@@ -4,6 +4,9 @@ import games.brennan.playermob.entity.goal.EatFoodGoal;
 import games.brennan.playermob.entity.goal.RaidArmorStandsGoal;
 import games.brennan.playermob.entity.goal.RaidContainersGoal;
 import games.brennan.playermob.entity.goal.WeaponAwareAttackGoal;
+import games.brennan.playermob.skin.PlayerMobSkin;
+import games.brennan.playermob.skin.PlayerMobSkinRegistry;
+import games.brennan.playermob.skin.SkinModel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.particles.ItemParticleOption;
@@ -74,11 +77,16 @@ import java.util.UUID;
  * goal-selector predicate forwards to {@code stance.permitsTargeting(this, candidate)}
  * so new stances drop in by adding enum constants — no goal rewiring.</p>
  *
- * <p><b>Skins (v1.5)</b> — Each mob rolls a {@link #getSkinIndex skin index}
- * in {@link #finalizeSpawn} from {@code [0, SKIN_COUNT)}. The client renderer
- * ({@code PlayerMobRenderer}, not imported here to keep this class
- * server-loadable) reads the index to pick a bundled texture. Persists
- * across save/load.</p>
+ * <p><b>Skins</b> — Each mob rolls its look in {@link #finalizeSpawn}. It
+ * always rolls a bundled-vanilla index in {@code [0, SKIN_COUNT)}, then with
+ * probability {@link #URL_SKIN_CHANCE} (~30%) overrides it with a Mojang skin
+ * texture URL drawn from the datapack-extensible {@link PlayerMobSkinRegistry}.
+ * So ~70% of mobs wear a vanilla default and ~30% wear a recognisable
+ * real-player skin. The client renderer ({@code PlayerMobRenderer}, not
+ * imported here to keep this class server-loadable) prefers the URL when set
+ * and falls back to the bundled index otherwise. Both fields persist across
+ * save/load; the URL field is purely additive on top of the v1 (0.2.0) save
+ * format.</p>
  *
  * <p><b>Inventory raiding (v1.5)</b> — Implements {@link InventoryCarrier}
  * so the mob has a backpack. {@link RaidContainersGoal} +
@@ -102,6 +110,21 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     private static final EntityDataAccessor<Integer> DATA_SKIN_INDEX =
         SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.INT);
 
+    /**
+     * Mojang skin texture URL ({@code http://textures.minecraft.net/texture/&lt;hash&gt;}).
+     * Empty string ⇒ no URL skin assigned — the renderer falls back to the
+     * legacy bundled-vanilla texture indexed by {@link #DATA_SKIN_INDEX}.
+     */
+    private static final EntityDataAccessor<String> DATA_SKIN_TEXTURE_URL =
+        SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.STRING);
+
+    /**
+     * Slim-arms flag (true = 3-pixel arms, like the Alex model). v2 always
+     * renders wide regardless; the flag is plumbed for v3 model-swap support.
+     */
+    private static final EntityDataAccessor<Boolean> DATA_SKIN_SLIM =
+        SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.BOOLEAN);
+
     // ---- Constants --------------------------------------------------------
 
     /**
@@ -119,6 +142,19 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
      */
     public static final int SKIN_COUNT = 9;
 
+    /**
+     * Probability a freshly-spawned mob uses a Mojang URL skin from the
+     * datapack-fed {@link PlayerMobSkinRegistry} instead of one of the
+     * {@link #SKIN_COUNT} bundled vanilla default skins.
+     *
+     * <p>{@code 0.30f} ⇒ ~30% real-player skins, ~70% vanilla defaults. The
+     * vanilla defaults stay the common case so the mob reads as "a player"
+     * at a glance, with recognisable real skins as the occasional standout.
+     * Only consulted when the registry is non-empty — an empty registry
+     * always falls back to a bundled skin regardless of this roll.</p>
+     */
+    private static final float URL_SKIN_CHANCE = 0.30f;
+
     /** Backpack size — matches Pillager (5) plus a little extra. */
     private static final int INVENTORY_SIZE = 8;
 
@@ -133,6 +169,8 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
 
     private static final String TAG_STANCE = "Stance";
     private static final String TAG_SKIN_INDEX = "SkinIndex";
+    private static final String TAG_SKIN_TEXTURE_URL = "SkinTextureUrl";
+    private static final String TAG_SKIN_SLIM = "SkinSlim";
     private static final String TAG_EXPLORED_BLOCKS = "ExploredBlocks";
     private static final String TAG_EXPLORED_ENTITIES = "ExploredEntities";
     private static final String TAG_POS = "Pos";
@@ -190,6 +228,8 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         builder.define(DATA_STANCE, Stance.HOSTILE_TO_HOSTILE_MOBS.ordinal());
         builder.define(DATA_IS_CHARGING_CROSSBOW, false);
         builder.define(DATA_SKIN_INDEX, 0);
+        builder.define(DATA_SKIN_TEXTURE_URL, "");
+        builder.define(DATA_SKIN_SLIM, false);
     }
 
     @Override
@@ -217,8 +257,16 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     }
 
     /**
-     * Roll the random skin index once at spawn so all clients see the same
-     * value. Server-side; syncs to clients via the DATA_SKIN_INDEX TrackedData.
+     * Roll the random skin at spawn so all clients see the same value.
+     * Server-side; syncs to clients via SynchedEntityData.
+     *
+     * <p>Always rolls a bundled-vanilla index first — it's both the ~70%
+     * common case (see {@link #URL_SKIN_CHANCE}) and the downgrade-safe
+     * payload for 0.2.0 clients. Then, with probability
+     * {@link #URL_SKIN_CHANCE}, overrides it with a Mojang URL skin from
+     * {@link PlayerMobSkinRegistry}. The other ~70% keep the bundled
+     * vanilla skin (URL left blank ⇒ renderer uses the index path). An
+     * empty registry always falls through to the bundled skin.</p>
      */
     @Override
     public SpawnGroupData finalizeSpawn(ServerLevelAccessor world,
@@ -226,6 +274,12 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
                                         MobSpawnType reason,
                                         SpawnGroupData data) {
         setSkinIndex(world.getRandom().nextInt(SKIN_COUNT));
+        if (world.getRandom().nextFloat() < URL_SKIN_CHANCE) {
+            PlayerMobSkinRegistry.pickRandom(world.getRandom()).ifPresent(skin -> {
+                setSkinTextureUrl(skin.textureUrl());
+                setSkinSlim(skin.model() == SkinModel.SLIM);
+            });
+        }
         return super.finalizeSpawn(world, difficulty, reason, data);
     }
 
@@ -257,6 +311,31 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         // Clamp to valid range — defensive against /summon SkinIndex:99.
         int clamped = (index < 0 || index >= SKIN_COUNT) ? 0 : index;
         this.entityData.set(DATA_SKIN_INDEX, clamped);
+    }
+
+    /**
+     * Mojang skin texture URL, or empty string if this mob has no URL skin
+     * assigned. {@code null} is coerced to {@code ""} on set.
+     */
+    public String getSkinTextureUrl() {
+        String raw = this.entityData.get(DATA_SKIN_TEXTURE_URL);
+        return raw == null ? "" : raw;
+    }
+
+    public void setSkinTextureUrl(String url) {
+        this.entityData.set(DATA_SKIN_TEXTURE_URL, url == null ? "" : url);
+    }
+
+    /**
+     * True if the assigned URL skin was authored for the slim-arms model.
+     * v2 always renders wide regardless — see renderer for details.
+     */
+    public boolean isSkinSlim() {
+        return this.entityData.get(DATA_SKIN_SLIM);
+    }
+
+    public void setSkinSlim(boolean slim) {
+        this.entityData.set(DATA_SKIN_SLIM, slim);
     }
 
     // ---- InventoryCarrier ------------------------------------------------
@@ -474,6 +553,14 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         super.addAdditionalSaveData(tag);
         tag.putInt(TAG_STANCE, getStance().ordinal());
         tag.putInt(TAG_SKIN_INDEX, getSkinIndex());
+        // URL skin tags are purely additive on top of v1 (SkinIndex). Only
+        // write the URL key when set, so 0.2.0-loaded mobs that never had a
+        // URL assigned don't round-trip an empty string back into the save.
+        String url = getSkinTextureUrl();
+        if (!url.isEmpty()) {
+            tag.putString(TAG_SKIN_TEXTURE_URL, url);
+            tag.putBoolean(TAG_SKIN_SLIM, isSkinSlim());
+        }
         // Inventory persistence — InventoryCarrier helper handles slot encoding.
         // registryAccess() is a HolderLookup.Provider on Entity in 1.21.1+.
         writeInventoryToTag(tag, this.registryAccess());
@@ -504,6 +591,13 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         // byOrdinal guards against missing/invalid stored values.
         setStance(Stance.byOrdinal(tag.getInt(TAG_STANCE)));
         setSkinIndex(tag.getInt(TAG_SKIN_INDEX));
+        // Backward compat: 0.2.0 saves have no SkinTextureUrl tag. Missing key
+        // ⇒ URL stays the default "" ⇒ renderer uses the legacy bundled-
+        // vanilla path keyed off SkinIndex. New v2 mobs round-trip the URL.
+        if (tag.contains(TAG_SKIN_TEXTURE_URL, Tag.TAG_STRING)) {
+            setSkinTextureUrl(tag.getString(TAG_SKIN_TEXTURE_URL));
+            setSkinSlim(tag.getBoolean(TAG_SKIN_SLIM));
+        }
         readInventoryFromTag(tag, this.registryAccess());
 
         recentlyExploredBlocks.clear();
