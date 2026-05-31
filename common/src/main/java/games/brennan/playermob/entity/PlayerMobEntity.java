@@ -93,17 +93,19 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     // ---- Constants --------------------------------------------------------
 
     /**
-     * Number of bundled player skins available in the resource pack at
-     * {@code assets/playermob/textures/entity/skins/skin_<N>.png}. Defined
-     * here (not on the client-only renderer) so server-side code can call
-     * {@code finalizeSpawn} without trying to load the {@code @Environment(CLIENT)}
+     * Number of player skins the renderer chooses from. Defined here (not
+     * on the client-only renderer) so server-side {@code finalizeSpawn} can
+     * roll an index without triggering load of the {@code @Environment(CLIENT)}
      * renderer class — would otherwise NoClassDefFoundError on dedicated
      * server boot.
      *
-     * <p>Keep in sync with the actual file count under that directory. A unit
-     * test (SkinIndexTest) verifies all expected PNGs exist on the classpath.</p>
+     * <p>Maps to the 9 default Minecraft player skins shipped in the vanilla
+     * client jar at {@code assets/minecraft/textures/entity/player/wide/<name>.png}
+     * — see {@code PlayerMobRenderer.SKIN_NAMES} for the canonical order.
+     * SkinIndexTest verifies the corresponding vanilla PNGs exist on the
+     * classpath.</p>
      */
-    public static final int SKIN_COUNT = 8;
+    public static final int SKIN_COUNT = 9;
 
     /** Backpack size — matches Pillager (5) plus a little extra. */
     private static final int INVENTORY_SIZE = 8;

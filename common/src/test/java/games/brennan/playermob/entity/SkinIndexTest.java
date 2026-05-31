@@ -6,53 +6,51 @@ import java.net.URL;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Compile-time + classpath checks for the bundled-skin system. We can't
- * instantiate {@link PlayerMobEntity} in a pure JUnit context (no bootstrapped
- * registries), so behavioural coverage of skin rolling + clamping lives in
- * the in-game Gate 2 smoke test. What we CAN verify cheaply here:
+ * Compile-time + classpath checks for the skin system. We can't instantiate
+ * {@link PlayerMobEntity} in a pure JUnit context (no bootstrapped registries),
+ * so behavioural coverage of skin rolling + clamping lives in the in-game
+ * Gate 2 smoke test. What we CAN verify cheaply here:
  *
  * <ol>
- *   <li>{@link PlayerMobEntity#SKIN_COUNT} matches the number of bundled PNGs.</li>
- *   <li>Each expected skin PNG actually ships in the resource pack.</li>
+ *   <li>{@link PlayerMobEntity#SKIN_COUNT} matches the number of vanilla
+ *       default player skins (9 in MC 1.19.3+).</li>
+ *   <li>Each referenced vanilla skin texture ships in the merged minecraft
+ *       client jar at the expected path.</li>
  *   <li>The constant lives on a server-loadable class (not the
  *       {@code @Environment(CLIENT)} renderer) — otherwise this test would
  *       fail to compile.</li>
  * </ol>
+ *
+ * <p>By pointing at vanilla skins (Steve / Alex / Ari / Efe / Kai / Makena /
+ * Noor / Sunny / Zuri) the mod ships zero skin bytes itself; if Mojang ever
+ * removes one of these textures in a future MC version, this test catches it.</p>
  */
 class SkinIndexTest {
 
-    /** Update this constant in lockstep with PlayerMobEntity.SKIN_COUNT + PNG file count. */
-    private static final int EXPECTED_SKIN_COUNT = 8;
+    /** Default-skin set added by Mojang in 1.19.3 (8 newer skins + the original Steve). */
+    private static final int EXPECTED_VANILLA_SKIN_COUNT = 9;
+
+    /** Must mirror the order in {@code PlayerMobRenderer.SKIN_NAMES}. */
+    private static final String[] EXPECTED_SKIN_NAMES = {
+        "alex", "ari", "efe", "kai", "makena", "noor", "steve", "sunny", "zuri"
+    };
 
     @Test
-    void skinCountConstantMatchesBundledFiles() {
-        // If this fails, either the constant or the PNGs are out of sync —
-        // bump the constant and add/remove PNGs accordingly.
-        assertEquals(EXPECTED_SKIN_COUNT, PlayerMobEntity.SKIN_COUNT,
-            "PlayerMobEntity.SKIN_COUNT must match the number of bundled skin files");
+    void skinCountConstantMatchesVanillaDefaultCount() {
+        assertEquals(EXPECTED_VANILLA_SKIN_COUNT, PlayerMobEntity.SKIN_COUNT,
+            "PlayerMobEntity.SKIN_COUNT must equal the vanilla default-skin count");
     }
 
     @Test
-    void everyExpectedSkinPngIsOnClasspath() {
-        // Resource path inside the common/src/main/resources tree.
-        for (int i = 0; i < EXPECTED_SKIN_COUNT; i++) {
-            String path = "/assets/playermob/textures/entity/skins/skin_" + i + ".png";
+    void everyExpectedVanillaSkinTextureIsOnClasspath() {
+        // The merged minecraft client jar is on the common-module test
+        // classpath via loom, so getResource("/assets/minecraft/...") resolves.
+        for (String name : EXPECTED_SKIN_NAMES) {
+            String path = "/assets/minecraft/textures/entity/player/wide/" + name + ".png";
             URL url = getClass().getResource(path);
-            assertNotNull(url, "Missing bundled skin file: " + path);
+            assertNotNull(url, "Missing vanilla skin texture on classpath: " + path);
         }
-    }
-
-    @Test
-    void noUnexpectedExtraSkinPngExists() {
-        // Catch the case where someone added skin_8.png but forgot to bump
-        // SKIN_COUNT — the new skin would never be rolled.
-        URL extra = getClass().getResource("/assets/playermob/textures/entity/skins/skin_"
-            + EXPECTED_SKIN_COUNT + ".png");
-        assertTrue(extra == null,
-            "Found skin_" + EXPECTED_SKIN_COUNT + ".png but SKIN_COUNT is " + EXPECTED_SKIN_COUNT
-            + " — bump the constant or remove the file");
     }
 }
