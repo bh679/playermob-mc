@@ -205,7 +205,7 @@ public final class RaidContainersGoal extends Goal {
 
         if (nextSwapAt == -1) {
             while (currentSlot < container.getContainerSize()
-                    && !mob.wouldReplaceFromContainer(container, currentSlot)) {
+                    && !mob.wouldTakeFromContainer(container, currentSlot)) {
                 currentSlot++;
             }
             if (currentSlot >= container.getContainerSize()) {
@@ -221,7 +221,12 @@ public final class RaidContainersGoal extends Goal {
         }
 
         if (mob.tickCount >= nextSwapAt) {
-            mob.tryReplaceFromContainer(container, currentSlot);
+            // tryTake handles both equipment swap and food collect-into-inventory.
+            // A single tryCollectFood call already moves as much as the mob's
+            // inventory can hold (addToContainer fills mergeable + empty slots
+            // in one pass), so always advancing is correct — re-examining the
+            // same slot would just return false on the next wouldTake.
+            mob.tryTakeFromContainer(container, currentSlot);
             currentSlot++;
             nextSwapAt = -1; // schedule next interesting slot
         }

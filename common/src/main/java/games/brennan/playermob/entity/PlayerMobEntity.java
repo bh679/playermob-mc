@@ -277,7 +277,7 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
      *
      * <p>Overriding here propagates the heuristic to vanilla pickup paths
      * ({@code Mob.pickUpItem}, the ground-item pickup checks) in addition to
-     * the raid goals' explicit {@link #wouldReplaceFromContainer} calls.</p>
+     * the raid goals' explicit {@link #wouldTakeFromContainer} calls.</p>
      */
     @Override
     protected boolean canReplaceCurrentItem(ItemStack candidate, ItemStack existing) {
@@ -285,19 +285,35 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     }
 
     /**
-     * Try to swap a candidate item from a container slot into the mob's
-     * equipment. If the candidate is better than what the mob is wearing in
-     * the matching slot, take it (clearing the container slot) and put the
-     * displaced item back into the container.
+     * Try to take a candidate item from a container slot. Two paths:
+     *
+     * <ul>
+     *   <li><b>Food</b> — copy as many items as fit into the mob's inventory
+     *       (where the {@link EatFoodGoal} will find them when HP drops).
+     *       Container slot shrinks; nothing is dropped on the ground.</li>
+     *   <li><b>Equipment</b> — if the candidate beats the mob's current
+     *       equivalent slot per {@link EquipmentEvaluator#shouldReplace},
+     *       swap it in. The displaced piece goes back into the container
+     *       (overflow to the ground if the container's full).</li>
+     * </ul>
      *
      * <p>Lives on the entity rather than the static {@link EquipmentEvaluator}
-     * because {@link #canReplaceCurrentItem} is {@code protected} on Mob —
-     * only the Mob subclass can read it.</p>
+     * because the equipment path needs {@code Mob.getEquipmentSlotForItem}
+     * (visible to subclasses) and {@code setItemSlot} (mutates the mob).</p>
      */
-    public boolean tryReplaceFromContainer(Container source, int slotIdx) {
+    public boolean tryTakeFromContainer(Container source, int slotIdx) {
         if (source == null) return false;
         ItemStack candidate = source.getItem(slotIdx);
         if (candidate.isEmpty()) return false;
+
+        // Food first — same candidate may both be a food AND fit a slot
+        // (e.g. enchanted golden apple) but the food/heal path is the more
+        // useful behaviour. The slot the equipment path would route this to
+        // would be MAINHAND, which would drop the mob's weapon mid-raid.
+        if (candidate.get(DataComponents.FOOD) != null) {
+            return EquipmentEvaluator.tryCollectFood(source, slotIdx, this.inventory);
+        }
+
         EquipmentSlot slot = getEquipmentSlotForItem(candidate);
         ItemStack current = getItemBySlot(slot);
         if (!canReplaceCurrentItem(candidate, current)) return false;
@@ -330,15 +346,18 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     }
 
     /**
-     * Pre-check variant of {@link #tryReplaceFromContainer} — answers
-     * "would the mob take this slot if asked?" without actually swapping.
-     * Used by the raid goal to skip worthless slots without burning the
-     * per-swap delay budget.
+     * Pre-check variant of {@link #tryTakeFromContainer} — answers "would the
+     * mob take this slot if asked?" without mutating anything. Used by the
+     * raid goal to skip worthless slots without burning the per-swap delay
+     * budget.
      */
-    public boolean wouldReplaceFromContainer(Container source, int slotIdx) {
+    public boolean wouldTakeFromContainer(Container source, int slotIdx) {
         if (source == null) return false;
         ItemStack candidate = source.getItem(slotIdx);
         if (candidate.isEmpty()) return false;
+        if (candidate.get(DataComponents.FOOD) != null) {
+            return EquipmentEvaluator.canCollectFood(source, slotIdx, this.inventory);
+        }
         EquipmentSlot slot = getEquipmentSlotForItem(candidate);
         ItemStack current = getItemBySlot(slot);
         return canReplaceCurrentItem(candidate, current);

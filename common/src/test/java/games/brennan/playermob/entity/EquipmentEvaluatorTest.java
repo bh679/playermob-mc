@@ -14,6 +14,7 @@ import net.minecraft.world.item.enchantment.Enchantments;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -64,6 +65,60 @@ class EquipmentEvaluatorTest {
         SimpleContainer container = new SimpleContainer(0);
         ItemStack remaining = EquipmentEvaluator.addToContainer(container, ItemStack.EMPTY);
         assertTrue(remaining.isEmpty(), "Zero-size container with empty input → empty");
+    }
+
+    // ---- tryCollectFood ------------------------------------------------
+
+    @Test
+    void tryCollectFoodMovesFullStackWhenDestinationHasRoom() {
+        SimpleContainer chest = new SimpleContainer(3);
+        chest.setItem(0, new ItemStack(Items.BREAD, 5));
+        SimpleContainer inv = new SimpleContainer(8);
+
+        boolean moved = EquipmentEvaluator.tryCollectFood(chest, 0, inv);
+        assertTrue(moved, "Food into empty inventory should succeed");
+        assertTrue(chest.getItem(0).isEmpty(), "Source slot drained");
+        assertEquals(5, inv.getItem(0).getCount(), "Inventory received the bread");
+    }
+
+    @Test
+    void tryCollectFoodSkipsNonFoodItems() {
+        SimpleContainer chest = new SimpleContainer(2);
+        chest.setItem(0, new ItemStack(Items.IRON_SWORD));
+        SimpleContainer inv = new SimpleContainer(2);
+
+        boolean moved = EquipmentEvaluator.tryCollectFood(chest, 0, inv);
+        assertFalse(moved, "Sword isn't food");
+        assertFalse(chest.getItem(0).isEmpty(), "Sword stays in chest");
+        assertTrue(inv.getItem(0).isEmpty(), "Inventory untouched");
+    }
+
+    @Test
+    void tryCollectFoodSplitsWhenInventoryPartiallyFull() {
+        // Inventory has one mergeable bread stack with 60/64 capacity left
+        // (1 bread in slot 0, max 64) AND no other slots — so only 63 of the
+        // chest's 64-bread stack fit.
+        SimpleContainer inv = new SimpleContainer(1);
+        inv.setItem(0, new ItemStack(Items.BREAD, 1));
+        SimpleContainer chest = new SimpleContainer(1);
+        chest.setItem(0, new ItemStack(Items.BREAD, 64));
+
+        boolean moved = EquipmentEvaluator.tryCollectFood(chest, 0, inv);
+        assertTrue(moved);
+        assertEquals(64, inv.getItem(0).getCount(), "Inv filled to max stack");
+        assertEquals(1, chest.getItem(0).getCount(), "Chest keeps the leftover bread");
+    }
+
+    @Test
+    void canCollectFoodReportsFalseWhenInventoryFullOfDifferentItem() {
+        // Inventory completely occupied by non-mergeable item.
+        SimpleContainer inv = new SimpleContainer(1);
+        inv.setItem(0, new ItemStack(Items.IRON_SWORD));
+        SimpleContainer chest = new SimpleContainer(1);
+        chest.setItem(0, new ItemStack(Items.BREAD, 5));
+
+        assertFalse(EquipmentEvaluator.canCollectFood(chest, 0, inv),
+            "No room → precheck refuses to burn the swap-delay budget");
     }
 
     // ---- shouldReplace -------------------------------------------------

@@ -157,6 +157,65 @@ public final class EquipmentEvaluator {
     }
 
     /**
+     * Returns true if the slot holds a non-empty food item AND
+     * {@code destination} has room to accept at least one item from it.
+     * Pre-check for {@link #tryCollectFood} — keeps the raid goal from
+     * burning swap-delay ticks on a slot it can't actually take.
+     */
+    public static boolean canCollectFood(Container source, int slotIdx, Container destination) {
+        if (source == null) return false;
+        ItemStack candidate = source.getItem(slotIdx);
+        if (candidate.isEmpty()) return false;
+        if (candidate.get(DataComponents.FOOD) == null) return false;
+        return hasRoomFor(destination, candidate);
+    }
+
+    /**
+     * Move food from {@code source[slotIdx]} into {@code destination}, taking
+     * as much as fits. Returns true if any items were moved.
+     *
+     * <p>Unlike {@link #addToContainer}, this is a "take from source" not a
+     * "put into container" — the source slot shrinks (or empties) on success.
+     * If the destination fills mid-move, the source keeps the leftover so
+     * nothing is lost.</p>
+     */
+    public static boolean tryCollectFood(Container source, int slotIdx, Container destination) {
+        if (source == null) return false;
+        ItemStack candidate = source.getItem(slotIdx);
+        if (candidate.isEmpty()) return false;
+        if (candidate.get(DataComponents.FOOD) == null) return false;
+
+        int before = candidate.getCount();
+        ItemStack leftover = addToContainer(destination, candidate.copy());
+        int taken = before - leftover.getCount();
+        if (taken <= 0) return false;
+
+        if (leftover.isEmpty()) {
+            source.setItem(slotIdx, ItemStack.EMPTY);
+        } else {
+            candidate.shrink(taken);
+        }
+        source.setChanged();
+        return true;
+    }
+
+    /**
+     * True if {@code container} has at least one empty slot or one mergeable
+     * stack of {@code stack}'s item with room remaining.
+     */
+    private static boolean hasRoomFor(Container container, ItemStack stack) {
+        for (int i = 0; i < container.getContainerSize(); i++) {
+            ItemStack slot = container.getItem(i);
+            if (slot.isEmpty()) return true;
+            if (ItemStack.isSameItemSameComponents(slot, stack)
+                    && slot.getCount() < slot.getMaxStackSize()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Add a stack to the first mergeable / empty slot in {@code container}.
      * Returns whatever didn't fit (empty if it all fit).
      */
