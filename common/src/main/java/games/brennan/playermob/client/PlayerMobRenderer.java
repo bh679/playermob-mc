@@ -3,10 +3,13 @@ package games.brennan.playermob.client;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+import net.minecraft.client.model.HumanoidModel;
 import net.minecraft.client.model.PlayerModel;
 import net.minecraft.client.model.geom.ModelLayers;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.entity.HumanoidMobRenderer;
+import net.minecraft.client.renderer.entity.layers.HumanoidArmorLayer;
+import net.minecraft.client.renderer.entity.layers.ItemInHandLayer;
 import net.minecraft.resources.ResourceLocation;
 
 /**
@@ -21,14 +24,24 @@ import net.minecraft.resources.ResourceLocation;
  * faces (Steve, Alex, plus the 7 newer defaults added in 1.19.3:
  * Ari, Efe, Kai, Makena, Noor, Sunny, Zuri).</p>
  *
+ * <p><b>Render layers added explicitly:</b> {@link HumanoidMobRenderer} does
+ * NOT auto-add armor / held-item layers (unlike {@code PlayerRenderer}). If
+ * we don't add them here, equipped armor and held weapons stay invisible
+ * even though the entity's slots are correctly populated server-side. So
+ * we add:</p>
+ * <ul>
+ *   <li>{@link HumanoidArmorLayer} — draws helmet/chestplate/leggings/boots</li>
+ *   <li>{@link ItemInHandLayer} — draws main-hand + off-hand items (sword, crossbow, etc.)</li>
+ * </ul>
+ *
  * <p>The index → skin mapping is stable across builds (alphabetical). Don't
  * reorder {@link #SKIN_NAMES} without bumping a save migration — existing
  * mobs in saved worlds have a stored {@code SkinIndex} that maps to a
  * specific position in this array.</p>
  *
- * <p>Wide model (Steve-style arms) used in v1; future v2 may add slim
- * variant support. Future v2 may also add per-entity GameProfile-backed
- * Mojang skin URLs (see GH issue #1).</p>
+ * <p>Wide model (Steve-style arms) used in v1. Future v2 may add slim
+ * variant support and per-entity GameProfile-backed Mojang skin URLs (see
+ * GH issue #1).</p>
  *
  * <p>{@link Environment} {@code CLIENT}-only — stripped from dedicated
  * server jars at load time. Server-side code that needs the skin count
@@ -62,6 +75,19 @@ public final class PlayerMobRenderer
         super(ctx,
               new PlayerModel<>(ctx.bakeLayer(ModelLayers.PLAYER), /* slim */ false),
               SHADOW_RADIUS);
+
+        // Armor layer — draws helmet/chest/legs/boots when slots are populated.
+        // Inner / outer models are the standard player armor models (wide
+        // variant matches our wide PlayerModel above).
+        this.addLayer(new HumanoidArmorLayer<>(
+            this,
+            new HumanoidModel<>(ctx.bakeLayer(ModelLayers.PLAYER_INNER_ARMOR)),
+            new HumanoidModel<>(ctx.bakeLayer(ModelLayers.PLAYER_OUTER_ARMOR)),
+            ctx.getModelManager()));
+
+        // Held-item layer — draws whatever the mob holds in mainhand + offhand.
+        // PlayerModel implements ArmedModel so the layer knows where to anchor.
+        this.addLayer(new ItemInHandLayer<>(this, ctx.getItemInHandRenderer()));
     }
 
     @Override
