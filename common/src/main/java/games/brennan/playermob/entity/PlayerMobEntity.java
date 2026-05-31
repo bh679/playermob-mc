@@ -71,14 +71,16 @@ import java.util.UUID;
  * goal-selector predicate forwards to {@code stance.permitsTargeting(this, candidate)}
  * so new stances drop in by adding enum constants — no goal rewiring.</p>
  *
- * <p><b>Skins</b> — Each mob rolls two values in {@link #finalizeSpawn}: a
- * bundled-vanilla index in {@code [0, SKIN_COUNT)} and (if the
- * {@link PlayerMobSkinRegistry} is populated) a Mojang skin texture URL
- * sourced from a datapack-extensible JSON registry. The client renderer
- * ({@code PlayerMobRenderer}, not imported here to keep this class
- * server-loadable) prefers the URL when set and falls back to the bundled
- * index. Both fields persist across save/load; the URL field is purely
- * additive on top of the v1 (0.2.0) save format.</p>
+ * <p><b>Skins</b> — Each mob rolls its look in {@link #finalizeSpawn}. It
+ * always rolls a bundled-vanilla index in {@code [0, SKIN_COUNT)}, then with
+ * probability {@link #URL_SKIN_CHANCE} (~30%) overrides it with a Mojang skin
+ * texture URL drawn from the datapack-extensible {@link PlayerMobSkinRegistry}.
+ * So ~70% of mobs wear a vanilla default and ~30% wear a recognisable
+ * real-player skin. The client renderer ({@code PlayerMobRenderer}, not
+ * imported here to keep this class server-loadable) prefers the URL when set
+ * and falls back to the bundled index otherwise. Both fields persist across
+ * save/load; the URL field is purely additive on top of the v1 (0.2.0) save
+ * format.</p>
  *
  * <p><b>Inventory raiding (v1.5)</b> — Implements {@link InventoryCarrier}
  * so the mob has a backpack. {@link RaidContainersGoal} +
@@ -133,6 +135,19 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
      * classpath.</p>
      */
     public static final int SKIN_COUNT = 9;
+
+    /**
+     * Probability a freshly-spawned mob uses a Mojang URL skin from the
+     * datapack-fed {@link PlayerMobSkinRegistry} instead of one of the
+     * {@link #SKIN_COUNT} bundled vanilla default skins.
+     *
+     * <p>{@code 0.30f} ⇒ ~30% real-player skins, ~70% vanilla defaults. The
+     * vanilla defaults stay the common case so the mob reads as "a player"
+     * at a glance, with recognisable real skins as the occasional standout.
+     * Only consulted when the registry is non-empty — an empty registry
+     * always falls back to a bundled skin regardless of this roll.</p>
+     */
+    private static final float URL_SKIN_CHANCE = 0.30f;
 
     /** Backpack size — matches Pillager (5) plus a little extra. */
     private static final int INVENTORY_SIZE = 8;
@@ -235,11 +250,13 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
      * Roll the random skin at spawn so all clients see the same value.
      * Server-side; syncs to clients via SynchedEntityData.
      *
-     * <p>Two-tier roll: first pick a bundled-vanilla index (downgrade-safe
-     * payload for 0.2.0 clients), then try to roll a Mojang URL skin from
-     * {@link PlayerMobSkinRegistry}. If the registry is empty (boot before
-     * datapack reload, or a datapack that strips everything) we leave the
-     * URL blank and the renderer falls back to the bundled-vanilla path.</p>
+     * <p>Always rolls a bundled-vanilla index first — it's both the ~70%
+     * common case (see {@link #URL_SKIN_CHANCE}) and the downgrade-safe
+     * payload for 0.2.0 clients. Then, with probability
+     * {@link #URL_SKIN_CHANCE}, overrides it with a Mojang URL skin from
+     * {@link PlayerMobSkinRegistry}. The other ~70% keep the bundled
+     * vanilla skin (URL left blank ⇒ renderer uses the index path). An
+     * empty registry always falls through to the bundled skin.</p>
      */
     @Override
     public SpawnGroupData finalizeSpawn(ServerLevelAccessor world,
@@ -247,10 +264,12 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
                                         MobSpawnType reason,
                                         SpawnGroupData data) {
         setSkinIndex(world.getRandom().nextInt(SKIN_COUNT));
-        PlayerMobSkinRegistry.pickRandom(world.getRandom()).ifPresent(skin -> {
-            setSkinTextureUrl(skin.textureUrl());
-            setSkinSlim(skin.model() == SkinModel.SLIM);
-        });
+        if (world.getRandom().nextFloat() < URL_SKIN_CHANCE) {
+            PlayerMobSkinRegistry.pickRandom(world.getRandom()).ifPresent(skin -> {
+                setSkinTextureUrl(skin.textureUrl());
+                setSkinSlim(skin.model() == SkinModel.SLIM);
+            });
+        }
         return super.finalizeSpawn(world, difficulty, reason, data);
     }
 
