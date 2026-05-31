@@ -3,12 +3,15 @@ package games.brennan.playermob;
 import games.brennan.playermob.entity.Personality;
 import games.brennan.playermob.entity.PersonalityProfile;
 import games.brennan.playermob.entity.PlayerMobEntity;
+import games.brennan.playermob.menu.PlayerMobMenu;
+import games.brennan.playermob.menu.PlayerMobMenuOpener;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.MobCategory;
+import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.SpawnEggItem;
 import net.minecraft.world.item.component.CustomData;
@@ -33,12 +36,16 @@ public final class PlayerMobRegistry {
 
     public static final String PLAYER_MOB_PATH = "player_mob";
     public static final String PLAYER_MOB_SPAWN_EGG_PATH = "player_mob_spawn_egg";
+    public static final String PLAYER_MOB_MENU_PATH = "player_mob_menu";
 
     public static final ResourceLocation PLAYER_MOB_ID =
         ResourceLocation.fromNamespaceAndPath(PlayerMob.MOD_ID, PLAYER_MOB_PATH);
 
     public static final ResourceLocation PLAYER_MOB_SPAWN_EGG_ID =
         ResourceLocation.fromNamespaceAndPath(PlayerMob.MOD_ID, PLAYER_MOB_SPAWN_EGG_PATH);
+
+    public static final ResourceLocation PLAYER_MOB_MENU_ID =
+        ResourceLocation.fromNamespaceAndPath(PlayerMob.MOD_ID, PLAYER_MOB_MENU_PATH);
 
     /**
      * The registered {@link EntityType}. Populated by each loader entry class
@@ -51,6 +58,21 @@ public final class PlayerMobRegistry {
      * The registered spawn-egg item. Populated by each loader entry class.
      */
     public static Item PLAYER_MOB_SPAWN_EGG;
+
+    /**
+     * The registered {@link MenuType} for the Creative inventory screen.
+     * Populated by each loader entry class (Fabric uses an extended screen
+     * handler type; Forge/NeoForge use {@code IForgeMenuType}/
+     * {@code IMenuTypeExtension}). Never null after that loader's boot.
+     */
+    public static MenuType<PlayerMobMenu> PLAYER_MOB_MENU;
+
+    /**
+     * Loader-supplied hook that opens {@link PlayerMobMenu} server-side. Set
+     * by each loader entry class during boot; read at runtime by
+     * {@code PlayerMobEntity.mobInteract}. See {@link PlayerMobMenuOpener}.
+     */
+    public static PlayerMobMenuOpener MENU_OPENER;
 
     private PlayerMobRegistry() {}
 

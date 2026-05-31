@@ -1,30 +1,44 @@
 package games.brennan.playermob.entity;
 
+import games.brennan.playermob.PlayerMobRegistry;
+import games.brennan.playermob.entity.goal.CollectFloorItemsGoal;
+import games.brennan.playermob.entity.goal.EatFoodGoal;
 import games.brennan.playermob.entity.goal.FleeFromCategoryGoal;
 import games.brennan.playermob.entity.goal.FriendlyGreetGoal;
 import games.brennan.playermob.entity.goal.RaidArmorStandsGoal;
 import games.brennan.playermob.entity.goal.RaidContainersGoal;
 import games.brennan.playermob.entity.goal.SkepticalWatchGoal;
 import games.brennan.playermob.entity.goal.WeaponAwareAttackGoal;
+import games.brennan.playermob.skin.PlayerMobSkin;
+import games.brennan.playermob.skin.PlayerMobSkinRegistry;
+import games.brennan.playermob.skin.SkinModel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.particles.ItemParticleOption;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.util.Mth;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
+import net.minecraft.network.chat.Component;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.DifficultyInstance;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.level.block.BarrelBlock;
 import net.minecraft.world.level.block.entity.BarrelBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.ChestBlockEntity;
+import net.minecraft.world.level.block.entity.ShulkerBoxBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
@@ -40,10 +54,12 @@ import net.minecraft.world.entity.ai.goal.WaterAvoidingRandomStrollGoal;
 import net.minecraft.world.entity.ai.goal.target.HurtByTargetGoal;
 import net.minecraft.world.entity.ai.goal.target.NearestAttackableTargetGoal;
 import net.minecraft.world.entity.monster.CrossbowAttackMob;
+import net.minecraft.world.food.FoodProperties;
 import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.monster.RangedAttackMob;
 import net.minecraft.world.entity.npc.InventoryCarrier;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.projectile.AbstractArrow;
 import net.minecraft.world.entity.projectile.ProjectileUtil;
 import net.minecraft.world.item.AxeItem;
@@ -55,7 +71,6 @@ import net.minecraft.world.item.MaceItem;
 import net.minecraft.world.item.SwordItem;
 import net.minecraft.world.item.TridentItem;
 import net.minecraft.world.Container;
-import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.entity.item.ItemEntity;
@@ -84,18 +99,22 @@ import java.util.UUID;
  * <p><b>Personalities</b> ({@link PersonalityProfile}) drive how the mob
  * treats each {@link TargetCategory} of entity (players, hostile mobs, animals,
  * villagers) — Aggressive, Friendly, Passive, Skeptical, or Shy. The
- * target-selector predicate attacks anything the mob is {@link Personality#AGGRESSIVE}
+ * target-selector attacks anything the mob is {@link Personality#AGGRESSIVE}
  * toward; {@link FleeFromCategoryGoal}, {@link SkepticalWatchGoal}, and
- * {@link FriendlyGreetGoal} cover the non-combat dispositions and self-gate on
- * the live personality, so a runtime flip (see {@link #hurt}) re-wires nothing.
- * Personalities are server-side only; the crouch gesture rides the vanilla-synced
- * entity pose ({@link #setCrouching}), so no extra client sync is needed.</p>
+ * {@link FriendlyGreetGoal} cover the rest and self-gate on the live
+ * personality (a runtime flip via {@link #hurt} re-wires nothing). Server-side
+ * only; the crouch gesture rides the vanilla-synced pose ({@link #setCrouching}).</p>
  *
- * <p><b>Skins (v1.5)</b> — Each mob rolls a {@link #getSkinIndex skin index}
- * in {@link #finalizeSpawn} from {@code [0, SKIN_COUNT)}. The client renderer
- * ({@code PlayerMobRenderer}, not imported here to keep this class
- * server-loadable) reads the index to pick a bundled texture. Persists
- * across save/load.</p>
+ * <p><b>Skins</b> — Each mob rolls its look in {@link #finalizeSpawn}. It
+ * always rolls a bundled-vanilla index in {@code [0, SKIN_COUNT)}, then with
+ * probability {@link #URL_SKIN_CHANCE} (~30%) overrides it with a Mojang skin
+ * texture URL drawn from the datapack-extensible {@link PlayerMobSkinRegistry}.
+ * So ~70% of mobs wear a vanilla default and ~30% wear a recognisable
+ * real-player skin. The client renderer ({@code PlayerMobRenderer}, not
+ * imported here to keep this class server-loadable) prefers the URL when set
+ * and falls back to the bundled index otherwise. Both fields persist across
+ * save/load; the URL field is purely additive on top of the v1 (0.2.0) save
+ * format.</p>
  *
  * <p><b>Inventory raiding (v1.5)</b> — Implements {@link InventoryCarrier}
  * so the mob has a backpack. {@link RaidContainersGoal} +
@@ -116,6 +135,21 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     private static final EntityDataAccessor<Integer> DATA_SKIN_INDEX =
         SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.INT);
 
+    /**
+     * Mojang skin texture URL ({@code http://textures.minecraft.net/texture/&lt;hash&gt;}).
+     * Empty string ⇒ no URL skin assigned — the renderer falls back to the
+     * legacy bundled-vanilla texture indexed by {@link #DATA_SKIN_INDEX}.
+     */
+    private static final EntityDataAccessor<String> DATA_SKIN_TEXTURE_URL =
+        SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.STRING);
+
+    /**
+     * Slim-arms flag (true = 3-pixel arms, like the Alex model). v2 always
+     * renders wide regardless; the flag is plumbed for v3 model-swap support.
+     */
+    private static final EntityDataAccessor<Boolean> DATA_SKIN_SLIM =
+        SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.BOOLEAN);
+
     // ---- Constants --------------------------------------------------------
 
     /**
@@ -133,6 +167,19 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
      */
     public static final int SKIN_COUNT = 9;
 
+    /**
+     * Probability a freshly-spawned mob uses a Mojang URL skin from the
+     * datapack-fed {@link PlayerMobSkinRegistry} instead of one of the
+     * {@link #SKIN_COUNT} bundled vanilla default skins.
+     *
+     * <p>{@code 0.30f} ⇒ ~30% real-player skins, ~70% vanilla defaults. The
+     * vanilla defaults stay the common case so the mob reads as "a player"
+     * at a glance, with recognisable real skins as the occasional standout.
+     * Only consulted when the registry is non-empty — an empty registry
+     * always falls back to a bundled skin regardless of this roll.</p>
+     */
+    private static final float URL_SKIN_CHANCE = 0.30f;
+
     /** Backpack size — matches Pillager (5) plus a little extra. */
     private static final int INVENTORY_SIZE = 8;
 
@@ -146,6 +193,8 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     private static final int CHEST_VIEWERS_EVENT = 1;
 
     private static final String TAG_SKIN_INDEX = "SkinIndex";
+    private static final String TAG_SKIN_TEXTURE_URL = "SkinTextureUrl";
+    private static final String TAG_SKIN_SLIM = "SkinSlim";
     private static final String TAG_EXPLORED_BLOCKS = "ExploredBlocks";
     private static final String TAG_EXPLORED_ENTITIES = "ExploredEntities";
     private static final String TAG_POS = "Pos";
@@ -156,8 +205,8 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
 
     /**
      * Per-category personalities (who the mob attacks / greets / flees /
-     * watches). Server-side only — see class javadoc. Rolled at spawn, set by
-     * spawn eggs / {@code /summon}, persisted to NBT, and flipped by {@link #hurt}.
+     * watches). Server-side only. Rolled at spawn, set by spawn eggs /
+     * {@code /summon}, persisted to NBT, and flipped by {@link #hurt}.
      */
     private final PersonalityProfile personalities = new PersonalityProfile();
 
@@ -189,6 +238,9 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
 
     public PlayerMobEntity(EntityType<? extends PlayerMobEntity> type, Level level) {
         super(type, level);
+        // Enable vanilla's passive proximity pickup (Mob.aiStep). The active
+        // CollectFloorItemsGoal does the seeking; this catches items underfoot.
+        this.setCanPickUpLoot(true);
     }
 
     /**
@@ -209,6 +261,8 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         super.defineSynchedData(builder);
         builder.define(DATA_IS_CHARGING_CROSSBOW, false);
         builder.define(DATA_SKIN_INDEX, 0);
+        builder.define(DATA_SKIN_TEXTURE_URL, "");
+        builder.define(DATA_SKIN_SLIM, false);
     }
 
     @Override
@@ -221,15 +275,18 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         this.goalSelector.addGoal(1, new SkepticalWatchGoal(this, /* watchRange */ 10.0, /* closeRange */ 4.0));
         this.goalSelector.addGoal(1, new FriendlyGreetGoal(this, /* range */ 10.0, /* approachSpeed */ 0.9));
         this.goalSelector.addGoal(2, new WeaponAwareAttackGoal(this, 1.0, 8.0f));
+        // EatFoodGoal added BEFORE the raid goals at the same priority so
+        // its canUse() is evaluated first — a low-HP mob with food prefers
+        // eating over walking to the next chest.
+        this.goalSelector.addGoal(3, new EatFoodGoal(this));
         this.goalSelector.addGoal(3, new RaidContainersGoal(this, /* speed */ 0.9, /* radius */ 12));
         this.goalSelector.addGoal(3, new RaidArmorStandsGoal(this, /* speed */ 0.9, /* radius */ 12.0));
+        this.goalSelector.addGoal(3, new CollectFloorItemsGoal(this, /* speed */ 0.9, /* radius */ 8.0));
         this.goalSelector.addGoal(8, new WaterAvoidingRandomStrollGoal(this, 0.6));
         this.goalSelector.addGoal(9, new LookAtPlayerGoal(this, LivingEntity.class, 8.0F));
         this.goalSelector.addGoal(10, new RandomLookAroundGoal(this));
 
         this.targetSelector.addGoal(1, new HurtByTargetGoal(this));
-        // Attack anything the mob is AGGRESSIVE toward (its personality for that
-        // entity's category — players, hostile mobs, animals, or villagers).
         this.targetSelector.addGoal(2, new NearestAttackableTargetGoal<>(
             this,
             LivingEntity.class,
@@ -240,10 +297,16 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     }
 
     /**
-     * Roll the random skin index and any unset personalities once at spawn.
-     * {@code rollUnsetRandom} skips categories already pinned by a spawn egg's
-     * {@code entity_data} or {@code /summon} NBT, so the player-facing archetype
-     * eggs keep their player personality while the other categories randomise.
+     * Roll the random skin at spawn so all clients see the same value.
+     * Server-side; syncs to clients via SynchedEntityData.
+     *
+     * <p>Always rolls a bundled-vanilla index first — it's both the ~70%
+     * common case (see {@link #URL_SKIN_CHANCE}) and the downgrade-safe
+     * payload for 0.2.0 clients. Then, with probability
+     * {@link #URL_SKIN_CHANCE}, overrides it with a Mojang URL skin from
+     * {@link PlayerMobSkinRegistry}. The other ~70% keep the bundled
+     * vanilla skin (URL left blank ⇒ renderer uses the index path). An
+     * empty registry always falls through to the bundled skin.</p>
      */
     @Override
     public SpawnGroupData finalizeSpawn(ServerLevelAccessor world,
@@ -251,6 +314,14 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
                                         MobSpawnType reason,
                                         SpawnGroupData data) {
         setSkinIndex(world.getRandom().nextInt(SKIN_COUNT));
+        if (world.getRandom().nextFloat() < URL_SKIN_CHANCE) {
+            PlayerMobSkinRegistry.pickRandom(world.getRandom()).ifPresent(skin -> {
+                setSkinTextureUrl(skin.textureUrl());
+                setSkinSlim(skin.model() == SkinModel.SLIM);
+            });
+        }
+        // Randomise any personality categories not pinned by a spawn egg's
+        // entity_data or /summon NBT (player-facing eggs leave PLAYERS set).
         personalities.rollUnsetRandom(world.getRandom());
         return super.finalizeSpawn(world, difficulty, reason, data);
     }
@@ -264,8 +335,7 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
 
     /**
      * Nearest living entity within {@code range} that the mob holds the given
-     * {@code personality} toward. Used by the social goals to find their
-     * subject. {@code null} when none is in range.
+     * {@code personality} toward. Used by the social goals to find their subject.
      */
     public LivingEntity nearestWithPersonality(Personality personality, double range) {
         AABB box = getBoundingBox().inflate(range);
@@ -300,8 +370,7 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
 
     /**
      * Skeptical "ready a weapon": if the main hand is empty, move the first
-     * weapon found in the backpack into it. No-op if already armed or the
-     * backpack has no weapon.
+     * weapon found in the backpack into it. No-op if already armed or none found.
      */
     public void drawWeaponFromBackpack() {
         if (!getMainHandItem().isEmpty()) return;
@@ -332,14 +401,11 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     }
 
     /**
-     * Crouch gesture used by the Friendly greeting and Shy hiding. The
+     * Crouch gesture for the Friendly greeting and Shy hiding. The
      * {@code PlayerModel} renders the sneak pose from {@link #isCrouching()}
-     * (i.e. {@link #getPose()} {@code == CROUCHING}), <em>not</em> from the
-     * shared sneak flag — so we must set the pose, not just
-     * {@code setShiftKeyDown}. We set both so the flag-driven bits (name-tag
-     * dimming, etc.) stay consistent. Our entity has no per-pose dimensions, so
-     * this changes the visual only, not the hitbox. {@code setPose} no-ops when
-     * the value is unchanged, so it's cheap to assert every tick.
+     * (i.e. {@link #getPose()} {@code == CROUCHING}), not the sneak flag — so we
+     * set the pose. Both are set so flag-driven bits stay consistent. Visual-only
+     * (no per-pose dimensions); {@code setPose} no-ops when unchanged.
      */
     public void setCrouching(boolean crouching) {
         setShiftKeyDown(crouching);
@@ -348,9 +414,8 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
 
     /**
      * Snap the body (and head) to face {@code target}. Vanilla shield blocking
-     * ({@code LivingEntity.isDamageSourceBlocked}) only deflects hits arriving
-     * from the direction the body faces, so a Skeptical mob holding its shield
-     * up must square up to the threat for the block to count.
+     * only deflects hits from the facing direction, so a Skeptical mob holding
+     * its shield up must square up to the threat for the block to count.
      */
     public void faceBodyToward(LivingEntity target) {
         double dx = target.getX() - getX();
@@ -362,10 +427,9 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     }
 
     /**
-     * Friendly "gift": toss an item as an {@link ItemEntity} arcing toward
-     * {@code target}. Prefers a real item from the backpack (something it
-     * looted); if the backpack is empty it offers a small default gift so the
-     * gesture always lands. Always drops something.
+     * Friendly "gift": toss an item arcing toward {@code target} from eye height
+     * like a player's Q-drop. Prefers a looted backpack item; offers a small
+     * default gift if the backpack is empty so the gesture always lands.
      */
     public boolean giveItemTo(LivingEntity target) {
         ItemStack gift = ItemStack.EMPTY;
@@ -378,8 +442,6 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         if (gift.isEmpty()) {
             gift = defaultGift();
         }
-        // Throw it at the target like a player's Q-drop: spawn at eye height and
-        // launch it arcing toward the target's chest, rather than plopping at our feet.
         double fromX = getX();
         double fromY = getEyeY() - 0.1;
         double fromZ = getZ();
@@ -412,10 +474,9 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     }
 
     /**
-     * True if a lootable chest/barrel that hasn't been recently raided sits
-     * within {@code radius}. Lets the Shy flee goal decide to brave a sneak-raid
-     * instead of fleeing — once the chest is looted it's marked explored, so this
-     * returns false and the mob flees ("crouch to the chest, run away when done").
+     * True if a lootable chest/barrel not recently raided sits within {@code radius}.
+     * Lets the Shy flee goal brave a sneak-raid instead of fleeing — once looted the
+     * chest is marked explored, so this returns false and the mob flees.
      */
     public boolean hasRaidableContainerNearby(int radius) {
         BlockPos origin = blockPosition();
@@ -456,6 +517,31 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         this.entityData.set(DATA_SKIN_INDEX, clamped);
     }
 
+    /**
+     * Mojang skin texture URL, or empty string if this mob has no URL skin
+     * assigned. {@code null} is coerced to {@code ""} on set.
+     */
+    public String getSkinTextureUrl() {
+        String raw = this.entityData.get(DATA_SKIN_TEXTURE_URL);
+        return raw == null ? "" : raw;
+    }
+
+    public void setSkinTextureUrl(String url) {
+        this.entityData.set(DATA_SKIN_TEXTURE_URL, url == null ? "" : url);
+    }
+
+    /**
+     * True if the assigned URL skin was authored for the slim-arms model.
+     * v2 always renders wide regardless — see renderer for details.
+     */
+    public boolean isSkinSlim() {
+        return this.entityData.get(DATA_SKIN_SLIM);
+    }
+
+    public void setSkinSlim(boolean slim) {
+        this.entityData.set(DATA_SKIN_SLIM, slim);
+    }
+
     // ---- InventoryCarrier ------------------------------------------------
 
     @Override
@@ -463,22 +549,81 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         return this.inventory;
     }
 
+    // ---- Interaction (Creative inventory access) -------------------------
+
+    /**
+     * Right-click handler. In Creative, an empty-handed main-hand right-click
+     * opens the mob's inventory screen (equipment + backpack) — the mob
+     * equivalent of pressing E. Survival players, or anyone holding an item,
+     * fall through to vanilla behaviour so normal interactions are unchanged.
+     *
+     * <p>The menu must be opened server-side (the backpack isn't synced to
+     * clients otherwise); the loader-specific open call lives behind
+     * {@link PlayerMobRegistry#MENU_OPENER}. {@code sidedSuccess} swings the
+     * player's arm on the client and consumes the interaction on the server.</p>
+     */
+    @Override
+    protected InteractionResult mobInteract(Player player, InteractionHand hand) {
+        if (hand == InteractionHand.MAIN_HAND
+                && player.getAbilities().instabuild
+                && player.getItemInHand(hand).isEmpty()) {
+            if (player instanceof ServerPlayer serverPlayer
+                    && PlayerMobRegistry.MENU_OPENER != null) {
+                PlayerMobRegistry.MENU_OPENER.open(serverPlayer, this);
+            }
+            return InteractionResult.sidedSuccess(this.level().isClientSide);
+        }
+        return super.mobInteract(player, hand);
+    }
+
     // ---- Equipment swap helpers (called from raid goals) -----------------
 
     /**
-     * Try to swap a candidate item from a container slot into the mob's
-     * equipment. If the candidate is better than what the mob is wearing in
-     * the matching slot, take it (clearing the container slot) and put the
-     * displaced item back into the container.
+     * Replace vanilla's comparator with the enchantment-aware
+     * {@link EquipmentEvaluator#shouldReplace} so an iron sword with
+     * Sharpness V can win against a plain diamond sword. Vanilla's
+     * implementation in {@link net.minecraft.world.entity.Mob} short-circuits
+     * on base damage and never sees the enchantment difference.
+     *
+     * <p>Overriding here propagates the heuristic to vanilla pickup paths
+     * ({@code Mob.pickUpItem}, the ground-item pickup checks) in addition to
+     * the raid goals' explicit {@link #wouldTakeFromContainer} calls.</p>
+     */
+    @Override
+    protected boolean canReplaceCurrentItem(ItemStack candidate, ItemStack existing) {
+        return EquipmentEvaluator.shouldReplace(candidate, existing);
+    }
+
+    /**
+     * Try to take a candidate item from a container slot. Two paths:
+     *
+     * <ul>
+     *   <li><b>Food</b> — copy as many items as fit into the mob's inventory
+     *       (where the {@link EatFoodGoal} will find them when HP drops).
+     *       Container slot shrinks; nothing is dropped on the ground.</li>
+     *   <li><b>Equipment</b> — if the candidate beats the mob's current
+     *       equivalent slot per {@link EquipmentEvaluator#shouldReplace},
+     *       swap it in. The displaced piece goes back into the container
+     *       (overflow to the ground if the container's full).</li>
+     * </ul>
      *
      * <p>Lives on the entity rather than the static {@link EquipmentEvaluator}
-     * because {@link #canReplaceCurrentItem} is {@code protected} on Mob —
-     * only the Mob subclass can read it.</p>
+     * because the equipment path needs {@code Mob.getEquipmentSlotForItem}
+     * (visible to subclasses) and {@code setItemSlot} (mutates the mob).</p>
      */
-    public boolean tryReplaceFromContainer(Container source, int slotIdx) {
+    public boolean tryTakeFromContainer(Container source, int slotIdx) {
         if (source == null) return false;
         ItemStack candidate = source.getItem(slotIdx);
         if (candidate.isEmpty()) return false;
+
+        // Food first — same candidate may both be a food AND fit a slot
+        // (e.g. enchanted golden apple) but the food/heal path is the more
+        // useful behaviour. The slot the equipment path would route this to
+        // would be MAINHAND, which would drop the mob's weapon mid-raid.
+        if (candidate.get(DataComponents.FOOD) != null) {
+            return EquipmentEvaluator.tryCollectFood(source, slotIdx, this.inventory);
+        }
+
         EquipmentSlot slot = getEquipmentSlotForItem(candidate);
         ItemStack current = getItemBySlot(slot);
         if (!canReplaceCurrentItem(candidate, current)) return false;
@@ -511,15 +656,18 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     }
 
     /**
-     * Pre-check variant of {@link #tryReplaceFromContainer} — answers
-     * "would the mob take this slot if asked?" without actually swapping.
-     * Used by the raid goal to skip worthless slots without burning the
-     * per-swap delay budget.
+     * Pre-check variant of {@link #tryTakeFromContainer} — answers "would the
+     * mob take this slot if asked?" without mutating anything. Used by the
+     * raid goal to skip worthless slots without burning the per-swap delay
+     * budget.
      */
-    public boolean wouldReplaceFromContainer(Container source, int slotIdx) {
+    public boolean wouldTakeFromContainer(Container source, int slotIdx) {
         if (source == null) return false;
         ItemStack candidate = source.getItem(slotIdx);
         if (candidate.isEmpty()) return false;
+        if (candidate.get(DataComponents.FOOD) != null) {
+            return EquipmentEvaluator.canCollectFood(source, slotIdx, this.inventory);
+        }
         EquipmentSlot slot = getEquipmentSlotForItem(candidate);
         ItemStack current = getItemBySlot(slot);
         return canReplaceCurrentItem(candidate, current);
@@ -532,6 +680,331 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         EquipmentSlot mobSlot = getEquipmentSlotForItem(candidate);
         ItemStack current = getItemBySlot(mobSlot);
         return canReplaceCurrentItem(candidate, current);
+    }
+
+    // ---- Floor item pickup (CollectFloorItemsGoal + vanilla aiStep) -------
+
+    /**
+     * Want-filter for floor items — used by both {@link CollectFloorItemsGoal}'s
+     * scan and vanilla's passive {@code Mob.aiStep} pickup. The branch order
+     * mirrors {@link #tryPickUpFloorItem}: a toolkit weapon/tool (wanted only if
+     * it beats our current best of its category), then armor/shield upgrades,
+     * then hoardable ammo / valuables / consumables, then building blocks.
+     */
+    @Override
+    public boolean wantsToPickUp(ItemStack stack) {
+        ItemPickupPolicy.WeaponCategory cat = ItemPickupPolicy.weaponCategory(stack);
+        if (cat != null) {
+            Located best = bestOfCategory(cat);
+            return best == null || ItemPickupPolicy.compareQuality(stack, best.stack()) > 0;
+        }
+        return wouldEquipArmor(stack)
+            || ItemPickupPolicy.isAmmo(stack)
+            || ItemPickupPolicy.isValuable(stack)
+            || ItemPickupPolicy.isConsumable(stack)
+            || (ItemPickupPolicy.isBuildingBlock(stack)
+                && ItemPickupPolicy.wantsBuildingBlock(this.inventory, stack));
+    }
+
+    /**
+     * Vanilla passive-pickup entry point — fires from {@code Mob.aiStep} when
+     * {@code canPickUpLoot} + {@code mobGriefing} hold. Routes through the same
+     * logic the active goal uses.
+     */
+    @Override
+    protected void pickUpItem(ItemEntity itemEntity) {
+        tryPickUpFloorItem(itemEntity);
+    }
+
+    /**
+     * Take an item off the ground: keep the best of each weapon/tool category
+     * (dropping worse duplicates), equip armor/shield upgrades, hoard ammo /
+     * valuables / consumables, and collect building blocks up to a one-stack
+     * cap. Public so {@link CollectFloorItemsGoal} can drive it directly rather
+     * than relying on the {@code CanPickUpLoot} flag.
+     *
+     * @return true if anything was taken
+     */
+    public boolean tryPickUpFloorItem(ItemEntity itemEntity) {
+        if (itemEntity == null || !itemEntity.isAlive() || itemEntity.isRemoved()) return false;
+        ItemStack stack = itemEntity.getItem();
+        if (stack.isEmpty() || itemEntity.hasPickUpDelay()) return false;
+
+        ItemPickupPolicy.WeaponCategory cat = ItemPickupPolicy.weaponCategory(stack);
+        if (cat != null) {
+            return finishPickup(itemEntity, stack, reconcileWeaponPickup(cat, stack));
+        }
+        if (wouldEquipArmor(stack)) {
+            return finishPickup(itemEntity, stack, equipArmorUpgrade(stack));
+        }
+        if (ItemPickupPolicy.isAmmo(stack)
+                || ItemPickupPolicy.isValuable(stack)
+                || ItemPickupPolicy.isConsumable(stack)) {
+            // InventoryCarrier.pickUpItem handles its own want-check, take, and discard.
+            InventoryCarrier.pickUpItem(this, this, itemEntity);
+            return true;
+        }
+        if (ItemPickupPolicy.isBuildingBlock(stack)) {
+            return finishPickup(itemEntity, stack, pickUpBlockCapped(stack));
+        }
+        return false;
+    }
+
+    /**
+     * Shared tail for the equip + block paths: play the pickup animation,
+     * shrink the ground stack by what was taken, and discard it when empty.
+     * Mirrors the count handling in {@code InventoryCarrier.pickUpItem}.
+     */
+    private boolean finishPickup(ItemEntity itemEntity, ItemStack stack, int moved) {
+        if (moved <= 0) return false;
+        onItemPickup(itemEntity);
+        take(itemEntity, moved);
+        stack.shrink(moved);
+        if (stack.isEmpty()) {
+            itemEntity.discard();
+        }
+        return true;
+    }
+
+    /**
+     * True if {@code stack} is armor/shield the mob would upgrade into. The
+     * {@link ItemPickupPolicy#isArmorOrShield} guard is essential: vanilla
+     * {@code canReplaceCurrentItem} returns true for <em>any</em> item over an
+     * empty slot. Weapons route through {@link #reconcileWeaponPickup} instead;
+     * this path is armor + shields only. Lives here (not on the static policy)
+     * because {@code canReplaceCurrentItem} is {@code protected} on Mob.
+     */
+    private boolean wouldEquipArmor(ItemStack stack) {
+        if (!ItemPickupPolicy.isArmorOrShield(stack)) return false;
+        EquipmentSlot slot = getEquipmentSlotForItem(stack);
+        return canReplaceCurrentItem(stack, getItemBySlot(slot));
+    }
+
+    /**
+     * Equip one of {@code found} (armor/shield) as an upgrade, stashing the
+     * displaced piece into the backpack (or dropping it if the backpack is
+     * full). Mirrors {@link #tryReplaceFromContainer}'s displaced-item handling.
+     *
+     * @return 1 if equipped, 0 if it turned out not to be an upgrade
+     */
+    private int equipArmorUpgrade(ItemStack found) {
+        EquipmentSlot slot = getEquipmentSlotForItem(found);
+        ItemStack current = getItemBySlot(slot);
+        if (!canReplaceCurrentItem(found, current)) return 0;
+
+        ItemStack toEquip = found.copy();
+        toEquip.setCount(1); // equipment slots hold a single piece
+        setItemSlot(slot, toEquip);
+        if (!current.isEmpty()) {
+            ItemStack leftover = EquipmentEvaluator.addToContainer(this.inventory, current);
+            if (!leftover.isEmpty()) spawnAtLocation(leftover);
+        }
+        return 1;
+    }
+
+    // ---- Weapon toolkit (best-of-each + combat switching) ----------------
+
+    /** A located toolkit item: {@code slot == -1} means the main hand, else a backpack slot index. */
+    private record Located(ItemStack stack, int slot) {}
+
+    /** Distance² thresholds for the combat weapon switch; the band between them prevents flicker. */
+    private static final double SWITCH_TO_MELEE_SQR = 16.0;  // within 4 blocks → draw melee
+    private static final double SWITCH_TO_RANGED_SQR = 64.0; // beyond 8 blocks → draw ranged
+
+    /** Best item of {@code cat} across main hand + backpack, or null if the mob holds none. */
+    private Located bestOfCategory(ItemPickupPolicy.WeaponCategory cat) {
+        Located best = null;
+        ItemStack main = getMainHandItem();
+        if (ItemPickupPolicy.weaponCategory(main) == cat) {
+            best = new Located(main, -1);
+        }
+        for (int i = 0; i < this.inventory.getContainerSize(); i++) {
+            ItemStack stack = this.inventory.getItem(i);
+            if (ItemPickupPolicy.weaponCategory(stack) == cat
+                    && (best == null || ItemPickupPolicy.compareQuality(stack, best.stack()) > 0)) {
+                best = new Located(stack, i);
+            }
+        }
+        return best;
+    }
+
+    /** Best melee weapon — the harder-hitting of the best sword and best axe. */
+    private Located bestMelee() {
+        Located sword = bestOfCategory(ItemPickupPolicy.WeaponCategory.SWORD);
+        Located axe = bestOfCategory(ItemPickupPolicy.WeaponCategory.AXE);
+        if (sword == null) return axe;
+        if (axe == null) return sword;
+        return ItemPickupPolicy.meleeAttackDamage(axe.stack())
+             > ItemPickupPolicy.meleeAttackDamage(sword.stack()) ? axe : sword;
+    }
+
+    /**
+     * Keep only the best of {@code cat}: if {@code picked} beats the current
+     * best, drop the displaced one and stash the newcomer; otherwise leave it
+     * on the ground. Then make sure the mob isn't left empty-handed (idle → best
+     * melee; the attack goal re-picks the situational weapon during combat).
+     *
+     * @return 1 if taken, 0 if {@code picked} wasn't an upgrade
+     */
+    private int reconcileWeaponPickup(ItemPickupPolicy.WeaponCategory cat, ItemStack picked) {
+        Located best = bestOfCategory(cat);
+        if (best != null && ItemPickupPolicy.compareQuality(picked, best.stack()) <= 0) {
+            return 0; // not strictly better — leave it on the ground
+        }
+        if (best != null) {
+            removeLocated(best);
+            spawnAtLocation(best.stack()); // drop the worse duplicate
+        }
+        ItemStack one = picked.copy();
+        one.setCount(1);
+        ItemStack leftover = EquipmentEvaluator.addToContainer(this.inventory, one);
+        if (!leftover.isEmpty()) spawnAtLocation(leftover);
+
+        if (getTarget() == null || getMainHandItem().isEmpty()) {
+            equipBestMeleeInHand();
+        }
+        return 1;
+    }
+
+    /** Clear a located item from wherever it lives (main hand or backpack slot). */
+    private void removeLocated(Located loc) {
+        if (loc.slot() == -1) {
+            setItemSlot(EquipmentSlot.MAINHAND, ItemStack.EMPTY);
+        } else {
+            this.inventory.setItem(loc.slot(), ItemStack.EMPTY);
+        }
+    }
+
+    /**
+     * Put the best melee weapon in the main hand (used when idle and after
+     * combat). No-op if the mob has no melee weapon or it's already in hand.
+     */
+    public void equipBestMeleeInHand() {
+        Located melee = bestMelee();
+        if (melee == null || melee.slot() == -1) return;
+        ensureInMainhand(melee);
+    }
+
+    /**
+     * Combat weapon switch: draw the best ranged weapon when {@code target} is
+     * far and the best melee when it's close, with a hysteresis band in between
+     * so the mob doesn't flicker at the boundary. Pickaxes are never drawn for
+     * combat. Called every combat tick by {@link WeaponAwareAttackGoal} — a
+     * cheap no-op when the right weapon is already in hand.
+     */
+    public void equipBestWeaponForTarget(LivingEntity target) {
+        if (target == null) return;
+        double distSq = distanceToSqr(target);
+        Located ranged = bestOfCategory(ItemPickupPolicy.WeaponCategory.RANGED);
+        Located melee = bestMelee();
+
+        Located desired;
+        if (ranged != null && distSq > SWITCH_TO_RANGED_SQR) {
+            desired = ranged;
+        } else if (melee != null && distSq < SWITCH_TO_MELEE_SQR) {
+            desired = melee;
+        } else {
+            // Hysteresis band (or only one type owned): keep the current combat
+            // weapon if we have one, else fall back to whatever we do own.
+            ItemPickupPolicy.WeaponCategory current = ItemPickupPolicy.weaponCategory(getMainHandItem());
+            if (current == ItemPickupPolicy.WeaponCategory.SWORD
+                    || current == ItemPickupPolicy.WeaponCategory.AXE
+                    || current == ItemPickupPolicy.WeaponCategory.RANGED) {
+                return;
+            }
+            desired = (melee != null) ? melee : ranged;
+        }
+        if (desired != null) ensureInMainhand(desired);
+    }
+
+    /** Swap {@code desired} into the main hand, returning the displaced item to the backpack. */
+    private void ensureInMainhand(Located desired) {
+        if (desired.slot() == -1) return; // already wielded
+        ItemStack current = getMainHandItem();
+        this.inventory.setItem(desired.slot(), ItemStack.EMPTY);
+        setItemSlot(EquipmentSlot.MAINHAND, desired.stack());
+        if (!current.isEmpty()) {
+            ItemStack leftover = EquipmentEvaluator.addToContainer(this.inventory, current);
+            if (!leftover.isEmpty()) spawnAtLocation(leftover);
+        }
+    }
+
+    /**
+     * Collect building blocks up to {@link ItemPickupPolicy#BUILDING_BLOCK_CAP}.
+     * Under the cap, take only enough to reach it. At the cap, "trade up": drop
+     * the smallest carried block stack and take the (strictly larger) found pile.
+     *
+     * @return how many blocks were taken from the ground stack
+     */
+    private int pickUpBlockCapped(ItemStack found) {
+        int carried = ItemPickupPolicy.countBuildingBlocks(this.inventory);
+        if (carried >= ItemPickupPolicy.BUILDING_BLOCK_CAP) {
+            int smallestSlot = ItemPickupPolicy.smallestBuildingBlockSlot(this.inventory);
+            if (smallestSlot < 0) return 0;
+            ItemStack smallest = this.inventory.getItem(smallestSlot);
+            if (found.getCount() <= smallest.getCount()) return 0;
+            // Trade up: free the smallest stack, then fall through to the add below.
+            this.inventory.setItem(smallestSlot, ItemStack.EMPTY);
+            spawnAtLocation(smallest);
+            carried = ItemPickupPolicy.countBuildingBlocks(this.inventory);
+        }
+        int room = ItemPickupPolicy.BUILDING_BLOCK_CAP - carried;
+        if (room <= 0) return 0;
+        ItemStack toAdd = found.copy();
+        toAdd.setCount(Math.min(found.getCount(), room));
+        int requested = toAdd.getCount();
+        ItemStack leftover = EquipmentEvaluator.addToContainer(this.inventory, toAdd);
+        return requested - leftover.getCount();
+    }
+
+    // ---- Food helpers (called from EatFoodGoal) --------------------------
+
+    /**
+     * Returns the inventory slot of the highest-nutrition food currently
+     * carried, or {@code -1} if no edible item is present. "Edible" means the
+     * item has a non-null {@link DataComponents#FOOD} component — same
+     * definition vanilla uses for items players can right-click to eat.
+     */
+    public int findBestFoodSlot() {
+        int bestSlot = -1;
+        int bestNutrition = 0;
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            ItemStack stack = inventory.getItem(i);
+            if (stack.isEmpty()) continue;
+            FoodProperties food = stack.get(DataComponents.FOOD);
+            if (food == null) continue;
+            if (food.nutrition() > bestNutrition) {
+                bestNutrition = food.nutrition();
+                bestSlot = i;
+            }
+        }
+        return bestSlot;
+    }
+
+    /**
+     * Spawn server-broadcast item-puff particles near the mob's mouth —
+     * the visual feedback for "this mob is eating right now". Client-side
+     * {@link Level#addParticle} won't reach other players, so we use
+     * {@link ServerLevel#sendParticles} which replicates to everyone in range.
+     *
+     * <p>Vanilla's {@code LivingEntity.triggerItemUseEffects} is gated on
+     * {@code isUsingItem()} and runs client-side per tick from data-tracked
+     * use state — we don't drive {@code startUsingItem} so the vanilla path
+     * never fires for our eating cycle.</p>
+     */
+    public void spawnEatingParticles(ItemStack food) {
+        if (!(level() instanceof ServerLevel serverLevel)) return;
+        ItemParticleOption particle = new ItemParticleOption(ParticleTypes.ITEM, food);
+        serverLevel.sendParticles(
+            particle,
+            getX(),
+            getEyeY() - 0.2,
+            getZ(),
+            /* count */ 4,
+            /* xDist */ 0.15,
+            /* yDist */ 0.1,
+            /* zDist */ 0.15,
+            /* speed */ 0.05);
     }
 
     // ---- Recently-explored cooldown maps ---------------------------------
@@ -586,6 +1059,14 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         super.addAdditionalSaveData(tag);
         personalities.save(tag);
         tag.putInt(TAG_SKIN_INDEX, getSkinIndex());
+        // URL skin tags are purely additive on top of v1 (SkinIndex). Only
+        // write the URL key when set, so 0.2.0-loaded mobs that never had a
+        // URL assigned don't round-trip an empty string back into the save.
+        String url = getSkinTextureUrl();
+        if (!url.isEmpty()) {
+            tag.putString(TAG_SKIN_TEXTURE_URL, url);
+            tag.putBoolean(TAG_SKIN_SLIM, isSkinSlim());
+        }
         // Inventory persistence — InventoryCarrier helper handles slot encoding.
         // registryAccess() is a HolderLookup.Provider on Entity in 1.21.1+.
         writeInventoryToTag(tag, this.registryAccess());
@@ -613,9 +1094,16 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     @Override
     public void readAdditionalSaveData(CompoundTag tag) {
         super.readAdditionalSaveData(tag);
-        // Per-category personalities; missing tags keep v1-behaviour defaults.
+        // Per-category personalities; missing tags keep category defaults.
         personalities.load(tag);
         setSkinIndex(tag.getInt(TAG_SKIN_INDEX));
+        // Backward compat: 0.2.0 saves have no SkinTextureUrl tag. Missing key
+        // ⇒ URL stays the default "" ⇒ renderer uses the legacy bundled-
+        // vanilla path keyed off SkinIndex. New v2 mobs round-trip the URL.
+        if (tag.contains(TAG_SKIN_TEXTURE_URL, Tag.TAG_STRING)) {
+            setSkinTextureUrl(tag.getString(TAG_SKIN_TEXTURE_URL));
+            setSkinSlim(tag.getBoolean(TAG_SKIN_SLIM));
+        }
         readInventoryFromTag(tag, this.registryAccess());
 
         recentlyExploredBlocks.clear();
@@ -656,28 +1144,14 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         this.inventory.clearContent();
     }
 
-    /**
-     * Hook the death event to force-close any container the mob had open.
-     * {@link RaidContainersGoal#stop} also closes the container, but when the
-     * mob dies mid-raid the goal selector stops ticking before it gets the
-     * chance — this override is the safety net so chests/barrels don't
-     * stay visually stuck open.
-     */
-    @Override
-    public void die(DamageSource source) {
-        closeOpenedContainer();
-        super.die(source);
-    }
-
     // ---- Provocation reaction --------------------------------------------
 
     /**
      * When struck by a categorisable entity the mob isn't already reacting to,
      * flip its personality toward that category: stand and fight ({@link
-     * Personality#AGGRESSIVE}) if armed, otherwise flee ({@link Personality#SHY},
+     * Personality#AGGRESSIVE}) if armed, else flee ({@link Personality#SHY},
      * clamped to Aggressive where Shy is disallowed). On a flip to Shy we drop
-     * the retaliation target so {@link FleeFromCategoryGoal} takes over instead
-     * of the attack goal.
+     * the retaliation target so {@link FleeFromCategoryGoal} takes over.
      */
     @Override
     public boolean hurt(DamageSource source, float amount) {
@@ -693,6 +1167,56 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
             }
         }
         return result;
+    }
+
+    /**
+     * Death hook with two responsibilities:
+     *
+     * <ol>
+     *   <li>Force-close any container the mob had open. {@link RaidContainersGoal#stop}
+     *       also closes it, but when the mob dies mid-raid the goal selector stops
+     *       ticking before it gets the chance — this is the safety net so
+     *       chests/barrels don't stay visually stuck open.</li>
+     *   <li>Announce the death in chat like a player's. The entity's display
+     *       name is "Player", so the vanilla combat tracker yields messages
+     *       that read like a real player death ("Player was slain by Zombie",
+     *       "Player drowned", …).</li>
+     * </ol>
+     */
+    @Override
+    public void die(DamageSource source) {
+        closeOpenedContainer();
+        // Capture the death message BEFORE super.die(): super calls
+        // CombatTracker.recheckStatus(), which clears the combat entries, so
+        // the attacker-aware message ("… was slain by Zombie") is only
+        // available now. Vanilla ServerPlayer.die() reads it before super for
+        // exactly this reason — reading after yields the generic "… died".
+        Component deathMessage = captureDeathMessage();
+        super.die(source);
+        // Broadcast only after super confirms the kill (this.dead flips true):
+        // a cancelled death (Forge/NeoForge LivingDeathEvent) or a re-entrant
+        // die() leaves it false, so we stay silent and never double-announce.
+        if (deathMessage != null && this.dead && this.level() instanceof ServerLevel serverLevel) {
+            serverLevel.getServer().getPlayerList().broadcastSystemMessage(deathMessage, false);
+        }
+    }
+
+    /**
+     * The player-style death message to broadcast, or {@code null} if this
+     * death must not be announced — client-side, already dead/removed, or the
+     * {@code showDeathMessages} gamerule is off (just like a real player).
+     *
+     * <p>Must be called BEFORE {@code super.die()} while the combat tracker
+     * still holds the fatal blow — see {@link #die}.</p>
+     */
+    private Component captureDeathMessage() {
+        if (this.dead || this.isRemoved() || !(this.level() instanceof ServerLevel serverLevel)) {
+            return null;
+        }
+        if (!serverLevel.getGameRules().getBoolean(GameRules.RULE_SHOWDEATHMESSAGES)) {
+            return null;
+        }
+        return this.getCombatTracker().getDeathMessage();
     }
 
     // ---- Container open/close (called from RaidContainersGoal) -----------
@@ -717,6 +1241,12 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
                 level.setBlock(pos, state.setValue(BarrelBlock.OPEN, true), 3);
             }
             playContainerSound(pos, SoundEvents.BARREL_OPEN);
+        } else if (be instanceof ShulkerBoxBlockEntity) {
+            // Vanilla ShulkerBoxBlockEntity.triggerEvent(1, n) drives the lid
+            // animation. Bypassing startOpen(Player) here because that method
+            // is Player-typed and our mob isn't a Player.
+            level.blockEvent(pos, state.getBlock(), ShulkerBoxBlockEntity.EVENT_SET_OPEN_COUNT, 1);
+            playContainerSound(pos, SoundEvents.SHULKER_BOX_OPEN);
         } else {
             return; // unknown container type; nothing to track
         }
@@ -745,6 +1275,9 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
                 level.setBlock(pos, state.setValue(BarrelBlock.OPEN, false), 3);
             }
             playContainerSound(pos, SoundEvents.BARREL_CLOSE);
+        } else if (be instanceof ShulkerBoxBlockEntity) {
+            level.blockEvent(pos, state.getBlock(), ShulkerBoxBlockEntity.EVENT_SET_OPEN_COUNT, 0);
+            playContainerSound(pos, SoundEvents.SHULKER_BOX_CLOSE);
         }
     }
 
@@ -808,26 +1341,44 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         arrow.shoot(dx, dy + dist * 0.2, dz, 1.6F,
                     (float) (14 - this.level().getDifficulty().getId() * 4));
 
-        this.playSound(SoundEvents.SKELETON_SHOOT, 1.0F,
+        // Player's bow-release sound (vanilla BowItem uses ARROW_SHOOT), not the
+        // skeleton's. Routes through getSoundSource() → Players category.
+        this.playSound(SoundEvents.ARROW_SHOOT, 1.0F,
                        1.0F / (this.getRandom().nextFloat() * 0.4F + 0.8F));
         this.level().addFreshEntity(arrow);
     }
 
-    // ---- Sounds (pillager-like, mirrors villager-style "person dies" feel)
+    // ---- Sounds (player-like — mirrors vanilla Player exactly) -----------
 
+    /** Players have no idle sound — stay silent like a real player. */
     @Override
     protected SoundEvent getAmbientSound() {
-        return SoundEvents.PILLAGER_AMBIENT;
+        return null;
     }
 
+    /**
+     * Data-driven hurt sound, identical to {@code Player.getHurtSound}: the
+     * damage type's own effect sound (PLAYER_HURT / _DROWN / _ON_FIRE /
+     * _FREEZE / _SWEET_BERRY_BUSH).
+     */
     @Override
     protected SoundEvent getHurtSound(DamageSource source) {
-        return SoundEvents.PILLAGER_HURT;
+        return source.type().effects().sound();
     }
 
     @Override
     protected SoundEvent getDeathSound() {
-        return SoundEvents.PILLAGER_DEATH;
+        return SoundEvents.PLAYER_DEATH;
+    }
+
+    /**
+     * Match a real player's sound category so hurt/death/bow sounds play under
+     * the Players volume slider, not Hostile Creatures. Mirrors
+     * {@code Player.getSoundSource()}.
+     */
+    @Override
+    public SoundSource getSoundSource() {
+        return SoundSource.PLAYERS;
     }
 
     /**
