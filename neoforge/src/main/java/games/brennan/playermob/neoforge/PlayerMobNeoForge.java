@@ -2,12 +2,13 @@ package games.brennan.playermob.neoforge;
 
 import games.brennan.playermob.PlayerMob;
 import games.brennan.playermob.PlayerMobRegistry;
+import games.brennan.playermob.entity.Personality;
 import games.brennan.playermob.entity.PlayerMobEntity;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraft.world.item.Item;
-import net.minecraft.world.item.SpawnEggItem;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
@@ -20,16 +21,18 @@ import net.neoforged.neoforge.registries.DeferredItem;
 import net.neoforged.neoforge.registries.DeferredRegister;
 
 /**
- * NeoForge loader entrypoint. Registers entity type, spawn egg, attributes,
- * and creative-tab placement via DeferredRegister + the matching event-bus
- * listeners, then hands off to {@link PlayerMob#init()} once registration
- * completes (FMLCommonSetupEvent).
+ * NeoForge loader entrypoint. Registers the entity type, the random spawn egg,
+ * the five player-facing personality archetype eggs (in a static block),
+ * attributes, and creative-tab placement via DeferredRegister + the matching
+ * event-bus listeners, then hands off to {@link PlayerMob#init()} once
+ * registration completes (FMLCommonSetupEvent).
+ *
+ * <p>Egg colours / {@code entity_data} are built by {@link PlayerMobRegistry};
+ * the archetype eggs are resolved from the item registry at creative-tab time
+ * to avoid threading their {@link DeferredItem} generics through a collection.</p>
  */
 @Mod(PlayerMob.MOD_ID)
 public final class PlayerMobNeoForge {
-
-    private static final int SPAWN_EGG_PRIMARY = 0xDDB897;
-    private static final int SPAWN_EGG_SECONDARY = 0x4F3A2A;
 
     private static final DeferredRegister<EntityType<?>> ENTITY_TYPES =
         DeferredRegister.create(Registries.ENTITY_TYPE, PlayerMob.MOD_ID);
@@ -42,9 +45,16 @@ public final class PlayerMobNeoForge {
 
     public static final DeferredItem<Item> PLAYER_MOB_SPAWN_EGG =
         ITEMS.register(PlayerMobRegistry.PLAYER_MOB_SPAWN_EGG_PATH, () ->
-            new SpawnEggItem(PLAYER_MOB.get(),
-                             SPAWN_EGG_PRIMARY, SPAWN_EGG_SECONDARY,
-                             new Item.Properties()));
+            PlayerMobRegistry.createRandomSpawnEgg(PLAYER_MOB.get()));
+
+    // Player-facing archetype eggs — one per personality. Registered for their
+    // side effect; resolved from BuiltInRegistries at tab-build time.
+    static {
+        for (Personality personality : Personality.values()) {
+            ITEMS.register(PlayerMobRegistry.personalitySpawnEggPath(personality), () ->
+                PlayerMobRegistry.createPersonalitySpawnEgg(PLAYER_MOB.get(), personality));
+        }
+    }
 
     public PlayerMobNeoForge(IEventBus modBus) {
         ENTITY_TYPES.register(modBus);
@@ -66,6 +76,10 @@ public final class PlayerMobNeoForge {
     private static void onBuildCreativeTab(BuildCreativeModeTabContentsEvent event) {
         if (event.getTabKey() == CreativeModeTabs.SPAWN_EGGS) {
             event.accept(PLAYER_MOB_SPAWN_EGG.get());
+            for (Personality personality : Personality.values()) {
+                event.accept(BuiltInRegistries.ITEM.get(
+                    PlayerMobRegistry.personalitySpawnEggId(personality)));
+            }
         }
     }
 

@@ -2,6 +2,7 @@ package games.brennan.playermob.fabric;
 
 import games.brennan.playermob.PlayerMob;
 import games.brennan.playermob.PlayerMobRegistry;
+import games.brennan.playermob.entity.Personality;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.itemgroup.v1.ItemGroupEvents;
@@ -10,28 +11,18 @@ import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.item.CreativeModeTabs;
-import net.minecraft.world.item.Item;
-import net.minecraft.world.item.SpawnEggItem;
 
 /**
- * Fabric loader entrypoint. Registers the entity type, spawn egg item, default
- * attributes, and creative-tab placement using Fabric-native APIs, then defers
- * to {@link PlayerMob#init()} for shared post-registration logic.
+ * Fabric loader entrypoint. Registers the entity type, the random spawn egg
+ * plus the five player-facing personality archetype eggs, default attributes,
+ * and creative-tab placement using Fabric-native APIs, then defers to
+ * {@link PlayerMob#init()} for shared post-registration logic.
  *
- * <p>Architectury API runtime is not used (its 1.21 line is Fabric+NeoForge
- * only — see {@code PlayerMobRegistry} javadoc) so each loader carries its
- * own short registration block.</p>
+ * <p>Egg colours, the {@code entity_data} payload, and the {@code SpawnEggItem}
+ * construction all live in {@link PlayerMobRegistry} so the three loaders share
+ * one source of truth — see {@link PlayerMobRegistry#createPersonalitySpawnEgg}.</p>
  */
 public final class PlayerMobFabric implements ModInitializer {
-
-    /**
-     * Spawn-egg primary (background) colour: warm skin tone.
-     */
-    private static final int SPAWN_EGG_PRIMARY = 0xDDB897;
-    /**
-     * Spawn-egg secondary (spots) colour: dark hair brown.
-     */
-    private static final int SPAWN_EGG_SECONDARY = 0x4F3A2A;
 
     @Override
     public void onInitialize() {
@@ -50,19 +41,28 @@ public final class PlayerMobFabric implements ModInitializer {
             PlayerMobRegistry.PLAYER_MOB,
             PlayerMobEntity.createAttributes());
 
-        // Spawn-egg item.
-        Item spawnEgg = new SpawnEggItem(
-            PlayerMobRegistry.PLAYER_MOB,
-            SPAWN_EGG_PRIMARY, SPAWN_EGG_SECONDARY,
-            new Item.Properties());
+        // Random (default) spawn egg — rolls every category at spawn.
         PlayerMobRegistry.PLAYER_MOB_SPAWN_EGG = Registry.register(
             BuiltInRegistries.ITEM,
             PlayerMobRegistry.PLAYER_MOB_SPAWN_EGG_ID,
-            spawnEgg);
+            PlayerMobRegistry.createRandomSpawnEgg(entityType));
 
-        // Drop the spawn egg into the Spawn Eggs creative tab.
-        ItemGroupEvents.modifyEntriesEvent(CreativeModeTabs.SPAWN_EGGS)
-            .register(entries -> entries.accept(PlayerMobRegistry.PLAYER_MOB_SPAWN_EGG));
+        // Player-facing archetype eggs — one per personality.
+        for (Personality personality : Personality.values()) {
+            Registry.register(
+                BuiltInRegistries.ITEM,
+                PlayerMobRegistry.personalitySpawnEggId(personality),
+                PlayerMobRegistry.createPersonalitySpawnEgg(entityType, personality));
+        }
+
+        // Drop every egg into the Spawn Eggs creative tab.
+        ItemGroupEvents.modifyEntriesEvent(CreativeModeTabs.SPAWN_EGGS).register(entries -> {
+            entries.accept(PlayerMobRegistry.PLAYER_MOB_SPAWN_EGG);
+            for (Personality personality : Personality.values()) {
+                entries.accept(BuiltInRegistries.ITEM.get(
+                    PlayerMobRegistry.personalitySpawnEggId(personality)));
+            }
+        });
 
         PlayerMob.init();
     }
