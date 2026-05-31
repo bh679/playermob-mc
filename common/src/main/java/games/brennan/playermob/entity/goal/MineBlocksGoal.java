@@ -184,8 +184,9 @@ public final class MineBlocksGoal extends Goal {
             }
 
             BlockState state = mob.level().getBlockState(targetPos);
-            // Make sure we're holding a tool that can actually harvest this.
-            mob.equipCorrectToolFor(state);
+            // Swap to the most appropriate tool (axe for wood, pickaxe for stone/ore);
+            // a real swap triggers a brief pause before the break (see tickBreaking).
+            mob.equipBestToolFor(state);
 
             float hardness = state.getDestroySpeed(mob.level(), targetPos);
             if (hardness < 0.0f) { // unbreakable somehow — abandon
@@ -214,6 +215,9 @@ public final class MineBlocksGoal extends Goal {
             return;
         }
         lookAtTarget();
+
+        // Brief "reach for the tool" pause after a swap before the break advances.
+        if (!mob.isToolReady()) return;
 
         if (mob.tickCount - lastSwingTick >= SWING_INTERVAL_TICKS) {
             mob.swing(InteractionHand.MAIN_HAND);

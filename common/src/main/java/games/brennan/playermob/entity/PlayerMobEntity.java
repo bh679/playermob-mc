@@ -366,6 +366,9 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
      */
     private boolean breakingBlock = false;
 
+    /** Tick at which a just-swapped tool/weapon becomes usable (0.2–1s swap pause). Transient. */
+    private int toolReadyTick = 0;
+
     public boolean isBreakingBlock() {
         return breakingBlock;
     }
@@ -415,29 +418,51 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     }
 
     /**
-     * Ensure the mainhand can actually harvest {@code state}. Returns {@code true}
-     * immediately if the block needs no special tool or the mainhand is already
-     * correct; otherwise pulls the first correct tool out of the backpack into
-     * the mainhand (stashing the displaced item) and returns whether the mainhand
-     * can now harvest the block.
+     * Swap in the most appropriate <em>mining tool</em> for {@code state} (an axe
+     * for wood, a correct-tier pickaxe for stone/ore — see {@link ToolSelector}).
+     * No-op if the mainhand is already best. A real swap starts the swap pause,
+     * so callers should wait for {@link #isToolReady()} before using the tool.
      */
-    public boolean equipCorrectToolFor(BlockState state) {
-        if (!state.requiresCorrectToolForDrops()) return true;
-        if (getMainHandItem().isCorrectToolForDrops(state)) return true;
-        for (int i = 0; i < this.inventory.getContainerSize(); i++) {
-            ItemStack candidate = this.inventory.getItem(i);
-            if (candidate.isEmpty() || !candidate.isCorrectToolForDrops(state)) continue;
-            ItemStack tool = candidate.copy();
-            ItemStack previousMain = getMainHandItem();
-            this.inventory.setItem(i, ItemStack.EMPTY);
-            setItemSlot(EquipmentSlot.MAINHAND, tool);
-            if (!previousMain.isEmpty()) {
-                ItemStack leftover = stashInInventory(previousMain);
-                if (!leftover.isEmpty()) spawnAtLocation(leftover);
-            }
-            return true;
+    public void equipBestToolFor(BlockState state) {
+        int slot = ToolSelector.bestToolSlot(state, getMainHandItem(), this.inventory);
+        if (slot >= 0) {
+            swapMainhandWithSlot(slot);
+            markToolSwap();
         }
-        return getMainHandItem().isCorrectToolForDrops(state);
+    }
+
+    /**
+     * Swap in the best <em>weapon</em> the mob owns (see {@link ToolSelector}).
+     * No-op if the mainhand is already best. A real swap starts the swap pause.
+     */
+    public void equipBestWeapon() {
+        int slot = ToolSelector.bestWeaponSlot(getMainHandItem(), this.inventory);
+        if (slot >= 0) {
+            swapMainhandWithSlot(slot);
+            markToolSwap();
+        }
+    }
+
+    /** Move the backpack item at {@code slot} into the mainhand, stashing the displaced item. */
+    private void swapMainhandWithSlot(int slot) {
+        ItemStack tool = this.inventory.getItem(slot).copy();
+        ItemStack previousMain = getMainHandItem();
+        this.inventory.setItem(slot, ItemStack.EMPTY);
+        setItemSlot(EquipmentSlot.MAINHAND, tool);
+        if (!previousMain.isEmpty()) {
+            ItemStack leftover = stashInInventory(previousMain);
+            if (!leftover.isEmpty()) spawnAtLocation(leftover);
+        }
+    }
+
+    /** Begin the post-swap "reach for it" pause: 4–20 ticks (0.2–1.0s). */
+    private void markToolSwap() {
+        this.toolReadyTick = this.tickCount + 4 + getRandom().nextInt(17);
+    }
+
+    /** False during the brief pause right after a tool/weapon swap. */
+    public boolean isToolReady() {
+        return this.tickCount >= this.toolReadyTick;
     }
 
     /**

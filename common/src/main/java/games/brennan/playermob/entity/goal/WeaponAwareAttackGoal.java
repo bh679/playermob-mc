@@ -90,6 +90,8 @@ public final class WeaponAwareAttackGoal extends Goal {
 
     @Override
     public void start() {
+        // Draw the best weapon first; a real swap adds a short hesitation (see tick()).
+        mob.equipBestWeapon();
         active = pickGoalForMainhand();
         active.start();
     }
@@ -104,6 +106,14 @@ public final class WeaponAwareAttackGoal extends Goal {
 
     @Override
     public void tick() {
+        // Hold (just face the target) during the brief post-swap pause before attacking.
+        if (!mob.isToolReady()) {
+            LivingEntity target = mob.getTarget();
+            if (target != null) {
+                mob.getLookControl().setLookAt(target, 30.0F, 30.0F);
+            }
+            return;
+        }
         if (active != null) {
             active.tick();
         }
