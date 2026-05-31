@@ -2,6 +2,7 @@ package games.brennan.playermob.fabric.client;
 
 import games.brennan.playermob.PlayerMobRegistry;
 import games.brennan.playermob.client.PlayerMobRenderer;
+import games.brennan.playermob.client.PlayerMobScreen;
 import games.brennan.playermob.client.VersionHudRenderer;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.api.EnvType;
@@ -9,6 +10,7 @@ import net.fabricmc.api.Environment;
 import net.fabricmc.fabric.api.client.rendering.v1.EntityRendererRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
+import net.minecraft.client.gui.screens.MenuScreens;
 
 /**
  * Fabric client-side entrypoint. Registers {@link PlayerMobRenderer} against
@@ -26,6 +28,10 @@ public final class PlayerMobFabricClient implements ClientModInitializer {
         EntityRendererRegistry.register(
             PlayerMobRegistry.PLAYER_MOB,
             PlayerMobRenderer::new);
+
+        // Client screen for the Creative inventory menu. onInitializeClient runs
+        // after onInitialize, so PLAYER_MOB_MENU is already registered.
+        MenuScreens.register(PlayerMobRegistry.PLAYER_MOB_MENU, PlayerMobScreen::new);
 
         // Dev-only build-info HUD — hidden on the `main`/release branch.
         // In-world:

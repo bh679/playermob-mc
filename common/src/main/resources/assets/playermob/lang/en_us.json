@@ -1,4 +1,5 @@
 {
   "entity.playermob.player_mob": "Player",
-  "item.playermob.player_mob_spawn_egg": "Player Spawn Egg"
+  "item.playermob.player_mob_spawn_egg": "Player Spawn Egg",
+  "container.playermob.player_mob": "Player"
 }

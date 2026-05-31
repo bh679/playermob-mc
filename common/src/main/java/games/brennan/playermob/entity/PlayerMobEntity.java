@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity;
 
+import games.brennan.playermob.PlayerMobRegistry;
 import games.brennan.playermob.entity.goal.CollectFloorItemsGoal;
 import games.brennan.playermob.entity.goal.EatFoodGoal;
 import games.brennan.playermob.entity.goal.HarvestCropsGoal;
@@ -22,10 +23,13 @@ import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.DifficultyInstance;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.level.block.BarrelBlock;
@@ -52,6 +56,7 @@ import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.monster.RangedAttackMob;
 import net.minecraft.world.entity.npc.InventoryCarrier;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.projectile.AbstractArrow;
 import net.minecraft.world.entity.projectile.ProjectileUtil;
 import net.minecraft.world.item.CrossbowItem;
@@ -99,7 +104,9 @@ import java.util.UUID;
  * so the mob has a backpack. {@link RaidContainersGoal} +
  * {@link RaidArmorStandsGoal} drive scan/path/swap behaviour. A
  * "recently explored" cooldown map keeps the mob from looping the same
- * chest. On death, {@link #dropCustomDeathLoot} dumps the inventory.</p>
+ * chest. On death, the mob drops everything like a player would — the
+ * backpack via {@link #dropCustomDeathLoot} and all equipped gear via the
+ * guaranteed {@link #getEquipmentDropChance} override.</p>
  *
  * <p><b>Spawning</b> — spawn egg + {@code /summon playermob:player_mob}
  * only. No natural spawns, no raid hooks.</p>
@@ -302,6 +309,23 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         return super.finalizeSpawn(world, difficulty, reason, data);
     }
 
+    // ---- Despawn / persistence -------------------------------------------
+
+    /**
+     * PlayerMobs never despawn naturally. Returning {@code true} makes
+     * {@code Mob.checkDespawn()} treat every PlayerMob as persistent — skipping
+     * both the &gt;128-block instant despawn and the 32–128-block idle random
+     * despawn, as if the mob were name-tagged — without writing any NBT, so it
+     * applies to summoned, spawn-egg, and already-saved mobs alike.
+     *
+     * <p>Does not affect the Peaceful-difficulty check: like all monsters,
+     * PlayerMobs are still removed when difficulty is set to Peaceful.</p>
+     */
+    @Override
+    public boolean requiresCustomPersistence() {
+        return true;
+    }
+
     // ---- Stance accessors -------------------------------------------------
 
     public Stance getStance() {
@@ -362,6 +386,33 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     @Override
     public SimpleContainer getInventory() {
         return this.inventory;
+    }
+
+    // ---- Interaction (Creative inventory access) -------------------------
+
+    /**
+     * Right-click handler. In Creative, an empty-handed main-hand right-click
+     * opens the mob's inventory screen (equipment + backpack) — the mob
+     * equivalent of pressing E. Survival players, or anyone holding an item,
+     * fall through to vanilla behaviour so normal interactions are unchanged.
+     *
+     * <p>The menu must be opened server-side (the backpack isn't synced to
+     * clients otherwise); the loader-specific open call lives behind
+     * {@link PlayerMobRegistry#MENU_OPENER}. {@code sidedSuccess} swings the
+     * player's arm on the client and consumes the interaction on the server.</p>
+     */
+    @Override
+    protected InteractionResult mobInteract(Player player, InteractionHand hand) {
+        if (hand == InteractionHand.MAIN_HAND
+                && player.getAbilities().instabuild
+                && player.getItemInHand(hand).isEmpty()) {
+            if (player instanceof ServerPlayer serverPlayer
+                    && PlayerMobRegistry.MENU_OPENER != null) {
+                PlayerMobRegistry.MENU_OPENER.open(serverPlayer, this);
+            }
+            return InteractionResult.sidedSuccess(this.level().isClientSide);
+        }
+        return super.mobInteract(player, hand);
     }
 
     // ---- Equipment swap helpers (called from raid goals) -----------------
@@ -975,8 +1026,19 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     // ---- Death drops -----------------------------------------------------
 
     /**
-     * On death, drop everything in the inventory in addition to vanilla
-     * equipment drops. Mirrors {@code Pillager.dropCustomDeathLoot}.
+     * Drop chance that flags a slot as a guaranteed, full-durability death
+     * drop — the same {@code 2.0F} sentinel vanilla uses in
+     * {@code Mob.setGuaranteedDrop}. Any value {@code > 1.0F} makes vanilla's
+     * {@code Mob.dropCustomDeathLoot} treat the slot as a guaranteed drop.
+     */
+    private static final float GUARANTEED_EQUIPMENT_DROP_CHANCE = 2.0F;
+
+    /**
+     * On death, drop the entire backpack inventory. Combined with the
+     * guaranteed {@link #getEquipmentDropChance} override below — which makes
+     * {@code super.dropCustomDeathLoot} drop every equipped slot too — the mob
+     * drops everything it was carrying, just like a player. Mirrors
+     * {@code Pillager.dropCustomDeathLoot} for the backpack half.
      */
     @Override
     protected void dropCustomDeathLoot(ServerLevel level, DamageSource source, boolean recentlyHit) {
@@ -988,6 +1050,29 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
             }
         }
         this.inventory.clearContent();
+    }
+
+    /**
+     * Make every equipment slot — held weapon, off-hand, and all four armor
+     * pieces — drop on death, at full durability, regardless of what killed
+     * the mob. A real player drops all their gear on death; PlayerMob now
+     * matches.
+     *
+     * <p>Returning a guaranteed value ({@code > 1.0F}) makes vanilla's
+     * {@code Mob.dropCustomDeathLoot} bypass the "recently hit by a player"
+     * gate, always pass the random roll, and skip the durability-damage step.
+     * Curse of Vanishing items are still destroyed (vanilla's
+     * {@code PREVENT_EQUIPMENT_DROP} check upstream) — also exactly like a
+     * player.</p>
+     *
+     * <p>Surgical by design: only the drop-chance <em>method</em> is
+     * overridden. The backing {@code handDropChances}/{@code armorDropChances}
+     * fields are left at their vanilla defaults, so the XP-reward and
+     * item-pickup logic that reads those fields directly is unaffected.</p>
+     */
+    @Override
+    protected float getEquipmentDropChance(EquipmentSlot slot) {
+        return GUARANTEED_EQUIPMENT_DROP_CHANCE;
     }
 
     /**
