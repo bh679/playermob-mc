@@ -19,6 +19,11 @@ import net.minecraft.world.entity.animal.Animal;
  * <em>below</em> the hostile-targeting goal (priority 2), so defending against a
  * zombie always wins over hunting a cow.</p>
  *
+ * <p>It also stands down via {@link PlayerMobEntity#hasImmediateFoodSource()}
+ * whenever there's meat on the ground to collect or food in the pack to eat —
+ * otherwise the mob would chain from kill to kill (combat preempting the
+ * priority-3 collect/eat goals) and never actually feed itself off the drops.</p>
+ *
  * <p>Unlike {@link HarvestCropsGoal}, hunting is <b>not</b> gated on the
  * {@code mobGriefing} gamerule — killing a mob isn't a block change, and vanilla
  * hostiles attack regardless of that rule.</p>
@@ -37,7 +42,13 @@ public final class HuntForFoodGoal extends NearestAttackableTargetGoal<Animal> {
 
     @Override
     public boolean canUse() {
-        return playerMob.wantsFood() && super.canUse();
+        if (!playerMob.wantsFood()) return false;
+        // Stand down if there's food to collect or eat right now: chasing the
+        // next animal (combat, priority 2) would preempt the priority-3 collect
+        // and eat goals, so the kill's meat would rot on the ground and the mob
+        // would never actually feed itself. Let collect → eat run, then resume.
+        if (playerMob.hasImmediateFoodSource()) return false;
+        return super.canUse();
     }
 
     @Override

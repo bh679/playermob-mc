@@ -29,8 +29,13 @@ import java.util.EnumSet;
  */
 public final class EatFoodGoal extends Goal {
 
-    /** Eat when HP drops below this fraction of max HP. */
-    private static final float HUNGER_THRESHOLD = 0.5f;
+    /**
+     * Eat when HP drops below this fraction of max HP. Also the threshold below
+     * which {@link PlayerMobEntity#hasImmediateFoodSource} treats banked food as
+     * "should eat this now" — so the hunt goal stands down and lets the mob eat
+     * instead of chasing another animal. Public so the entity can share it.
+     */
+    public static final float HUNGER_THRESHOLD = 0.75f;
 
     /** Total ticks from "bite starts" to "heal applied". Matches vanilla 1.6s eat duration. */
     private static final int EAT_TICKS = 32;

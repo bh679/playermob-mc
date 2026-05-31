@@ -63,6 +63,7 @@ import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.ServerLevelAccessor;
+import net.minecraft.world.phys.AABB;
 
 import java.util.HashMap;
 import java.util.Iterator;
@@ -793,6 +794,33 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         return total;
     }
 
+    /** Radius (blocks) the mob looks for already-dropped food before it hunts more. */
+    private static final double FOOD_SCAN_RADIUS = 10.0;
+
+    /**
+     * True when the mob already has an immediate way to deal with its hunger and
+     * shouldn't go hunt <em>more</em> food: either edible items are lying on the
+     * ground nearby (the {@link CollectFloorItemsGoal} will fetch them) or it's
+     * carrying food while hurt enough that {@link EatFoodGoal} will eat it.
+     *
+     * <p>{@link HuntForFoodGoal} consults this so that after a kill the mob
+     * stands down and lets the collect → eat loop run, instead of immediately
+     * chaining to the next animal — which, being combat at priority 2, would
+     * preempt the priority-3 collect/eat goals and leave the meat on the ground
+     * (the mob would stay hungry forever). The ground scan deliberately ignores
+     * the brief post-drop pickup delay so a just-killed animal's meat counts
+     * right away and hunting doesn't re-fire in that window.</p>
+     */
+    public boolean hasImmediateFoodSource() {
+        if (findBestFoodSlot() >= 0
+                && getHealth() < getMaxHealth() * EatFoodGoal.HUNGER_THRESHOLD) {
+            return true;
+        }
+        AABB box = getBoundingBox().inflate(FOOD_SCAN_RADIUS);
+        return !level().getEntitiesOfClass(ItemEntity.class, box,
+            e -> e.isAlive() && ForagePolicy.isEdible(e.getItem())).isEmpty();
+    }
+
     /**
      * Spawn server-broadcast item-puff particles near the mob's mouth —
      * the visual feedback for "this mob is eating right now". Client-side
@@ -806,7 +834,13 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
      */
     public void spawnEatingParticles(ItemStack food) {
         if (!(level() instanceof ServerLevel serverLevel)) return;
-        ItemParticleOption particle = new ItemParticleOption(ParticleTypes.ITEM, food);
+        // Snapshot with copy(): ItemParticleOption keeps a live reference and the
+        // packet encodes later on the Netty IO thread. EatFoodGoal shrinks the
+        // offhand stack to empty on the final eat tick — the very tick the last
+        // particle fires — and an empty ItemStack fails to encode ("Empty
+        // ItemStack not allowed"), which can disconnect an integrated-server
+        // client. Copying decouples the particle from that mutation.
+        ItemParticleOption particle = new ItemParticleOption(ParticleTypes.ITEM, food.copy());
         serverLevel.sendParticles(
             particle,
             getX(),
