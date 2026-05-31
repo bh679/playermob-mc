@@ -9,6 +9,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BarrelBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.ChestBlockEntity;
+import net.minecraft.world.level.block.entity.ShulkerBoxBlockEntity;
 
 import java.util.EnumSet;
 
@@ -204,7 +205,7 @@ public final class RaidContainersGoal extends Goal {
 
         if (nextSwapAt == -1) {
             while (currentSlot < container.getContainerSize()
-                    && !mob.wouldReplaceFromContainer(container, currentSlot)) {
+                    && !mob.wouldTakeFromContainer(container, currentSlot)) {
                 currentSlot++;
             }
             if (currentSlot >= container.getContainerSize()) {
@@ -220,7 +221,12 @@ public final class RaidContainersGoal extends Goal {
         }
 
         if (mob.tickCount >= nextSwapAt) {
-            mob.tryReplaceFromContainer(container, currentSlot);
+            // tryTake handles both equipment swap and food collect-into-inventory.
+            // A single tryCollectFood call already moves as much as the mob's
+            // inventory can hold (addToContainer fills mergeable + empty slots
+            // in one pass), so always advancing is correct — re-examining the
+            // same slot would just return false on the next wouldTake.
+            mob.tryTakeFromContainer(container, currentSlot);
             currentSlot++;
             nextSwapAt = -1; // schedule next interesting slot
         }
@@ -267,9 +273,11 @@ public final class RaidContainersGoal extends Goal {
 
     private static boolean isLootableContainer(BlockEntity be) {
         // ChestBlockEntity covers regular + trapped chests (TrappedChestBlockEntity extends ChestBlockEntity).
-        // Whitelisting only chest + barrel keeps the mob from raiding hoppers,
-        // dispensers, droppers, brewing stands, shulker boxes — items that
-        // usually have specific purposes and shouldn't be touched.
-        return be instanceof ChestBlockEntity || be instanceof BarrelBlockEntity;
+        // ShulkerBoxBlockEntity covers all 16 dyed variants (they all extend the base class).
+        // Hoppers / dispensers / droppers / brewing stands are intentionally
+        // excluded so the mob can't break redstone or brewing setups.
+        return be instanceof ChestBlockEntity
+            || be instanceof BarrelBlockEntity
+            || be instanceof ShulkerBoxBlockEntity;
     }
 }
