@@ -10,6 +10,9 @@ import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
@@ -213,6 +216,51 @@ class CraftingLadderTest {
         assertFalse(CraftingLadder.hasToolObjective(new SimpleContainer(8),
                 Set.of(Items.IRON_SWORD, Items.DIAMOND_PICKAXE, Items.NETHERITE_AXE)),
             "Raided iron/diamond/netherite tools also satisfy the kit");
+    }
+
+    @Test
+    void progressionReachesFullStoneKitViaWoodenPickaxe() {
+        // Simulate the idle gather→craft loop at the ladder level, table always in
+        // reach. Models mining: keep a little wood available; once the mob owns a
+        // pickaxe — which is exactly what unlocks stone mining in-game — start
+        // feeding cobblestone too. Proves the ladder bridges wood → wooden pickaxe
+        // → stone tools and then terminates.
+        SimpleContainer bp = new SimpleContainer(16);
+        Set<Item> owned = new HashSet<>();
+        List<String> sequence = new ArrayList<>();
+
+        for (int iter = 0; iter < 200; iter++) {
+            if (countOf(bp, Items.OAK_LOG) < 2) {
+                EquipmentEvaluator.addToContainer(bp, new ItemStack(Items.OAK_LOG, 4));
+            }
+            boolean ownsPickaxe = owned.contains(Items.WOODEN_PICKAXE)
+                    || owned.contains(Items.STONE_PICKAXE);
+            if (ownsPickaxe && countOf(bp, Items.COBBLESTONE) < 3) {
+                EquipmentEvaluator.addToContainer(bp, new ItemStack(Items.COBBLESTONE, 4));
+            }
+
+            Optional<CraftAction> next = CraftingLadder.nextCraft(bp, owned, true);
+            if (next.isEmpty()) break;
+            CraftAction a = next.get();
+            sequence.add(a.name());
+            CraftingLadder.apply(bp, a);
+            if (a.needsTable()) {
+                owned.add(a.output().getItem()); // simulate equipping the crafted tool
+            } else {
+                EquipmentEvaluator.addToContainer(bp, a.output());
+            }
+        }
+
+        assertTrue(sequence.contains("wooden_pickaxe"),
+            "must craft a wooden pickaxe — the bridge that unlocks stone mining");
+        assertTrue(sequence.indexOf("wooden_pickaxe") < sequence.indexOf("stone_pickaxe"),
+            "wooden pickaxe is crafted before the stone pickaxe");
+        assertTrue(owned.contains(Items.STONE_SWORD)
+                && owned.contains(Items.STONE_PICKAXE)
+                && owned.contains(Items.STONE_AXE),
+            "ends up with the full stone-tier kit");
+        assertFalse(CraftingLadder.hasToolObjective(bp, owned),
+            "loop terminates once the stone kit is complete (no busywork)");
     }
 
     private static int countOf(SimpleContainer c, Item item) {
