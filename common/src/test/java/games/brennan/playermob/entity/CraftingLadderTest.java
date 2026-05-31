@@ -15,14 +15,19 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Pure-logic tests for the curated {@link CraftingLadder}.
  *
  * <p>Like {@link EquipmentEvaluatorTest}, touching vanilla {@link ItemStack} /
- * {@link SimpleContainer} / item tags requires {@link Bootstrap#bootStrap()}
- * first — otherwise the first registry reference throws "Not bootstrapped".</p>
+ * {@link SimpleContainer} requires {@link Bootstrap#bootStrap()} first — else the
+ * first registry reference throws "Not bootstrapped". The ladder matches inputs
+ * by explicit item set (not tags), so it needs no datapack/tag reload.</p>
+ *
+ * <p>The {@code tableInReach} argument models whether a crafting table is
+ * available: tools (3×3 recipes) are only offered when it's {@code true}.</p>
  */
 class CraftingLadderTest {
 
@@ -44,86 +49,112 @@ class CraftingLadderTest {
         return c;
     }
 
-    private static CraftAction craft(SimpleContainer bp, Set<Item> owned) {
-        Optional<CraftAction> action = CraftingLadder.nextCraft(bp, owned);
+    private static CraftAction craft(SimpleContainer bp, Set<Item> owned, boolean tableInReach) {
+        Optional<CraftAction> action = CraftingLadder.nextCraft(bp, owned, tableInReach);
         assertTrue(action.isPresent(), "expected a craft action");
         return action.get();
     }
 
     @Test
     void emptyBackpackCraftsNothing() {
-        assertTrue(CraftingLadder.nextCraft(new SimpleContainer(8), Set.of()).isEmpty(),
+        assertTrue(CraftingLadder.nextCraft(new SimpleContainer(8), Set.of(), true).isEmpty(),
             "Nothing to work with → no craft");
     }
 
     @Test
     void singleLogCraftsPlanks() {
-        CraftAction a = craft(backpack(Items.OAK_LOG, 1), Set.of());
+        CraftAction a = craft(backpack(Items.OAK_LOG, 1), Set.of(), false);
         assertEquals("planks", a.name());
         assertEquals(Items.OAK_PLANKS, a.output().getItem());
         assertEquals(4, a.output().getCount(), "1 log → 4 planks");
+        assertFalse(a.needsTable(), "planks craft in hand");
     }
 
     @Test
     void planksWithoutSticksCraftsSticks() {
-        // 4 planks, 0 sticks → step 5 (sticks reserve) fires before any tool.
-        CraftAction a = craft(backpack(Items.OAK_PLANKS, 4), Set.of());
+        // 4 planks, 0 sticks → no tool is craftable (needs sticks); make sticks first.
+        CraftAction a = craft(backpack(Items.OAK_PLANKS, 4), Set.of(), true);
         assertEquals("sticks", a.name());
         assertEquals(Items.STICK, a.output().getItem());
         assertEquals(4, a.output().getCount());
     }
 
     @Test
-    void planksAndStickCraftWoodenSword() {
-        // Sword is step 1 — preferred over the pickaxe when the mob owns neither.
-        CraftAction a = craft(backpack(Items.OAK_PLANKS, 2, Items.STICK, 1), Set.of());
+    void planksAndStickCraftWoodenSwordAtTable() {
+        CraftAction a = craft(backpack(Items.OAK_PLANKS, 2, Items.STICK, 1), Set.of(), true);
         assertEquals("wooden_sword", a.name());
         assertEquals(Items.WOODEN_SWORD, a.output().getItem());
+        assertTrue(a.needsTable(), "a sword needs a crafting table");
+    }
+
+    @Test
+    void toolWithheldWithoutTableTriggersTableCraft() {
+        // Same materials, but no table in reach → the mob must craft a table first.
+        CraftAction a = craft(backpack(Items.OAK_PLANKS, 4, Items.STICK, 1), Set.of(), false);
+        assertEquals("crafting_table", a.name());
+        assertEquals(Items.CRAFTING_TABLE, a.output().getItem());
+        assertFalse(a.needsTable(), "a table is crafted in hand (2x2)");
+    }
+
+    @Test
+    void doesNotCraftSecondTableWhenAlreadyHoldingOne() {
+        // Holds a table already (to place) → don't craft another; fall through to sticks.
+        CraftAction a = craft(backpack(
+                Items.CRAFTING_TABLE, 1, Items.OAK_PLANKS, 4, Items.STICK, 1),
+            Set.of(), false);
+        assertNotEquals("crafting_table", a.name(), "shouldn't craft a 2nd table while carrying one");
+        assertEquals("sticks", a.name());
     }
 
     @Test
     void ownedSwordSkipsToPickaxe() {
-        // Already holding a sword (equipped, not in backpack) → step 1 guard skips,
-        // and with 3 planks + 2 sticks the wooden pickaxe (step 3) is next.
         CraftAction a = craft(backpack(Items.OAK_PLANKS, 3, Items.STICK, 2),
-            Set.of(Items.WOODEN_SWORD));
+            Set.of(Items.WOODEN_SWORD), true);
         assertEquals("wooden_pickaxe", a.name());
         assertEquals(Items.WOODEN_PICKAXE, a.output().getItem());
     }
 
     @Test
     void backpackSwordAlsoGuardsStepOne() {
-        // Ownership is checked against the backpack too, not just equipped tools.
         CraftAction a = craft(backpack(
                 Items.WOODEN_SWORD, 1, Items.OAK_PLANKS, 3, Items.STICK, 2),
-            Set.of());
+            Set.of(), true);
         assertEquals("wooden_pickaxe", a.name(),
-            "A sword sitting in the backpack should still skip step 1");
+            "A sword sitting in the backpack should still skip the sword step");
     }
 
     @Test
-    void cobbleAndStickCraftStoneSword() {
-        // No planks, so step 1 (wooden sword) can't fire; cobble + stick → stone sword.
-        CraftAction a = craft(backpack(Items.COBBLESTONE, 2, Items.STICK, 1), Set.of());
+    void cobbleAndStickCraftStoneSwordAtTable() {
+        CraftAction a = craft(backpack(Items.COBBLESTONE, 2, Items.STICK, 1), Set.of(), true);
         assertEquals("stone_sword", a.name());
         assertEquals(Items.STONE_SWORD, a.output().getItem());
     }
 
     @Test
+    void craftsAxeOnceSwordsAndPicksOwned() {
+        // Owns both swords + both picks → next tool is the axe.
+        CraftAction a = craft(backpack(Items.OAK_PLANKS, 3, Items.STICK, 2),
+            Set.of(Items.WOODEN_SWORD, Items.STONE_SWORD,
+                   Items.WOODEN_PICKAXE, Items.STONE_PICKAXE),
+            true);
+        assertEquals("wooden_axe", a.name());
+        assertEquals(Items.WOODEN_AXE, a.output().getItem());
+    }
+
+    @Test
     void tagAgnosticBirchFeedsTheLadder() {
-        // Birch (not oak) logs/planks still match via ItemTags.
-        CraftAction logToPlanks = craft(backpack(Items.BIRCH_LOG, 1), Set.of());
+        CraftAction logToPlanks = craft(backpack(Items.BIRCH_LOG, 1), Set.of(), false);
         assertEquals("planks", logToPlanks.name());
 
-        CraftAction birchSword = craft(backpack(Items.BIRCH_PLANKS, 2, Items.STICK, 1), Set.of());
+        CraftAction birchSword = craft(backpack(Items.BIRCH_PLANKS, 2, Items.STICK, 1), Set.of(), true);
         assertEquals("wooden_sword", birchSword.name());
     }
 
     @Test
     void applyConsumesExactInputs() {
-        // 4 planks + 4 sticks → wooden sword consumes 2 planks + 1 stick, leaving 2 + 3.
+        // 4 planks + 4 sticks at a table → wooden sword consumes 2 planks + 1 stick.
         SimpleContainer bp = backpack(Items.OAK_PLANKS, 4, Items.STICK, 4);
-        CraftAction a = craft(bp, Set.of());
+        CraftAction a = craft(bp, Set.of(), true);
         assertEquals("wooden_sword", a.name());
 
         CraftingLadder.apply(bp, a);
@@ -136,13 +167,27 @@ class CraftingLadderTest {
 
     @Test
     void fullyGearedCraftsNothing() {
-        // Owns the full wood+stone kit and holds reserve planks/sticks → idle.
         SimpleContainer bp = backpack(Items.OAK_PLANKS, 5, Items.STICK, 2);
         Set<Item> owned = Set.of(
             Items.WOODEN_SWORD, Items.STONE_SWORD,
-            Items.WOODEN_PICKAXE, Items.STONE_PICKAXE);
-        assertFalse(CraftingLadder.nextCraft(bp, owned).isPresent(),
+            Items.WOODEN_PICKAXE, Items.STONE_PICKAXE,
+            Items.WOODEN_AXE, Items.STONE_AXE);
+        assertFalse(CraftingLadder.nextCraft(bp, owned, true).isPresent(),
             "Fully geared with reserves → ladder is done");
+    }
+
+    @Test
+    void wantsTableReflectsToolAvailability() {
+        assertTrue(CraftingLadder.wantsTable(backpack(Items.OAK_PLANKS, 2, Items.STICK, 1), Set.of()),
+            "Materials for a sword + no sword owned → wants a table");
+        assertFalse(CraftingLadder.wantsTable(new SimpleContainer(8), Set.of()),
+            "No materials → doesn't want a table");
+        assertFalse(CraftingLadder.wantsTable(
+                backpack(Items.OAK_PLANKS, 5, Items.STICK, 2),
+                Set.of(Items.WOODEN_SWORD, Items.STONE_SWORD,
+                       Items.WOODEN_PICKAXE, Items.STONE_PICKAXE,
+                       Items.WOODEN_AXE, Items.STONE_AXE)),
+            "Fully geared → doesn't want a table");
     }
 
     private static int countOf(SimpleContainer c, Item item) {

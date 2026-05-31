@@ -20,20 +20,29 @@ import java.util.function.Predicate;
  * <i>gather → craft → equip → fight better</i> story instead of letting the mob
  * craft arbitrary junk.</p>
  *
+ * <p><b>Grid size matters</b>, just like for a player: 2×2 recipes craft "in
+ * hand" with no bench, but 3×3 recipes (the tools) require a <b>crafting
+ * table</b>. {@link #nextCraft} takes a {@code tableInReach} flag; tool steps are
+ * only offered when a table is available, and the mob makes/places one itself
+ * (see {@code CraftItemsGoal}).</p>
+ *
  * <p><b>The ladder</b> (evaluated top-to-bottom, first satisfiable step wins,
  * re-evaluated after every craft):</p>
  * <ol>
- *   <li>wooden sword   ← 2 planks + 1 stick      <i>(skip if the mob owns any sword)</i></li>
- *   <li>stone sword    ← 2 cobblestone + 1 stick <i>(skip if it owns a stone-tier-or-better sword)</i></li>
- *   <li>wooden pickaxe ← 3 planks + 2 sticks     <i>(skip if it owns any pickaxe)</i></li>
- *   <li>stone pickaxe  ← 3 cobblestone + 2 sticks<i>(skip if it owns a stone-tier-or-better pickaxe)</i></li>
- *   <li>4 sticks       ← 2 planks                <i>(only if sticks &lt; 2 and planks ≥ 2)</i></li>
- *   <li>4 planks       ← 1 log                   <i>(only if planks &lt; 5 and it has a log)</i></li>
+ *   <li>wooden sword   ← 2 planks + 1 stick      <i>(table; skip if it owns any sword)</i></li>
+ *   <li>stone sword    ← 2 cobblestone + 1 stick <i>(table; skip if it owns a stone-tier-or-better sword)</i></li>
+ *   <li>wooden pickaxe ← 3 planks + 2 sticks     <i>(table; skip if it owns any pickaxe)</i></li>
+ *   <li>stone pickaxe  ← 3 cobblestone + 2 sticks<i>(table; skip if it owns a stone-tier-or-better pickaxe)</i></li>
+ *   <li>wooden axe     ← 3 planks + 2 sticks     <i>(table; skip if it owns any axe)</i></li>
+ *   <li>stone axe      ← 3 cobblestone + 2 sticks<i>(table; skip if it owns a stone-tier-or-better axe)</i></li>
+ *   <li>crafting table ← 4 planks                <i>(in hand; only when a tool is wanted, no table is in reach, and it holds no table)</i></li>
+ *   <li>4 sticks       ← 2 planks                <i>(in hand; only if sticks &lt; 2 and planks ≥ 2)</i></li>
+ *   <li>4 planks       ← 1 log                   <i>(in hand; only if planks &lt; 5 and it has a log)</i></li>
  * </ol>
  *
  * <p>The ownership guards plus the stick/plank thresholds make the ladder
- * <b>terminate</b>: the mob ends up holding a wooden+stone sword and pickaxe
- * with a small plank/stick reserve, after which {@link #nextCraft} returns
+ * <b>terminate</b>: the mob ends up holding a wooden+stone sword, pickaxe, and
+ * axe with a small plank/stick reserve, after which {@link #nextCraft} returns
  * empty and crafting goes idle (mining continues). Coal and raw iron are
  * gathered as loot but are not craftable here — there is no smelting in v1.</p>
  *
@@ -88,98 +97,93 @@ public final class CraftingLadder {
 
     // ---- Tool ownership sets ---------------------------------------------
 
-    /** Every sword tier — guards step 1 (don't craft a wooden sword if any sword is owned). */
     private static final Set<Item> ANY_SWORD = Set.of(
         Items.WOODEN_SWORD, Items.STONE_SWORD, Items.IRON_SWORD,
         Items.GOLDEN_SWORD, Items.DIAMOND_SWORD, Items.NETHERITE_SWORD);
-
-    /** Stone-tier-or-better swords — guards step 2 (don't downgrade to a stone sword). */
     private static final Set<Item> STONE_PLUS_SWORD = Set.of(
         Items.STONE_SWORD, Items.IRON_SWORD, Items.DIAMOND_SWORD, Items.NETHERITE_SWORD);
 
     private static final Set<Item> ANY_PICKAXE = Set.of(
         Items.WOODEN_PICKAXE, Items.STONE_PICKAXE, Items.IRON_PICKAXE,
         Items.GOLDEN_PICKAXE, Items.DIAMOND_PICKAXE, Items.NETHERITE_PICKAXE);
-
     private static final Set<Item> STONE_PLUS_PICKAXE = Set.of(
         Items.STONE_PICKAXE, Items.IRON_PICKAXE, Items.DIAMOND_PICKAXE, Items.NETHERITE_PICKAXE);
+
+    private static final Set<Item> ANY_AXE = Set.of(
+        Items.WOODEN_AXE, Items.STONE_AXE, Items.IRON_AXE,
+        Items.GOLDEN_AXE, Items.DIAMOND_AXE, Items.NETHERITE_AXE);
+    private static final Set<Item> STONE_PLUS_AXE = Set.of(
+        Items.STONE_AXE, Items.IRON_AXE, Items.DIAMOND_AXE, Items.NETHERITE_AXE);
 
     // ---- Public API -------------------------------------------------------
 
     /**
      * A single craft the ladder wants to perform: the {@code costs} to remove
-     * from the backpack and the {@code output} to produce. {@code name} is a
-     * stable label for logging/tests.
+     * from the backpack and the {@code output} to produce. {@code needsTable} is
+     * true for the 3×3 tool recipes (the caller must be at a crafting table) and
+     * also flags which outputs are gear to equip vs. materials to stash.
      */
-    public record CraftAction(String name, List<Cost> costs, ItemStack output) {}
+    public record CraftAction(String name, List<Cost> costs, ItemStack output, boolean needsTable) {}
 
     /** One ingredient requirement: take {@code count} items matching {@code match}. */
     public record Cost(Predicate<ItemStack> match, int count) {}
 
     /**
-     * Decide the next craft for a mob with the given {@code backpack} contents
-     * and already-owned tools ({@code ownedTools} — typically the mob's
-     * currently-equipped items, which can't be read from the backpack).
+     * Decide the next craft for a mob with the given {@code backpack} contents,
+     * already-owned tools ({@code ownedTools} — typically equipped items), and
+     * whether a crafting table is currently within reach ({@code tableInReach}).
      *
      * <p>Pure: does not mutate {@code backpack}. Call {@link #apply} to perform
      * the returned action.</p>
-     *
-     * @return the next {@link CraftAction}, or empty if nothing should be crafted.
      */
-    public static Optional<CraftAction> nextCraft(Container backpack, Set<Item> ownedTools) {
-        int logs = countMatching(backpack, IS_LOG);
-        int planks = countMatching(backpack, IS_PLANKS);
-        int sticks = countMatching(backpack, IS_STICK);
-        int cobble = countMatching(backpack, IS_COBBLE);
+    public static Optional<CraftAction> nextCraft(Container backpack, Set<Item> ownedTools, boolean tableInReach) {
+        Census c = census(backpack, ownedTools);
 
-        boolean ownsSword = ownsAny(backpack, ownedTools, ANY_SWORD);
-        boolean ownsStoneSword = ownsAny(backpack, ownedTools, STONE_PLUS_SWORD);
-        boolean ownsPickaxe = ownsAny(backpack, ownedTools, ANY_PICKAXE);
-        boolean ownsStonePickaxe = ownsAny(backpack, ownedTools, STONE_PLUS_PICKAXE);
+        // Tool recipes (3×3 — require a crafting table).
+        if (tableInReach) {
+            if (!c.ownsSword && c.planks >= 2 && c.sticks >= 1)
+                return tool("wooden_sword", Items.WOODEN_SWORD, cost(IS_PLANKS, 2), cost(IS_STICK, 1));
+            if (!c.ownsStoneSword && c.cobble >= 2 && c.sticks >= 1)
+                return tool("stone_sword", Items.STONE_SWORD, cost(IS_COBBLE, 2), cost(IS_STICK, 1));
+            if (!c.ownsPickaxe && c.planks >= 3 && c.sticks >= 2)
+                return tool("wooden_pickaxe", Items.WOODEN_PICKAXE, cost(IS_PLANKS, 3), cost(IS_STICK, 2));
+            if (!c.ownsStonePickaxe && c.cobble >= 3 && c.sticks >= 2)
+                return tool("stone_pickaxe", Items.STONE_PICKAXE, cost(IS_COBBLE, 3), cost(IS_STICK, 2));
+            if (!c.ownsAxe && c.planks >= 3 && c.sticks >= 2)
+                return tool("wooden_axe", Items.WOODEN_AXE, cost(IS_PLANKS, 3), cost(IS_STICK, 2));
+            if (!c.ownsStoneAxe && c.cobble >= 3 && c.sticks >= 2)
+                return tool("stone_axe", Items.STONE_AXE, cost(IS_COBBLE, 3), cost(IS_STICK, 2));
+        }
 
-        // Step 1 — wooden sword.
-        if (!ownsSword && planks >= 2 && sticks >= 1) {
-            return Optional.of(new CraftAction("wooden_sword",
-                List.of(new Cost(IS_PLANKS, 2), new Cost(IS_STICK, 1)),
-                new ItemStack(Items.WOODEN_SWORD)));
+        // Crafting table (2×2, in hand) — make one when a tool is wanted but no
+        // table is reachable and the mob isn't already carrying one to place.
+        if (!tableInReach && !c.holdsTable && c.planks >= 4 && wantsAnyTool(c)) {
+            return inHand("crafting_table", new ItemStack(Items.CRAFTING_TABLE), cost(IS_PLANKS, 4));
         }
-        // Step 2 — stone sword.
-        if (!ownsStoneSword && cobble >= 2 && sticks >= 1) {
-            return Optional.of(new CraftAction("stone_sword",
-                List.of(new Cost(IS_COBBLE, 2), new Cost(IS_STICK, 1)),
-                new ItemStack(Items.STONE_SWORD)));
+        // Sticks (keep a minimum reserve).
+        if (c.sticks < 2 && c.planks >= 2) {
+            return inHand("sticks", new ItemStack(Items.STICK, 4), cost(IS_PLANKS, 2));
         }
-        // Step 3 — wooden pickaxe.
-        if (!ownsPickaxe && planks >= 3 && sticks >= 2) {
-            return Optional.of(new CraftAction("wooden_pickaxe",
-                List.of(new Cost(IS_PLANKS, 3), new Cost(IS_STICK, 2)),
-                new ItemStack(Items.WOODEN_PICKAXE)));
-        }
-        // Step 4 — stone pickaxe.
-        if (!ownsStonePickaxe && cobble >= 3 && sticks >= 2) {
-            return Optional.of(new CraftAction("stone_pickaxe",
-                List.of(new Cost(IS_COBBLE, 3), new Cost(IS_STICK, 2)),
-                new ItemStack(Items.STONE_PICKAXE)));
-        }
-        // Step 5 — sticks (keep a minimum reserve).
-        if (sticks < 2 && planks >= 2) {
-            return Optional.of(new CraftAction("sticks",
-                List.of(new Cost(IS_PLANKS, 2)),
-                new ItemStack(Items.STICK, 4)));
-        }
-        // Step 6 — planks (top up toward the reserve from logs).
-        if (planks < 5 && logs >= 1) {
-            return Optional.of(new CraftAction("planks",
-                List.of(new Cost(IS_LOG, 1)),
-                new ItemStack(Items.OAK_PLANKS, 4)));
+        // Planks (top up toward the reserve from logs).
+        if (c.planks < 5 && c.logs >= 1) {
+            return inHand("planks", new ItemStack(Items.OAK_PLANKS, 4), cost(IS_LOG, 1));
         }
         return Optional.empty();
     }
 
     /**
+     * True if the mob has the materials for, and doesn't already own, some tool —
+     * ignoring whether a table is available. Drives {@code CraftItemsGoal}'s
+     * decision to place a crafting table it's carrying.
+     */
+    public static boolean wantsTable(Container backpack, Set<Item> ownedTools) {
+        return wantsAnyTool(census(backpack, ownedTools));
+    }
+
+    /**
      * Remove {@code action}'s costs from {@code backpack}. The caller decides
-     * where the {@link CraftAction#output} goes (equip it, or stash it back via
-     * {@code EquipmentEvaluator.addToContainer}).
+     * where the {@link CraftAction#output} goes (equip a tool, or stash a
+     * material/table via {@code EquipmentEvaluator.addToContainer}).
      */
     public static void apply(Container backpack, CraftAction action) {
         for (Cost cost : action.costs()) {
@@ -188,13 +192,68 @@ public final class CraftingLadder {
         backpack.setChanged();
     }
 
-    // ---- Helpers ----------------------------------------------------------
+    // ---- Internal ladder model -------------------------------------------
+
+    /** Snapshot of everything the ladder's guards depend on. */
+    private record Census(int logs, int planks, int sticks, int cobble,
+                          boolean ownsSword, boolean ownsStoneSword,
+                          boolean ownsPickaxe, boolean ownsStonePickaxe,
+                          boolean ownsAxe, boolean ownsStoneAxe,
+                          boolean holdsTable) {}
+
+    private static Census census(Container backpack, Set<Item> owned) {
+        return new Census(
+            countMatching(backpack, IS_LOG),
+            countMatching(backpack, IS_PLANKS),
+            countMatching(backpack, IS_STICK),
+            countMatching(backpack, IS_COBBLE),
+            ownsAny(backpack, owned, ANY_SWORD),
+            ownsAny(backpack, owned, STONE_PLUS_SWORD),
+            ownsAny(backpack, owned, ANY_PICKAXE),
+            ownsAny(backpack, owned, STONE_PLUS_PICKAXE),
+            ownsAny(backpack, owned, ANY_AXE),
+            ownsAny(backpack, owned, STONE_PLUS_AXE),
+            countItem(backpack, Items.CRAFTING_TABLE) > 0);
+    }
+
+    /** Mirrors the tool guards in {@link #nextCraft}, ignoring table access. */
+    private static boolean wantsAnyTool(Census c) {
+        return (!c.ownsSword && c.planks >= 2 && c.sticks >= 1)
+            || (!c.ownsStoneSword && c.cobble >= 2 && c.sticks >= 1)
+            || (!c.ownsPickaxe && c.planks >= 3 && c.sticks >= 2)
+            || (!c.ownsStonePickaxe && c.cobble >= 3 && c.sticks >= 2)
+            || (!c.ownsAxe && c.planks >= 3 && c.sticks >= 2)
+            || (!c.ownsStoneAxe && c.cobble >= 3 && c.sticks >= 2);
+    }
+
+    private static Optional<CraftAction> tool(String name, Item output, Cost... costs) {
+        return Optional.of(new CraftAction(name, List.of(costs), new ItemStack(output), true));
+    }
+
+    private static Optional<CraftAction> inHand(String name, ItemStack output, Cost... costs) {
+        return Optional.of(new CraftAction(name, List.of(costs), output, false));
+    }
+
+    private static Cost cost(Predicate<ItemStack> match, int count) {
+        return new Cost(match, count);
+    }
+
+    // ---- Container helpers ------------------------------------------------
 
     private static int countMatching(Container c, Predicate<ItemStack> match) {
         int total = 0;
         for (int i = 0; i < c.getContainerSize(); i++) {
             ItemStack s = c.getItem(i);
             if (!s.isEmpty() && match.test(s)) total += s.getCount();
+        }
+        return total;
+    }
+
+    private static int countItem(Container c, Item item) {
+        int total = 0;
+        for (int i = 0; i < c.getContainerSize(); i++) {
+            ItemStack s = c.getItem(i);
+            if (!s.isEmpty() && s.getItem() == item) total += s.getCount();
         }
         return total;
     }

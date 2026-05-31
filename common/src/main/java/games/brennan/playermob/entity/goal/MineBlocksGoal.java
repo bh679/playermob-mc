@@ -2,17 +2,24 @@ package games.brennan.playermob.entity.goal;
 
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.List;
 
@@ -34,6 +41,12 @@ import java.util.List;
  * from the start, stone/ore only once it has crafted (and can equip) a correct
  * pickaxe. That tool-gating is what drives the natural progression.</p>
  *
+ * <p><b>Line of sight:</b> the mob only mines blocks it can actually see — never
+ * tunnelling to a hidden block. The scan skips fully-buried blocks (no exposed
+ * face) cheaply, then raycasts ({@link Level#clip}) from the mob's eyes to the
+ * block and accepts it only if the ray reaches that block. LOS is re-checked on
+ * arrival and during the break, so a block that becomes occluded is abandoned.</p>
+ *
  * <p><b>Phase machine:</b> SCAN (in {@link #canUse}) → PATHING → BREAKING (which
  * grabs the right tool, then advances {@code destroyBlockProgress} over a
  * hardness-scaled tick budget) → on completion, COLLECT drops + break FX → mark
@@ -50,6 +63,7 @@ public final class MineBlocksGoal extends Goal {
     private static final int SWING_INTERVAL_TICKS = 8;      // arm-swing cadence while mining
     private static final int POST_VISIT_COOLDOWN = 20;      // 1s after finishing before rescanning
     private static final int EMPTY_SCAN_COOLDOWN = 40;      // 2s between scans when nothing found
+    private static final int MAX_LOS_CHECKS = 24;           // cap raycasts per scan (bounds cost)
 
     /** Ticks-per-hardness-unit; tunes how long a break visibly takes. */
     private static final double HARDNESS_TICKS_PER_UNIT = 20.0;
@@ -160,6 +174,12 @@ public final class MineBlocksGoal extends Goal {
             mob.getNavigation().stop();
             lookAtTarget();
 
+            // Don't mine what we can't see (e.g. a wall went up during approach).
+            if (!hasLineOfSight(targetPos)) {
+                stop();
+                return;
+            }
+
             BlockState state = mob.level().getBlockState(targetPos);
             // Make sure we're holding a tool that can actually harvest this.
             mob.equipCorrectToolFor(state);
@@ -185,7 +205,8 @@ public final class MineBlocksGoal extends Goal {
     private void tickBreaking() {
         Level level = mob.level();
         BlockState state = level.getBlockState(targetPos);
-        if (!isMineableTarget(state)) { // block changed/removed mid-break
+        if (!isMineableTarget(state) || !hasLineOfSight(targetPos)) {
+            // Block changed/removed, or got occluded mid-break — abandon.
             stop();
             return;
         }
@@ -258,8 +279,7 @@ public final class MineBlocksGoal extends Goal {
         BlockPos mobPos = mob.blockPosition();
         Level level = mob.level();
         long now = mob.tickCount;
-        BlockPos closest = null;
-        double closestDistSq = Double.MAX_VALUE;
+        List<BlockPos> candidates = new ArrayList<>();
 
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         for (int dx = -scanRadius; dx <= scanRadius; dx++) {
@@ -271,15 +291,48 @@ public final class MineBlocksGoal extends Goal {
                     if (mob.isBlockExplored(cursor, now)) continue;
                     if (!mob.canHarvestWithOwnedTools(state)) continue;
                     if (state.getDestroySpeed(level, cursor) < 0.0f) continue;
-                    double distSq = mobPos.distSqr(cursor);
-                    if (distSq < closestDistSq) {
-                        closestDistSq = distSq;
-                        closest = cursor.immutable();
-                    }
+                    if (!hasExposedFace(level, cursor)) continue; // skip fully-buried blocks cheaply
+                    candidates.add(cursor.immutable());
                 }
             }
         }
-        return closest;
+
+        // Nearest first, then take the first one we actually have line of sight to.
+        // The exposed-face prefilter keeps this list small; the raycast cap bounds the rest.
+        candidates.sort(Comparator.comparingDouble((BlockPos p) -> mobPos.distSqr(p)));
+        int checks = 0;
+        for (BlockPos pos : candidates) {
+            if (checks++ >= MAX_LOS_CHECKS) break;
+            if (hasLineOfSight(pos)) return pos;
+        }
+        return null;
+    }
+
+    /**
+     * Cheap occlusion prefilter: a block is worth a (more expensive) raycast only
+     * if at least one of its 6 faces touches a non-full-cube (air, etc.). Fully
+     * buried blocks are skipped without a raycast.
+     */
+    private boolean hasExposedFace(Level level, BlockPos pos) {
+        BlockPos.MutableBlockPos n = new BlockPos.MutableBlockPos();
+        for (Direction d : Direction.values()) {
+            n.set(pos.getX() + d.getStepX(), pos.getY() + d.getStepY(), pos.getZ() + d.getStepZ());
+            if (!level.getBlockState(n).isCollisionShapeFullBlock(level, n)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Raycast from the mob's eyes to the block centre; true only if the ray
+     * reaches that exact block (i.e. nothing solid is in the way). This is what
+     * stops the mob mining "through" walls.
+     */
+    private boolean hasLineOfSight(BlockPos pos) {
+        Vec3 eye = mob.getEyePosition();
+        Vec3 center = Vec3.atCenterOf(pos);
+        BlockHitResult hit = mob.level().clip(
+            new ClipContext(eye, center, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mob));
+        return hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(pos);
     }
 
     /**
