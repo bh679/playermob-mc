@@ -2,6 +2,7 @@ package games.brennan.playermob.neoforge.client;
 
 import games.brennan.playermob.PlayerMob;
 import games.brennan.playermob.client.PlayerMobRenderer;
+import games.brennan.playermob.client.PlayerMobScreen;
 import games.brennan.playermob.client.VersionHudRenderer;
 import games.brennan.playermob.neoforge.PlayerMobNeoForge;
 import net.minecraft.client.gui.LayeredDraw;
@@ -9,6 +10,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.client.event.EntityRenderersEvent;
 import net.neoforged.neoforge.client.event.RegisterGuiLayersEvent;
+import net.neoforged.neoforge.client.event.RegisterMenuScreensEvent;
 import net.neoforged.neoforge.client.event.ScreenEvent;
 import net.neoforged.neoforge.common.NeoForge;
 
@@ -28,6 +30,7 @@ public final class PlayerMobNeoForgeClient {
 
     public static void register(IEventBus modBus) {
         modBus.addListener(PlayerMobNeoForgeClient::onRegisterRenderers);
+        modBus.addListener(PlayerMobNeoForgeClient::onRegisterScreens);
         modBus.addListener(PlayerMobNeoForgeClient::onRegisterGuiLayers);
         // Screen render events fire on the game bus, not the mod bus.
         NeoForge.EVENT_BUS.addListener(PlayerMobNeoForgeClient::onScreenRender);
@@ -35,6 +38,10 @@ public final class PlayerMobNeoForgeClient {
 
     private static void onRegisterRenderers(EntityRenderersEvent.RegisterRenderers event) {
         event.registerEntityRenderer(PlayerMobNeoForge.PLAYER_MOB.get(), PlayerMobRenderer::new);
+    }
+
+    private static void onRegisterScreens(RegisterMenuScreensEvent event) {
+        event.register(PlayerMobNeoForge.PLAYER_MOB_MENU.get(), PlayerMobScreen::new);
     }
 
     private static void onRegisterGuiLayers(RegisterGuiLayersEvent event) {
