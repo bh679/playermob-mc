@@ -1,10 +1,17 @@
 package games.brennan.playermob.entity;
 
 import games.brennan.playermob.entity.goal.CollectFloorItemsGoal;
+import games.brennan.playermob.entity.goal.EatFoodGoal;
 import games.brennan.playermob.entity.goal.RaidArmorStandsGoal;
 import games.brennan.playermob.entity.goal.RaidContainersGoal;
 import games.brennan.playermob.entity.goal.WeaponAwareAttackGoal;
+import games.brennan.playermob.skin.PlayerMobSkin;
+import games.brennan.playermob.skin.PlayerMobSkinRegistry;
+import games.brennan.playermob.skin.SkinModel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.particles.ItemParticleOption;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
@@ -22,6 +29,7 @@ import net.minecraft.world.level.block.BarrelBlock;
 import net.minecraft.world.level.block.entity.BarrelBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.ChestBlockEntity;
+import net.minecraft.world.level.block.entity.ShulkerBoxBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
@@ -36,6 +44,7 @@ import net.minecraft.world.entity.ai.goal.WaterAvoidingRandomStrollGoal;
 import net.minecraft.world.entity.ai.goal.target.HurtByTargetGoal;
 import net.minecraft.world.entity.ai.goal.target.NearestAttackableTargetGoal;
 import net.minecraft.world.entity.monster.CrossbowAttackMob;
+import net.minecraft.world.food.FoodProperties;
 import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.monster.RangedAttackMob;
@@ -70,11 +79,16 @@ import java.util.UUID;
  * goal-selector predicate forwards to {@code stance.permitsTargeting(this, candidate)}
  * so new stances drop in by adding enum constants — no goal rewiring.</p>
  *
- * <p><b>Skins (v1.5)</b> — Each mob rolls a {@link #getSkinIndex skin index}
- * in {@link #finalizeSpawn} from {@code [0, SKIN_COUNT)}. The client renderer
- * ({@code PlayerMobRenderer}, not imported here to keep this class
- * server-loadable) reads the index to pick a bundled texture. Persists
- * across save/load.</p>
+ * <p><b>Skins</b> — Each mob rolls its look in {@link #finalizeSpawn}. It
+ * always rolls a bundled-vanilla index in {@code [0, SKIN_COUNT)}, then with
+ * probability {@link #URL_SKIN_CHANCE} (~30%) overrides it with a Mojang skin
+ * texture URL drawn from the datapack-extensible {@link PlayerMobSkinRegistry}.
+ * So ~70% of mobs wear a vanilla default and ~30% wear a recognisable
+ * real-player skin. The client renderer ({@code PlayerMobRenderer}, not
+ * imported here to keep this class server-loadable) prefers the URL when set
+ * and falls back to the bundled index otherwise. Both fields persist across
+ * save/load; the URL field is purely additive on top of the v1 (0.2.0) save
+ * format.</p>
  *
  * <p><b>Inventory raiding (v1.5)</b> — Implements {@link InventoryCarrier}
  * so the mob has a backpack. {@link RaidContainersGoal} +
@@ -98,6 +112,21 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     private static final EntityDataAccessor<Integer> DATA_SKIN_INDEX =
         SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.INT);
 
+    /**
+     * Mojang skin texture URL ({@code http://textures.minecraft.net/texture/&lt;hash&gt;}).
+     * Empty string ⇒ no URL skin assigned — the renderer falls back to the
+     * legacy bundled-vanilla texture indexed by {@link #DATA_SKIN_INDEX}.
+     */
+    private static final EntityDataAccessor<String> DATA_SKIN_TEXTURE_URL =
+        SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.STRING);
+
+    /**
+     * Slim-arms flag (true = 3-pixel arms, like the Alex model). v2 always
+     * renders wide regardless; the flag is plumbed for v3 model-swap support.
+     */
+    private static final EntityDataAccessor<Boolean> DATA_SKIN_SLIM =
+        SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.BOOLEAN);
+
     // ---- Constants --------------------------------------------------------
 
     /**
@@ -115,6 +144,19 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
      */
     public static final int SKIN_COUNT = 9;
 
+    /**
+     * Probability a freshly-spawned mob uses a Mojang URL skin from the
+     * datapack-fed {@link PlayerMobSkinRegistry} instead of one of the
+     * {@link #SKIN_COUNT} bundled vanilla default skins.
+     *
+     * <p>{@code 0.30f} ⇒ ~30% real-player skins, ~70% vanilla defaults. The
+     * vanilla defaults stay the common case so the mob reads as "a player"
+     * at a glance, with recognisable real skins as the occasional standout.
+     * Only consulted when the registry is non-empty — an empty registry
+     * always falls back to a bundled skin regardless of this roll.</p>
+     */
+    private static final float URL_SKIN_CHANCE = 0.30f;
+
     /** Backpack size — matches Pillager (5) plus a little extra. */
     private static final int INVENTORY_SIZE = 8;
 
@@ -129,6 +171,8 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
 
     private static final String TAG_STANCE = "Stance";
     private static final String TAG_SKIN_INDEX = "SkinIndex";
+    private static final String TAG_SKIN_TEXTURE_URL = "SkinTextureUrl";
+    private static final String TAG_SKIN_SLIM = "SkinSlim";
     private static final String TAG_EXPLORED_BLOCKS = "ExploredBlocks";
     private static final String TAG_EXPLORED_ENTITIES = "ExploredEntities";
     private static final String TAG_POS = "Pos";
@@ -189,12 +233,18 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         builder.define(DATA_STANCE, Stance.HOSTILE_TO_HOSTILE_MOBS.ordinal());
         builder.define(DATA_IS_CHARGING_CROSSBOW, false);
         builder.define(DATA_SKIN_INDEX, 0);
+        builder.define(DATA_SKIN_TEXTURE_URL, "");
+        builder.define(DATA_SKIN_SLIM, false);
     }
 
     @Override
     protected void registerGoals() {
         this.goalSelector.addGoal(0, new FloatGoal(this));
         this.goalSelector.addGoal(2, new WeaponAwareAttackGoal(this, 1.0, 8.0f));
+        // EatFoodGoal added BEFORE the raid goals at the same priority so
+        // its canUse() is evaluated first — a low-HP mob with food prefers
+        // eating over walking to the next chest.
+        this.goalSelector.addGoal(3, new EatFoodGoal(this));
         this.goalSelector.addGoal(3, new RaidContainersGoal(this, /* speed */ 0.9, /* radius */ 12));
         this.goalSelector.addGoal(3, new RaidArmorStandsGoal(this, /* speed */ 0.9, /* radius */ 12.0));
         this.goalSelector.addGoal(3, new CollectFloorItemsGoal(this, /* speed */ 0.9, /* radius */ 8.0));
@@ -213,8 +263,16 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     }
 
     /**
-     * Roll the random skin index once at spawn so all clients see the same
-     * value. Server-side; syncs to clients via the DATA_SKIN_INDEX TrackedData.
+     * Roll the random skin at spawn so all clients see the same value.
+     * Server-side; syncs to clients via SynchedEntityData.
+     *
+     * <p>Always rolls a bundled-vanilla index first — it's both the ~70%
+     * common case (see {@link #URL_SKIN_CHANCE}) and the downgrade-safe
+     * payload for 0.2.0 clients. Then, with probability
+     * {@link #URL_SKIN_CHANCE}, overrides it with a Mojang URL skin from
+     * {@link PlayerMobSkinRegistry}. The other ~70% keep the bundled
+     * vanilla skin (URL left blank ⇒ renderer uses the index path). An
+     * empty registry always falls through to the bundled skin.</p>
      */
     @Override
     public SpawnGroupData finalizeSpawn(ServerLevelAccessor world,
@@ -222,6 +280,12 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
                                         MobSpawnType reason,
                                         SpawnGroupData data) {
         setSkinIndex(world.getRandom().nextInt(SKIN_COUNT));
+        if (world.getRandom().nextFloat() < URL_SKIN_CHANCE) {
+            PlayerMobSkinRegistry.pickRandom(world.getRandom()).ifPresent(skin -> {
+                setSkinTextureUrl(skin.textureUrl());
+                setSkinSlim(skin.model() == SkinModel.SLIM);
+            });
+        }
         return super.finalizeSpawn(world, difficulty, reason, data);
     }
 
@@ -255,6 +319,31 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         this.entityData.set(DATA_SKIN_INDEX, clamped);
     }
 
+    /**
+     * Mojang skin texture URL, or empty string if this mob has no URL skin
+     * assigned. {@code null} is coerced to {@code ""} on set.
+     */
+    public String getSkinTextureUrl() {
+        String raw = this.entityData.get(DATA_SKIN_TEXTURE_URL);
+        return raw == null ? "" : raw;
+    }
+
+    public void setSkinTextureUrl(String url) {
+        this.entityData.set(DATA_SKIN_TEXTURE_URL, url == null ? "" : url);
+    }
+
+    /**
+     * True if the assigned URL skin was authored for the slim-arms model.
+     * v2 always renders wide regardless — see renderer for details.
+     */
+    public boolean isSkinSlim() {
+        return this.entityData.get(DATA_SKIN_SLIM);
+    }
+
+    public void setSkinSlim(boolean slim) {
+        this.entityData.set(DATA_SKIN_SLIM, slim);
+    }
+
     // ---- InventoryCarrier ------------------------------------------------
 
     @Override
@@ -265,19 +354,51 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     // ---- Equipment swap helpers (called from raid goals) -----------------
 
     /**
-     * Try to swap a candidate item from a container slot into the mob's
-     * equipment. If the candidate is better than what the mob is wearing in
-     * the matching slot, take it (clearing the container slot) and put the
-     * displaced item back into the container.
+     * Replace vanilla's comparator with the enchantment-aware
+     * {@link EquipmentEvaluator#shouldReplace} so an iron sword with
+     * Sharpness V can win against a plain diamond sword. Vanilla's
+     * implementation in {@link net.minecraft.world.entity.Mob} short-circuits
+     * on base damage and never sees the enchantment difference.
+     *
+     * <p>Overriding here propagates the heuristic to vanilla pickup paths
+     * ({@code Mob.pickUpItem}, the ground-item pickup checks) in addition to
+     * the raid goals' explicit {@link #wouldTakeFromContainer} calls.</p>
+     */
+    @Override
+    protected boolean canReplaceCurrentItem(ItemStack candidate, ItemStack existing) {
+        return EquipmentEvaluator.shouldReplace(candidate, existing);
+    }
+
+    /**
+     * Try to take a candidate item from a container slot. Two paths:
+     *
+     * <ul>
+     *   <li><b>Food</b> — copy as many items as fit into the mob's inventory
+     *       (where the {@link EatFoodGoal} will find them when HP drops).
+     *       Container slot shrinks; nothing is dropped on the ground.</li>
+     *   <li><b>Equipment</b> — if the candidate beats the mob's current
+     *       equivalent slot per {@link EquipmentEvaluator#shouldReplace},
+     *       swap it in. The displaced piece goes back into the container
+     *       (overflow to the ground if the container's full).</li>
+     * </ul>
      *
      * <p>Lives on the entity rather than the static {@link EquipmentEvaluator}
-     * because {@link #canReplaceCurrentItem} is {@code protected} on Mob —
-     * only the Mob subclass can read it.</p>
+     * because the equipment path needs {@code Mob.getEquipmentSlotForItem}
+     * (visible to subclasses) and {@code setItemSlot} (mutates the mob).</p>
      */
-    public boolean tryReplaceFromContainer(Container source, int slotIdx) {
+    public boolean tryTakeFromContainer(Container source, int slotIdx) {
         if (source == null) return false;
         ItemStack candidate = source.getItem(slotIdx);
         if (candidate.isEmpty()) return false;
+
+        // Food first — same candidate may both be a food AND fit a slot
+        // (e.g. enchanted golden apple) but the food/heal path is the more
+        // useful behaviour. The slot the equipment path would route this to
+        // would be MAINHAND, which would drop the mob's weapon mid-raid.
+        if (candidate.get(DataComponents.FOOD) != null) {
+            return EquipmentEvaluator.tryCollectFood(source, slotIdx, this.inventory);
+        }
+
         EquipmentSlot slot = getEquipmentSlotForItem(candidate);
         ItemStack current = getItemBySlot(slot);
         if (!canReplaceCurrentItem(candidate, current)) return false;
@@ -310,15 +431,18 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     }
 
     /**
-     * Pre-check variant of {@link #tryReplaceFromContainer} — answers
-     * "would the mob take this slot if asked?" without actually swapping.
-     * Used by the raid goal to skip worthless slots without burning the
-     * per-swap delay budget.
+     * Pre-check variant of {@link #tryTakeFromContainer} — answers "would the
+     * mob take this slot if asked?" without mutating anything. Used by the
+     * raid goal to skip worthless slots without burning the per-swap delay
+     * budget.
      */
-    public boolean wouldReplaceFromContainer(Container source, int slotIdx) {
+    public boolean wouldTakeFromContainer(Container source, int slotIdx) {
         if (source == null) return false;
         ItemStack candidate = source.getItem(slotIdx);
         if (candidate.isEmpty()) return false;
+        if (candidate.get(DataComponents.FOOD) != null) {
+            return EquipmentEvaluator.canCollectFood(source, slotIdx, this.inventory);
+        }
         EquipmentSlot slot = getEquipmentSlotForItem(candidate);
         ItemStack current = getItemBySlot(slot);
         return canReplaceCurrentItem(candidate, current);
@@ -608,6 +732,56 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         return requested - leftover.getCount();
     }
 
+    // ---- Food helpers (called from EatFoodGoal) --------------------------
+
+    /**
+     * Returns the inventory slot of the highest-nutrition food currently
+     * carried, or {@code -1} if no edible item is present. "Edible" means the
+     * item has a non-null {@link DataComponents#FOOD} component — same
+     * definition vanilla uses for items players can right-click to eat.
+     */
+    public int findBestFoodSlot() {
+        int bestSlot = -1;
+        int bestNutrition = 0;
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            ItemStack stack = inventory.getItem(i);
+            if (stack.isEmpty()) continue;
+            FoodProperties food = stack.get(DataComponents.FOOD);
+            if (food == null) continue;
+            if (food.nutrition() > bestNutrition) {
+                bestNutrition = food.nutrition();
+                bestSlot = i;
+            }
+        }
+        return bestSlot;
+    }
+
+    /**
+     * Spawn server-broadcast item-puff particles near the mob's mouth —
+     * the visual feedback for "this mob is eating right now". Client-side
+     * {@link Level#addParticle} won't reach other players, so we use
+     * {@link ServerLevel#sendParticles} which replicates to everyone in range.
+     *
+     * <p>Vanilla's {@code LivingEntity.triggerItemUseEffects} is gated on
+     * {@code isUsingItem()} and runs client-side per tick from data-tracked
+     * use state — we don't drive {@code startUsingItem} so the vanilla path
+     * never fires for our eating cycle.</p>
+     */
+    public void spawnEatingParticles(ItemStack food) {
+        if (!(level() instanceof ServerLevel serverLevel)) return;
+        ItemParticleOption particle = new ItemParticleOption(ParticleTypes.ITEM, food);
+        serverLevel.sendParticles(
+            particle,
+            getX(),
+            getEyeY() - 0.2,
+            getZ(),
+            /* count */ 4,
+            /* xDist */ 0.15,
+            /* yDist */ 0.1,
+            /* zDist */ 0.15,
+            /* speed */ 0.05);
+    }
+
     // ---- Recently-explored cooldown maps ---------------------------------
 
     /**
@@ -660,6 +834,14 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         super.addAdditionalSaveData(tag);
         tag.putInt(TAG_STANCE, getStance().ordinal());
         tag.putInt(TAG_SKIN_INDEX, getSkinIndex());
+        // URL skin tags are purely additive on top of v1 (SkinIndex). Only
+        // write the URL key when set, so 0.2.0-loaded mobs that never had a
+        // URL assigned don't round-trip an empty string back into the save.
+        String url = getSkinTextureUrl();
+        if (!url.isEmpty()) {
+            tag.putString(TAG_SKIN_TEXTURE_URL, url);
+            tag.putBoolean(TAG_SKIN_SLIM, isSkinSlim());
+        }
         // Inventory persistence — InventoryCarrier helper handles slot encoding.
         // registryAccess() is a HolderLookup.Provider on Entity in 1.21.1+.
         writeInventoryToTag(tag, this.registryAccess());
@@ -690,6 +872,13 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         // byOrdinal guards against missing/invalid stored values.
         setStance(Stance.byOrdinal(tag.getInt(TAG_STANCE)));
         setSkinIndex(tag.getInt(TAG_SKIN_INDEX));
+        // Backward compat: 0.2.0 saves have no SkinTextureUrl tag. Missing key
+        // ⇒ URL stays the default "" ⇒ renderer uses the legacy bundled-
+        // vanilla path keyed off SkinIndex. New v2 mobs round-trip the URL.
+        if (tag.contains(TAG_SKIN_TEXTURE_URL, Tag.TAG_STRING)) {
+            setSkinTextureUrl(tag.getString(TAG_SKIN_TEXTURE_URL));
+            setSkinSlim(tag.getBoolean(TAG_SKIN_SLIM));
+        }
         readInventoryFromTag(tag, this.registryAccess());
 
         recentlyExploredBlocks.clear();
@@ -765,6 +954,12 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
                 level.setBlock(pos, state.setValue(BarrelBlock.OPEN, true), 3);
             }
             playContainerSound(pos, SoundEvents.BARREL_OPEN);
+        } else if (be instanceof ShulkerBoxBlockEntity) {
+            // Vanilla ShulkerBoxBlockEntity.triggerEvent(1, n) drives the lid
+            // animation. Bypassing startOpen(Player) here because that method
+            // is Player-typed and our mob isn't a Player.
+            level.blockEvent(pos, state.getBlock(), ShulkerBoxBlockEntity.EVENT_SET_OPEN_COUNT, 1);
+            playContainerSound(pos, SoundEvents.SHULKER_BOX_OPEN);
         } else {
             return; // unknown container type; nothing to track
         }
@@ -793,6 +988,9 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
                 level.setBlock(pos, state.setValue(BarrelBlock.OPEN, false), 3);
             }
             playContainerSound(pos, SoundEvents.BARREL_CLOSE);
+        } else if (be instanceof ShulkerBoxBlockEntity) {
+            level.blockEvent(pos, state.getBlock(), ShulkerBoxBlockEntity.EVENT_SET_OPEN_COUNT, 0);
+            playContainerSound(pos, SoundEvents.SHULKER_BOX_CLOSE);
         }
     }
 
@@ -856,26 +1054,44 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         arrow.shoot(dx, dy + dist * 0.2, dz, 1.6F,
                     (float) (14 - this.level().getDifficulty().getId() * 4));
 
-        this.playSound(SoundEvents.SKELETON_SHOOT, 1.0F,
+        // Player's bow-release sound (vanilla BowItem uses ARROW_SHOOT), not the
+        // skeleton's. Routes through getSoundSource() → Players category.
+        this.playSound(SoundEvents.ARROW_SHOOT, 1.0F,
                        1.0F / (this.getRandom().nextFloat() * 0.4F + 0.8F));
         this.level().addFreshEntity(arrow);
     }
 
-    // ---- Sounds (pillager-like, mirrors villager-style "person dies" feel)
+    // ---- Sounds (player-like — mirrors vanilla Player exactly) -----------
 
+    /** Players have no idle sound — stay silent like a real player. */
     @Override
     protected SoundEvent getAmbientSound() {
-        return SoundEvents.PILLAGER_AMBIENT;
+        return null;
     }
 
+    /**
+     * Data-driven hurt sound, identical to {@code Player.getHurtSound}: the
+     * damage type's own effect sound (PLAYER_HURT / _DROWN / _ON_FIRE /
+     * _FREEZE / _SWEET_BERRY_BUSH).
+     */
     @Override
     protected SoundEvent getHurtSound(DamageSource source) {
-        return SoundEvents.PILLAGER_HURT;
+        return source.type().effects().sound();
     }
 
     @Override
     protected SoundEvent getDeathSound() {
-        return SoundEvents.PILLAGER_DEATH;
+        return SoundEvents.PLAYER_DEATH;
+    }
+
+    /**
+     * Match a real player's sound category so hurt/death/bow sounds play under
+     * the Players volume slider, not Hostile Creatures. Mirrors
+     * {@code Player.getSoundSource()}.
+     */
+    @Override
+    public SoundSource getSoundSource() {
+        return SoundSource.PLAYERS;
     }
 
     /**
