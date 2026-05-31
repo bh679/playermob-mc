@@ -147,5 +147,54 @@ Per global versioning rule: SemVer in `gradle.properties` `mod_version` field.
 > this repo. Bump `gradle.properties` `mod_version` manually before each commit.
 
 **Tagging is NOT done manually.** Tags exist only when a release is shipped — see
-"Releasing (post-Gate 3)" below when set up. The global versioning rule's `git tag && git push`
+"Releasing (post-Gate 3)" below. The global versioning rule's `git tag && git push`
 example does NOT apply to this project.
+
+---
+
+## Releasing (post-Gate 3)
+
+Not every Gate 3 merge ships a public release. Tags exist only for releases — there is
+no `push: tags` trigger on `release.yml`; the workflow is dispatch-only and creates the
+tag itself.
+
+### When to suggest releasing
+
+At Gate 3, after the merge lands, suggest "tag for release" if the change is
+**significant**:
+- New PlayerMob behaviour (new entity goals, new stance profiles, weapon AI changes, new attributes/DataTracker fields)
+- New player-facing content (spawn-egg or `/summon` UX, new registered items/entities tied to PlayerMob)
+- Loader compatibility update (Architectury / Loom / Fabric / Forge / NeoForge / MC version bump)
+- Fix affecting many users (crashes, multiplayer breakage, save corruption, broken AI on a whole weapon class)
+
+**Skip** for: internal refactors, CI/tooling/build changes, dev-only changes, doc-only
+updates, minor cosmetic fixes. When in doubt, ask the user.
+
+### When the user says "tag for release"
+
+1. Confirm `mod_version` on main:
+   ```bash
+   grep '^mod_version=' gradle.properties | cut -d= -f2
+   ```
+2. Show the user: "Release v<version>? This will publish to GitHub Releases +
+   Modrinth + CurseForge + Discord (Discord only fires on MAJOR bump unless
+   `notify_discord` is set)."
+3. On confirmation:
+   ```bash
+   gh workflow run release.yml -f tag=v<version>
+   ```
+4. Watch the run:
+   ```bash
+   gh run watch $(gh run list --workflow=release.yml --limit 1 --json databaseId --jq '.[0].databaseId')
+   ```
+5. On success, share the release URL:
+   ```bash
+   gh release view v<version> --json url --jq .url
+   ```
+
+### Tag discipline
+
+Tags are created exclusively by `release.yml`. **Never run `git tag` or
+`git push origin v<x>` manually.** Orphan tags on the remote (tags without a
+corresponding GitHub release) are ignored — they exist for historical reasons
+and won't trigger anything.
