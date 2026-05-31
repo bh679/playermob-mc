@@ -4,6 +4,7 @@ import games.brennan.playermob.PlayerMob;
 import games.brennan.playermob.PlayerMobRegistry;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.menu.PlayerMobMenu;
+import games.brennan.playermob.skin.PlayerMobSkinReloadListener;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.SimpleMenuProvider;
@@ -13,7 +14,9 @@ import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.SpawnEggItem;
 import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.common.extensions.IForgeMenuType;
+import net.minecraftforge.event.AddReloadListenerEvent;
 import net.minecraftforge.event.BuildCreativeModeTabContentsEvent;
 import net.minecraftforge.event.entity.EntityAttributeCreationEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
@@ -65,9 +68,20 @@ public final class PlayerMobForge {
         modBus.addListener(PlayerMobForge::onBuildCreativeTab);
         modBus.addListener(PlayerMobForge::onCommonSetup);
 
+        // Reload listeners live on the game bus, not the mod bus.
+        MinecraftForge.EVENT_BUS.addListener(PlayerMobForge::onAddReloadListeners);
+
         if (FMLEnvironment.dist == Dist.CLIENT) {
             games.brennan.playermob.forge.client.PlayerMobForgeClient.register(modBus);
         }
+    }
+
+    /**
+     * Wire the skin-pack reload listener — datapack hook for adding skins via
+     * {@code data/<ns>/playermob_skins/*.json}.
+     */
+    private static void onAddReloadListeners(AddReloadListenerEvent event) {
+        event.addListener(new PlayerMobSkinReloadListener());
     }
 
     private static void onEntityAttributeCreation(EntityAttributeCreationEvent event) {

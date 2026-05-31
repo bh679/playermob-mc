@@ -60,8 +60,8 @@ LANDING_URL="$GH_RELEASE_URL"
 # Each release now produces three loader-specific versions on Modrinth
 # (v0.3.0+fabric / +forge / +neoforge), so link to the versions list rather
 # than guessing a single version slug.
-MODRINTH_URL="https://modrinth.com/mod/playermob/versions"
-CURSEFORGE_URL="https://www.curseforge.com/minecraft/mc-mods/playermob/files"
+MODRINTH_URL="https://modrinth.com/mod/interactive-player-mobs/versions"
+CURSEFORGE_URL="https://www.curseforge.com/minecraft/mc-mods/interactive-player-mobs/files"
 
 PAYLOAD=$(jq -n \
   --arg title "PlayerMob $RELEASE_TAG" \

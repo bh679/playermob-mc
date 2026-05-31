@@ -7,10 +7,13 @@ import games.brennan.playermob.menu.PlayerMobMenu;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.itemgroup.v1.ItemGroupEvents;
 import net.fabricmc.fabric.api.object.builder.v1.entity.FabricDefaultAttributeRegistry;
+import net.fabricmc.fabric.api.resource.ResourceManagerHelper;
 import net.fabricmc.fabric.api.screenhandler.v1.ExtendedScreenHandlerType;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.codec.ByteBufCodecs;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.packs.PackType;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraft.world.item.Item;
@@ -80,6 +83,15 @@ public final class PlayerMobFabric implements ModInitializer {
         // StreamCodec, so a plain openMenu(provider) is enough.
         PlayerMobRegistry.MENU_OPENER = (serverPlayer, mob) ->
             serverPlayer.openMenu(new PlayerMobMenuProvider(mob));
+
+        // Datapack-extensible skin pack — loads data/<ns>/playermob_skins/*.json
+        // into PlayerMobSkinRegistry. Fabric's ResourceManagerHelper is the loader-
+        // native equivalent of vanilla's addReloadListener on the server data type.
+        ResourceLocation skinListenerId =
+            ResourceLocation.fromNamespaceAndPath(PlayerMob.MOD_ID, "skins");
+        ResourceManagerHelper.get(PackType.SERVER_DATA)
+            .registerReloadListener(
+                new games.brennan.playermob.fabric.SkinReloadListenerWrapper(skinListenerId));
 
         PlayerMob.init();
     }

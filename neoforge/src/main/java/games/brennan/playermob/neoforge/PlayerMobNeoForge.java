@@ -4,6 +4,7 @@ import games.brennan.playermob.PlayerMob;
 import games.brennan.playermob.PlayerMobRegistry;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.menu.PlayerMobMenu;
+import games.brennan.playermob.skin.PlayerMobSkinReloadListener;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.SimpleMenuProvider;
@@ -17,7 +18,9 @@ import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.neoforged.fml.loading.FMLEnvironment;
+import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.common.extensions.IMenuTypeExtension;
+import net.neoforged.neoforge.event.AddReloadListenerEvent;
 import net.neoforged.neoforge.event.BuildCreativeModeTabContentsEvent;
 import net.neoforged.neoforge.event.entity.EntityAttributeCreationEvent;
 import net.neoforged.neoforge.registries.DeferredHolder;
@@ -67,9 +70,20 @@ public final class PlayerMobNeoForge {
         modBus.addListener(PlayerMobNeoForge::onBuildCreativeTab);
         modBus.addListener(PlayerMobNeoForge::onCommonSetup);
 
+        // Reload listeners live on the game bus, not the mod bus.
+        NeoForge.EVENT_BUS.addListener(PlayerMobNeoForge::onAddReloadListeners);
+
         if (FMLEnvironment.dist == Dist.CLIENT) {
             games.brennan.playermob.neoforge.client.PlayerMobNeoForgeClient.register(modBus);
         }
+    }
+
+    /**
+     * Wire the skin-pack reload listener — datapack hook for adding skins via
+     * {@code data/<ns>/playermob_skins/*.json}.
+     */
+    private static void onAddReloadListeners(AddReloadListenerEvent event) {
+        event.addListener(new PlayerMobSkinReloadListener());
     }
 
     private static void onEntityAttributeCreation(EntityAttributeCreationEvent event) {
