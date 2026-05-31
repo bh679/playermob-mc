@@ -3,11 +3,14 @@ package games.brennan.playermob.fabric;
 import games.brennan.playermob.PlayerMob;
 import games.brennan.playermob.PlayerMobRegistry;
 import games.brennan.playermob.entity.PlayerMobEntity;
+import games.brennan.playermob.menu.PlayerMobMenu;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.itemgroup.v1.ItemGroupEvents;
 import net.fabricmc.fabric.api.object.builder.v1.entity.FabricDefaultAttributeRegistry;
+import net.fabricmc.fabric.api.screenhandler.v1.ExtendedScreenHandlerType;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraft.world.item.Item;
@@ -63,6 +66,20 @@ public final class PlayerMobFabric implements ModInitializer {
         // Drop the spawn egg into the Spawn Eggs creative tab.
         ItemGroupEvents.modifyEntriesEvent(CreativeModeTabs.SPAWN_EGGS)
             .register(entries -> entries.accept(PlayerMobRegistry.PLAYER_MOB_SPAWN_EGG));
+
+        // Inventory menu — the extended type carries the target mob's entity id
+        // to the client via the VarInt StreamCodec.
+        PlayerMobRegistry.PLAYER_MOB_MENU = Registry.register(
+            BuiltInRegistries.MENU,
+            PlayerMobRegistry.PLAYER_MOB_MENU_ID,
+            new ExtendedScreenHandlerType<>(
+                (syncId, inv, entityId) -> PlayerMobMenu.fromEntityId(syncId, inv, entityId),
+                ByteBufCodecs.VAR_INT));
+
+        // Opener — Fabric serialises getScreenOpeningData() through the type's
+        // StreamCodec, so a plain openMenu(provider) is enough.
+        PlayerMobRegistry.MENU_OPENER = (serverPlayer, mob) ->
+            serverPlayer.openMenu(new PlayerMobMenuProvider(mob));
 
         PlayerMob.init();
     }
