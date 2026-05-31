@@ -14,6 +14,7 @@ import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
+import net.minecraft.network.chat.Component;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
@@ -55,6 +56,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.decoration.ArmorStand;
+import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.ServerLevelAccessor;
 
@@ -639,16 +641,53 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     }
 
     /**
-     * Hook the death event to force-close any container the mob had open.
-     * {@link RaidContainersGoal#stop} also closes the container, but when the
-     * mob dies mid-raid the goal selector stops ticking before it gets the
-     * chance — this override is the safety net so chests/barrels don't
-     * stay visually stuck open.
+     * Death hook with two responsibilities:
+     *
+     * <ol>
+     *   <li>Force-close any container the mob had open. {@link RaidContainersGoal#stop}
+     *       also closes it, but when the mob dies mid-raid the goal selector stops
+     *       ticking before it gets the chance — this is the safety net so
+     *       chests/barrels don't stay visually stuck open.</li>
+     *   <li>Announce the death in chat like a player's. The entity's display
+     *       name is "Player", so the vanilla combat tracker yields messages
+     *       that read like a real player death ("Player was slain by Zombie",
+     *       "Player drowned", …).</li>
+     * </ol>
      */
     @Override
     public void die(DamageSource source) {
         closeOpenedContainer();
+        // Capture the death message BEFORE super.die(): super calls
+        // CombatTracker.recheckStatus(), which clears the combat entries, so
+        // the attacker-aware message ("… was slain by Zombie") is only
+        // available now. Vanilla ServerPlayer.die() reads it before super for
+        // exactly this reason — reading after yields the generic "… died".
+        Component deathMessage = captureDeathMessage();
         super.die(source);
+        // Broadcast only after super confirms the kill (this.dead flips true):
+        // a cancelled death (Forge/NeoForge LivingDeathEvent) or a re-entrant
+        // die() leaves it false, so we stay silent and never double-announce.
+        if (deathMessage != null && this.dead && this.level() instanceof ServerLevel serverLevel) {
+            serverLevel.getServer().getPlayerList().broadcastSystemMessage(deathMessage, false);
+        }
+    }
+
+    /**
+     * The player-style death message to broadcast, or {@code null} if this
+     * death must not be announced — client-side, already dead/removed, or the
+     * {@code showDeathMessages} gamerule is off (just like a real player).
+     *
+     * <p>Must be called BEFORE {@code super.die()} while the combat tracker
+     * still holds the fatal blow — see {@link #die}.</p>
+     */
+    private Component captureDeathMessage() {
+        if (this.dead || this.isRemoved() || !(this.level() instanceof ServerLevel serverLevel)) {
+            return null;
+        }
+        if (!serverLevel.getGameRules().getBoolean(GameRules.RULE_SHOWDEATHMESSAGES)) {
+            return null;
+        }
+        return this.getCombatTracker().getDeathMessage();
     }
 
     // ---- Container open/close (called from RaidContainersGoal) -----------
