@@ -1,5 +1,7 @@
 package games.brennan.playermob.entity;
 
+import games.brennan.playermob.entity.goal.CraftItemsGoal;
+import games.brennan.playermob.entity.goal.MineBlocksGoal;
 import games.brennan.playermob.entity.goal.RaidArmorStandsGoal;
 import games.brennan.playermob.entity.goal.RaidContainersGoal;
 import games.brennan.playermob.entity.goal.WeaponAwareAttackGoal;
@@ -42,6 +44,7 @@ import net.minecraft.world.entity.npc.InventoryCarrier;
 import net.minecraft.world.entity.projectile.AbstractArrow;
 import net.minecraft.world.entity.projectile.ProjectileUtil;
 import net.minecraft.world.item.CrossbowItem;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.EquipmentSlot;
@@ -50,8 +53,10 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.ServerLevelAccessor;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -79,6 +84,16 @@ import java.util.UUID;
  * {@link RaidArmorStandsGoal} drive scan/path/swap behaviour. A
  * "recently explored" cooldown map keeps the mob from looping the same
  * chest. On death, {@link #dropCustomDeathLoot} dumps the inventory.</p>
+ *
+ * <p><b>Gather &amp; craft (idle)</b> — When nothing more interesting is
+ * happening (combat @2, raiding @3), two low-priority objectives kick in:
+ * {@link MineBlocksGoal} harvests nearby logs / stone / ores (tool-gated,
+ * {@code mobGriefing}-honouring) into the backpack, and {@link CraftItemsGoal}
+ * walks the curated {@link CraftingLadder} (logs → planks → sticks →
+ * wooden/stone sword &amp; pickaxe), equipping crafted gear when it beats what's
+ * worn. Together they form an emergent <i>gather → craft → equip → fight
+ * better</i> loop. The equipment / tool helpers they call live on this class
+ * because they need {@code protected} Mob members.</p>
  *
  * <p><b>Spawning</b> — spawn egg + {@code /summon playermob:player_mob}
  * only. No natural spawns, no raid hooks.</p>
@@ -192,6 +207,11 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         this.goalSelector.addGoal(2, new WeaponAwareAttackGoal(this, 1.0, 8.0f));
         this.goalSelector.addGoal(3, new RaidContainersGoal(this, /* speed */ 0.9, /* radius */ 12));
         this.goalSelector.addGoal(3, new RaidArmorStandsGoal(this, /* speed */ 0.9, /* radius */ 12.0));
+        // Idle "player-like" objectives. Craft @5 runs before mine @6 so the mob
+        // processes the materials it already has before gathering more; both sit
+        // below combat (@2) and raiding (@3) so anything interesting preempts them.
+        this.goalSelector.addGoal(5, new CraftItemsGoal(this));
+        this.goalSelector.addGoal(6, new MineBlocksGoal(this, /* speed */ 0.9, /* radius */ 10));
         this.goalSelector.addGoal(8, new WaterAvoidingRandomStrollGoal(this, 0.6));
         this.goalSelector.addGoal(9, new LookAtPlayerGoal(this, LivingEntity.class, 8.0F));
         this.goalSelector.addGoal(10, new RandomLookAroundGoal(this));
@@ -325,6 +345,106 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         EquipmentSlot mobSlot = getEquipmentSlotForItem(candidate);
         ItemStack current = getItemBySlot(mobSlot);
         return canReplaceCurrentItem(candidate, current);
+    }
+
+    // ---- Gather & craft helpers (called from MineBlocksGoal / CraftItemsGoal) ----
+
+    /**
+     * Transient "currently mid block-break" flag. {@link MineBlocksGoal} sets it
+     * while animating a break so {@link CraftItemsGoal} (higher priority) won't
+     * preempt and waste the partial progress. Not saved or synced — resets to
+     * {@code false} on load, which is harmless (the goal just re-evaluates).
+     */
+    private boolean breakingBlock = false;
+
+    public boolean isBreakingBlock() {
+        return breakingBlock;
+    }
+
+    public void setBreakingBlock(boolean breaking) {
+        this.breakingBlock = breaking;
+    }
+
+    /**
+     * Add a harvested or crafted stack to the backpack, merging into existing
+     * stacks first (reuses {@link EquipmentEvaluator#addToContainer}). Returns
+     * whatever didn't fit (empty if it all fit).
+     */
+    public ItemStack stashInInventory(ItemStack stack) {
+        return EquipmentEvaluator.addToContainer(this.inventory, stack);
+    }
+
+    /**
+     * Equip {@code candidate} if it beats what's in the matching equipment slot
+     * (same {@link #canReplaceCurrentItem} test the raid goals use). Returns the
+     * item the caller should stash back into the backpack — the displaced piece
+     * if we equipped, or {@code candidate} unchanged if we didn't.
+     */
+    public ItemStack equipIfBetter(ItemStack candidate) {
+        if (candidate.isEmpty()) return candidate;
+        EquipmentSlot slot = getEquipmentSlotForItem(candidate);
+        ItemStack current = getItemBySlot(slot);
+        if (canReplaceCurrentItem(candidate, current)) {
+            setItemSlot(slot, candidate.copy());
+            return current;
+        }
+        return candidate;
+    }
+
+    /**
+     * The set of items the mob currently has equipped (hands + armor). Fed to
+     * {@link CraftingLadder#nextCraft} so its ownership guards see tools the mob
+     * is wearing, not just what's loose in the backpack.
+     */
+    public Set<Item> equippedToolItems() {
+        Set<Item> items = new HashSet<>();
+        for (EquipmentSlot slot : EquipmentSlot.values()) {
+            ItemStack stack = getItemBySlot(slot);
+            if (!stack.isEmpty()) items.add(stack.getItem());
+        }
+        return items;
+    }
+
+    /**
+     * Ensure the mainhand can actually harvest {@code state}. Returns {@code true}
+     * immediately if the block needs no special tool or the mainhand is already
+     * correct; otherwise pulls the first correct tool out of the backpack into
+     * the mainhand (stashing the displaced item) and returns whether the mainhand
+     * can now harvest the block.
+     */
+    public boolean equipCorrectToolFor(BlockState state) {
+        if (!state.requiresCorrectToolForDrops()) return true;
+        if (getMainHandItem().isCorrectToolForDrops(state)) return true;
+        for (int i = 0; i < this.inventory.getContainerSize(); i++) {
+            ItemStack candidate = this.inventory.getItem(i);
+            if (candidate.isEmpty() || !candidate.isCorrectToolForDrops(state)) continue;
+            ItemStack tool = candidate.copy();
+            ItemStack previousMain = getMainHandItem();
+            this.inventory.setItem(i, ItemStack.EMPTY);
+            setItemSlot(EquipmentSlot.MAINHAND, tool);
+            if (!previousMain.isEmpty()) {
+                ItemStack leftover = stashInInventory(previousMain);
+                if (!leftover.isEmpty()) spawnAtLocation(leftover);
+            }
+            return true;
+        }
+        return getMainHandItem().isCorrectToolForDrops(state);
+    }
+
+    /**
+     * True if the mob could harvest {@code state} with some tool it owns — no
+     * tool required, or the mainhand or a backpack item is the correct tool.
+     * {@link MineBlocksGoal} uses this to decide whether a block is worth
+     * targeting; it calls {@link #equipCorrectToolFor} before actually breaking.
+     */
+    public boolean canHarvestWithOwnedTools(BlockState state) {
+        if (!state.requiresCorrectToolForDrops()) return true;
+        if (getMainHandItem().isCorrectToolForDrops(state)) return true;
+        for (int i = 0; i < this.inventory.getContainerSize(); i++) {
+            ItemStack candidate = this.inventory.getItem(i);
+            if (!candidate.isEmpty() && candidate.isCorrectToolForDrops(state)) return true;
+        }
+        return false;
     }
 
     // ---- Recently-explored cooldown maps ---------------------------------
