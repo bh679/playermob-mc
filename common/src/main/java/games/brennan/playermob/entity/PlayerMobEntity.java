@@ -96,7 +96,9 @@ import java.util.UUID;
  * so the mob has a backpack. {@link RaidContainersGoal} +
  * {@link RaidArmorStandsGoal} drive scan/path/swap behaviour. A
  * "recently explored" cooldown map keeps the mob from looping the same
- * chest. On death, {@link #dropCustomDeathLoot} dumps the inventory.</p>
+ * chest. On death, the mob drops everything like a player would — the
+ * backpack via {@link #dropCustomDeathLoot} and all equipped gear via the
+ * guaranteed {@link #getEquipmentDropChance} override.</p>
  *
  * <p><b>Spawning</b> — spawn egg + {@code /summon playermob:player_mob}
  * only. No natural spawns, no raid hooks.</p>
@@ -906,8 +908,19 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     // ---- Death drops -----------------------------------------------------
 
     /**
-     * On death, drop everything in the inventory in addition to vanilla
-     * equipment drops. Mirrors {@code Pillager.dropCustomDeathLoot}.
+     * Drop chance that flags a slot as a guaranteed, full-durability death
+     * drop — the same {@code 2.0F} sentinel vanilla uses in
+     * {@code Mob.setGuaranteedDrop}. Any value {@code > 1.0F} makes vanilla's
+     * {@code Mob.dropCustomDeathLoot} treat the slot as a guaranteed drop.
+     */
+    private static final float GUARANTEED_EQUIPMENT_DROP_CHANCE = 2.0F;
+
+    /**
+     * On death, drop the entire backpack inventory. Combined with the
+     * guaranteed {@link #getEquipmentDropChance} override below — which makes
+     * {@code super.dropCustomDeathLoot} drop every equipped slot too — the mob
+     * drops everything it was carrying, just like a player. Mirrors
+     * {@code Pillager.dropCustomDeathLoot} for the backpack half.
      */
     @Override
     protected void dropCustomDeathLoot(ServerLevel level, DamageSource source, boolean recentlyHit) {
@@ -919,6 +932,29 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
             }
         }
         this.inventory.clearContent();
+    }
+
+    /**
+     * Make every equipment slot — held weapon, off-hand, and all four armor
+     * pieces — drop on death, at full durability, regardless of what killed
+     * the mob. A real player drops all their gear on death; PlayerMob now
+     * matches.
+     *
+     * <p>Returning a guaranteed value ({@code > 1.0F}) makes vanilla's
+     * {@code Mob.dropCustomDeathLoot} bypass the "recently hit by a player"
+     * gate, always pass the random roll, and skip the durability-damage step.
+     * Curse of Vanishing items are still destroyed (vanilla's
+     * {@code PREVENT_EQUIPMENT_DROP} check upstream) — also exactly like a
+     * player.</p>
+     *
+     * <p>Surgical by design: only the drop-chance <em>method</em> is
+     * overridden. The backing {@code handDropChances}/{@code armorDropChances}
+     * fields are left at their vanilla defaults, so the XP-reward and
+     * item-pickup logic that reads those fields directly is unaffected.</p>
+     */
+    @Override
+    protected float getEquipmentDropChance(EquipmentSlot slot) {
+        return GUARANTEED_EQUIPMENT_DROP_CHANCE;
     }
 
     /**
