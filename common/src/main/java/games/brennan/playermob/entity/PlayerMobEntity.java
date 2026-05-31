@@ -13,9 +13,15 @@ import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.DifficultyInstance;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.level.block.BarrelBlock;
+import net.minecraft.world.level.block.entity.BarrelBlockEntity;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.ChestBlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.MobSpawnType;
@@ -113,6 +119,12 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     /** Recently-explored entries expire after this many ticks (60 seconds). */
     private static final long RECENTLY_EXPLORED_TTL_TICKS = 1200L;
 
+    /**
+     * Chest {@code triggerEvent} ID for "viewer count changed" — drives the
+     * lid animation. See {@link ChestBlockEntity#triggerEvent}.
+     */
+    private static final int CHEST_VIEWERS_EVENT = 1;
+
     private static final String TAG_STANCE = "Stance";
     private static final String TAG_SKIN_INDEX = "SkinIndex";
     private static final String TAG_EXPLORED_BLOCKS = "ExploredBlocks";
@@ -136,6 +148,18 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
      * block map.
      */
     private final Map<UUID, Long> recentlyExploredEntities = new HashMap<>();
+
+    /**
+     * Position of the container this mob currently has visually "open" (chest
+     * lid animated, or barrel block-state set to OPEN). {@code null} when the
+     * mob is not actively looting a container.
+     *
+     * <p>Tracked here (not in the raid goal) so the entity's {@link #die}
+     * override can force-close the container when the mob is killed mid-raid
+     * — the goal's {@code stop()} doesn't reliably fire on death because the
+     * entity may be removed before the goal selector ticks again.</p>
+     */
+    private BlockPos openContainerPos;
 
     public PlayerMobEntity(EntityType<? extends PlayerMobEntity> type, Level level) {
         super(type, level);
@@ -423,6 +447,82 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
             }
         }
         this.inventory.clearContent();
+    }
+
+    /**
+     * Hook the death event to force-close any container the mob had open.
+     * {@link RaidContainersGoal#stop} also closes the container, but when the
+     * mob dies mid-raid the goal selector stops ticking before it gets the
+     * chance — this override is the safety net so chests/barrels don't
+     * stay visually stuck open.
+     */
+    @Override
+    public void die(DamageSource source) {
+        closeOpenedContainer();
+        super.die(source);
+    }
+
+    // ---- Container open/close (called from RaidContainersGoal) -----------
+
+    /**
+     * Animate the container at {@code pos} as open and play the matching
+     * sound (chest lid via {@link Level#blockEvent}, barrel via the
+     * {@link BarrelBlock#OPEN} block-state property). Tracks the position
+     * on the entity so {@link #die} can force-close it if needed.
+     */
+    public void openContainer(BlockPos pos) {
+        Level level = level();
+        BlockEntity be = level.getBlockEntity(pos);
+        if (be == null) return;
+        BlockState state = level.getBlockState(pos);
+
+        if (be instanceof ChestBlockEntity) {
+            level.blockEvent(pos, state.getBlock(), CHEST_VIEWERS_EVENT, 1);
+            playContainerSound(pos, SoundEvents.CHEST_OPEN);
+        } else if (be instanceof BarrelBlockEntity) {
+            if (state.hasProperty(BarrelBlock.OPEN)) {
+                level.setBlock(pos, state.setValue(BarrelBlock.OPEN, true), 3);
+            }
+            playContainerSound(pos, SoundEvents.BARREL_OPEN);
+        } else {
+            return; // unknown container type; nothing to track
+        }
+        this.openContainerPos = pos.immutable();
+    }
+
+    /**
+     * Reverse {@link #openContainer}. Cheap no-op if no container is
+     * currently flagged open — safe to call from cleanup paths.
+     */
+    public void closeOpenedContainer() {
+        if (openContainerPos == null) return;
+        BlockPos pos = openContainerPos;
+        openContainerPos = null;
+
+        Level level = level();
+        BlockEntity be = level.getBlockEntity(pos);
+        if (be == null) return; // container destroyed mid-raid; nothing to animate
+        BlockState state = level.getBlockState(pos);
+
+        if (be instanceof ChestBlockEntity) {
+            level.blockEvent(pos, state.getBlock(), CHEST_VIEWERS_EVENT, 0);
+            playContainerSound(pos, SoundEvents.CHEST_CLOSE);
+        } else if (be instanceof BarrelBlockEntity) {
+            if (state.hasProperty(BarrelBlock.OPEN)) {
+                level.setBlock(pos, state.setValue(BarrelBlock.OPEN, false), 3);
+            }
+            playContainerSound(pos, SoundEvents.BARREL_CLOSE);
+        }
+    }
+
+    private void playContainerSound(BlockPos pos, SoundEvent sound) {
+        level().playSound(
+            /* exclude */ null,
+            pos,
+            sound,
+            SoundSource.BLOCKS,
+            /* volume */ 0.5F,
+            /* pitch */ 0.9F + getRandom().nextFloat() * 0.1F);
     }
 
     // ---- CrossbowAttackMob -----------------------------------------------

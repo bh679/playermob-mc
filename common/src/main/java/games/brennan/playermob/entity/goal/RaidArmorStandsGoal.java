@@ -12,7 +12,7 @@ import java.util.List;
 
 /**
  * Walk to nearby armor stands and swap in better gear from them, one piece
- * at a time with a random 1–5 second delay per swap (matches
+ * at a time with a random 0.3–2 second delay per swap (matches
  * {@link RaidContainersGoal}'s pace).
  *
  * <p>Mirror of the chest raider but for {@link ArmorStand} entities. Swap
@@ -28,8 +28,8 @@ import java.util.List;
 public final class RaidArmorStandsGoal extends Goal {
 
     private static final int APPROACH_PAUSE_TICKS = 20;    // 1s once in reach before first swap
-    private static final int MIN_SWAP_DELAY_TICKS = 20;    // 1s minimum per swap
-    private static final int MAX_SWAP_DELAY_TICKS = 100;   // 5s maximum per swap
+    private static final int MIN_SWAP_DELAY_TICKS = 6;     // 0.3s minimum per swap (matches RaidContainersGoal)
+    private static final int MAX_SWAP_DELAY_TICKS = 40;    // 2s maximum per swap (matches RaidContainersGoal)
     private static final int PATH_TIMEOUT_TICKS = 100;     // 5s to reach
     private static final int POST_VISIT_COOLDOWN = 20;
     private static final int EMPTY_SCAN_COOLDOWN = 40;
