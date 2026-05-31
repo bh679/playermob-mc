@@ -11,25 +11,34 @@ import java.util.EnumSet;
 import java.util.List;
 
 /**
- * Walk to nearby armor stands and swap in better gear from them.
+ * Walk to nearby armor stands and swap in better gear from them, one piece
+ * at a time with a random 1–5 second delay per swap (matches
+ * {@link RaidContainersGoal}'s pace).
  *
- * <p>Mirror of {@link RaidContainersGoal} but for {@link ArmorStand} entities
- * instead of block entities. Swap mechanic differs slightly: armor stand
- * keeps the displaced piece in the same slot (true swap), whereas containers
- * have spare slots so the displaced piece goes into "any free slot".</p>
+ * <p>Mirror of the chest raider but for {@link ArmorStand} entities. Swap
+ * semantics differ: the armor stand keeps the displaced piece in the same
+ * slot (true swap), since stands have no spare slots to dump into.</p>
  *
- * <p>Honours {@code mobGriefing} gamerule and combat-preemption priority
- * exactly like the container variant.</p>
+ * <p>No "open" visual — armor stands aren't containers in the lid-animation
+ * sense. The mob just walks up, pauses, and methodically equips piece by
+ * piece.</p>
+ *
+ * <p>Honours {@code mobGriefing} gamerule + combat-preemption priority.</p>
  */
 public final class RaidArmorStandsGoal extends Goal {
 
-    private static final int LOOT_PAUSE_TICKS = 10;
-    private static final int PATH_TIMEOUT_TICKS = 100;
+    private static final int APPROACH_PAUSE_TICKS = 20;    // 1s once in reach before first swap
+    private static final int MIN_SWAP_DELAY_TICKS = 20;    // 1s minimum per swap
+    private static final int MAX_SWAP_DELAY_TICKS = 100;   // 5s maximum per swap
+    private static final int PATH_TIMEOUT_TICKS = 100;     // 5s to reach
     private static final int POST_VISIT_COOLDOWN = 20;
     private static final int EMPTY_SCAN_COOLDOWN = 40;
     private static final double REACH_DISTANCE_SQR = 4.0;
 
-    private enum Phase { IDLE, PATHING, LOOTING }
+    private enum Phase { IDLE, PATHING, APPROACHING, LOOTING }
+
+    /** Iteration order over the 6 equipment slots. Caches as field to avoid per-tick allocation. */
+    private static final EquipmentSlot[] SLOTS = EquipmentSlot.values();
 
     private final PlayerMobEntity mob;
     private final double moveSpeed;
@@ -39,6 +48,9 @@ public final class RaidArmorStandsGoal extends Goal {
     private int phaseTicks = 0;
     private int scanCooldown = 0;
     private ArmorStand target;
+
+    private int slotCursor = 0;       // index into SLOTS
+    private int nextSwapAt = -1;      // tick to fire next swap, -1 = unscheduled
 
     public RaidArmorStandsGoal(PlayerMobEntity mob, double moveSpeed, double scanRadius) {
         this.mob = mob;
@@ -77,6 +89,8 @@ public final class RaidArmorStandsGoal extends Goal {
     public void start() {
         phase = Phase.PATHING;
         phaseTicks = 0;
+        slotCursor = 0;
+        nextSwapAt = -1;
         mob.getNavigation().moveTo(target, moveSpeed);
     }
 
@@ -89,7 +103,14 @@ public final class RaidArmorStandsGoal extends Goal {
         }
         phase = Phase.IDLE;
         phaseTicks = 0;
+        slotCursor = 0;
+        nextSwapAt = -1;
         scanCooldown = POST_VISIT_COOLDOWN;
+    }
+
+    @Override
+    public boolean requiresUpdateEveryTick() {
+        return true;
     }
 
     @Override
@@ -103,23 +124,48 @@ public final class RaidArmorStandsGoal extends Goal {
         switch (phase) {
             case PATHING -> {
                 if (mob.distanceToSqr(target) < REACH_DISTANCE_SQR) {
-                    phase = Phase.LOOTING;
-                    phaseTicks = 0;
                     mob.getNavigation().stop();
                     mob.getLookControl().setLookAt(target, 30f, 30f);
+                    phase = Phase.APPROACHING;
+                    phaseTicks = 0;
                 } else if (phaseTicks > PATH_TIMEOUT_TICKS) {
                     stop();
                 }
             }
-            case LOOTING -> {
-                if (phaseTicks < LOOT_PAUSE_TICKS) return;
-                // Cover all 6 equipment slots — head/chest/legs/feet + mainhand/offhand.
-                for (EquipmentSlot slot : EquipmentSlot.values()) {
-                    mob.tryReplaceFromArmorStand(target, slot);
+            case APPROACHING -> {
+                if (phaseTicks >= APPROACH_PAUSE_TICKS) {
+                    phase = Phase.LOOTING;
+                    phaseTicks = 0;
+                    slotCursor = 0;
+                    nextSwapAt = -1;
                 }
-                stop();
             }
+            case LOOTING -> tickLooting();
             default -> { /* IDLE */ }
+        }
+    }
+
+    private void tickLooting() {
+        if (nextSwapAt == -1) {
+            // Advance to the next slot we actually want from the stand.
+            while (slotCursor < SLOTS.length
+                    && !mob.wouldReplaceFromArmorStand(target, SLOTS[slotCursor])) {
+                slotCursor++;
+            }
+            if (slotCursor >= SLOTS.length) {
+                stop();
+                return;
+            }
+            int delay = MIN_SWAP_DELAY_TICKS
+                + mob.getRandom().nextInt(MAX_SWAP_DELAY_TICKS - MIN_SWAP_DELAY_TICKS + 1);
+            nextSwapAt = mob.tickCount + delay;
+            return;
+        }
+
+        if (mob.tickCount >= nextSwapAt) {
+            mob.tryReplaceFromArmorStand(target, SLOTS[slotCursor]);
+            slotCursor++;
+            nextSwapAt = -1;
         }
     }
 

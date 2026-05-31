@@ -279,6 +279,30 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         return true;
     }
 
+    /**
+     * Pre-check variant of {@link #tryReplaceFromContainer} — answers
+     * "would the mob take this slot if asked?" without actually swapping.
+     * Used by the raid goal to skip worthless slots without burning the
+     * per-swap delay budget.
+     */
+    public boolean wouldReplaceFromContainer(Container source, int slotIdx) {
+        if (source == null) return false;
+        ItemStack candidate = source.getItem(slotIdx);
+        if (candidate.isEmpty()) return false;
+        EquipmentSlot slot = getEquipmentSlotForItem(candidate);
+        ItemStack current = getItemBySlot(slot);
+        return canReplaceCurrentItem(candidate, current);
+    }
+
+    /** Pre-check variant of {@link #tryReplaceFromArmorStand}. */
+    public boolean wouldReplaceFromArmorStand(ArmorStand stand, EquipmentSlot fromSlot) {
+        ItemStack candidate = stand.getItemBySlot(fromSlot);
+        if (candidate.isEmpty()) return false;
+        EquipmentSlot mobSlot = getEquipmentSlotForItem(candidate);
+        ItemStack current = getItemBySlot(mobSlot);
+        return canReplaceCurrentItem(candidate, current);
+    }
+
     // ---- Recently-explored cooldown maps ---------------------------------
 
     /**
