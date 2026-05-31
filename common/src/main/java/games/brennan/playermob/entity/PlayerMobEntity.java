@@ -1,9 +1,13 @@
 package games.brennan.playermob.entity;
 
+import games.brennan.playermob.entity.goal.EatFoodGoal;
 import games.brennan.playermob.entity.goal.RaidArmorStandsGoal;
 import games.brennan.playermob.entity.goal.RaidContainersGoal;
 import games.brennan.playermob.entity.goal.WeaponAwareAttackGoal;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.particles.ItemParticleOption;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
@@ -21,6 +25,7 @@ import net.minecraft.world.level.block.BarrelBlock;
 import net.minecraft.world.level.block.entity.BarrelBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.ChestBlockEntity;
+import net.minecraft.world.level.block.entity.ShulkerBoxBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
@@ -35,6 +40,7 @@ import net.minecraft.world.entity.ai.goal.WaterAvoidingRandomStrollGoal;
 import net.minecraft.world.entity.ai.goal.target.HurtByTargetGoal;
 import net.minecraft.world.entity.ai.goal.target.NearestAttackableTargetGoal;
 import net.minecraft.world.entity.monster.CrossbowAttackMob;
+import net.minecraft.world.food.FoodProperties;
 import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.monster.RangedAttackMob;
@@ -190,6 +196,10 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     protected void registerGoals() {
         this.goalSelector.addGoal(0, new FloatGoal(this));
         this.goalSelector.addGoal(2, new WeaponAwareAttackGoal(this, 1.0, 8.0f));
+        // EatFoodGoal added BEFORE the raid goals at the same priority so
+        // its canUse() is evaluated first — a low-HP mob with food prefers
+        // eating over walking to the next chest.
+        this.goalSelector.addGoal(3, new EatFoodGoal(this));
         this.goalSelector.addGoal(3, new RaidContainersGoal(this, /* speed */ 0.9, /* radius */ 12));
         this.goalSelector.addGoal(3, new RaidArmorStandsGoal(this, /* speed */ 0.9, /* radius */ 12.0));
         this.goalSelector.addGoal(8, new WaterAvoidingRandomStrollGoal(this, 0.6));
@@ -259,6 +269,22 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     // ---- Equipment swap helpers (called from raid goals) -----------------
 
     /**
+     * Replace vanilla's comparator with the enchantment-aware
+     * {@link EquipmentEvaluator#shouldReplace} so an iron sword with
+     * Sharpness V can win against a plain diamond sword. Vanilla's
+     * implementation in {@link net.minecraft.world.entity.Mob} short-circuits
+     * on base damage and never sees the enchantment difference.
+     *
+     * <p>Overriding here propagates the heuristic to vanilla pickup paths
+     * ({@code Mob.pickUpItem}, the ground-item pickup checks) in addition to
+     * the raid goals' explicit {@link #wouldReplaceFromContainer} calls.</p>
+     */
+    @Override
+    protected boolean canReplaceCurrentItem(ItemStack candidate, ItemStack existing) {
+        return EquipmentEvaluator.shouldReplace(candidate, existing);
+    }
+
+    /**
      * Try to swap a candidate item from a container slot into the mob's
      * equipment. If the candidate is better than what the mob is wearing in
      * the matching slot, take it (clearing the container slot) and put the
@@ -325,6 +351,56 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         EquipmentSlot mobSlot = getEquipmentSlotForItem(candidate);
         ItemStack current = getItemBySlot(mobSlot);
         return canReplaceCurrentItem(candidate, current);
+    }
+
+    // ---- Food helpers (called from EatFoodGoal) --------------------------
+
+    /**
+     * Returns the inventory slot of the highest-nutrition food currently
+     * carried, or {@code -1} if no edible item is present. "Edible" means the
+     * item has a non-null {@link DataComponents#FOOD} component — same
+     * definition vanilla uses for items players can right-click to eat.
+     */
+    public int findBestFoodSlot() {
+        int bestSlot = -1;
+        int bestNutrition = 0;
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            ItemStack stack = inventory.getItem(i);
+            if (stack.isEmpty()) continue;
+            FoodProperties food = stack.get(DataComponents.FOOD);
+            if (food == null) continue;
+            if (food.nutrition() > bestNutrition) {
+                bestNutrition = food.nutrition();
+                bestSlot = i;
+            }
+        }
+        return bestSlot;
+    }
+
+    /**
+     * Spawn server-broadcast item-puff particles near the mob's mouth —
+     * the visual feedback for "this mob is eating right now". Client-side
+     * {@link Level#addParticle} won't reach other players, so we use
+     * {@link ServerLevel#sendParticles} which replicates to everyone in range.
+     *
+     * <p>Vanilla's {@code LivingEntity.triggerItemUseEffects} is gated on
+     * {@code isUsingItem()} and runs client-side per tick from data-tracked
+     * use state — we don't drive {@code startUsingItem} so the vanilla path
+     * never fires for our eating cycle.</p>
+     */
+    public void spawnEatingParticles(ItemStack food) {
+        if (!(level() instanceof ServerLevel serverLevel)) return;
+        ItemParticleOption particle = new ItemParticleOption(ParticleTypes.ITEM, food);
+        serverLevel.sendParticles(
+            particle,
+            getX(),
+            getEyeY() - 0.2,
+            getZ(),
+            /* count */ 4,
+            /* xDist */ 0.15,
+            /* yDist */ 0.1,
+            /* zDist */ 0.15,
+            /* speed */ 0.05);
     }
 
     // ---- Recently-explored cooldown maps ---------------------------------
@@ -484,6 +560,12 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
                 level.setBlock(pos, state.setValue(BarrelBlock.OPEN, true), 3);
             }
             playContainerSound(pos, SoundEvents.BARREL_OPEN);
+        } else if (be instanceof ShulkerBoxBlockEntity) {
+            // Vanilla ShulkerBoxBlockEntity.triggerEvent(1, n) drives the lid
+            // animation. Bypassing startOpen(Player) here because that method
+            // is Player-typed and our mob isn't a Player.
+            level.blockEvent(pos, state.getBlock(), ShulkerBoxBlockEntity.EVENT_SET_OPEN_COUNT, 1);
+            playContainerSound(pos, SoundEvents.SHULKER_BOX_OPEN);
         } else {
             return; // unknown container type; nothing to track
         }
@@ -512,6 +594,9 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
                 level.setBlock(pos, state.setValue(BarrelBlock.OPEN, false), 3);
             }
             playContainerSound(pos, SoundEvents.BARREL_CLOSE);
+        } else if (be instanceof ShulkerBoxBlockEntity) {
+            level.blockEvent(pos, state.getBlock(), ShulkerBoxBlockEntity.EVENT_SET_OPEN_COUNT, 0);
+            playContainerSound(pos, SoundEvents.SHULKER_BOX_CLOSE);
         }
     }
 

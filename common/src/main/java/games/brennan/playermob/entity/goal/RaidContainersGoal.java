@@ -9,6 +9,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BarrelBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.ChestBlockEntity;
+import net.minecraft.world.level.block.entity.ShulkerBoxBlockEntity;
 
 import java.util.EnumSet;
 
@@ -267,9 +268,11 @@ public final class RaidContainersGoal extends Goal {
 
     private static boolean isLootableContainer(BlockEntity be) {
         // ChestBlockEntity covers regular + trapped chests (TrappedChestBlockEntity extends ChestBlockEntity).
-        // Whitelisting only chest + barrel keeps the mob from raiding hoppers,
-        // dispensers, droppers, brewing stands, shulker boxes — items that
-        // usually have specific purposes and shouldn't be touched.
-        return be instanceof ChestBlockEntity || be instanceof BarrelBlockEntity;
+        // ShulkerBoxBlockEntity covers all 16 dyed variants (they all extend the base class).
+        // Hoppers / dispensers / droppers / brewing stands are intentionally
+        // excluded so the mob can't break redstone or brewing setups.
+        return be instanceof ChestBlockEntity
+            || be instanceof BarrelBlockEntity
+            || be instanceof ShulkerBoxBlockEntity;
     }
 }
