@@ -263,6 +263,35 @@ class CraftingLadderTest {
             "loop terminates once the stone kit is complete (no busywork)");
     }
 
+    @Test
+    void neededRawMaterialFollowsTheProgression() {
+        // No pickaxe yet → still gathering wood, whatever the wood count.
+        assertEquals(CraftingLadder.Need.LOGS,
+            CraftingLadder.neededRawMaterial(new SimpleContainer(8), Set.of()),
+            "nothing owned → gather logs");
+        assertEquals(CraftingLadder.Need.LOGS,
+            CraftingLadder.neededRawMaterial(backpack(Items.OAK_LOG, 10), Set.of()),
+            "lots of wood but no pickaxe → still logs (can't mine stone yet)");
+
+        // Owns a pickaxe + a wood reserve → switch to stone (ends the wood loop).
+        assertEquals(CraftingLadder.Need.STONE,
+            CraftingLadder.neededRawMaterial(backpack(Items.OAK_LOG, 2),
+                Set.of(Items.WOODEN_PICKAXE)),
+            "pickaxe + wood reserve → go get stone");
+
+        // Owns a pickaxe but wood reserve is depleted → top up logs briefly.
+        assertEquals(CraftingLadder.Need.LOGS,
+            CraftingLadder.neededRawMaterial(new SimpleContainer(8),
+                Set.of(Items.WOODEN_PICKAXE)),
+            "pickaxe but no wood → top up logs before stone");
+
+        // Full stone kit → gather nothing.
+        assertEquals(CraftingLadder.Need.NONE,
+            CraftingLadder.neededRawMaterial(backpack(Items.OAK_LOG, 10),
+                Set.of(Items.STONE_SWORD, Items.STONE_PICKAXE, Items.STONE_AXE)),
+            "kitted → gather nothing");
+    }
+
     private static int countOf(SimpleContainer c, Item item) {
         int n = 0;
         for (int i = 0; i < c.getContainerSize(); i++) {

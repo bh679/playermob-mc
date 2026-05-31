@@ -201,6 +201,39 @@ public final class CraftingLadder {
         return !c.ownsStoneSword || !c.ownsStonePickaxe || !c.ownsStoneAxe;
     }
 
+    /** What raw block the mob should currently gather. */
+    public enum Need { LOGS, STONE, NONE }
+
+    /**
+     * Minimum wood (in stick-equivalents) the mob keeps before committing to
+     * stone gathering — the 3 stone tools cost 5 sticks total, so a small buffer
+     * over that means it won't strand itself underground without sticks to craft.
+     */
+    private static final int STONE_PHASE_WOOD_RESERVE = 6;
+
+    /**
+     * Decide which raw material {@code MineBlocksGoal} should gather next, so the
+     * mob stops over-gathering one resource:
+     * <ul>
+     *   <li>{@link Need#NONE} — objective complete (full stone kit); don't gather.</li>
+     *   <li>{@link Need#STONE} — owns a pickaxe (can mine stone) and holds enough
+     *       wood reserve to craft the remaining stone tools → go get cobblestone.</li>
+     *   <li>{@link Need#LOGS} — still climbing the wood tier, or briefly topping up
+     *       a depleted wood reserve before resuming stone.</li>
+     * </ul>
+     * This is what ends the "endless wood" loop: once the mob has its wooden
+     * pickaxe and a little wood banked, it targets stone instead of more trees.
+     */
+    public static Need neededRawMaterial(Container backpack, Set<Item> ownedTools) {
+        Census c = census(backpack, ownedTools);
+        if (!hasToolObjective(c)) return Need.NONE;
+        if (c.ownsPickaxe) {
+            int woodUnits = c.sticks + c.planks * 2 + c.logs * 8; // stick-equivalents
+            return woodUnits >= STONE_PHASE_WOOD_RESERVE ? Need.STONE : Need.LOGS;
+        }
+        return Need.LOGS;
+    }
+
     /**
      * Remove {@code action}'s costs from {@code backpack}. The caller decides
      * where the {@link CraftAction#output} goes (equip a tool, or stash a
