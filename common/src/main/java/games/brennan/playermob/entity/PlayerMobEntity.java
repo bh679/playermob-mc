@@ -291,6 +291,23 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         return super.finalizeSpawn(world, difficulty, reason, data);
     }
 
+    // ---- Despawn / persistence -------------------------------------------
+
+    /**
+     * PlayerMobs never despawn naturally. Returning {@code true} makes
+     * {@code Mob.checkDespawn()} treat every PlayerMob as persistent — skipping
+     * both the &gt;128-block instant despawn and the 32–128-block idle random
+     * despawn, as if the mob were name-tagged — without writing any NBT, so it
+     * applies to summoned, spawn-egg, and already-saved mobs alike.
+     *
+     * <p>Does not affect the Peaceful-difficulty check: like all monsters,
+     * PlayerMobs are still removed when difficulty is set to Peaceful.</p>
+     */
+    @Override
+    public boolean requiresCustomPersistence() {
+        return true;
+    }
+
     // ---- Stance accessors -------------------------------------------------
 
     public Stance getStance() {
