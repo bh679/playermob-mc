@@ -86,6 +86,12 @@ public final class SkepticalWatchGoal extends Goal {
             mob.raiseShieldIfHeld();
             mob.drawWeaponFromBackpack();
         }
+
+        // While the shield is up, square the body up to the threat so the block
+        // actually deflects (vanilla only blocks hits from the facing direction).
+        if (mob.isUsingItem()) {
+            mob.faceBodyToward(watched);
+        }
     }
 
     @Override

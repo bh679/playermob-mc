@@ -7,6 +7,7 @@ import games.brennan.playermob.entity.goal.RaidContainersGoal;
 import games.brennan.playermob.entity.goal.SkepticalWatchGoal;
 import games.brennan.playermob.entity.goal.WeaponAwareAttackGoal;
 import net.minecraft.core.BlockPos;
+import net.minecraft.util.Mth;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
@@ -28,6 +29,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.MobSpawnType;
+import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.SpawnGroupData;
 import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
@@ -57,6 +59,7 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.ServerLevelAccessor;
 import net.minecraft.world.phys.AABB;
@@ -85,8 +88,8 @@ import java.util.UUID;
  * toward; {@link FleeFromCategoryGoal}, {@link SkepticalWatchGoal}, and
  * {@link FriendlyGreetGoal} cover the non-combat dispositions and self-gate on
  * the live personality, so a runtime flip (see {@link #hurt}) re-wires nothing.
- * Personalities are server-side only (the crouch gesture rides the existing
- * shared sneak flag, so no extra client sync is needed).</p>
+ * Personalities are server-side only; the crouch gesture rides the vanilla-synced
+ * entity pose ({@link #setCrouching}), so no extra client sync is needed.</p>
  *
  * <p><b>Skins (v1.5)</b> — Each mob rolls a {@link #getSkinIndex skin index}
  * in {@link #finalizeSpawn} from {@code [0, SKIN_COUNT)}. The client renderer
@@ -329,20 +332,105 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     }
 
     /**
-     * Friendly "gift": pop the first non-empty backpack stack and toss it as an
-     * {@link ItemEntity} arcing toward {@code target}. Returns {@code false}
-     * when the backpack is empty (nothing to give).
+     * Crouch gesture used by the Friendly greeting and Shy hiding. The
+     * {@code PlayerModel} renders the sneak pose from {@link #isCrouching()}
+     * (i.e. {@link #getPose()} {@code == CROUCHING}), <em>not</em> from the
+     * shared sneak flag — so we must set the pose, not just
+     * {@code setShiftKeyDown}. We set both so the flag-driven bits (name-tag
+     * dimming, etc.) stay consistent. Our entity has no per-pose dimensions, so
+     * this changes the visual only, not the hitbox. {@code setPose} no-ops when
+     * the value is unchanged, so it's cheap to assert every tick.
+     */
+    public void setCrouching(boolean crouching) {
+        setShiftKeyDown(crouching);
+        setPose(crouching ? Pose.CROUCHING : Pose.STANDING);
+    }
+
+    /**
+     * Snap the body (and head) to face {@code target}. Vanilla shield blocking
+     * ({@code LivingEntity.isDamageSourceBlocked}) only deflects hits arriving
+     * from the direction the body faces, so a Skeptical mob holding its shield
+     * up must square up to the threat for the block to count.
+     */
+    public void faceBodyToward(LivingEntity target) {
+        double dx = target.getX() - getX();
+        double dz = target.getZ() - getZ();
+        float yaw = (float) (Mth.atan2(dz, dx) * (180.0 / Math.PI)) - 90.0F;
+        setYRot(yaw);
+        setYBodyRot(yaw);
+        setYHeadRot(yaw);
+    }
+
+    /**
+     * Friendly "gift": toss an item as an {@link ItemEntity} arcing toward
+     * {@code target}. Prefers a real item from the backpack (something it
+     * looted); if the backpack is empty it offers a small default gift so the
+     * gesture always lands. Always drops something.
      */
     public boolean giveItemTo(LivingEntity target) {
+        ItemStack gift = ItemStack.EMPTY;
         for (int i = 0; i < inventory.getContainerSize(); i++) {
             if (!inventory.getItem(i).isEmpty()) {
-                ItemEntity gift = spawnAtLocation(inventory.removeItemNoUpdate(i));
-                if (gift != null) {
-                    Vec3 toward = target.position().subtract(position()).normalize().scale(0.3);
-                    gift.setDeltaMovement(toward.x, 0.3, toward.z);
-                    gift.setPickUpDelay(10);
+                gift = inventory.removeItemNoUpdate(i);
+                break;
+            }
+        }
+        if (gift.isEmpty()) {
+            gift = defaultGift();
+        }
+        // Throw it at the target like a player's Q-drop: spawn at eye height and
+        // launch it arcing toward the target's chest, rather than plopping at our feet.
+        double fromX = getX();
+        double fromY = getEyeY() - 0.1;
+        double fromZ = getZ();
+        ItemEntity thrown = new ItemEntity(level(), fromX, fromY, fromZ, gift);
+        double dx = target.getX() - fromX;
+        double dy = (target.getY() + target.getBbHeight() * 0.5) - fromY;
+        double dz = target.getZ() - fromZ;
+        double horizontal = Math.sqrt(dx * dx + dz * dz);
+        Vec3 velocity = new Vec3(dx, dy + horizontal * 0.15, dz).normalize().scale(0.45);
+        thrown.setDeltaMovement(velocity);
+        thrown.setPickUpDelay(10);
+        level().addFreshEntity(thrown);
+        return true;
+    }
+
+    /** A small, friendly token gift for when the backpack has nothing looted yet. */
+    private ItemStack defaultGift() {
+        return switch (getRandom().nextInt(5)) {
+            case 0 -> new ItemStack(Items.POPPY);
+            case 1 -> new ItemStack(Items.DANDELION);
+            case 2 -> new ItemStack(Items.BREAD);
+            case 3 -> new ItemStack(Items.APPLE);
+            default -> new ItemStack(Items.COOKIE);
+        };
+    }
+
+    /** Whether world-griefing (and thus chest raiding) is permitted here. */
+    public boolean canRaid() {
+        return level().getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING);
+    }
+
+    /**
+     * True if a lootable chest/barrel that hasn't been recently raided sits
+     * within {@code radius}. Lets the Shy flee goal decide to brave a sneak-raid
+     * instead of fleeing — once the chest is looted it's marked explored, so this
+     * returns false and the mob flees ("crouch to the chest, run away when done").
+     */
+    public boolean hasRaidableContainerNearby(int radius) {
+        BlockPos origin = blockPosition();
+        long now = tickCount;
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dy = -radius; dy <= radius; dy++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    cursor.set(origin.getX() + dx, origin.getY() + dy, origin.getZ() + dz);
+                    BlockEntity be = level().getBlockEntity(cursor);
+                    if ((be instanceof ChestBlockEntity || be instanceof BarrelBlockEntity)
+                            && !isBlockExplored(cursor, now)) {
+                        return true;
+                    }
                 }
-                return true;
             }
         }
         return false;

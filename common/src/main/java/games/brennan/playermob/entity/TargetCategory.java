@@ -81,14 +81,15 @@ public enum TargetCategory {
 
     /**
      * Classify a candidate entity into a category, or {@code null} if it belongs
-     * to none. Other {@link PlayerMobEntity}s return {@code null} so the mob
-     * never treats its own kind as a target. Order matters: villagers are
-     * checked before animals (they share no supertype today, but the explicit
-     * order is defensive), and the hostile check is last so a future hostile
-     * animal would still classify as an animal.
+     * to none. Other {@link PlayerMobEntity}s classify as {@link #PLAYERS} —
+     * they're player-shaped, so the mob treats its own kind like players (self
+     * is excluded by the goal/target scans, not here). Order matters: the
+     * PlayerMob check is first (it's also an {@code Enemy}); villagers before
+     * animals; the hostile check last so a future hostile animal still
+     * classifies as an animal.
      */
     public static TargetCategory classify(LivingEntity entity) {
-        if (entity instanceof PlayerMobEntity) return null; // ignore own kind
+        if (entity instanceof PlayerMobEntity) return PLAYERS; // treat own kind like players
         if (entity instanceof Player) return PLAYERS;
         if (entity instanceof AbstractVillager) return VILLAGERS;
         if (entity instanceof Animal) return ANIMALS;

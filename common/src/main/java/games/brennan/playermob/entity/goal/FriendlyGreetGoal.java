@@ -4,36 +4,53 @@ import games.brennan.playermob.entity.Personality;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
-import net.minecraft.world.entity.player.Player;
 
 import java.util.EnumSet;
 
 /**
- * The <b>Friendly</b> behaviour: approach an entity the mob is
- * {@link Personality#FRIENDLY} toward (players, animals, villagers), lock eyes
- * with it, repeatedly bob into a crouch as a greeting gesture, and — for player
- * friends — periodically toss a gift from the backpack.
+ * The <b>Friendly</b> behaviour, as a one-shot greeting sequence performed when
+ * the mob first notices an entity it is {@link Personality#FRIENDLY} toward
+ * (players, animals, villagers):
  *
- * <p>Self-gates on {@code target == null} so a friendly mob that's mid-fight
- * (e.g. defending against a zombie) doesn't try to greet at the same time.
- * Owns MOVE+LOOK at priority 1 so greeting preempts strolling/raiding while a
- * friend is near.</p>
+ * <ol>
+ *   <li><b>Follow</b> — walk up to the friend.</li>
+ *   <li><b>Crouch</b> — bob into a crouch a random 3–10 times as a greeting.</li>
+ *   <li><b>Gift</b> — drop one item from the backpack toward the friend
+ *       (no-op if the backpack is empty).</li>
+ * </ol>
+ *
+ * <p>When a cycle finishes the mob picks one of two things, matching the
+ * requested behaviour: greet <em>again</em> (re-run immediately if the friend is
+ * still near) or <em>disengage</em> for a spell — a cooldown during which this
+ * goal stands down so the lower-priority raid/stroll goals get a turn (i.e. it
+ * wanders off to a chest). Self-gates on {@code target == null} so it yields to
+ * combat.</p>
  */
 public final class FriendlyGreetGoal extends Goal {
 
-    private static final double STOP_DISTANCE = 3.0;        // how close it approaches
-    private static final int CROUCH_TOGGLE_TICKS = 10;      // ~0.5s bob cadence
-    private static final int GIFT_COOLDOWN_MIN_TICKS = 100;  // 5s
-    private static final int GIFT_COOLDOWN_MAX_TICKS = 200;  // 10s
+    private static final double FOLLOW_STOP_DISTANCE = 3.0;   // close enough to greet
+    private static final int FOLLOW_TIMEOUT_TICKS = 100;      // greet in place if it can't get closer (5s)
+    private static final int CROUCH_HALF_PERIOD_TICKS = 5;    // ticks per down / up half of a bob
+    private static final int MIN_CROUCHES = 3;
+    private static final int MAX_CROUCHES = 10;
+    private static final int MIN_DISENGAGE_TICKS = 200;       // ~10s of "go raid / wander"
+    private static final int MAX_DISENGAGE_TICKS = 400;       // ~20s
+    private static final float CHANCE_TO_DISENGAGE = 0.5F;    // else greet again
+
+    private enum Phase { FOLLOW, CROUCH, GIFT, DONE }
 
     private final PlayerMobEntity mob;
     private final double range;
     private final double approachSpeed;
 
     private LivingEntity friend;
-    private int crouchTimer;
-    private boolean crouched;
-    private int giftCooldown;
+    private Phase phase = Phase.DONE;
+    private int followTicks;
+    private int crouchesTarget;
+    private int crouchesDone;
+    private int halfPeriodTicks;
+    private boolean crouchDown;
+    private int cooldownTicks;
 
     public FriendlyGreetGoal(PlayerMobEntity mob, double range, double approachSpeed) {
         this.mob = mob;
@@ -44,6 +61,11 @@ public final class FriendlyGreetGoal extends Goal {
 
     @Override
     public boolean canUse() {
+        // Disengage cooldown — sit out so the mob can go raid / wander between greets.
+        if (cooldownTicks > 0) {
+            cooldownTicks--;
+            return false;
+        }
         if (mob.getTarget() != null) return false;
         LivingEntity candidate = mob.nearestWithPersonality(Personality.FRIENDLY, range);
         if (candidate == null) return false;
@@ -53,18 +75,22 @@ public final class FriendlyGreetGoal extends Goal {
 
     @Override
     public boolean canContinueToUse() {
-        return friend != null
+        return phase != Phase.DONE
+            && friend != null
             && friend.isAlive()
             && mob.getTarget() == null
             && mob.personalityToward(friend) == Personality.FRIENDLY
-            && mob.distanceTo(friend) <= range + 4.0;
+            && mob.distanceTo(friend) <= range + 6.0;
     }
 
     @Override
     public void start() {
-        this.crouchTimer = 0;
-        this.crouched = false;
-        this.giftCooldown = GIFT_COOLDOWN_MIN_TICKS;
+        this.phase = Phase.FOLLOW;
+        this.followTicks = 0;
+        this.crouchesTarget = MIN_CROUCHES + mob.getRandom().nextInt(MAX_CROUCHES - MIN_CROUCHES + 1);
+        this.crouchesDone = 0;
+        this.halfPeriodTicks = 0;
+        this.crouchDown = false;
     }
 
     @Override
@@ -72,40 +98,60 @@ public final class FriendlyGreetGoal extends Goal {
         if (friend == null) return;
         mob.getLookControl().setLookAt(friend, 30.0F, 30.0F);
 
-        // Approach until comfortably close, then hold position.
-        if (mob.distanceTo(friend) > STOP_DISTANCE) {
-            mob.getNavigation().moveTo(friend, approachSpeed);
-        } else {
+        switch (phase) {
+            case FOLLOW -> tickFollow();
+            case CROUCH -> tickCrouch();
+            case GIFT -> tickGift();
+            default -> { /* DONE — canContinueToUse ends the goal next evaluation */ }
+        }
+    }
+
+    private void tickFollow() {
+        boolean closeEnough = mob.distanceTo(friend) <= FOLLOW_STOP_DISTANCE;
+        if (closeEnough || ++followTicks > FOLLOW_TIMEOUT_TICKS) {
             mob.getNavigation().stop();
+            phase = Phase.CROUCH;
+            halfPeriodTicks = 0;
+            crouchDown = true;
+            mob.setCrouching(true); // first crouch-down
+            return;
         }
+        mob.getNavigation().moveTo(friend, approachSpeed);
+    }
 
-        // Greeting bob — toggle the crouch flag on a steady cadence.
-        if (++crouchTimer >= CROUCH_TOGGLE_TICKS) {
-            crouchTimer = 0;
-            crouched = !crouched;
-            mob.setShiftKeyDown(crouched);
-        }
-
-        // Gift: only to players, on a cooldown, when the backpack has something.
-        if (giftCooldown > 0) {
-            giftCooldown--;
-        } else if (friend instanceof Player && mob.distanceTo(friend) <= STOP_DISTANCE + 2.0) {
-            if (mob.giveItemTo(friend)) {
-                giftCooldown = GIFT_COOLDOWN_MIN_TICKS
-                    + mob.getRandom().nextInt(GIFT_COOLDOWN_MAX_TICKS - GIFT_COOLDOWN_MIN_TICKS + 1);
-            } else {
-                // Nothing to give — wait a beat before checking again.
-                giftCooldown = GIFT_COOLDOWN_MIN_TICKS;
+    private void tickCrouch() {
+        mob.getNavigation().stop();
+        if (++halfPeriodTicks >= CROUCH_HALF_PERIOD_TICKS) {
+            halfPeriodTicks = 0;
+            crouchDown = !crouchDown;
+            if (!crouchDown && ++crouchesDone >= crouchesTarget) {
+                // Completed the last bob, ending upright → move on to the gift.
+                phase = Phase.GIFT;
+                return;
             }
         }
+        // Assert the crouch state every tick so nothing resets the pose mid-bob.
+        mob.setCrouching(crouchDown);
+    }
+
+    private void tickGift() {
+        mob.setCrouching(false);
+        mob.giveItemTo(friend); // tosses a backpack item, or a default token gift if empty
+        phase = Phase.DONE;     // cycle complete — stop() decides greet-again vs disengage
     }
 
     @Override
     public void stop() {
-        mob.setShiftKeyDown(false);
+        mob.setCrouching(false);
         mob.getNavigation().stop();
+        // Only a *completed* greet rolls the disengage choice; an interrupted one
+        // (friend left / combat) leaves the cooldown at 0 so it can resume freely.
+        if (phase == Phase.DONE && mob.getRandom().nextFloat() < CHANCE_TO_DISENGAGE) {
+            cooldownTicks = MIN_DISENGAGE_TICKS
+                + mob.getRandom().nextInt(MAX_DISENGAGE_TICKS - MIN_DISENGAGE_TICKS + 1);
+        }
         this.friend = null;
-        this.crouched = false;
+        this.phase = Phase.DONE;
     }
 
     @Override
