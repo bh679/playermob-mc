@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity;
 
+import games.brennan.playermob.entity.goal.CollectFloorItemsGoal;
 import games.brennan.playermob.entity.goal.RaidArmorStandsGoal;
 import games.brennan.playermob.entity.goal.RaidContainersGoal;
 import games.brennan.playermob.entity.goal.WeaponAwareAttackGoal;
@@ -46,6 +47,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.decoration.ArmorStand;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.ServerLevelAccessor;
 
@@ -163,6 +165,9 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
 
     public PlayerMobEntity(EntityType<? extends PlayerMobEntity> type, Level level) {
         super(type, level);
+        // Enable vanilla's passive proximity pickup (Mob.aiStep). The active
+        // CollectFloorItemsGoal does the seeking; this catches items underfoot.
+        this.setCanPickUpLoot(true);
     }
 
     /**
@@ -192,6 +197,7 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         this.goalSelector.addGoal(2, new WeaponAwareAttackGoal(this, 1.0, 8.0f));
         this.goalSelector.addGoal(3, new RaidContainersGoal(this, /* speed */ 0.9, /* radius */ 12));
         this.goalSelector.addGoal(3, new RaidArmorStandsGoal(this, /* speed */ 0.9, /* radius */ 12.0));
+        this.goalSelector.addGoal(3, new CollectFloorItemsGoal(this, /* speed */ 0.9, /* radius */ 8.0));
         this.goalSelector.addGoal(8, new WaterAvoidingRandomStrollGoal(this, 0.6));
         this.goalSelector.addGoal(9, new LookAtPlayerGoal(this, LivingEntity.class, 8.0F));
         this.goalSelector.addGoal(10, new RandomLookAroundGoal(this));
@@ -325,6 +331,281 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         EquipmentSlot mobSlot = getEquipmentSlotForItem(candidate);
         ItemStack current = getItemBySlot(mobSlot);
         return canReplaceCurrentItem(candidate, current);
+    }
+
+    // ---- Floor item pickup (CollectFloorItemsGoal + vanilla aiStep) -------
+
+    /**
+     * Want-filter for floor items — used by both {@link CollectFloorItemsGoal}'s
+     * scan and vanilla's passive {@code Mob.aiStep} pickup. The branch order
+     * mirrors {@link #tryPickUpFloorItem}: a toolkit weapon/tool (wanted only if
+     * it beats our current best of its category), then armor/shield upgrades,
+     * then hoardable ammo / valuables / consumables, then building blocks.
+     */
+    @Override
+    public boolean wantsToPickUp(ItemStack stack) {
+        ItemPickupPolicy.WeaponCategory cat = ItemPickupPolicy.weaponCategory(stack);
+        if (cat != null) {
+            Located best = bestOfCategory(cat);
+            return best == null || ItemPickupPolicy.compareQuality(stack, best.stack()) > 0;
+        }
+        return wouldEquipArmor(stack)
+            || ItemPickupPolicy.isAmmo(stack)
+            || ItemPickupPolicy.isValuable(stack)
+            || ItemPickupPolicy.isConsumable(stack)
+            || (ItemPickupPolicy.isBuildingBlock(stack)
+                && ItemPickupPolicy.wantsBuildingBlock(this.inventory, stack));
+    }
+
+    /**
+     * Vanilla passive-pickup entry point — fires from {@code Mob.aiStep} when
+     * {@code canPickUpLoot} + {@code mobGriefing} hold. Routes through the same
+     * logic the active goal uses.
+     */
+    @Override
+    protected void pickUpItem(ItemEntity itemEntity) {
+        tryPickUpFloorItem(itemEntity);
+    }
+
+    /**
+     * Take an item off the ground: keep the best of each weapon/tool category
+     * (dropping worse duplicates), equip armor/shield upgrades, hoard ammo /
+     * valuables / consumables, and collect building blocks up to a one-stack
+     * cap. Public so {@link CollectFloorItemsGoal} can drive it directly rather
+     * than relying on the {@code CanPickUpLoot} flag.
+     *
+     * @return true if anything was taken
+     */
+    public boolean tryPickUpFloorItem(ItemEntity itemEntity) {
+        if (itemEntity == null || !itemEntity.isAlive() || itemEntity.isRemoved()) return false;
+        ItemStack stack = itemEntity.getItem();
+        if (stack.isEmpty() || itemEntity.hasPickUpDelay()) return false;
+
+        ItemPickupPolicy.WeaponCategory cat = ItemPickupPolicy.weaponCategory(stack);
+        if (cat != null) {
+            return finishPickup(itemEntity, stack, reconcileWeaponPickup(cat, stack));
+        }
+        if (wouldEquipArmor(stack)) {
+            return finishPickup(itemEntity, stack, equipArmorUpgrade(stack));
+        }
+        if (ItemPickupPolicy.isAmmo(stack)
+                || ItemPickupPolicy.isValuable(stack)
+                || ItemPickupPolicy.isConsumable(stack)) {
+            // InventoryCarrier.pickUpItem handles its own want-check, take, and discard.
+            InventoryCarrier.pickUpItem(this, this, itemEntity);
+            return true;
+        }
+        if (ItemPickupPolicy.isBuildingBlock(stack)) {
+            return finishPickup(itemEntity, stack, pickUpBlockCapped(stack));
+        }
+        return false;
+    }
+
+    /**
+     * Shared tail for the equip + block paths: play the pickup animation,
+     * shrink the ground stack by what was taken, and discard it when empty.
+     * Mirrors the count handling in {@code InventoryCarrier.pickUpItem}.
+     */
+    private boolean finishPickup(ItemEntity itemEntity, ItemStack stack, int moved) {
+        if (moved <= 0) return false;
+        onItemPickup(itemEntity);
+        take(itemEntity, moved);
+        stack.shrink(moved);
+        if (stack.isEmpty()) {
+            itemEntity.discard();
+        }
+        return true;
+    }
+
+    /**
+     * True if {@code stack} is armor/shield the mob would upgrade into. The
+     * {@link ItemPickupPolicy#isArmorOrShield} guard is essential: vanilla
+     * {@code canReplaceCurrentItem} returns true for <em>any</em> item over an
+     * empty slot. Weapons route through {@link #reconcileWeaponPickup} instead;
+     * this path is armor + shields only. Lives here (not on the static policy)
+     * because {@code canReplaceCurrentItem} is {@code protected} on Mob.
+     */
+    private boolean wouldEquipArmor(ItemStack stack) {
+        if (!ItemPickupPolicy.isArmorOrShield(stack)) return false;
+        EquipmentSlot slot = getEquipmentSlotForItem(stack);
+        return canReplaceCurrentItem(stack, getItemBySlot(slot));
+    }
+
+    /**
+     * Equip one of {@code found} (armor/shield) as an upgrade, stashing the
+     * displaced piece into the backpack (or dropping it if the backpack is
+     * full). Mirrors {@link #tryReplaceFromContainer}'s displaced-item handling.
+     *
+     * @return 1 if equipped, 0 if it turned out not to be an upgrade
+     */
+    private int equipArmorUpgrade(ItemStack found) {
+        EquipmentSlot slot = getEquipmentSlotForItem(found);
+        ItemStack current = getItemBySlot(slot);
+        if (!canReplaceCurrentItem(found, current)) return 0;
+
+        ItemStack toEquip = found.copy();
+        toEquip.setCount(1); // equipment slots hold a single piece
+        setItemSlot(slot, toEquip);
+        if (!current.isEmpty()) {
+            ItemStack leftover = EquipmentEvaluator.addToContainer(this.inventory, current);
+            if (!leftover.isEmpty()) spawnAtLocation(leftover);
+        }
+        return 1;
+    }
+
+    // ---- Weapon toolkit (best-of-each + combat switching) ----------------
+
+    /** A located toolkit item: {@code slot == -1} means the main hand, else a backpack slot index. */
+    private record Located(ItemStack stack, int slot) {}
+
+    /** Distance² thresholds for the combat weapon switch; the band between them prevents flicker. */
+    private static final double SWITCH_TO_MELEE_SQR = 16.0;  // within 4 blocks → draw melee
+    private static final double SWITCH_TO_RANGED_SQR = 64.0; // beyond 8 blocks → draw ranged
+
+    /** Best item of {@code cat} across main hand + backpack, or null if the mob holds none. */
+    private Located bestOfCategory(ItemPickupPolicy.WeaponCategory cat) {
+        Located best = null;
+        ItemStack main = getMainHandItem();
+        if (ItemPickupPolicy.weaponCategory(main) == cat) {
+            best = new Located(main, -1);
+        }
+        for (int i = 0; i < this.inventory.getContainerSize(); i++) {
+            ItemStack stack = this.inventory.getItem(i);
+            if (ItemPickupPolicy.weaponCategory(stack) == cat
+                    && (best == null || ItemPickupPolicy.compareQuality(stack, best.stack()) > 0)) {
+                best = new Located(stack, i);
+            }
+        }
+        return best;
+    }
+
+    /** Best melee weapon — the harder-hitting of the best sword and best axe. */
+    private Located bestMelee() {
+        Located sword = bestOfCategory(ItemPickupPolicy.WeaponCategory.SWORD);
+        Located axe = bestOfCategory(ItemPickupPolicy.WeaponCategory.AXE);
+        if (sword == null) return axe;
+        if (axe == null) return sword;
+        return ItemPickupPolicy.meleeAttackDamage(axe.stack())
+             > ItemPickupPolicy.meleeAttackDamage(sword.stack()) ? axe : sword;
+    }
+
+    /**
+     * Keep only the best of {@code cat}: if {@code picked} beats the current
+     * best, drop the displaced one and stash the newcomer; otherwise leave it
+     * on the ground. Then make sure the mob isn't left empty-handed (idle → best
+     * melee; the attack goal re-picks the situational weapon during combat).
+     *
+     * @return 1 if taken, 0 if {@code picked} wasn't an upgrade
+     */
+    private int reconcileWeaponPickup(ItemPickupPolicy.WeaponCategory cat, ItemStack picked) {
+        Located best = bestOfCategory(cat);
+        if (best != null && ItemPickupPolicy.compareQuality(picked, best.stack()) <= 0) {
+            return 0; // not strictly better — leave it on the ground
+        }
+        if (best != null) {
+            removeLocated(best);
+            spawnAtLocation(best.stack()); // drop the worse duplicate
+        }
+        ItemStack one = picked.copy();
+        one.setCount(1);
+        ItemStack leftover = EquipmentEvaluator.addToContainer(this.inventory, one);
+        if (!leftover.isEmpty()) spawnAtLocation(leftover);
+
+        if (getTarget() == null || getMainHandItem().isEmpty()) {
+            equipBestMeleeInHand();
+        }
+        return 1;
+    }
+
+    /** Clear a located item from wherever it lives (main hand or backpack slot). */
+    private void removeLocated(Located loc) {
+        if (loc.slot() == -1) {
+            setItemSlot(EquipmentSlot.MAINHAND, ItemStack.EMPTY);
+        } else {
+            this.inventory.setItem(loc.slot(), ItemStack.EMPTY);
+        }
+    }
+
+    /**
+     * Put the best melee weapon in the main hand (used when idle and after
+     * combat). No-op if the mob has no melee weapon or it's already in hand.
+     */
+    public void equipBestMeleeInHand() {
+        Located melee = bestMelee();
+        if (melee == null || melee.slot() == -1) return;
+        ensureInMainhand(melee);
+    }
+
+    /**
+     * Combat weapon switch: draw the best ranged weapon when {@code target} is
+     * far and the best melee when it's close, with a hysteresis band in between
+     * so the mob doesn't flicker at the boundary. Pickaxes are never drawn for
+     * combat. Called every combat tick by {@link WeaponAwareAttackGoal} — a
+     * cheap no-op when the right weapon is already in hand.
+     */
+    public void equipBestWeaponForTarget(LivingEntity target) {
+        if (target == null) return;
+        double distSq = distanceToSqr(target);
+        Located ranged = bestOfCategory(ItemPickupPolicy.WeaponCategory.RANGED);
+        Located melee = bestMelee();
+
+        Located desired;
+        if (ranged != null && distSq > SWITCH_TO_RANGED_SQR) {
+            desired = ranged;
+        } else if (melee != null && distSq < SWITCH_TO_MELEE_SQR) {
+            desired = melee;
+        } else {
+            // Hysteresis band (or only one type owned): keep the current combat
+            // weapon if we have one, else fall back to whatever we do own.
+            ItemPickupPolicy.WeaponCategory current = ItemPickupPolicy.weaponCategory(getMainHandItem());
+            if (current == ItemPickupPolicy.WeaponCategory.SWORD
+                    || current == ItemPickupPolicy.WeaponCategory.AXE
+                    || current == ItemPickupPolicy.WeaponCategory.RANGED) {
+                return;
+            }
+            desired = (melee != null) ? melee : ranged;
+        }
+        if (desired != null) ensureInMainhand(desired);
+    }
+
+    /** Swap {@code desired} into the main hand, returning the displaced item to the backpack. */
+    private void ensureInMainhand(Located desired) {
+        if (desired.slot() == -1) return; // already wielded
+        ItemStack current = getMainHandItem();
+        this.inventory.setItem(desired.slot(), ItemStack.EMPTY);
+        setItemSlot(EquipmentSlot.MAINHAND, desired.stack());
+        if (!current.isEmpty()) {
+            ItemStack leftover = EquipmentEvaluator.addToContainer(this.inventory, current);
+            if (!leftover.isEmpty()) spawnAtLocation(leftover);
+        }
+    }
+
+    /**
+     * Collect building blocks up to {@link ItemPickupPolicy#BUILDING_BLOCK_CAP}.
+     * Under the cap, take only enough to reach it. At the cap, "trade up": drop
+     * the smallest carried block stack and take the (strictly larger) found pile.
+     *
+     * @return how many blocks were taken from the ground stack
+     */
+    private int pickUpBlockCapped(ItemStack found) {
+        int carried = ItemPickupPolicy.countBuildingBlocks(this.inventory);
+        if (carried >= ItemPickupPolicy.BUILDING_BLOCK_CAP) {
+            int smallestSlot = ItemPickupPolicy.smallestBuildingBlockSlot(this.inventory);
+            if (smallestSlot < 0) return 0;
+            ItemStack smallest = this.inventory.getItem(smallestSlot);
+            if (found.getCount() <= smallest.getCount()) return 0;
+            // Trade up: free the smallest stack, then fall through to the add below.
+            this.inventory.setItem(smallestSlot, ItemStack.EMPTY);
+            spawnAtLocation(smallest);
+            carried = ItemPickupPolicy.countBuildingBlocks(this.inventory);
+        }
+        int room = ItemPickupPolicy.BUILDING_BLOCK_CAP - carried;
+        if (room <= 0) return 0;
+        ItemStack toAdd = found.copy();
+        toAdd.setCount(Math.min(found.getCount(), room));
+        int requested = toAdd.getCount();
+        ItemStack leftover = EquipmentEvaluator.addToContainer(this.inventory, toAdd);
+        return requested - leftover.getCount();
     }
 
     // ---- Recently-explored cooldown maps ---------------------------------
