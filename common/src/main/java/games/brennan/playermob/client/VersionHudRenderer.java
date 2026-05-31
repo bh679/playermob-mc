@@ -4,18 +4,24 @@ import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.TitleScreen;
 
 /**
  * Client-only build-info HUD: draws {@code "PlayerMob v<version> (<branch>)"} in
- * the top-left corner in-game. The drawing + show/hide decision are shared here;
- * each loader registers its own native HUD hook and delegates to {@link #render}:
+ * the top-left corner, both <b>in-world</b> and on the <b>main menu</b>. The draw
+ * + show/hide decision are shared here; each loader registers its own native
+ * hooks and delegates:
  * <ul>
- *   <li>Fabric — {@code HudRenderCallback}</li>
- *   <li>NeoForge — {@code RegisterGuiLayersEvent}</li>
- *   <li>Forge — {@code AddGuiOverlayLayersEvent}</li>
+ *   <li>In-world HUD — Fabric {@code HudRenderCallback}, NeoForge
+ *       {@code RegisterGuiLayersEvent}, Forge {@code AddGuiOverlayLayersEvent}
+ *       → {@link #render(GuiGraphics)}</li>
+ *   <li>Main menu — Fabric {@code ScreenEvents}, NeoForge/Forge
+ *       {@code ScreenEvent.Render.Post} → {@link #renderOnScreen(GuiGraphics, Screen)}</li>
  * </ul>
  *
- * <p>Respects F1 (hideGui). The F3 debug overlay draws over this, which is fine.</p>
+ * <p>The in-world path respects F1 (hideGui); the F3 debug overlay draws over it,
+ * which is fine.</p>
  */
 @Environment(EnvType.CLIENT)
 public final class VersionHudRenderer {
@@ -41,17 +47,34 @@ public final class VersionHudRenderer {
     }
 
     /**
-     * Draws the build-info line. No-op when the GUI is hidden (F1) or when this
-     * is a release ({@code main}) build. Called from each loader's HUD hook.
+     * In-world HUD pass. No-op when the GUI is hidden (F1) or when this is a
+     * release ({@code main}) build.
      */
     public static void render(GuiGraphics graphics) {
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.options.hideGui) {
+        if (Minecraft.getInstance().options.hideGui) {
             return;
         }
+        draw(graphics);
+    }
+
+    /**
+     * Screen render pass — draws on the main menu ({@link TitleScreen}) only;
+     * all other screens are skipped. F1/hideGui is an in-world toggle, so it is
+     * intentionally not consulted here (the menu label should not depend on an
+     * in-world setting).
+     */
+    public static void renderOnScreen(GuiGraphics graphics, Screen screen) {
+        if (screen instanceof TitleScreen) {
+            draw(graphics);
+        }
+    }
+
+    /** Shared draw: the {@code main}-branch gate plus the actual text. */
+    private static void draw(GuiGraphics graphics) {
         if (!shouldDisplay(VersionInfo.BRANCH)) {
             return;
         }
+        Minecraft mc = Minecraft.getInstance();
         graphics.drawString(mc.font, VersionInfo.DISPLAY, MARGIN, MARGIN, TEXT_ARGB, true);
     }
 }
