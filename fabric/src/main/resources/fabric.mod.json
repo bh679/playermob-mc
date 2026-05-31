@@ -13,7 +13,8 @@
   "license": "${mod_license}",
   "environment": "*",
   "entrypoints": {
-    "main": ["games.brennan.playermob.fabric.PlayerMobFabric"]
+    "main": ["games.brennan.playermob.fabric.PlayerMobFabric"],
+    "client": ["games.brennan.playermob.fabric.client.PlayerMobFabricClient"]
   },
   "mixins": [
     "playermob.mixins.json"
