@@ -3,6 +3,7 @@ package games.brennan.playermob.entity;
 import games.brennan.playermob.PlayerMobRegistry;
 import games.brennan.playermob.entity.goal.CollectFloorItemsGoal;
 import games.brennan.playermob.entity.goal.EatFoodGoal;
+import games.brennan.playermob.entity.goal.PlayerMobDoorGoal;
 import games.brennan.playermob.entity.goal.RaidArmorStandsGoal;
 import games.brennan.playermob.entity.goal.RaidContainersGoal;
 import games.brennan.playermob.entity.goal.WeaponAwareAttackGoal;
@@ -48,6 +49,7 @@ import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
 import net.minecraft.world.entity.ai.goal.WaterAvoidingRandomStrollGoal;
 import net.minecraft.world.entity.ai.goal.target.HurtByTargetGoal;
 import net.minecraft.world.entity.ai.goal.target.NearestAttackableTargetGoal;
+import net.minecraft.world.entity.ai.navigation.GroundPathNavigation;
 import net.minecraft.world.entity.monster.CrossbowAttackMob;
 import net.minecraft.world.food.FoodProperties;
 import net.minecraft.world.entity.monster.Enemy;
@@ -104,6 +106,11 @@ import java.util.UUID;
  * chest. On death, the mob drops everything like a player would — the
  * backpack via {@link #dropCustomDeathLoot} and all equipped gear via the
  * guaranteed {@link #getEquipmentDropChance} override.</p>
+ *
+ * <p><b>Doors</b> — the navigation has {@code setCanOpenDoors(true)} so the mob
+ * paths through closed wooden doors, and {@link PlayerMobDoorGoal} opens them on
+ * approach. Each mob rolls a {@link #closesDoors} personality at spawn: half
+ * close the door behind themselves, half leave it open.</p>
  *
  * <p><b>Spawning</b> — spawn egg + {@code /summon playermob:player_mob}
  * only. No natural spawns, no raid hooks.</p>
@@ -182,6 +189,7 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     private static final String TAG_SKIN_INDEX = "SkinIndex";
     private static final String TAG_SKIN_TEXTURE_URL = "SkinTextureUrl";
     private static final String TAG_SKIN_SLIM = "SkinSlim";
+    private static final String TAG_CLOSES_DOORS = "ClosesDoors";
     private static final String TAG_EXPLORED_BLOCKS = "ExploredBlocks";
     private static final String TAG_EXPLORED_ENTITIES = "ExploredEntities";
     private static final String TAG_POS = "Pos";
@@ -216,11 +224,28 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
      */
     private BlockPos openContainerPos;
 
+    /**
+     * Per-mob "tidiness" personality, rolled 50/50 at spawn (see
+     * {@link #finalizeSpawn}) and persisted. {@code true} ⇒ this mob closes
+     * wooden doors behind itself (villager-like); {@code false} ⇒ it leaves
+     * them open (raider-like). Read every tick by {@link PlayerMobDoorGoal}.
+     *
+     * <p>Server-only AI state — never rendered — so it's a plain field with NBT
+     * persistence rather than a synched DataTracker entry.</p>
+     */
+    private boolean closesDoors;
+
     public PlayerMobEntity(EntityType<? extends PlayerMobEntity> type, Level level) {
         super(type, level);
         // Enable vanilla's passive proximity pickup (Mob.aiStep). The active
         // CollectFloorItemsGoal does the seeking; this catches items underfoot.
         this.setCanPickUpLoot(true);
+        // Route pathfinding through closed wooden doors (passing through *open*
+        // doors is already on by default). PlayerMobDoorGoal does the opening;
+        // without this flag DoorInteractGoal.canUse() never fires.
+        if (this.getNavigation() instanceof GroundPathNavigation groundNav) {
+            groundNav.setCanOpenDoors(true);
+        }
     }
 
     /**
@@ -249,6 +274,9 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     @Override
     protected void registerGoals() {
         this.goalSelector.addGoal(0, new FloatGoal(this));
+        // Open (and, for "tidy" mobs, close) wooden doors on the path. Declares
+        // no flags, so it runs alongside whatever movement goal owns the walk.
+        this.goalSelector.addGoal(1, new PlayerMobDoorGoal(this));
         this.goalSelector.addGoal(2, new WeaponAwareAttackGoal(this, 1.0, 8.0f));
         // EatFoodGoal added BEFORE the raid goals at the same priority so
         // its canUse() is evaluated first — a low-HP mob with food prefers
@@ -295,6 +323,8 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
                 setSkinSlim(skin.model() == SkinModel.SLIM);
             });
         }
+        // Roll the door-closing personality (~50% close behind, ~50% leave open).
+        this.closesDoors = world.getRandom().nextBoolean();
         return super.finalizeSpawn(world, difficulty, reason, data);
     }
 
@@ -368,6 +398,17 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
 
     public void setSkinSlim(boolean slim) {
         this.entityData.set(DATA_SKIN_SLIM, slim);
+    }
+
+    // ---- Door behaviour ---------------------------------------------------
+
+    /**
+     * Whether this mob closes wooden doors behind itself. Read each tick by
+     * {@link PlayerMobDoorGoal}; rolled at spawn and persisted. See
+     * {@link #closesDoors}.
+     */
+    public boolean closesDoors() {
+        return this.closesDoors;
     }
 
     // ---- InventoryCarrier ------------------------------------------------
@@ -887,6 +928,7 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         super.addAdditionalSaveData(tag);
         tag.putInt(TAG_STANCE, getStance().ordinal());
         tag.putInt(TAG_SKIN_INDEX, getSkinIndex());
+        tag.putBoolean(TAG_CLOSES_DOORS, this.closesDoors);
         // URL skin tags are purely additive on top of v1 (SkinIndex). Only
         // write the URL key when set, so 0.2.0-loaded mobs that never had a
         // URL assigned don't round-trip an empty string back into the save.
@@ -925,6 +967,8 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         // byOrdinal guards against missing/invalid stored values.
         setStance(Stance.byOrdinal(tag.getInt(TAG_STANCE)));
         setSkinIndex(tag.getInt(TAG_SKIN_INDEX));
+        // Missing key (pre-door-feature saves) ⇒ false ⇒ leave-open. Additive.
+        this.closesDoors = tag.getBoolean(TAG_CLOSES_DOORS);
         // Backward compat: 0.2.0 saves have no SkinTextureUrl tag. Missing key
         // ⇒ URL stays the default "" ⇒ renderer uses the legacy bundled-
         // vanilla path keyed off SkinIndex. New v2 mobs round-trip the URL.
