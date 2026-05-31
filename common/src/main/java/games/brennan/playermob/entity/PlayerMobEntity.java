@@ -575,26 +575,44 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         arrow.shoot(dx, dy + dist * 0.2, dz, 1.6F,
                     (float) (14 - this.level().getDifficulty().getId() * 4));
 
-        this.playSound(SoundEvents.SKELETON_SHOOT, 1.0F,
+        // Player's bow-release sound (vanilla BowItem uses ARROW_SHOOT), not the
+        // skeleton's. Routes through getSoundSource() → Players category.
+        this.playSound(SoundEvents.ARROW_SHOOT, 1.0F,
                        1.0F / (this.getRandom().nextFloat() * 0.4F + 0.8F));
         this.level().addFreshEntity(arrow);
     }
 
-    // ---- Sounds (pillager-like, mirrors villager-style "person dies" feel)
+    // ---- Sounds (player-like — mirrors vanilla Player exactly) -----------
 
+    /** Players have no idle sound — stay silent like a real player. */
     @Override
     protected SoundEvent getAmbientSound() {
-        return SoundEvents.PILLAGER_AMBIENT;
+        return null;
     }
 
+    /**
+     * Data-driven hurt sound, identical to {@code Player.getHurtSound}: the
+     * damage type's own effect sound (PLAYER_HURT / _DROWN / _ON_FIRE /
+     * _FREEZE / _SWEET_BERRY_BUSH).
+     */
     @Override
     protected SoundEvent getHurtSound(DamageSource source) {
-        return SoundEvents.PILLAGER_HURT;
+        return source.type().effects().sound();
     }
 
     @Override
     protected SoundEvent getDeathSound() {
-        return SoundEvents.PILLAGER_DEATH;
+        return SoundEvents.PLAYER_DEATH;
+    }
+
+    /**
+     * Match a real player's sound category so hurt/death/bow sounds play under
+     * the Players volume slider, not Hostile Creatures. Mirrors
+     * {@code Player.getSoundSource()}.
+     */
+    @Override
+    public SoundSource getSoundSource() {
+        return SoundSource.PLAYERS;
     }
 
     /**
