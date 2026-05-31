@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.entity.CraftingLadder;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -101,6 +102,8 @@ public final class MineBlocksGoal extends Goal {
         }
         if (mob.getTarget() != null) return false; // combat preempts
         if (!mob.level().getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)) return false;
+        // Gather only while there's a crafting objective — a fully-kitted mob idles.
+        if (!CraftingLadder.hasToolObjective(mob.getInventory(), mob.equippedToolItems())) return false;
 
         BlockPos found = findClosestMineable();
         if (found == null) {

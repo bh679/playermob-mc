@@ -16,6 +16,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
+import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.Optional;
 
@@ -53,9 +54,11 @@ public final class CraftItemsGoal extends Goal {
     private static final int SWING_INTERVAL_TICKS = 8;    // arm-swing cadence
     private static final int POST_CRAFT_COOLDOWN = 12;    // brief pause between crafts
     private static final int EMPTY_COOLDOWN = 40;         // 2s between checks when nothing to do
-    private static final int PATH_TIMEOUT_TICKS = 100;    // 5s to reach a table
-    private static final int TABLE_SCAN_RADIUS = 6;       // search range for a usable table
+    private static final int PATH_TIMEOUT_TICKS = 160;    // 8s to reach a (possibly remembered) table
+    private static final int TABLE_SCAN_RADIUS = 6;       // local search range to discover tables
     private static final double TABLE_REACH_SQR = 6.25;   // 2.5 blocks — "at the table"
+    private static final double MAX_TABLE_DISTANCE_SQR = 256.0; // 16 blocks — farthest remembered table worth walking to
+    private static final int CONTAINER_DEFER_RADIUS = 12; // don't craft if a chest/barrel is this close — loot first
 
     private enum Phase { IDLE, GOTO_TABLE, CRAFTING, PLACING }
 
@@ -83,8 +86,13 @@ public final class CraftItemsGoal extends Goal {
         if (mob.getTarget() != null) return false;     // combat preempts
         if (mob.isBreakingBlock()) return false;        // don't interrupt a mine
         if (!mob.level().getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)) return false;
+        // Defer to looting: don't craft while there's a container to raid nearby.
+        if (RaidContainersGoal.hasLootableContainerNearby(mob, CONTAINER_DEFER_RADIUS)) {
+            cooldown = EMPTY_COOLDOWN;
+            return false;
+        }
 
-        tablePos = findNearbyCraftingTable();
+        tablePos = findUsableCraftingTable();
         boolean tableInReach = tablePos != null;
 
         Optional<CraftAction> next =
@@ -223,6 +231,7 @@ public final class CraftItemsGoal extends Goal {
 
         Level level = mob.level();
         level.setBlock(spot, Blocks.CRAFTING_TABLE.defaultBlockState(), 3);
+        mob.rememberCraftingTable(spot);
         mob.swing(InteractionHand.MAIN_HAND);
         mob.playSound(SoundEvents.WOOD_PLACE, 1.0F, 0.9F + mob.getRandom().nextFloat() * 0.2F);
     }
@@ -272,12 +281,47 @@ public final class CraftItemsGoal extends Goal {
         return null;
     }
 
-    private BlockPos findNearbyCraftingTable() {
+    /**
+     * The best crafting table to use: the nearest <em>remembered</em> table that
+     * still exists and is within walking range, else a freshly-scanned nearby one
+     * (which we then remember). Returns null only when the mob knows of no usable
+     * table — that's the one case where it crafts + places a new one, so it never
+     * spams duplicates.
+     */
+    private BlockPos findUsableCraftingTable() {
+        BlockPos best = null;
+        double bestDistSq = Double.MAX_VALUE;
+
+        // Remembered tables first — prune any that have since been removed.
+        for (long packed : new ArrayList<>(mob.getKnownCraftingTables())) {
+            BlockPos p = BlockPos.of(packed);
+            if (!isCraftingTable(p)) {
+                mob.forgetCraftingTable(p);
+                continue;
+            }
+            double d = distanceToSqr(p);
+            if (d <= MAX_TABLE_DISTANCE_SQR && d < bestDistSq) {
+                bestDistSq = d;
+                best = p;
+            }
+        }
+
+        // Discover (and remember) a table in the immediate area.
+        BlockPos scanned = scanForTable();
+        if (scanned != null) {
+            mob.rememberCraftingTable(scanned);
+            if (distanceToSqr(scanned) < bestDistSq) {
+                best = scanned;
+            }
+        }
+        return best;
+    }
+
+    private BlockPos scanForTable() {
         BlockPos mobPos = mob.blockPosition();
         Level level = mob.level();
         BlockPos closest = null;
         double closestDistSq = Double.MAX_VALUE;
-
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         for (int dx = -TABLE_SCAN_RADIUS; dx <= TABLE_SCAN_RADIUS; dx++) {
             for (int dy = -TABLE_SCAN_RADIUS; dy <= TABLE_SCAN_RADIUS; dy++) {

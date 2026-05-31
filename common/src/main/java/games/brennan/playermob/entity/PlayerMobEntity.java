@@ -144,6 +144,7 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     private static final String TAG_SKIN_INDEX = "SkinIndex";
     private static final String TAG_EXPLORED_BLOCKS = "ExploredBlocks";
     private static final String TAG_EXPLORED_ENTITIES = "ExploredEntities";
+    private static final String TAG_KNOWN_TABLES = "KnownCraftingTables";
     private static final String TAG_POS = "Pos";
     private static final String TAG_UUID = "UUID";
     private static final String TAG_TICK = "Tick";
@@ -163,6 +164,14 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
      * block map.
      */
     private final Map<UUID, Long> recentlyExploredEntities = new HashMap<>();
+
+    /**
+     * Packed {@link BlockPos} longs of crafting tables this mob has placed or
+     * used. Lets it walk back to an existing table instead of building a new one
+     * each time (see {@code CraftItemsGoal}). Persisted; pruned lazily when a
+     * remembered position is found to no longer be a table.
+     */
+    private final Set<Long> knownCraftingTables = new HashSet<>();
 
     /**
      * Position of the container this mob currently has visually "open" (chest
@@ -447,6 +456,23 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         return false;
     }
 
+    // ---- Known crafting tables (called from CraftItemsGoal) ---------------
+
+    /** Remember a crafting table the mob placed or used, so it returns instead of rebuilding. */
+    public void rememberCraftingTable(BlockPos pos) {
+        knownCraftingTables.add(pos.asLong());
+    }
+
+    /** Forget a remembered table (e.g. it's gone). */
+    public void forgetCraftingTable(BlockPos pos) {
+        knownCraftingTables.remove(pos.asLong());
+    }
+
+    /** Packed-long positions of remembered crafting tables (mutable view). */
+    public Set<Long> getKnownCraftingTables() {
+        return knownCraftingTables;
+    }
+
     // ---- Recently-explored cooldown maps ---------------------------------
 
     /**
@@ -521,6 +547,12 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
             entities.add(entry);
         }
         tag.put(TAG_EXPLORED_ENTITIES, entities);
+
+        // Known crafting tables — packed BlockPos longs.
+        long[] tables = new long[knownCraftingTables.size()];
+        int ti = 0;
+        for (long v : knownCraftingTables) tables[ti++] = v;
+        tag.putLongArray(TAG_KNOWN_TABLES, tables);
     }
 
     @Override
@@ -548,6 +580,11 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
                     recentlyExploredEntities.put(entry.getUUID(TAG_UUID), entry.getLong(TAG_TICK));
                 }
             }
+        }
+
+        knownCraftingTables.clear();
+        for (long v : tag.getLongArray(TAG_KNOWN_TABLES)) {
+            knownCraftingTables.add(v);
         }
     }
 

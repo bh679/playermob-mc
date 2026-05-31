@@ -190,6 +190,31 @@ class CraftingLadderTest {
             "Fully geared → doesn't want a table");
     }
 
+    @Test
+    void noObjectiveMeansNoCraftEvenWithMaterials() {
+        // Full stone-tier kit owned: even with a pile of raw materials and a
+        // table, the ladder does nothing (no busywork).
+        SimpleContainer bp = backpack(
+            Items.OAK_LOG, 10, Items.OAK_PLANKS, 10, Items.COBBLESTONE, 10, Items.STICK, 10);
+        Set<Item> kitted = Set.of(Items.STONE_SWORD, Items.STONE_PICKAXE, Items.STONE_AXE);
+        assertFalse(CraftingLadder.nextCraft(bp, kitted, true).isPresent(),
+            "No missing tool → craft nothing");
+    }
+
+    @Test
+    void hasToolObjectiveTracksTheKit() {
+        assertTrue(CraftingLadder.hasToolObjective(new SimpleContainer(8), Set.of()),
+            "Owns nothing → has an objective");
+        assertTrue(CraftingLadder.hasToolObjective(new SimpleContainer(8), Set.of(Items.WOODEN_SWORD)),
+            "Only a wooden sword → still wants the stone kit");
+        assertFalse(CraftingLadder.hasToolObjective(new SimpleContainer(8),
+                Set.of(Items.STONE_SWORD, Items.STONE_PICKAXE, Items.STONE_AXE)),
+            "Full stone kit → no objective");
+        assertFalse(CraftingLadder.hasToolObjective(new SimpleContainer(8),
+                Set.of(Items.IRON_SWORD, Items.DIAMOND_PICKAXE, Items.NETHERITE_AXE)),
+            "Raided iron/diamond/netherite tools also satisfy the kit");
+    }
+
     private static int countOf(SimpleContainer c, Item item) {
         int n = 0;
         for (int i = 0; i < c.getContainerSize(); i++) {

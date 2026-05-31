@@ -3,6 +3,7 @@ package games.brennan.playermob.entity.goal;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.Container;
+import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.Level;
@@ -263,6 +264,26 @@ public final class RaidContainersGoal extends Goal {
             }
         }
         return closest;
+    }
+
+    /**
+     * Whether any lootable container (chest/barrel) sits within {@code radius}
+     * blocks of {@code mob}. Shared with {@code CraftItemsGoal} so the mob loots
+     * before it bothers crafting. Brute-force cube scan — call sparingly.
+     */
+    public static boolean hasLootableContainerNearby(Mob mob, int radius) {
+        BlockPos mobPos = mob.blockPosition();
+        Level level = mob.level();
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dy = -radius; dy <= radius; dy++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    cursor.set(mobPos.getX() + dx, mobPos.getY() + dy, mobPos.getZ() + dz);
+                    if (isLootableContainer(level.getBlockEntity(cursor))) return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static boolean isLootableContainer(BlockEntity be) {

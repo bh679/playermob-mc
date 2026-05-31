@@ -139,6 +139,11 @@ public final class CraftingLadder {
     public static Optional<CraftAction> nextCraft(Container backpack, Set<Item> ownedTools, boolean tableInReach) {
         Census c = census(backpack, ownedTools);
 
+        // Only craft toward an objective (a missing tool). With a full stone-tier
+        // kit there's nothing to work toward, so don't make planks/sticks/tables
+        // as busywork.
+        if (!hasToolObjective(c)) return Optional.empty();
+
         // Tool recipes (3×3 — require a crafting table).
         if (tableInReach) {
             if (!c.ownsSword && c.planks >= 2 && c.sticks >= 1)
@@ -178,6 +183,22 @@ public final class CraftingLadder {
      */
     public static boolean wantsTable(Container backpack, Set<Item> ownedTools) {
         return wantsAnyTool(census(backpack, ownedTools));
+    }
+
+    /**
+     * Whether the mob still has a crafting objective — i.e. it's missing a
+     * stone-tier-or-better sword, pickaxe, or axe (a raided iron/diamond tool
+     * counts). When false the whole gather-and-craft loop idles (both
+     * {@code CraftItemsGoal} and {@code MineBlocksGoal} stand down). Unlike
+     * {@link #wantsTable}, this doesn't require the materials to be in hand yet —
+     * it's the "is there a point to gathering" question.
+     */
+    public static boolean hasToolObjective(Container backpack, Set<Item> ownedTools) {
+        return hasToolObjective(census(backpack, ownedTools));
+    }
+
+    private static boolean hasToolObjective(Census c) {
+        return !c.ownsStoneSword || !c.ownsStonePickaxe || !c.ownsStoneAxe;
     }
 
     /**
