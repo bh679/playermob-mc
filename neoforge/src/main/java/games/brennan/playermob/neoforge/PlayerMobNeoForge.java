@@ -3,9 +3,13 @@ package games.brennan.playermob.neoforge;
 import games.brennan.playermob.PlayerMob;
 import games.brennan.playermob.PlayerMobRegistry;
 import games.brennan.playermob.entity.PlayerMobEntity;
+import games.brennan.playermob.menu.PlayerMobMenu;
 import games.brennan.playermob.skin.PlayerMobSkinReloadListener;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.SimpleMenuProvider;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.SpawnEggItem;
@@ -15,6 +19,7 @@ import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.neoforged.fml.loading.FMLEnvironment;
 import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.common.extensions.IMenuTypeExtension;
 import net.neoforged.neoforge.event.AddReloadListenerEvent;
 import net.neoforged.neoforge.event.BuildCreativeModeTabContentsEvent;
 import net.neoforged.neoforge.event.entity.EntityAttributeCreationEvent;
@@ -38,6 +43,8 @@ public final class PlayerMobNeoForge {
         DeferredRegister.create(Registries.ENTITY_TYPE, PlayerMob.MOD_ID);
     private static final DeferredRegister.Items ITEMS =
         DeferredRegister.createItems(PlayerMob.MOD_ID);
+    private static final DeferredRegister<MenuType<?>> MENUS =
+        DeferredRegister.create(Registries.MENU, PlayerMob.MOD_ID);
 
     public static final DeferredHolder<EntityType<?>, EntityType<PlayerMobEntity>> PLAYER_MOB =
         ENTITY_TYPES.register(PlayerMobRegistry.PLAYER_MOB_PATH, () ->
@@ -49,9 +56,15 @@ public final class PlayerMobNeoForge {
                              SPAWN_EGG_PRIMARY, SPAWN_EGG_SECONDARY,
                              new Item.Properties()));
 
+    public static final DeferredHolder<MenuType<?>, MenuType<PlayerMobMenu>> PLAYER_MOB_MENU =
+        MENUS.register(PlayerMobRegistry.PLAYER_MOB_MENU_PATH, () ->
+            IMenuTypeExtension.create((syncId, inv, buf) ->
+                PlayerMobMenu.fromEntityId(syncId, inv, buf.readVarInt())));
+
     public PlayerMobNeoForge(IEventBus modBus) {
         ENTITY_TYPES.register(modBus);
         ITEMS.register(modBus);
+        MENUS.register(modBus);
 
         modBus.addListener(PlayerMobNeoForge::onEntityAttributeCreation);
         modBus.addListener(PlayerMobNeoForge::onBuildCreativeTab);
@@ -90,6 +103,13 @@ public final class PlayerMobNeoForge {
     private static void onCommonSetup(FMLCommonSetupEvent event) {
         PlayerMobRegistry.PLAYER_MOB = PLAYER_MOB.get();
         PlayerMobRegistry.PLAYER_MOB_SPAWN_EGG = PLAYER_MOB_SPAWN_EGG.get();
+        PlayerMobRegistry.PLAYER_MOB_MENU = PLAYER_MOB_MENU.get();
+        PlayerMobRegistry.MENU_OPENER = (serverPlayer, mob) ->
+            serverPlayer.openMenu(
+                new SimpleMenuProvider(
+                    (id, inv, player) -> new PlayerMobMenu(id, inv, mob),
+                    Component.translatable("container.playermob.player_mob")),
+                buf -> buf.writeVarInt(mob.getId()));
         PlayerMob.init();
     }
 }

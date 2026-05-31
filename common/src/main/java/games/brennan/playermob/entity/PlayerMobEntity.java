@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity;
 
+import games.brennan.playermob.PlayerMobRegistry;
 import games.brennan.playermob.entity.goal.CollectFloorItemsGoal;
 import games.brennan.playermob.entity.goal.EatFoodGoal;
 import games.brennan.playermob.entity.goal.RaidArmorStandsGoal;
@@ -20,10 +21,13 @@ import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.DifficultyInstance;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.level.block.BarrelBlock;
@@ -50,6 +54,7 @@ import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.monster.RangedAttackMob;
 import net.minecraft.world.entity.npc.InventoryCarrier;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.projectile.AbstractArrow;
 import net.minecraft.world.entity.projectile.ProjectileUtil;
 import net.minecraft.world.item.CrossbowItem;
@@ -353,6 +358,33 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     @Override
     public SimpleContainer getInventory() {
         return this.inventory;
+    }
+
+    // ---- Interaction (Creative inventory access) -------------------------
+
+    /**
+     * Right-click handler. In Creative, an empty-handed main-hand right-click
+     * opens the mob's inventory screen (equipment + backpack) — the mob
+     * equivalent of pressing E. Survival players, or anyone holding an item,
+     * fall through to vanilla behaviour so normal interactions are unchanged.
+     *
+     * <p>The menu must be opened server-side (the backpack isn't synced to
+     * clients otherwise); the loader-specific open call lives behind
+     * {@link PlayerMobRegistry#MENU_OPENER}. {@code sidedSuccess} swings the
+     * player's arm on the client and consumes the interaction on the server.</p>
+     */
+    @Override
+    protected InteractionResult mobInteract(Player player, InteractionHand hand) {
+        if (hand == InteractionHand.MAIN_HAND
+                && player.getAbilities().instabuild
+                && player.getItemInHand(hand).isEmpty()) {
+            if (player instanceof ServerPlayer serverPlayer
+                    && PlayerMobRegistry.MENU_OPENER != null) {
+                PlayerMobRegistry.MENU_OPENER.open(serverPlayer, this);
+            }
+            return InteractionResult.sidedSuccess(this.level().isClientSide);
+        }
+        return super.mobInteract(player, hand);
     }
 
     // ---- Equipment swap helpers (called from raid goals) -----------------
