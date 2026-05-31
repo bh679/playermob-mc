@@ -2,6 +2,8 @@ package games.brennan.playermob.entity;
 
 import games.brennan.playermob.entity.goal.CollectFloorItemsGoal;
 import games.brennan.playermob.entity.goal.EatFoodGoal;
+import games.brennan.playermob.entity.goal.HarvestCropsGoal;
+import games.brennan.playermob.entity.goal.HuntForFoodGoal;
 import games.brennan.playermob.entity.goal.RaidArmorStandsGoal;
 import games.brennan.playermob.entity.goal.RaidContainersGoal;
 import games.brennan.playermob.entity.goal.WeaponAwareAttackGoal;
@@ -250,6 +252,11 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         this.goalSelector.addGoal(3, new RaidContainersGoal(this, /* speed */ 0.9, /* radius */ 12));
         this.goalSelector.addGoal(3, new RaidArmorStandsGoal(this, /* speed */ 0.9, /* radius */ 12.0));
         this.goalSelector.addGoal(3, new CollectFloorItemsGoal(this, /* speed */ 0.9, /* radius */ 8.0));
+        // Low-priority idle forage drive: only farms ripe crops when there's
+        // nothing more urgent (combat 2, raid/eat/collect 3) to do. Hunting is
+        // NOT here — it runs as a target goal so the priority-2 attack goal does
+        // the killing (see below).
+        this.goalSelector.addGoal(6, new HarvestCropsGoal(this, /* speed */ 0.9, /* radius */ 8));
         this.goalSelector.addGoal(8, new WaterAvoidingRandomStrollGoal(this, 0.6));
         this.goalSelector.addGoal(9, new LookAtPlayerGoal(this, LivingEntity.class, 8.0F));
         this.goalSelector.addGoal(10, new RandomLookAroundGoal(this));
@@ -262,6 +269,9 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
             true,
             false,
             candidate -> getStance().permitsTargeting(this, candidate)));
+        // Hunt food animals only while hungry, and below the hostile-targeting
+        // goal (2) so defending against a zombie always beats chasing a cow.
+        this.targetSelector.addGoal(3, new HuntForFoodGoal(this));
     }
 
     /**
@@ -734,7 +744,7 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         return requested - leftover.getCount();
     }
 
-    // ---- Food helpers (called from EatFoodGoal) --------------------------
+    // ---- Food helpers (called from EatFoodGoal + the forage goals) -------
 
     /**
      * Returns the inventory slot of the highest-nutrition food currently
@@ -756,6 +766,31 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
             }
         }
         return bestSlot;
+    }
+
+    /**
+     * Whether the mob currently wants to go acquire food — the single trigger
+     * for the forage drive ({@link HarvestCropsGoal} harvests crops,
+     * {@link HuntForFoodGoal} hunts animals, and the existing raid goal loots
+     * chests). Health-scaled: a mob with no food always wants some; a hurt mob
+     * keeps topping up to a healing buffer; a full-health mob with food is
+     * content. See {@link ForagePolicy#wantsFood}.
+     */
+    public boolean wantsFood() {
+        boolean hasFood = findBestFoodSlot() >= 0;
+        return ForagePolicy.wantsFood(hasFood, carriedFoodNutrition(), getHealth(), getMaxHealth());
+    }
+
+    /** Total nutrition (food points) across every food stack in the backpack. */
+    private int carriedFoodNutrition() {
+        int total = 0;
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            ItemStack stack = inventory.getItem(i);
+            if (stack.isEmpty()) continue;
+            FoodProperties food = stack.get(DataComponents.FOOD);
+            if (food != null) total += food.nutrition() * stack.getCount();
+        }
+        return total;
     }
 
     /**
