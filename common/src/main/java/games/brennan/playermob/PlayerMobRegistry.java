@@ -1,13 +1,22 @@
 package games.brennan.playermob;
 
+import games.brennan.playermob.entity.Personality;
+import games.brennan.playermob.entity.PersonalityProfile;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.menu.PlayerMobMenu;
 import games.brennan.playermob.menu.PlayerMobMenuOpener;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.MobCategory;
 import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.SpawnEggItem;
+import net.minecraft.world.item.component.CustomData;
+
+import java.util.Locale;
 
 /**
  * Common registration holder.
@@ -79,5 +88,61 @@ public final class PlayerMobRegistry {
             .<PlayerMobEntity>of(PlayerMobEntity::new, MobCategory.MONSTER)
             .sized(0.6F, 1.95F)
             .clientTrackingRange(8);
+    }
+
+    // ---- Spawn eggs -------------------------------------------------------
+
+    /** Spawn-egg background colour (warm skin tone) — shared by every variant. */
+    public static final int SPAWN_EGG_PRIMARY = 0xDDB897;
+    /** Default/random egg spot colour (dark hair brown). */
+    public static final int SPAWN_EGG_SECONDARY = 0x4F3A2A;
+
+    /** Registry path for an archetype egg, e.g. {@code player_mob_shy_spawn_egg}. */
+    public static String personalitySpawnEggPath(Personality personality) {
+        return "player_mob_" + personality.name().toLowerCase(Locale.ROOT) + "_spawn_egg";
+    }
+
+    public static ResourceLocation personalitySpawnEggId(Personality personality) {
+        return ResourceLocation.fromNamespaceAndPath(PlayerMob.MOD_ID, personalitySpawnEggPath(personality));
+    }
+
+    /**
+     * The {@code entity_data} an archetype egg stamps onto the mob it spawns —
+     * just the player-facing personality. {@code finalizeSpawn} then randomises
+     * the other categories (see {@link PersonalityProfile#rollUnsetRandom}).
+     */
+    public static CompoundTag personalityEggData(Personality personality) {
+        CompoundTag tag = new CompoundTag();
+        tag.putInt(PersonalityProfile.TAG_PLAYERS, personality.ordinal());
+        return tag;
+    }
+
+    /** Distinct spot colour per personality so the eggs read apart in the creative menu. */
+    public static int personalityEggColor(Personality personality) {
+        return switch (personality) {
+            case AGGRESSIVE -> 0xB02E26; // red
+            case FRIENDLY   -> 0x5E7C16; // green
+            case PASSIVE    -> 0x8E8E8E; // grey
+            case SKEPTICAL  -> 0xE0A030; // amber
+            case SHY        -> 0x3AB3DA; // light blue
+        };
+    }
+
+    /** The fully-random spawn egg (the original default egg). */
+    public static SpawnEggItem createRandomSpawnEgg(EntityType<? extends Mob> type) {
+        return new SpawnEggItem(type, SPAWN_EGG_PRIMARY, SPAWN_EGG_SECONDARY, new Item.Properties());
+    }
+
+    /**
+     * An archetype egg that pins the player-facing personality via the
+     * {@code entity_data} component; the entity's {@code finalizeSpawn} fills the
+     * remaining categories at random.
+     */
+    public static SpawnEggItem createPersonalitySpawnEgg(EntityType<? extends Mob> type, Personality personality) {
+        return new SpawnEggItem(
+            type,
+            SPAWN_EGG_PRIMARY,
+            personalityEggColor(personality),
+            new Item.Properties().component(DataComponents.ENTITY_DATA, CustomData.of(personalityEggData(personality))));
     }
 }

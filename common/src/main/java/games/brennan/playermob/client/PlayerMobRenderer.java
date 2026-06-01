@@ -1,11 +1,13 @@
 package games.brennan.playermob.client;
 
+import com.mojang.blaze3d.vertex.PoseStack;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.model.HumanoidModel;
 import net.minecraft.client.model.PlayerModel;
 import net.minecraft.client.model.geom.ModelLayers;
+import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.entity.HumanoidMobRenderer;
 import net.minecraft.client.renderer.entity.layers.HumanoidArmorLayer;
@@ -94,6 +96,20 @@ public final class PlayerMobRenderer
         // Held-item layer — draws whatever the mob holds in mainhand + offhand.
         // PlayerModel implements ArmedModel so the layer knows where to anchor.
         this.addLayer(new ItemInHandLayer<>(this, ctx.getItemInHandRenderer()));
+    }
+
+    /**
+     * {@link HumanoidMobRenderer} never sets the model's {@code crouching} flag
+     * — only {@code PlayerRenderer} does, for real players — so the sneak pose
+     * driven by {@link PlayerMobEntity#setCrouching} (Friendly greeting, Shy
+     * hiding) would otherwise never render. Mirror the entity's crouch state
+     * onto the model each frame, exactly as PlayerRenderer does.
+     */
+    @Override
+    public void render(PlayerMobEntity entity, float entityYaw, float partialTick,
+                       PoseStack poseStack, MultiBufferSource buffer, int packedLight) {
+        this.getModel().crouching = entity.isCrouching();
+        super.render(entity, entityYaw, partialTick, poseStack, buffer, packedLight);
     }
 
     @Override

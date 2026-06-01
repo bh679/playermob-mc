@@ -2,9 +2,11 @@ package games.brennan.playermob.forge;
 
 import games.brennan.playermob.PlayerMob;
 import games.brennan.playermob.PlayerMobRegistry;
+import games.brennan.playermob.entity.Personality;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.menu.PlayerMobMenu;
 import games.brennan.playermob.skin.PlayerMobSkinReloadListener;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.SimpleMenuProvider;
@@ -12,7 +14,6 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraft.world.item.Item;
-import net.minecraft.world.item.SpawnEggItem;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.common.extensions.IForgeMenuType;
@@ -30,12 +31,15 @@ import net.minecraftforge.registries.RegistryObject;
  * Forge loader entrypoint. Mirrors {@code PlayerMobNeoForge} with Forge-flavour
  * imports. The Architectury API doesn't ship a Forge build for 1.21.x, so
  * registration lives per-loader using Forge's DeferredRegister.
+ *
+ * <p>Registers the entity type, the random spawn egg, and the five player-facing
+ * personality archetype eggs (in a static block); egg colours / {@code entity_data}
+ * are built by {@link PlayerMobRegistry}. The archetype eggs are looked back up
+ * from the item registry at creative-tab time, which avoids threading their
+ * {@link RegistryObject} generics through a collection.</p>
  */
 @Mod(PlayerMob.MOD_ID)
 public final class PlayerMobForge {
-
-    private static final int SPAWN_EGG_PRIMARY = 0xDDB897;
-    private static final int SPAWN_EGG_SECONDARY = 0x4F3A2A;
 
     private static final DeferredRegister<EntityType<?>> ENTITY_TYPES =
         DeferredRegister.create(Registries.ENTITY_TYPE, PlayerMob.MOD_ID);
@@ -50,9 +54,16 @@ public final class PlayerMobForge {
 
     public static final RegistryObject<Item> PLAYER_MOB_SPAWN_EGG =
         ITEMS.register(PlayerMobRegistry.PLAYER_MOB_SPAWN_EGG_PATH, () ->
-            new SpawnEggItem(PLAYER_MOB.get(),
-                             SPAWN_EGG_PRIMARY, SPAWN_EGG_SECONDARY,
-                             new Item.Properties()));
+            PlayerMobRegistry.createRandomSpawnEgg(PLAYER_MOB.get()));
+
+    // Player-facing archetype eggs — one per personality. Registered for their
+    // side effect; resolved from BuiltInRegistries at tab-build time.
+    static {
+        for (Personality personality : Personality.values()) {
+            ITEMS.register(PlayerMobRegistry.personalitySpawnEggPath(personality), () ->
+                PlayerMobRegistry.createPersonalitySpawnEgg(PLAYER_MOB.get(), personality));
+        }
+    }
 
     public static final RegistryObject<MenuType<PlayerMobMenu>> PLAYER_MOB_MENU =
         MENUS.register(PlayerMobRegistry.PLAYER_MOB_MENU_PATH, () ->
@@ -91,6 +102,10 @@ public final class PlayerMobForge {
     private static void onBuildCreativeTab(BuildCreativeModeTabContentsEvent event) {
         if (event.getTabKey() == CreativeModeTabs.SPAWN_EGGS) {
             event.accept(PLAYER_MOB_SPAWN_EGG.get());
+            for (Personality personality : Personality.values()) {
+                event.accept(BuiltInRegistries.ITEM.get(
+                    PlayerMobRegistry.personalitySpawnEggId(personality)));
+            }
         }
     }
 

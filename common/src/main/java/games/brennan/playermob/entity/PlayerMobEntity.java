@@ -3,10 +3,14 @@ package games.brennan.playermob.entity;
 import games.brennan.playermob.PlayerMobRegistry;
 import games.brennan.playermob.entity.goal.CollectFloorItemsGoal;
 import games.brennan.playermob.entity.goal.EatFoodGoal;
+import games.brennan.playermob.entity.goal.FleeFromCategoryGoal;
+import games.brennan.playermob.entity.goal.FriendlyGreetGoal;
 import games.brennan.playermob.entity.goal.HarvestCropsGoal;
 import games.brennan.playermob.entity.goal.HuntForFoodGoal;
+import games.brennan.playermob.entity.goal.PlayerMobDoorGoal;
 import games.brennan.playermob.entity.goal.RaidArmorStandsGoal;
 import games.brennan.playermob.entity.goal.RaidContainersGoal;
+import games.brennan.playermob.entity.goal.SkepticalWatchGoal;
 import games.brennan.playermob.entity.goal.WeaponAwareAttackGoal;
 import games.brennan.playermob.skin.PlayerMobSkin;
 import games.brennan.playermob.skin.PlayerMobSkinRegistry;
@@ -15,6 +19,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.particles.ItemParticleOption;
 import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.util.Mth;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
@@ -41,6 +46,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.MobSpawnType;
+import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.SpawnGroupData;
 import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
@@ -50,6 +56,7 @@ import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
 import net.minecraft.world.entity.ai.goal.WaterAvoidingRandomStrollGoal;
 import net.minecraft.world.entity.ai.goal.target.HurtByTargetGoal;
 import net.minecraft.world.entity.ai.goal.target.NearestAttackableTargetGoal;
+import net.minecraft.world.entity.ai.navigation.GroundPathNavigation;
 import net.minecraft.world.entity.monster.CrossbowAttackMob;
 import net.minecraft.world.food.FoodProperties;
 import net.minecraft.world.entity.monster.Enemy;
@@ -59,8 +66,14 @@ import net.minecraft.world.entity.npc.InventoryCarrier;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.projectile.AbstractArrow;
 import net.minecraft.world.entity.projectile.ProjectileUtil;
+import net.minecraft.world.item.AxeItem;
+import net.minecraft.world.item.BowItem;
 import net.minecraft.world.item.CrossbowItem;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.MaceItem;
+import net.minecraft.world.item.SwordItem;
+import net.minecraft.world.item.TridentItem;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.decoration.ArmorStand;
@@ -69,9 +82,11 @@ import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.ServerLevelAccessor;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -85,9 +100,14 @@ import java.util.UUID;
  * {@link CrossbowAttackMob} (which extends {@link RangedAttackMob}) for
  * vanilla ranged-goal compatibility.</p>
  *
- * <p><b>Targets</b> are driven by {@link Stance} (v1 ships exactly one). The
- * goal-selector predicate forwards to {@code stance.permitsTargeting(this, candidate)}
- * so new stances drop in by adding enum constants — no goal rewiring.</p>
+ * <p><b>Personalities</b> ({@link PersonalityProfile}) drive how the mob
+ * treats each {@link TargetCategory} of entity (players, hostile mobs, animals,
+ * villagers) — Aggressive, Friendly, Passive, Skeptical, or Shy. The
+ * target-selector attacks anything the mob is {@link Personality#AGGRESSIVE}
+ * toward; {@link FleeFromCategoryGoal}, {@link SkepticalWatchGoal}, and
+ * {@link FriendlyGreetGoal} cover the rest and self-gate on the live
+ * personality (a runtime flip via {@link #hurt} re-wires nothing). Server-side
+ * only; the crouch gesture rides the vanilla-synced pose ({@link #setCrouching}).</p>
  *
  * <p><b>Skins</b> — Each mob rolls its look in {@link #finalizeSpawn}. It
  * always rolls a bundled-vanilla index in {@code [0, SKIN_COUNT)}, then with
@@ -108,15 +128,17 @@ import java.util.UUID;
  * backpack via {@link #dropCustomDeathLoot} and all equipped gear via the
  * guaranteed {@link #getEquipmentDropChance} override.</p>
  *
+ * <p><b>Doors</b> — the navigation has {@code setCanOpenDoors(true)} so the mob
+ * paths through closed wooden doors, and {@link PlayerMobDoorGoal} opens them on
+ * approach. Each mob rolls a {@link #closesDoors} personality at spawn: half
+ * close the door behind themselves, half leave it open.</p>
+ *
  * <p><b>Spawning</b> — spawn egg + {@code /summon playermob:player_mob}
  * only. No natural spawns, no raid hooks.</p>
  */
 public class PlayerMobEntity extends Monster implements CrossbowAttackMob, InventoryCarrier {
 
     // ---- DataTracker ------------------------------------------------------
-
-    private static final EntityDataAccessor<Integer> DATA_STANCE =
-        SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.INT);
 
     private static final EntityDataAccessor<Boolean> DATA_IS_CHARGING_CROSSBOW =
         SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.BOOLEAN);
@@ -181,10 +203,10 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
      */
     private static final int CHEST_VIEWERS_EVENT = 1;
 
-    private static final String TAG_STANCE = "Stance";
     private static final String TAG_SKIN_INDEX = "SkinIndex";
     private static final String TAG_SKIN_TEXTURE_URL = "SkinTextureUrl";
     private static final String TAG_SKIN_SLIM = "SkinSlim";
+    private static final String TAG_CLOSES_DOORS = "ClosesDoors";
     private static final String TAG_EXPLORED_BLOCKS = "ExploredBlocks";
     private static final String TAG_EXPLORED_ENTITIES = "ExploredEntities";
     private static final String TAG_POS = "Pos";
@@ -192,6 +214,13 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     private static final String TAG_TICK = "Tick";
 
     // ---- Fields -----------------------------------------------------------
+
+    /**
+     * Per-category personalities (who the mob attacks / greets / flees /
+     * watches). Server-side only. Rolled at spawn, set by spawn eggs /
+     * {@code /summon}, persisted to NBT, and flipped by {@link #hurt}.
+     */
+    private final PersonalityProfile personalities = new PersonalityProfile();
 
     private final SimpleContainer inventory = new SimpleContainer(INVENTORY_SIZE);
 
@@ -219,11 +248,28 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
      */
     private BlockPos openContainerPos;
 
+    /**
+     * Per-mob "tidiness" personality, rolled 50/50 at spawn (see
+     * {@link #finalizeSpawn}) and persisted. {@code true} ⇒ this mob closes
+     * wooden doors behind itself (villager-like); {@code false} ⇒ it leaves
+     * them open (raider-like). Read every tick by {@link PlayerMobDoorGoal}.
+     *
+     * <p>Server-only AI state — never rendered — so it's a plain field with NBT
+     * persistence rather than a synched DataTracker entry.</p>
+     */
+    private boolean closesDoors;
+
     public PlayerMobEntity(EntityType<? extends PlayerMobEntity> type, Level level) {
         super(type, level);
         // Enable vanilla's passive proximity pickup (Mob.aiStep). The active
         // CollectFloorItemsGoal does the seeking; this catches items underfoot.
         this.setCanPickUpLoot(true);
+        // Route pathfinding through closed wooden doors (passing through *open*
+        // doors is already on by default). PlayerMobDoorGoal does the opening;
+        // without this flag DoorInteractGoal.canUse() never fires.
+        if (this.getNavigation() instanceof GroundPathNavigation groundNav) {
+            groundNav.setCanOpenDoors(true);
+        }
     }
 
     /**
@@ -242,7 +288,6 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     @Override
     protected void defineSynchedData(SynchedEntityData.Builder builder) {
         super.defineSynchedData(builder);
-        builder.define(DATA_STANCE, Stance.HOSTILE_TO_HOSTILE_MOBS.ordinal());
         builder.define(DATA_IS_CHARGING_CROSSBOW, false);
         builder.define(DATA_SKIN_INDEX, 0);
         builder.define(DATA_SKIN_TEXTURE_URL, "");
@@ -252,6 +297,15 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     @Override
     protected void registerGoals() {
         this.goalSelector.addGoal(0, new FloatGoal(this));
+        // Personality social goals — priority 1 so they preempt raiding/strolling
+        // when their disposition applies. Each self-gates on the live personality;
+        // Skeptical/Friendly also gate on "no target" so they yield to combat.
+        this.goalSelector.addGoal(1, new FleeFromCategoryGoal(this, /* range */ 10.0F, /* walk */ 1.0, /* sprint */ 1.3));
+        this.goalSelector.addGoal(1, new SkepticalWatchGoal(this, /* watchRange */ 10.0, /* closeRange */ 4.0));
+        this.goalSelector.addGoal(1, new FriendlyGreetGoal(this, /* range */ 10.0, /* approachSpeed */ 0.9));
+        // Open (and, for "tidy" mobs, close) wooden doors on the path. Declares
+        // no flags, so it runs alongside whatever movement goal owns the walk.
+        this.goalSelector.addGoal(1, new PlayerMobDoorGoal(this));
         this.goalSelector.addGoal(2, new WeaponAwareAttackGoal(this, 1.0, 8.0f));
         // EatFoodGoal added BEFORE the raid goals at the same priority so
         // its canUse() is evaluated first — a low-HP mob with food prefers
@@ -276,7 +330,7 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
             10,
             true,
             false,
-            candidate -> getStance().permitsTargeting(this, candidate)));
+            candidate -> personalityToward(candidate) == Personality.AGGRESSIVE));
         // Hunt food animals only while hungry, and below the hostile-targeting
         // goal (2) so defending against a zombie always beats chasing a cow.
         this.targetSelector.addGoal(3, new HuntForFoodGoal(this));
@@ -306,6 +360,11 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
                 setSkinSlim(skin.model() == SkinModel.SLIM);
             });
         }
+        // Randomise any personality categories not pinned by a spawn egg's
+        // entity_data or /summon NBT (player-facing eggs leave PLAYERS set).
+        personalities.rollUnsetRandom(world.getRandom());
+        // Roll the door-closing personality (~50% close behind, ~50% leave open).
+        this.closesDoors = world.getRandom().nextBoolean();
         return super.finalizeSpawn(world, difficulty, reason, data);
     }
 
@@ -326,14 +385,175 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         return true;
     }
 
-    // ---- Stance accessors -------------------------------------------------
+    // ---- Personality accessors + behaviour helpers ------------------------
 
-    public Stance getStance() {
-        return Stance.byOrdinal(this.entityData.get(DATA_STANCE));
+    /** The mob's personality toward a live entity, or {@code null} if uncategorised. */
+    public Personality personalityToward(LivingEntity entity) {
+        return personalities.personalityToward(entity);
     }
 
-    public void setStance(Stance stance) {
-        this.entityData.set(DATA_STANCE, stance.ordinal());
+    /**
+     * Nearest living entity within {@code range} that the mob holds the given
+     * {@code personality} toward. Used by the social goals to find their subject.
+     */
+    public LivingEntity nearestWithPersonality(Personality personality, double range) {
+        AABB box = getBoundingBox().inflate(range);
+        LivingEntity closest = null;
+        double closestSq = range * range;
+        List<LivingEntity> candidates = level().getEntitiesOfClass(
+            LivingEntity.class, box,
+            e -> e != this && e.isAlive() && personalities.personalityToward(e) == personality);
+        for (LivingEntity e : candidates) {
+            double distSq = distanceToSqr(e);
+            if (distSq < closestSq) {
+                closestSq = distSq;
+                closest = e;
+            }
+        }
+        return closest;
+    }
+
+    /** True if the main hand holds a recognised weapon (drives the provoked fight/flee choice). */
+    public boolean isArmed() {
+        return isWeapon(getMainHandItem());
+    }
+
+    private static boolean isWeapon(ItemStack stack) {
+        return stack.getItem() instanceof SwordItem
+            || stack.getItem() instanceof AxeItem
+            || stack.getItem() instanceof TridentItem
+            || stack.getItem() instanceof BowItem
+            || stack.getItem() instanceof CrossbowItem
+            || stack.getItem() instanceof MaceItem;
+    }
+
+    /**
+     * Skeptical "ready a weapon": if the main hand is empty, move the first
+     * weapon found in the backpack into it. No-op if already armed or none found.
+     */
+    public void drawWeaponFromBackpack() {
+        if (!getMainHandItem().isEmpty()) return;
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            ItemStack stack = inventory.getItem(i);
+            if (!stack.isEmpty() && isWeapon(stack)) {
+                setItemSlot(EquipmentSlot.MAINHAND, inventory.removeItemNoUpdate(i));
+                return;
+            }
+        }
+    }
+
+    /** Skeptical "raise shield": start using a shield held in either hand. */
+    public void raiseShieldIfHeld() {
+        if (isUsingItem()) return;
+        if (getOffhandItem().is(Items.SHIELD)) {
+            startUsingItem(InteractionHand.OFF_HAND);
+        } else if (getMainHandItem().is(Items.SHIELD)) {
+            startUsingItem(InteractionHand.MAIN_HAND);
+        }
+    }
+
+    /** Stop holding up a shield (reverse of {@link #raiseShieldIfHeld}). */
+    public void lowerShield() {
+        if (isUsingItem() && getUseItem().is(Items.SHIELD)) {
+            stopUsingItem();
+        }
+    }
+
+    /**
+     * Crouch gesture for the Friendly greeting and Shy hiding. The
+     * {@code PlayerModel} renders the sneak pose from {@link #isCrouching()}
+     * (i.e. {@link #getPose()} {@code == CROUCHING}), not the sneak flag — so we
+     * set the pose. Both are set so flag-driven bits stay consistent. Visual-only
+     * (no per-pose dimensions); {@code setPose} no-ops when unchanged.
+     */
+    public void setCrouching(boolean crouching) {
+        setShiftKeyDown(crouching);
+        setPose(crouching ? Pose.CROUCHING : Pose.STANDING);
+    }
+
+    /**
+     * Snap the body (and head) to face {@code target}. Vanilla shield blocking
+     * only deflects hits from the facing direction, so a Skeptical mob holding
+     * its shield up must square up to the threat for the block to count.
+     */
+    public void faceBodyToward(LivingEntity target) {
+        double dx = target.getX() - getX();
+        double dz = target.getZ() - getZ();
+        float yaw = (float) (Mth.atan2(dz, dx) * (180.0 / Math.PI)) - 90.0F;
+        setYRot(yaw);
+        setYBodyRot(yaw);
+        setYHeadRot(yaw);
+    }
+
+    /**
+     * Friendly "gift": toss an item arcing toward {@code target} from eye height
+     * like a player's Q-drop. Prefers a looted backpack item; offers a small
+     * default gift if the backpack is empty so the gesture always lands.
+     */
+    public boolean giveItemTo(LivingEntity target) {
+        ItemStack gift = ItemStack.EMPTY;
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            if (!inventory.getItem(i).isEmpty()) {
+                gift = inventory.removeItemNoUpdate(i);
+                break;
+            }
+        }
+        if (gift.isEmpty()) {
+            gift = defaultGift();
+        }
+        double fromX = getX();
+        double fromY = getEyeY() - 0.1;
+        double fromZ = getZ();
+        ItemEntity thrown = new ItemEntity(level(), fromX, fromY, fromZ, gift);
+        double dx = target.getX() - fromX;
+        double dy = (target.getY() + target.getBbHeight() * 0.5) - fromY;
+        double dz = target.getZ() - fromZ;
+        double horizontal = Math.sqrt(dx * dx + dz * dz);
+        Vec3 velocity = new Vec3(dx, dy + horizontal * 0.15, dz).normalize().scale(0.45);
+        thrown.setDeltaMovement(velocity);
+        thrown.setPickUpDelay(10);
+        level().addFreshEntity(thrown);
+        return true;
+    }
+
+    /** A small, friendly token gift for when the backpack has nothing looted yet. */
+    private ItemStack defaultGift() {
+        return switch (getRandom().nextInt(5)) {
+            case 0 -> new ItemStack(Items.POPPY);
+            case 1 -> new ItemStack(Items.DANDELION);
+            case 2 -> new ItemStack(Items.BREAD);
+            case 3 -> new ItemStack(Items.APPLE);
+            default -> new ItemStack(Items.COOKIE);
+        };
+    }
+
+    /** Whether world-griefing (and thus chest raiding) is permitted here. */
+    public boolean canRaid() {
+        return level().getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING);
+    }
+
+    /**
+     * True if a lootable chest/barrel not recently raided sits within {@code radius}.
+     * Lets the Shy flee goal brave a sneak-raid instead of fleeing — once looted the
+     * chest is marked explored, so this returns false and the mob flees.
+     */
+    public boolean hasRaidableContainerNearby(int radius) {
+        BlockPos origin = blockPosition();
+        long now = tickCount;
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dy = -radius; dy <= radius; dy++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    cursor.set(origin.getX() + dx, origin.getY() + dy, origin.getZ() + dz);
+                    BlockEntity be = level().getBlockEntity(cursor);
+                    if ((be instanceof ChestBlockEntity || be instanceof BarrelBlockEntity)
+                            && !isBlockExplored(cursor, now)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     // ---- Skin accessors ---------------------------------------------------
@@ -379,6 +599,17 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
 
     public void setSkinSlim(boolean slim) {
         this.entityData.set(DATA_SKIN_SLIM, slim);
+    }
+
+    // ---- Door behaviour ---------------------------------------------------
+
+    /**
+     * Whether this mob closes wooden doors behind itself. Read each tick by
+     * {@link PlayerMobDoorGoal}; rolled at spawn and persisted. See
+     * {@link #closesDoors}.
+     */
+    public boolean closesDoors() {
+        return this.closesDoors;
     }
 
     // ---- InventoryCarrier ------------------------------------------------
@@ -954,8 +1185,9 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     @Override
     public void addAdditionalSaveData(CompoundTag tag) {
         super.addAdditionalSaveData(tag);
-        tag.putInt(TAG_STANCE, getStance().ordinal());
+        personalities.save(tag);
         tag.putInt(TAG_SKIN_INDEX, getSkinIndex());
+        tag.putBoolean(TAG_CLOSES_DOORS, this.closesDoors);
         // URL skin tags are purely additive on top of v1 (SkinIndex). Only
         // write the URL key when set, so 0.2.0-loaded mobs that never had a
         // URL assigned don't round-trip an empty string back into the save.
@@ -991,9 +1223,11 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     @Override
     public void readAdditionalSaveData(CompoundTag tag) {
         super.readAdditionalSaveData(tag);
-        // byOrdinal guards against missing/invalid stored values.
-        setStance(Stance.byOrdinal(tag.getInt(TAG_STANCE)));
+        // Per-category personalities; missing tags keep category defaults.
+        personalities.load(tag);
         setSkinIndex(tag.getInt(TAG_SKIN_INDEX));
+        // Missing key (pre-door-feature saves) ⇒ false ⇒ leave-open. Additive.
+        this.closesDoors = tag.getBoolean(TAG_CLOSES_DOORS);
         // Backward compat: 0.2.0 saves have no SkinTextureUrl tag. Missing key
         // ⇒ URL stays the default "" ⇒ renderer uses the legacy bundled-
         // vanilla path keyed off SkinIndex. New v2 mobs round-trip the URL.
@@ -1050,6 +1284,31 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
             }
         }
         this.inventory.clearContent();
+    }
+
+    // ---- Provocation reaction --------------------------------------------
+
+    /**
+     * When struck by a categorisable entity the mob isn't already reacting to,
+     * flip its personality toward that category: stand and fight ({@link
+     * Personality#AGGRESSIVE}) if armed, else flee ({@link Personality#SHY},
+     * clamped to Aggressive where Shy is disallowed). On a flip to Shy we drop
+     * the retaliation target so {@link FleeFromCategoryGoal} takes over.
+     */
+    @Override
+    public boolean hurt(DamageSource source, float amount) {
+        boolean result = super.hurt(source, amount);
+        if (result && !level().isClientSide && source.getEntity() instanceof LivingEntity attacker) {
+            TargetCategory category = TargetCategory.classify(attacker);
+            if (category != null) {
+                Personality reaction = personalities.provoke(category, isArmed());
+                if (reaction == Personality.SHY) {
+                    setTarget(null);
+                    setLastHurtByMob(null);
+                }
+            }
+        }
+        return result;
     }
 
     /**
