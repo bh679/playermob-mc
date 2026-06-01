@@ -2,10 +2,8 @@ package games.brennan.playermob.entity.goal;
 
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.ai.goal.RangedCrossbowAttackGoal;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.ai.goal.MeleeAttackGoal;
-import net.minecraft.world.entity.ai.goal.RangedBowAttackGoal;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
@@ -17,8 +15,8 @@ import java.util.EnumSet;
  * the MOVE+LOOK+JUMP flags so the goal selector sees a single occupant for
  * combat — switching mid-combat won't lose the slot.
  *
- * <p>Internally delegates to three vanilla goals — {@link RangedCrossbowAttackGoal},
- * {@link RangedBowAttackGoal}, {@link MeleeAttackGoal} — chosen per tick by
+ * <p>Internally delegates to three goals — {@link PlayerMobCrossbowAttackGoal},
+ * {@link PlayerMobBowAttackGoal}, {@link MeleeAttackGoal} — chosen per tick by
  * inspecting the main-hand stack. When the held weapon changes mid-combat
  * (e.g. the mob's crossbow runs out of ammo and the operator swaps via
  * {@code /item replace}), this goal stops the previous delegate and starts
@@ -34,8 +32,8 @@ import java.util.EnumSet;
 public final class WeaponAwareAttackGoal extends Goal {
 
     private final PlayerMobEntity mob;
-    private final RangedCrossbowAttackGoal<PlayerMobEntity> crossbow;
-    private final RangedBowAttackGoal<PlayerMobEntity> bow;
+    private final PlayerMobCrossbowAttackGoal crossbow;
+    private final PlayerMobBowAttackGoal bow;
     private final MeleeAttackGoal melee;
 
     /** The currently-running delegate, or {@code null} when nothing has started. */
@@ -50,10 +48,10 @@ public final class WeaponAwareAttackGoal extends Goal {
      */
     public WeaponAwareAttackGoal(PlayerMobEntity mob, double speed, float rangedAttackRange) {
         this.mob = mob;
-        // 20-tick attack interval mirrors vanilla skeleton; RangedCrossbowAttackGoal
+        // 20-tick attack interval mirrors vanilla skeleton; the crossbow goal
         // manages its own charge timing so doesn't take an interval arg.
-        this.crossbow = new RangedCrossbowAttackGoal<>(mob, speed, rangedAttackRange);
-        this.bow = new RangedBowAttackGoal<>(mob, speed, 20, rangedAttackRange);
+        this.crossbow = new PlayerMobCrossbowAttackGoal(mob, speed, rangedAttackRange);
+        this.bow = new PlayerMobBowAttackGoal(mob, speed, 20, rangedAttackRange);
         this.melee = new MeleeAttackGoal(mob, speed, true);
         // We claim every flag any delegate might need so the selector reserves
         // them for us. Inner-goal flags are irrelevant — they're not selector-managed.
