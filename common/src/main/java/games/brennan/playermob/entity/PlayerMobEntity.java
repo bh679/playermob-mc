@@ -1,6 +1,7 @@
 package games.brennan.playermob.entity;
 
 import games.brennan.playermob.PlayerMobRegistry;
+import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.goal.CollectFloorItemsGoal;
 import games.brennan.playermob.entity.goal.EatFoodGoal;
 import games.brennan.playermob.entity.goal.FleeFromCategoryGoal;
@@ -330,10 +331,30 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
             10,
             true,
             false,
-            candidate -> personalityToward(candidate) == Personality.AGGRESSIVE));
+            candidate -> personalityToward(candidate) == Personality.AGGRESSIVE
+                && TrainConfinement.allowsTarget(this, candidate)));
         // Hunt food animals only while hungry, and below the hostile-targeting
         // goal (2) so defending against a zombie always beats chasing a cow.
         this.targetSelector.addGoal(3, new HuntForFoodGoal(this));
+    }
+
+    /**
+     * When standing on a Dungeon Train carriage, never hold an attack target that
+     * has left the train. Acquisition is already filtered (the priority-2 target
+     * goal and {@link HuntForFoodGoal}); this central sweep additionally drops a
+     * target that <em>wanders</em> off, covering every target source (hostile,
+     * retaliation, hunt) in one place — clearing it also makes the priority-2
+     * {@code WeaponAwareAttackGoal} stand down. No-op unless a train mod is
+     * installed and the mob is actually on a train: {@link
+     * TrainConfinement#allowsTarget} short-circuits to {@code true} otherwise.
+     */
+    @Override
+    protected void customServerAiStep() {
+        super.customServerAiStep();
+        LivingEntity target = getTarget();
+        if (target != null && !TrainConfinement.allowsTarget(this, target)) {
+            setTarget(null);
+        }
     }
 
     /**

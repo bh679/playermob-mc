@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.Personality;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.core.BlockPos;
@@ -113,7 +114,8 @@ public final class RaidContainersGoal extends Goal {
                 && targetPos != null
                 && mob.isAlive()
                 && !mob.isDeadOrDying()
-                && mob.getTarget() == null;
+                && mob.getTarget() == null
+                && TrainConfinement.allowsTarget(mob, targetPos);
     }
 
     @Override
@@ -282,6 +284,7 @@ public final class RaidContainersGoal extends Goal {
                     BlockEntity be = level.getBlockEntity(cursor);
                     if (!isLootableContainer(be)) continue;
                     if (mob.isBlockExplored(cursor, now)) continue;
+                    if (!TrainConfinement.allowsTarget(mob, cursor)) continue;
                     double distSq = mobPos.distSqr(cursor);
                     if (distSq < closestDistSq) {
                         closestDistSq = distSq;

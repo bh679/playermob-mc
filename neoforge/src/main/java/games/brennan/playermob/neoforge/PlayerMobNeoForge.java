@@ -2,6 +2,7 @@ package games.brennan.playermob.neoforge;
 
 import games.brennan.playermob.PlayerMob;
 import games.brennan.playermob.PlayerMobRegistry;
+import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.Personality;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.menu.PlayerMobMenu;
@@ -16,6 +17,7 @@ import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraft.world.item.Item;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
+import net.neoforged.fml.ModList;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.neoforged.fml.loading.FMLEnvironment;
@@ -124,6 +126,23 @@ public final class PlayerMobNeoForge {
                     (id, inv, player) -> new PlayerMobMenu(id, inv, mob),
                     Component.translatable("container.playermob.player_mob")),
                 buf -> buf.writeVarInt(mob.getId()));
+
+        // Optional Dungeon Train integration. DT is NeoForge-only and optional;
+        // gate on its presence so DungeonTrainEnvironment (and the Dungeon Train
+        // symbols it imports) is only ever classloaded when DT is installed.
+        if (ModList.get().isLoaded("dungeontrain")) {
+            installDungeonTrain();
+        }
         PlayerMob.init();
+    }
+
+    /**
+     * Install the Dungeon Train-backed train environment. Isolated in its own
+     * method and referenced only from behind the {@code isLoaded("dungeontrain")}
+     * guard, so the NeoForge compat class and its Dungeon Train imports are never
+     * classloaded when DT is absent.
+     */
+    private static void installDungeonTrain() {
+        TrainConfinement.install(new games.brennan.playermob.neoforge.compat.DungeonTrainEnvironment());
     }
 }

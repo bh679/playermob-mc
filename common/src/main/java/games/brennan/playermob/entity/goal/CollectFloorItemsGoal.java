@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.item.ItemEntity;
@@ -79,7 +80,8 @@ public final class CollectFloorItemsGoal extends Goal {
                 && target.isAlive()
                 && !target.isRemoved()
                 && mob.isAlive()
-                && mob.getTarget() == null;
+                && mob.getTarget() == null
+                && TrainConfinement.allowsTarget(mob, target);
     }
 
     @Override
@@ -128,7 +130,8 @@ public final class CollectFloorItemsGoal extends Goal {
         AABB box = mob.getBoundingBox().inflate(scanRadius);
         List<ItemEntity> nearby = mob.level().getEntitiesOfClass(
             ItemEntity.class, box,
-            e -> e.isAlive() && !e.hasPickUpDelay() && mob.wantsToPickUp(e.getItem()));
+            e -> e.isAlive() && !e.hasPickUpDelay() && mob.wantsToPickUp(e.getItem())
+                && TrainConfinement.allowsTarget(mob, e));
         ItemEntity closest = null;
         double closestDistSq = Double.MAX_VALUE;
         for (ItemEntity e : nearby) {

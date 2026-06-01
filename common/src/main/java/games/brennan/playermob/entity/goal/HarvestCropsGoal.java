@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.EquipmentEvaluator;
 import games.brennan.playermob.entity.ForagePolicy;
 import games.brennan.playermob.entity.PlayerMobEntity;
@@ -92,7 +93,8 @@ public final class HarvestCropsGoal extends Goal {
                 && mob.isAlive()
                 && !mob.isDeadOrDying()
                 && mob.getTarget() == null
-                && mob.wantsFood();
+                && mob.wantsFood()
+                && TrainConfinement.allowsTarget(mob, targetPos);
     }
 
     @Override
@@ -211,6 +213,7 @@ public final class HarvestCropsGoal extends Goal {
                     cursor.set(mobPos.getX() + dx, mobPos.getY() + dy, mobPos.getZ() + dz);
                     if (!ForagePolicy.isRipeFoodCrop(level.getBlockState(cursor))) continue;
                     if (mob.isBlockExplored(cursor, now)) continue;
+                    if (!TrainConfinement.allowsTarget(mob, cursor)) continue;
                     double distSq = mobPos.distSqr(cursor);
                     if (distSq < closestDistSq) {
                         closestDistSq = distSq;

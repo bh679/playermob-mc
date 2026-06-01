@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.ForagePolicy;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.world.entity.ai.goal.target.NearestAttackableTargetGoal;
@@ -36,7 +37,8 @@ public final class HuntForFoodGoal extends NearestAttackableTargetGoal<Animal> {
         // Mirrors the hostile-targeting goal wiring in PlayerMobEntity#registerGoals:
         // randomInterval 10, mustSee true, mustReach false, single-arg selector.
         super(mob, Animal.class, 10, true, false,
-            candidate -> ForagePolicy.isHuntableFoodAnimal(candidate));
+            candidate -> ForagePolicy.isHuntableFoodAnimal(candidate)
+                && TrainConfinement.allowsTarget(mob, candidate));
         this.playerMob = mob;
     }
 
