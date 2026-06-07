@@ -4,6 +4,7 @@ import games.brennan.playermob.PlayerMobRegistry;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.goal.AdvanceCarriageGoal;
 import games.brennan.playermob.entity.goal.CollectFloorItemsGoal;
+import games.brennan.playermob.entity.goal.DefendLovedOneGoal;
 import games.brennan.playermob.entity.goal.EatFoodGoal;
 import games.brennan.playermob.entity.goal.FleeFromCategoryGoal;
 import games.brennan.playermob.entity.goal.FriendlyGreetGoal;
@@ -387,6 +388,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         this.goalSelector.addGoal(10, new RandomLookAroundGoal(this));
 
         this.targetSelector.addGoal(1, new HurtByTargetGoal(this));
+        // Defend an individual it loves: registered right after HurtByTargetGoal at
+        // the same priority, so self-defence wins the TARGET-flag tie but defending
+        // a friend still outranks proactively hunting a random hostile (priority 2).
+        this.targetSelector.addGoal(1, new DefendLovedOneGoal(this, DispositionResolver.MAX_RANGE));
         this.targetSelector.addGoal(2, new NearestAttackableTargetGoal<>(
             this,
             LivingEntity.class,
@@ -548,6 +553,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * The mob's computed {@link Reaction} toward a live entity — never null
      * ({@link Reaction#IGNORE} for an uncategorised / creative / spectator
      * target). Feelings are only consulted for players and other PlayerMobs.
+     *
+     * <p>For a mid fight/flight mob ({@link DispositionResolver#isMidBand}) a
+     * proactive FIGHT/FLEE is refined by a "can I win?" power comparison
+     * ({@link DispositionResolver#applyWinAssessment}) — it fights weaker foes and
+     * flees stronger ones. This gates <em>acquisition</em> only; once a target is
+     * locked, vanilla retention keeps the fight going (the power-aware break-off
+     * lives in {@link #hurt}). The power estimate is computed only after we know
+     * it's a mid-band engage decision, so the common cases stay free.</p>
      */
     public Reaction reactionToward(LivingEntity entity) {
         TargetCategory category = TargetCategory.classify(entity);
@@ -557,8 +570,108 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         float feeling = category == TargetCategory.PLAYERS
             ? feelings.feelingToward(entity.getUUID())
             : FeelingLedger.DEFAULT;
-        return DispositionResolver.resolve(
-            traits.fightFlight(), traits.friendliness(), feeling, category, distanceTo(entity));
+        int ff = traits.fightFlight();
+        Reaction base = DispositionResolver.resolve(
+            ff, traits.friendliness(), feeling, category, distanceTo(entity));
+        if ((base == Reaction.FIGHT || base == Reaction.FLEE) && DispositionResolver.isMidBand(ff)) {
+            return DispositionResolver.applyWinAssessment(base, ff, selfCombatPower(), combatPowerOf(entity));
+        }
+        return base;
+    }
+
+    // ---- Combat-power assessment ("can I win?") ---------------------------
+
+    /** Cached {@link #combatPowerOf}{@code (this)}, recomputed at most once per tick. */
+    private double selfCombatPowerCache;
+    /** The {@code tickCount} the cache was filled on; {@code -1} = stale/unset. */
+    private int selfCombatPowerTick = -1;
+
+    /**
+     * The mob's own combat power for the current tick. {@link #reactionToward}
+     * runs per-candidate across several scan sites, so the mob's own power — the
+     * same value for every candidate this tick — is computed once and reused.
+     * Transient: never saved or synced.
+     */
+    private double selfCombatPower() {
+        if (selfCombatPowerTick != tickCount) {
+            selfCombatPowerCache = combatPowerOf(this);
+            selfCombatPowerTick = tickCount;
+        }
+        return selfCombatPowerCache;
+    }
+
+    /**
+     * A combat-power estimate for any living entity from its health, held weapon
+     * ({@link EquipmentEvaluator#score}) and armour value. Used to decide whether a
+     * mid fight/flight mob fights or flees a given foe.
+     */
+    private static double combatPowerOf(LivingEntity entity) {
+        double weaponScore = EquipmentEvaluator.score(entity.getMainHandItem());
+        return DispositionResolver.combatPower(entity.getHealth(), weaponScore, entity.getArmorValue());
+    }
+
+    // ---- Defend-loved-ones support (DefendLovedOneGoal) -------------------
+
+    /**
+     * Find an individual this mob loves ({@code feeling >= }{@link
+     * DispositionResolver#FEELING_LOVE}) that was recently attacked, paired with its
+     * attacker, for {@link DefendLovedOneGoal} to target. Scans within {@code range}
+     * and returns {@code {defended, foe}} for the <em>nearest</em> qualifying loved
+     * one, or {@code null} if none. A loved one qualifies only when its
+     * {@code getLastHurtByMob()} is a valid, recent, reachable foe — alive, not this
+     * mob or the loved one, categorisable (so creative/spectator attackers are
+     * skipped), train-allowed, within range, and last hit no more than
+     * {@code recencyTicks} ago (measured in the loved one's own {@code tickCount}
+     * frame, the same frame its hurt-timestamp is recorded in). Only players and
+     * other PlayerMobs ever reach the love threshold, so {@code defended} is always
+     * player-shaped.
+     */
+    public LivingEntity[] findLovedOneAndFoe(double range, int recencyTicks) {
+        AABB box = getBoundingBox().inflate(range);
+        double rangeSq = range * range;
+        LivingEntity bestDefended = null;
+        LivingEntity bestFoe = null;
+        double closestSq = rangeSq;
+        for (LivingEntity loved : level().getEntitiesOfClass(LivingEntity.class, box)) {
+            if (loved == this || !loved.isAlive()) continue;
+            if (feelingToward(loved) < DispositionResolver.FEELING_LOVE) continue;
+            double lovedSq = distanceToSqr(loved);
+            if (lovedSq >= closestSq) continue; // farther than a match we already have
+            if (loved.tickCount - loved.getLastHurtByMobTimestamp() > recencyTicks) continue;
+            LivingEntity foe = loved.getLastHurtByMob();
+            if (!isDefensibleFoe(foe, loved, rangeSq)) continue;
+            closestSq = lovedSq;
+            bestDefended = loved;
+            bestFoe = foe;
+        }
+        return bestDefended == null ? null : new LivingEntity[] { bestDefended, bestFoe };
+    }
+
+    /** Whether {@code foe} is a valid target to defend {@code loved} from. */
+    private boolean isDefensibleFoe(LivingEntity foe, LivingEntity loved, double rangeSq) {
+        return foe != null
+            && foe != this
+            && foe != loved
+            && foe.isAlive()
+            && TargetCategory.classify(foe) != null      // skips creative/spectator + uncategorised
+            && TrainConfinement.allowsTarget(this, foe)
+            && distanceToSqr(foe) <= rangeSq;
+    }
+
+    /**
+     * Whether this mob is brave enough to wade into a fight against {@code foe} —
+     * the courage gate for {@link DefendLovedOneGoal}. A brave mob (above the mid
+     * band) always joins, a timid one (below it) never does, and a middling one
+     * joins only if it reckons it can win ({@link DispositionResolver#canWin}). Uses
+     * the raw power check rather than {@link #reactionToward}, so defending a friend
+     * overrides the social personal-space bubble (a mob will charge a player it would
+     * otherwise only WATCH).
+     */
+    public boolean wouldEngageFoe(LivingEntity foe) {
+        int ff = traits.fightFlight();
+        if (ff < DispositionResolver.MID_BAND_LO) return false;
+        if (ff > DispositionResolver.MID_BAND_HI) return true;
+        return DispositionResolver.canWin(ff, selfCombatPower(), combatPowerOf(foe));
     }
 
     /**
@@ -679,21 +792,71 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     }
 
     /**
-     * Friendly "gift": toss an item arcing toward {@code target} from eye height
-     * like a player's Q-drop. Prefers a looted backpack item; offers a small
-     * default gift if the backpack is empty so the gesture always lands.
+     * Friendly "gift": choose a present whose quality scales with how loved the
+     * recipient is ({@link GiftPolicy}) and toss it arcing toward {@code target}
+     * from eye height like a player's Q-drop. The gesture always lands — the lowest
+     * tier is a freshly-minted flower — so this never returns false.
      */
     public boolean giveItemTo(LivingEntity target) {
-        ItemStack gift = ItemStack.EMPTY;
+        tossGift(target, chooseGift(target));
+        return true;
+    }
+
+    /**
+     * Pick the gift for {@code target}, its quality scaled by feeling +
+     * friendliness ({@link GiftPolicy#tierFor}):
+     * <ul>
+     *   <li><b>GEAR</b> — a deeply-loved friend of a very friendly mob gets a real
+     *       armour/weapon upgrade donated from the backpack (player-shaped
+     *       recipients only, so an animal/villager is never handed armour). If no
+     *       backpack piece would upgrade them, it steps down to a staple.</li>
+     *   <li><b>STAPLE</b> — a bit of food.</li>
+     *   <li><b>TRINKET</b> — a flower (the baseline gesture).</li>
+     * </ul>
+     * Gear comes only from the backpack, so the mob never disarms itself.
+     */
+    private ItemStack chooseGift(LivingEntity target) {
+        GiftPolicy.GiftTier tier = GiftPolicy.tierFor(feelingToward(target), friendliness());
+        if (tier == GiftPolicy.GiftTier.GEAR
+                && (target instanceof Player || target instanceof PlayerMobEntity)) {
+            ItemStack gear = takeBestGearUpgradeFor(target);
+            if (!gear.isEmpty()) {
+                return gear;
+            }
+            tier = GiftPolicy.GiftTier.STAPLE; // nothing in the pack would upgrade them
+        }
+        return tier == GiftPolicy.GiftTier.STAPLE ? stapleGift() : trinketGift();
+    }
+
+    /**
+     * Find and remove the single backpack equipment piece that best upgrades
+     * {@code recipient}'s gear — the highest-{@link EquipmentEvaluator#score} stack
+     * for which {@link EquipmentEvaluator#shouldReplace} beats what the recipient
+     * already wears/holds in that slot — or {@link ItemStack#EMPTY} if the backpack
+     * holds no upgrade. {@code getEquipmentSlotForItem} is item-driven (same slot
+     * for any humanoid), so it's read off the mob. Read-only scan, then one removal
+     * — no mid-iteration mutation. All recognised gear stacks to 1, so the whole
+     * stack is the gift.
+     */
+    private ItemStack takeBestGearUpgradeFor(LivingEntity recipient) {
+        int bestSlot = -1;
+        double bestScore = Double.NEGATIVE_INFINITY;
         for (int i = 0; i < inventory.getContainerSize(); i++) {
-            if (!inventory.getItem(i).isEmpty()) {
-                gift = inventory.removeItemNoUpdate(i);
-                break;
+            ItemStack candidate = inventory.getItem(i);
+            if (candidate.isEmpty()) continue;
+            EquipmentSlot slot = getEquipmentSlotForItem(candidate);
+            if (!EquipmentEvaluator.shouldReplace(candidate, recipient.getItemBySlot(slot))) continue;
+            double s = EquipmentEvaluator.score(candidate);
+            if (s > bestScore) {
+                bestScore = s;
+                bestSlot = i;
             }
         }
-        if (gift.isEmpty()) {
-            gift = defaultGift();
-        }
+        return bestSlot < 0 ? ItemStack.EMPTY : inventory.removeItemNoUpdate(bestSlot);
+    }
+
+    /** Toss {@code gift} arcing toward {@code target} from eye height, like a player's Q-drop. */
+    private void tossGift(LivingEntity target, ItemStack gift) {
         double fromX = getX();
         double fromY = getEyeY() - 0.1;
         double fromZ = getZ();
@@ -706,16 +869,18 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         thrown.setDeltaMovement(velocity);
         thrown.setPickUpDelay(10);
         level().addFreshEntity(thrown);
-        return true;
     }
 
-    /** A small, friendly token gift for when the backpack has nothing looted yet. */
-    private ItemStack defaultGift() {
-        return switch (getRandom().nextInt(5)) {
-            case 0 -> new ItemStack(Items.POPPY);
-            case 1 -> new ItemStack(Items.DANDELION);
-            case 2 -> new ItemStack(Items.BREAD);
-            case 3 -> new ItemStack(Items.APPLE);
+    /** A flower — the baseline trinket gift. */
+    private ItemStack trinketGift() {
+        return new ItemStack(getRandom().nextBoolean() ? Items.POPPY : Items.DANDELION);
+    }
+
+    /** A bit of food — the mid-tier "staple" gift. */
+    private ItemStack stapleGift() {
+        return switch (getRandom().nextInt(3)) {
+            case 0 -> new ItemStack(Items.BREAD);
+            case 1 -> new ItemStack(Items.APPLE);
             default -> new ItemStack(Items.COOKIE);
         };
     }
@@ -1595,8 +1760,13 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
                     pushDispositionToClient();
                 }
                 // Immediate response: fighters retaliate (keep the HurtByTargetGoal
-                // target); flighty mobs drop it so FleeFromCategoryGoal takes over.
-                if (DispositionResolver.onHurt(traits.fightFlight()) == DispositionResolver.HurtResponse.FLEE) {
+                // target); flighty mobs drop it so FleeFromCategoryGoal takes over. A
+                // mid fight/flight mob weighs whether it can win this exchange before
+                // standing its ground — this is also the break-off path for a fight
+                // the proactive acquisition started but is now losing.
+                DispositionResolver.HurtResponse response = DispositionResolver.onHurt(
+                    traits.fightFlight(), selfCombatPower(), combatPowerOf(attacker));
+                if (response == DispositionResolver.HurtResponse.FLEE) {
                     setTarget(null);
                     setLastHurtByMob(null);
                 }
