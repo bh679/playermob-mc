@@ -58,12 +58,14 @@ public final class TrainRecoveryGoal extends Goal {
     private static final double SCAN_RADIUS = 28.0;
     /** Once the nearest carriage is farther than this (it outran us), give up. */
     private static final double ABANDON_DISTANCE = 24.0;
-    /** Hard ceiling on a whole recovery attempt (10s) — best-effort, never loop forever. */
-    private static final int GLOBAL_ABANDON_TICKS = 200;
+    /** Absolute backstop on a whole recovery attempt (60s) — best-effort, never loop forever. */
+    private static final int GLOBAL_ABANDON_TICKS = 1200;
+    /** Give up if no progress (gather / place / step-closer) for this long (5s). */
+    private static final int STALL_ABANDON_TICKS = 100;
+    /** APPROACH walks back first; it only hands off to BRIDGE after being stuck below the deck this long. */
+    private static final int APPROACH_STUCK_LIMIT = 15;
     /** Re-issue navigation toward the moving carriage at this cadence. */
     private static final int PATH_REISSUE_TICKS = 5;
-    /** Horizontal distance at which APPROACH hands off to BRIDGE. */
-    private static final double BRIDGE_TRIGGER_DIST = 2.5;
     /** Max bridge blocks placed per recovery — bounded so a failing mob doesn't pave the tracks. */
     private static final int MAX_PLACEMENTS = 12;
     /** Ticks between bridge placements, leaving time to climb the previous step. */
@@ -91,6 +93,9 @@ public final class TrainRecoveryGoal extends Goal {
     private int totalTicks = 0;
     private int cooldown = 0;
     private int placementsUsed = 0;
+    private int lastProgressTick = 0;            // totalTicks at the last gather / place / step-closer
+    private double lastBoxDist = Double.MAX_VALUE;
+    private int approachStuckTicks = 0;
 
     /** Re-resolved every evaluation/tick — the carriage moves. */
     private TrainEnvironment.ReboardTarget target;
@@ -136,7 +141,8 @@ public final class TrainRecoveryGoal extends Goal {
         if (phase == Phase.IDLE || !mob.isAlive() || mob.isDeadOrDying()) return false;
         if (!mobGriefingOn()) return false;
         if (TrainConfinement.isConfined(mob)) return false;        // back aboard → success
-        if (totalTicks >= GLOBAL_ABANDON_TICKS) return false;       // best-effort time cap
+        if (totalTicks - lastProgressTick >= STALL_ABANDON_TICKS) return false; // no progress → give up
+        if (totalTicks >= GLOBAL_ABANDON_TICKS) return false;                   // absolute backstop
         TrainEnvironment.ReboardTarget t = TrainConfinement.nearestCarriage(mob, SCAN_RADIUS);
         if (t == null) return false;
         this.target = t;
@@ -149,6 +155,9 @@ public final class TrainRecoveryGoal extends Goal {
         phaseTicks = 0;
         totalTicks = 0;
         placementsUsed = 0;
+        lastProgressTick = 0;
+        lastBoxDist = Double.MAX_VALUE;
+        approachStuckTicks = 0;
         gatherTargetPos = null;
         pillarColumn = null;
         moveTowardCarriage();
@@ -191,15 +200,28 @@ public final class TrainRecoveryGoal extends Goal {
 
     private void tickApproach() {
         AABB box = target.worldBox();
+        // Pathfind back first: let vanilla nav walk the easiest route up to the deck
+        // (along the bed, terrain, and the pillar/stair adjuncts beside the track),
+        // re-issued toward the moving carriage. Only build/gather if that gets stuck.
         if (phaseTicks % PATH_REISSUE_TICKS == 0 || mob.getNavigation().isDone()) {
             moveTowardCarriage();
         }
-        // Close horizontally but still below the carriage floor → start bridging.
-        if (horizontalDistToBox(box) <= BRIDGE_TRIGGER_DIST && mob.getY() < box.minY - 0.5) {
+        double dist = horizontalDistToBox(box);
+        if (dist < lastBoxDist - 0.05) {        // still walking closer — keep going, don't bridge yet
+            approachStuckTicks = 0;
+            markProgress();
+        } else {
+            approachStuckTicks++;
+        }
+        lastBoxDist = dist;
+        // Bridge only once the mob can't walk any closer/higher and is still below the
+        // deck — i.e. genuinely stuck against the final step, a wall, or a pit.
+        if (mob.getY() < box.minY - 0.5 && approachStuckTicks > APPROACH_STUCK_LIMIT) {
             phase = Phase.BRIDGE;
             phaseTicks = 0;
+            approachStuckTicks = 0;
         }
-        // Walking up onto the carriage by other means flips isConfined → canContinueToUse stops us.
+        // Walking up onto the carriage flips isConfined → canContinueToUse ends us (success).
     }
 
     // ---- BRIDGE -----------------------------------------------------------
@@ -259,6 +281,7 @@ public final class TrainRecoveryGoal extends Goal {
         lookAt(place);
         if (tryPlaceBridgeBlock(place, slot)) {
             placementsUsed++;
+            markProgress();
         }
     }
 
@@ -287,6 +310,7 @@ public final class TrainRecoveryGoal extends Goal {
             if (tryPlaceBridgeBlock(pillarColumn, slot)) {
                 placementsUsed++;
                 pillarColumn = null;
+                markProgress();
             }
         }
     }
@@ -427,6 +451,7 @@ public final class TrainRecoveryGoal extends Goal {
             Math.min(9, (int) (gatherBreakTicks / (double) breakTicksTotal * 10.0)));
         if (gatherBreakTicks >= breakTicksTotal) {
             harvestGatherTarget(state);
+            markProgress();
             // Collect enough to climb back on before finishing — only then bridge.
             if (BlockSourcePolicy.bridgeBlockCount(mob.getInventory()) >= blocksNeeded()) {
                 phase = Phase.BRIDGE;
@@ -576,6 +601,11 @@ public final class TrainRecoveryGoal extends Goal {
         double dx = Math.max(Math.max(box.minX - mob.getX(), 0.0), mob.getX() - box.maxX);
         double dz = Math.max(Math.max(box.minZ - mob.getZ(), 0.0), mob.getZ() - box.maxZ);
         return Math.sqrt(dx * dx + dz * dz);
+    }
+
+    /** Note forward progress so the stall-abandon timer ({@link #STALL_ABANDON_TICKS}) resets. */
+    private void markProgress() {
+        lastProgressTick = totalTicks;
     }
 
     private boolean mobGriefingOn() {
