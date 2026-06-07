@@ -715,6 +715,12 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
             return EquipmentEvaluator.tryCollectFood(source, slotIdx, this.inventory);
         }
 
+        // Wood/stone the mob stocks up on — a stack of each, capped independently.
+        ItemPickupPolicy.BlockResource resource = ItemPickupPolicy.blockResource(candidate);
+        if (resource != null) {
+            return takeBlockResourceCapped(source, slotIdx, resource);
+        }
+
         EquipmentSlot slot = getEquipmentSlotForItem(candidate);
         ItemStack current = getItemBySlot(slot);
         if (!canReplaceCurrentItem(candidate, current)) return false;
@@ -726,6 +732,65 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
             ItemStack leftover = EquipmentEvaluator.addToContainer(source, current.copy());
             if (!leftover.isEmpty()) spawnAtLocation(leftover);
         }
+        return true;
+    }
+
+    /**
+     * Move up to a per-resource cap (one stack) of {@code resource} from a chest
+     * slot into the backpack. Under the cap, take only enough to reach it. At the
+     * cap, trade up: if {@code found} out-ranks the lowest-value stack of this
+     * resource the mob carries (for STONE, tool-craftable beats decorative;
+     * otherwise a bigger pile wins) push that stack back into the chest and take
+     * the better one. Overflow that doesn't fit stays in the chest — nothing is
+     * ever dropped on the ground.
+     *
+     * <p>Mirrors {@link #pickUpBlockCapped} (the floor-pickup equivalent) but
+     * moves chest → backpack and returns displaced stacks to the chest rather
+     * than the floor. Looted wood/stone are also {@code BlockItem}s, so they also
+     * count toward the floor-pickup pooled
+     * {@link ItemPickupPolicy#countBuildingBlocks} cap — the caps share slots but
+     * enforce independently.</p>
+     *
+     * @return true if any item moved
+     */
+    private boolean takeBlockResourceCapped(Container source, int slotIdx,
+                                            ItemPickupPolicy.BlockResource resource) {
+        ItemStack found = source.getItem(slotIdx);
+        if (found.isEmpty()) return false;
+
+        int cap = resource == ItemPickupPolicy.BlockResource.WOOD
+            ? ItemPickupPolicy.WOOD_CAP : ItemPickupPolicy.STONE_CAP;
+        int carried = ItemPickupPolicy.countResource(this.inventory, resource);
+
+        if (carried >= cap) {
+            int lowSlot = ItemPickupPolicy.lowestValueResourceSlot(this.inventory, resource);
+            if (lowSlot < 0) return false;
+            ItemStack lowest = this.inventory.getItem(lowSlot);
+            if (ItemPickupPolicy.tradeUpValue(resource, found)
+                    <= ItemPickupPolicy.tradeUpValue(resource, lowest)) {
+                return false;
+            }
+            // Trade up: push the displaced stack back into the chest. If the chest
+            // is full, undo and bail rather than drop it on the ground.
+            this.inventory.setItem(lowSlot, ItemStack.EMPTY);
+            ItemStack back = EquipmentEvaluator.addToContainer(source, lowest);
+            if (!back.isEmpty()) {
+                this.inventory.setItem(lowSlot, back);
+                return false;
+            }
+            carried = ItemPickupPolicy.countResource(this.inventory, resource);
+        }
+
+        int room = cap - carried;
+        if (room <= 0) return false;
+        ItemStack toAdd = found.copy();
+        toAdd.setCount(Math.min(found.getCount(), room));
+        int before = toAdd.getCount();
+        ItemStack leftover = EquipmentEvaluator.addToContainer(this.inventory, toAdd);
+        int moved = before - leftover.getCount();
+        if (moved <= 0) return false;
+        found.shrink(moved);
+        source.setChanged();
         return true;
     }
 
@@ -758,6 +823,16 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         if (candidate.isEmpty()) return false;
         if (candidate.get(DataComponents.FOOD) != null) {
             return EquipmentEvaluator.canCollectFood(source, slotIdx, this.inventory);
+        }
+        // Wood/stone pre-check — kept exactly in sync with takeBlockResourceCapped's decision.
+        ItemPickupPolicy.BlockResource resource = ItemPickupPolicy.blockResource(candidate);
+        if (resource != null) {
+            if (!ItemPickupPolicy.wantsResource(this.inventory, candidate, resource)) return false;
+            int cap = resource == ItemPickupPolicy.BlockResource.WOOD
+                ? ItemPickupPolicy.WOOD_CAP : ItemPickupPolicy.STONE_CAP;
+            // At cap, wantsResource already confirmed a displaceable slot — trade-up frees it.
+            if (ItemPickupPolicy.countResource(this.inventory, resource) >= cap) return true;
+            return EquipmentEvaluator.hasRoomFor(this.inventory, candidate);
         }
         EquipmentSlot slot = getEquipmentSlotForItem(candidate);
         ItemStack current = getItemBySlot(slot);
