@@ -65,7 +65,7 @@ public final class TrainRecoveryGoal extends Goal {
     /** Horizontal distance at which APPROACH hands off to BRIDGE. */
     private static final double BRIDGE_TRIGGER_DIST = 2.5;
     /** Max bridge blocks placed per recovery — bounded so a failing mob doesn't pave the tracks. */
-    private static final int MAX_PLACEMENTS = 6;
+    private static final int MAX_PLACEMENTS = 12;
     /** Ticks between bridge placements, leaving time to climb the previous step. */
     private static final int PLACE_INTERVAL_TICKS = 10;
     /** Gather scan cube half-extent and reach. */
@@ -95,6 +95,7 @@ public final class TrainRecoveryGoal extends Goal {
     /** Re-resolved every evaluation/tick — the carriage moves. */
     private TrainEnvironment.ReboardTarget target;
     private BlockPos gatherTargetPos;
+    private BlockPos pillarColumn;     // foot column captured at jump-stack launch
     private int gatherBreakTicks = 0;
     private int breakTicksTotal = 0;   // 0 = not yet sized for the current gather target
     private int toolReadyTick = 0;     // tick the post-tool-swap pause ends
@@ -149,6 +150,7 @@ public final class TrainRecoveryGoal extends Goal {
         totalTicks = 0;
         placementsUsed = 0;
         gatherTargetPos = null;
+        pillarColumn = null;
         moveTowardCarriage();
     }
 
@@ -156,9 +158,11 @@ public final class TrainRecoveryGoal extends Goal {
     public void stop() {
         mob.getNavigation().stop();
         if (gatherTargetPos != null) {
+            mob.level().destroyBlockProgress(mob.getId(), gatherTargetPos, -1);  // clear cracking overlay
             mob.markBlockExplored(gatherTargetPos);
             gatherTargetPos = null;
         }
+        pillarColumn = null;
         phase = Phase.IDLE;
         phaseTicks = 0;
         cooldown = POST_COOLDOWN_TICKS;
@@ -236,41 +240,77 @@ public final class TrainRecoveryGoal extends Goal {
         }
     }
 
-    /** Staircase bridging: place one step out-and-up toward the carriage, then climb it. */
+    /**
+     * Staircase bridging: step out-and-up toward the carriage's near edge. Stops
+     * short of building <em>under</em> the deck — once the next step would go
+     * beneath it, switch to pillaring up beside it (jump-stack), then hop across.
+     */
     private void tickStairs(int slot, AABB box) {
+        if (mob.blockPosition().getY() >= Mth.floor(box.minY)) {
+            hopOntoDeck(box);                          // at floor height beside it — hop across
+            return;
+        }
         BlockPos place = BlockSourcePolicy.nextBridgePos(mob.blockPosition(), box);
-        if (place == null) {
-            mob.getJumpControl().jump();            // level with the base layer — hop aboard
+        if (place == null || isUnderBox(place, box)) {
+            tickJumpStack(slot, box);                  // at the edge — pillar up beside, don't build under
             return;
         }
         if (phaseTicks % PLACE_INTERVAL_TICKS != 0) return;   // let it climb the previous step
-        mob.getLookControl().setLookAt(place.getX() + 0.5, place.getY() + 0.5, place.getZ() + 0.5);
+        lookAt(place);
         if (tryPlaceBridgeBlock(place, slot)) {
             placementsUsed++;
         }
     }
 
     /**
-     * Jump-stack a pillar under the mob's own feet with a gravity block: jump, and
-     * near the apex place a block in the just-vacated foot space so it settles and
-     * the mob lands one block higher. Repeats until level with the carriage base.
-     * The jump cycle paces placement naturally (one per launch).
+     * Jump-stack a pillar beside the mob: capture the foot column on launch, then
+     * at the apex place a block in that just-vacated space so the mob lands one
+     * block higher. Repeats until level with the deck, then hops across. The jump
+     * cycle paces placement (one per launch). Works for gravity blocks (sand/gravel),
+     * which a staircase out into the air can't support.
      */
     private void tickJumpStack(int slot, AABB box) {
         if (mob.blockPosition().getY() >= Mth.floor(box.minY)) {
-            mob.getJumpControl().jump();            // high enough — hop across
+            hopOntoDeck(box);                          // high enough — hop across onto the deck
             return;
         }
         if (mob.onGround()) {
-            mob.getJumpControl().jump();            // launch; place once airborne
+            pillarColumn = mob.blockPosition();        // the space we're about to vacate
+            mob.getJumpControl().jump();
             return;
         }
-        if (mob.getDeltaMovement().y > 0.0) return; // wait for the apex / descent
-        BlockPos under = BlockPos.containing(mob.getX(), mob.getY() - 0.2, mob.getZ());
-        mob.getLookControl().setLookAt(under.getX() + 0.5, under.getY(), under.getZ() + 0.5);
-        if (tryPlaceBridgeBlock(under, slot)) {
-            placementsUsed++;
+        // Airborne and at/after the apex: fill the captured foot space so we land on it.
+        if (pillarColumn != null
+                && mob.getY() >= pillarColumn.getY() + 1.0
+                && mob.getDeltaMovement().y <= 0.0) {
+            lookAt(pillarColumn);
+            if (tryPlaceBridgeBlock(pillarColumn, slot)) {
+                placementsUsed++;
+                pillarColumn = null;
+            }
         }
+    }
+
+    /**
+     * Hop from beside the carriage, at floor height, across onto the deck: steer at
+     * a point one block in on the deck and jump. Re-issued each tick (the carriage
+     * moves) so the mob keeps lunging until {@code isConfined} flips to success.
+     */
+    private void hopOntoDeck(AABB box) {
+        double dx = Mth.clamp(mob.getX(), box.minX + 1.0, box.maxX - 1.0);
+        double dz = Mth.clamp(mob.getZ(), box.minZ + 1.0, box.maxZ - 1.0);
+        mob.getNavigation().moveTo(dx, box.minY + 1.0, dz, moveSpeed);
+        if (mob.onGround()) mob.getJumpControl().jump();
+    }
+
+    /** True if {@code pos}'s column lies within the carriage footprint (i.e. under the deck). */
+    private static boolean isUnderBox(BlockPos pos, AABB box) {
+        double x = pos.getX() + 0.5, z = pos.getZ() + 0.5;
+        return x >= box.minX && x <= box.maxX && z >= box.minZ && z <= box.maxZ;
+    }
+
+    private void lookAt(BlockPos pos) {
+        mob.getLookControl().setLookAt(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
     }
 
     /**
@@ -350,6 +390,7 @@ public final class TrainRecoveryGoal extends Goal {
         // Block changed/destroyed since we picked it.
         BlockState state = mob.level().getBlockState(gatherTargetPos);
         if (!BlockSourcePolicy.isHandBreakable(state) && !BlockSourcePolicy.isStoneClass(state)) {
+            mob.level().destroyBlockProgress(mob.getId(), gatherTargetPos, -1);
             mob.markBlockExplored(gatherTargetPos);
             gatherTargetPos = null;
             return;
@@ -381,6 +422,9 @@ public final class TrainRecoveryGoal extends Goal {
         if (mob.tickCount < toolReadyTick) return;      // reach-for-the-tool pause
         if (gatherBreakTicks % 4 == 0) mob.swing(InteractionHand.MAIN_HAND);
         gatherBreakTicks++;
+        // Cracking overlay scaled to break progress, so it reads as real mining.
+        mob.level().destroyBlockProgress(mob.getId(), gatherTargetPos,
+            Math.min(9, (int) (gatherBreakTicks / (double) breakTicksTotal * 10.0)));
         if (gatherBreakTicks >= breakTicksTotal) {
             harvestGatherTarget(state);
             // Collect enough to climb back on before finishing — only then bridge.
@@ -405,6 +449,7 @@ public final class TrainRecoveryGoal extends Goal {
                 if (!leftover.isEmpty()) mob.spawnAtLocation(leftover);
             }
         }
+        mob.level().destroyBlockProgress(mob.getId(), gatherTargetPos, -1);  // clear cracking overlay
         mob.markBlockExplored(gatherTargetPos);
         gatherTargetPos = null;
     }
@@ -427,7 +472,7 @@ public final class TrainRecoveryGoal extends Goal {
      */
     private int blocksNeeded() {
         int climb = Mth.floor(target.worldBox().minY) - mob.blockPosition().getY();
-        return Mth.clamp(climb, 1, MAX_PLACEMENTS);
+        return Mth.clamp(climb + 1, 1, MAX_PLACEMENTS);   // +1 buffer for the hop / a wasted placement
     }
 
     /** Nearest cheap, hand-breakable, non-track block worth breaking for a bridge block. */
@@ -507,11 +552,23 @@ public final class TrainRecoveryGoal extends Goal {
         mob.getNavigation().moveTo(p.x, p.y, p.z, moveSpeed);
     }
 
-    /** The point on the carriage's near edge, at its floor level, to head for. */
+    /**
+     * A point just OUTSIDE the carriage's nearest face, at floor level — so the mob
+     * approaches and bridges up <em>beside</em> the deck (ready to hop across),
+     * never underneath it.
+     */
     private Vec3 approachPoint(AABB box) {
-        double x = Mth.clamp(mob.getX(), box.minX + 0.5, box.maxX - 0.5);
-        double z = Mth.clamp(mob.getZ(), box.minZ + 0.5, box.maxZ - 0.5);
-        return new Vec3(x, box.minY, z);
+        double cx = Mth.clamp(mob.getX(), box.minX + 0.5, box.maxX - 0.5);
+        double cz = Mth.clamp(mob.getZ(), box.minZ + 0.5, box.maxZ - 0.5);
+        double dWest = cx - box.minX, dEast = box.maxX - cx;
+        double dNorth = cz - box.minZ, dSouth = box.maxZ - cz;
+        double nearest = Math.min(Math.min(dWest, dEast), Math.min(dNorth, dSouth));
+        double tx = cx, tz = cz;
+        if (nearest == dWest) tx = box.minX - 1.0;
+        else if (nearest == dEast) tx = box.maxX + 1.0;
+        else if (nearest == dNorth) tz = box.minZ - 1.0;
+        else tz = box.maxZ + 1.0;
+        return new Vec3(tx, box.minY, tz);
     }
 
     /** Horizontal distance from the mob to the nearest point of {@code box}. */
