@@ -180,6 +180,9 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
                 if (footY == null) {
                     continue;
                 }
+                if (footY > mobFootY + 1) {
+                    continue;                               // landing is higher than the mob can hop up to
+                }
                 if (!corridorClear(ship, level, mx, mz, wx, wz, mobFootY)) {
                     continue;                               // a too-tall wall blocks the leap
                 }
