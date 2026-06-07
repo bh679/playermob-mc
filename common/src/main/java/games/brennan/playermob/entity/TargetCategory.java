@@ -83,14 +83,21 @@ public enum TargetCategory {
      * Classify a candidate entity into a category, or {@code null} if it belongs
      * to none. Other {@link PlayerMobEntity}s classify as {@link #PLAYERS} —
      * they're player-shaped, so the mob treats its own kind like players (self
-     * is excluded by the goal/target scans, not here). Order matters: the
-     * PlayerMob check is first (it's also an {@code Enemy}); villagers before
-     * animals; the hostile check last so a future hostile animal still
-     * classifies as an animal.
+     * is excluded by the goal/target scans, not here). Real players in Creative
+     * or Spectator mode return {@code null}, so the mob holds no disposition
+     * toward them and every path (attack, flee, greet, watch, provoke) ignores
+     * them — mirroring vanilla's {@code EntitySelector.NO_CREATIVE_OR_SPECTATOR}.
+     * Order matters: the PlayerMob check is first (it's also an {@code Enemy});
+     * villagers before animals; the hostile check last so a future hostile
+     * animal still classifies as an animal.
      */
     public static TargetCategory classify(LivingEntity entity) {
-        if (entity instanceof PlayerMobEntity) return PLAYERS; // treat own kind like players
-        if (entity instanceof Player) return PLAYERS;
+        if (entity instanceof PlayerMobEntity) return PLAYERS; // own kind — never creative/spectator
+        if (entity instanceof Player player) {
+            // Players in Creative or Spectator are treated as not present.
+            if (player.isCreative() || player.isSpectator()) return null;
+            return PLAYERS;
+        }
         if (entity instanceof AbstractVillager) return VILLAGERS;
         if (entity instanceof Animal) return ANIMALS;
         if (entity instanceof Enemy) return HOSTILE_MOBS;

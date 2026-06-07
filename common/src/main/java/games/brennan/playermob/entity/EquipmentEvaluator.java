@@ -201,9 +201,11 @@ public final class EquipmentEvaluator {
 
     /**
      * True if {@code container} has at least one empty slot or one mergeable
-     * stack of {@code stack}'s item with room remaining.
+     * stack of {@code stack}'s item with room remaining. Package-private so the
+     * entity can use it as a non-mutating physical-room pre-check when looting
+     * wood/stone into the backpack.
      */
-    private static boolean hasRoomFor(Container container, ItemStack stack) {
+    static boolean hasRoomFor(Container container, ItemStack stack) {
         for (int i = 0; i < container.getContainerSize(); i++) {
             ItemStack slot = container.getItem(i);
             if (slot.isEmpty()) return true;

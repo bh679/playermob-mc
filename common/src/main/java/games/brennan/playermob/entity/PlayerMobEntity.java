@@ -345,22 +345,43 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     }
 
     /**
-     * When standing on a Dungeon Train carriage, never hold an attack target that
-     * has left the train. Acquisition is already filtered (the priority-2 target
-     * goal and {@link HuntForFoodGoal}); this central sweep additionally drops a
-     * target that <em>wanders</em> off, covering every target source (hostile,
-     * retaliation, hunt) in one place — clearing it also makes the priority-2
-     * {@code WeaponAwareAttackGoal} stand down. No-op unless a train mod is
-     * installed and the mob is actually on a train: {@link
-     * TrainConfinement#allowsTarget} short-circuits to {@code true} otherwise.
+     * Central held-target sweep, covering every target source (hostile,
+     * retaliation, hunt) in one place — clearing the target also makes the
+     * priority-2 {@code WeaponAwareAttackGoal} stand down. Drops a target that:
+     *
+     * <ul>
+     *   <li>has switched to <b>Creative or Spectator</b> mid-engagement (or was
+     *       acquired by the vanilla {@link HurtByTargetGoal} retaliation path,
+     *       which bypasses {@link TargetCategory#classify}) — see
+     *       {@link #isIgnoredPlayer}; or</li>
+     *   <li>has <b>left the Dungeon Train</b> carriage the mob is riding.
+     *       Acquisition is already filtered (the priority-2 target goal and
+     *       {@link HuntForFoodGoal}); this sweep additionally drops a target that
+     *       <em>wanders</em> off. No-op unless a train mod is installed and the
+     *       mob is on a train: {@link TrainConfinement#allowsTarget}
+     *       short-circuits to {@code true} otherwise.</li>
+     * </ul>
      */
     @Override
     protected void customServerAiStep() {
         super.customServerAiStep();
         LivingEntity target = getTarget();
-        if (target != null && !TrainConfinement.allowsTarget(this, target)) {
+        if (target != null && (isIgnoredPlayer(target) || !TrainConfinement.allowsTarget(this, target))) {
             setTarget(null);
         }
+    }
+
+    /**
+     * Players in Creative or Spectator mode are ignored by all AI — the mob
+     * treats them as not present. {@link TargetCategory#classify} returns
+     * {@code null} for them (covering proactive targeting and the social goals);
+     * this helper covers the two paths {@code classify} can't — the vanilla
+     * {@link HurtByTargetGoal} retaliation target ({@link #customServerAiStep})
+     * and the {@link #hurt} provoke/retaliate flip. {@code isCreative()} matches
+     * Creative only; {@code isSpectator()} matches Spectator only.
+     */
+    private static boolean isIgnoredPlayer(LivingEntity entity) {
+        return entity instanceof Player player && (player.isCreative() || player.isSpectator());
     }
 
     /**
@@ -721,6 +742,12 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             return EquipmentEvaluator.tryCollectFood(source, slotIdx, this.inventory);
         }
 
+        // Wood/stone the mob stocks up on — a stack of each, capped independently.
+        ItemPickupPolicy.BlockResource resource = ItemPickupPolicy.blockResource(candidate);
+        if (resource != null) {
+            return takeBlockResourceCapped(source, slotIdx, resource);
+        }
+
         EquipmentSlot slot = getEquipmentSlotForItem(candidate);
         ItemStack current = getItemBySlot(slot);
         if (!canReplaceCurrentItem(candidate, current)) return false;
@@ -732,6 +759,65 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             ItemStack leftover = EquipmentEvaluator.addToContainer(source, current.copy());
             if (!leftover.isEmpty()) spawnAtLocation(leftover);
         }
+        return true;
+    }
+
+    /**
+     * Move up to a per-resource cap (one stack) of {@code resource} from a chest
+     * slot into the backpack. Under the cap, take only enough to reach it. At the
+     * cap, trade up: if {@code found} out-ranks the lowest-value stack of this
+     * resource the mob carries (for STONE, tool-craftable beats decorative;
+     * otherwise a bigger pile wins) push that stack back into the chest and take
+     * the better one. Overflow that doesn't fit stays in the chest — nothing is
+     * ever dropped on the ground.
+     *
+     * <p>Mirrors {@link #pickUpBlockCapped} (the floor-pickup equivalent) but
+     * moves chest → backpack and returns displaced stacks to the chest rather
+     * than the floor. Looted wood/stone are also {@code BlockItem}s, so they also
+     * count toward the floor-pickup pooled
+     * {@link ItemPickupPolicy#countBuildingBlocks} cap — the caps share slots but
+     * enforce independently.</p>
+     *
+     * @return true if any item moved
+     */
+    private boolean takeBlockResourceCapped(Container source, int slotIdx,
+                                            ItemPickupPolicy.BlockResource resource) {
+        ItemStack found = source.getItem(slotIdx);
+        if (found.isEmpty()) return false;
+
+        int cap = resource == ItemPickupPolicy.BlockResource.WOOD
+            ? ItemPickupPolicy.WOOD_CAP : ItemPickupPolicy.STONE_CAP;
+        int carried = ItemPickupPolicy.countResource(this.inventory, resource);
+
+        if (carried >= cap) {
+            int lowSlot = ItemPickupPolicy.lowestValueResourceSlot(this.inventory, resource);
+            if (lowSlot < 0) return false;
+            ItemStack lowest = this.inventory.getItem(lowSlot);
+            if (ItemPickupPolicy.tradeUpValue(resource, found)
+                    <= ItemPickupPolicy.tradeUpValue(resource, lowest)) {
+                return false;
+            }
+            // Trade up: push the displaced stack back into the chest. If the chest
+            // is full, undo and bail rather than drop it on the ground.
+            this.inventory.setItem(lowSlot, ItemStack.EMPTY);
+            ItemStack back = EquipmentEvaluator.addToContainer(source, lowest);
+            if (!back.isEmpty()) {
+                this.inventory.setItem(lowSlot, back);
+                return false;
+            }
+            carried = ItemPickupPolicy.countResource(this.inventory, resource);
+        }
+
+        int room = cap - carried;
+        if (room <= 0) return false;
+        ItemStack toAdd = found.copy();
+        toAdd.setCount(Math.min(found.getCount(), room));
+        int before = toAdd.getCount();
+        ItemStack leftover = EquipmentEvaluator.addToContainer(this.inventory, toAdd);
+        int moved = before - leftover.getCount();
+        if (moved <= 0) return false;
+        found.shrink(moved);
+        source.setChanged();
         return true;
     }
 
@@ -764,6 +850,16 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (candidate.isEmpty()) return false;
         if (candidate.get(DataComponents.FOOD) != null) {
             return EquipmentEvaluator.canCollectFood(source, slotIdx, this.inventory);
+        }
+        // Wood/stone pre-check — kept exactly in sync with takeBlockResourceCapped's decision.
+        ItemPickupPolicy.BlockResource resource = ItemPickupPolicy.blockResource(candidate);
+        if (resource != null) {
+            if (!ItemPickupPolicy.wantsResource(this.inventory, candidate, resource)) return false;
+            int cap = resource == ItemPickupPolicy.BlockResource.WOOD
+                ? ItemPickupPolicy.WOOD_CAP : ItemPickupPolicy.STONE_CAP;
+            // At cap, wantsResource already confirmed a displaceable slot — trade-up frees it.
+            if (ItemPickupPolicy.countResource(this.inventory, resource) >= cap) return true;
+            return EquipmentEvaluator.hasRoomFor(this.inventory, candidate);
         }
         EquipmentSlot slot = getEquipmentSlotForItem(candidate);
         ItemStack current = getItemBySlot(slot);
@@ -1326,6 +1422,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     public boolean hurt(DamageSource source, float amount) {
         boolean result = super.hurt(source, amount);
         if (result && !level().isClientSide && source.getEntity() instanceof LivingEntity attacker) {
+            // Creative/Spectator players are ignored: take the hit (they can still
+            // kill the mob) but never retaliate or flip personality toward them.
+            // super.hurt() already set lastHurtByMob — clear it so the vanilla
+            // HurtByTargetGoal doesn't re-acquire them every tick.
+            if (isIgnoredPlayer(attacker)) {
+                setLastHurtByMob(null);
+                return result;
+            }
             TargetCategory category = TargetCategory.classify(attacker);
             if (category != null) {
                 Personality reaction = personalities.provoke(category, isArmed());
