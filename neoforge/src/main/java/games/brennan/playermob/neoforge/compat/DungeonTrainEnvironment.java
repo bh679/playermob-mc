@@ -121,6 +121,63 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
     }
 
     @Override
+    public Vec3 nextGroupTarget(Entity self, int dir) {
+        if (!(self.level() instanceof ServerLevel level)) {
+            return null;
+        }
+        Trains.Carriage current = carriageAt(self);
+        if (current == null) {
+            return null;
+        }
+        UUID trainId = current.provider().getTrainId();
+        int myLow = current.provider().getPIdx();
+        int myHigh = current.provider().getGroupHighestPIdx();
+
+        // The adjacent group of the *same* train, just beyond our boundary in `dir`:
+        // marching down (dir < 0) we want the same-train group whose rooms sit
+        // entirely below ours, nearest to the gap; marching up (dir > 0), the nearest
+        // one above. pIdx is monotonic along world-X across the whole train, so the
+        // current group is excluded automatically by these range tests.
+        Trains.Carriage best = null;
+        for (Trains.Carriage c : Trains.allCarriages(level)) {
+            if (c == current || !trainId.equals(c.provider().getTrainId())) {
+                continue;
+            }
+            int cLow = c.provider().getPIdx();
+            int cHigh = c.provider().getGroupHighestPIdx();
+            if (dir < 0) {
+                if (cHigh < myLow && (best == null || cHigh > best.provider().getGroupHighestPIdx())) {
+                    best = c;
+                }
+            } else {
+                if (cLow > myHigh && (best == null || cLow < best.provider().getPIdx())) {
+                    best = c;
+                }
+            }
+        }
+        if (best == null) {
+            return null; // genuine end of the train this way
+        }
+        AABBdc bb = best.ship().worldAABB();
+        if (bb == null) {
+            return null;
+        }
+        int bLow = best.provider().getPIdx();
+        int bHigh = best.provider().getGroupHighestPIdx();
+        int rooms = bHigh - bLow + 1;
+        if (rooms <= 0) {
+            return null;
+        }
+        // The room facing the gap: the high-pIdx (max-X) room when we approach from
+        // above (dir < 0), the low-pIdx (min-X) room when we approach from below.
+        int room = dir < 0 ? bHigh : bLow;
+        double roomLen = (bb.maxX() - bb.minX()) / rooms;
+        double targetX = bb.minX() + (room - bLow + 0.5) * roomLen;
+        double centerZ = (bb.minZ() + bb.maxZ()) / 2.0;
+        return new Vec3(targetX, self.getY(), centerZ);
+    }
+
+    @Override
     public void openBlockingDoor(Entity self) {
         if (!(self.level() instanceof ServerLevel level)) {
             return;
