@@ -2,11 +2,14 @@ package games.brennan.playermob.neoforge.compat;
 
 import games.brennan.dungeontrain.train.Trains;
 import games.brennan.playermob.compat.TrainEnvironment;
+import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.ButtonBlock;
 import net.minecraft.world.level.block.DoorBlock;
+import net.minecraft.world.level.block.LeverBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3d;
@@ -42,8 +45,10 @@ import java.util.UUID;
  * same far-offset space the navigation paths in), not at the mob's apparent world
  * position — so door-opening converts the mob's position via
  * {@link games.brennan.dungeontrain.ship.ManagedShip#worldToShip}. Wooden and copper
- * doors are hand-openable and opened directly; iron doors are redstone-only and left
- * for a follow-up (button/lever/pressure-plate operation).</p>
+ * doors are hand-openable and opened directly; iron doors are redstone-only, so their
+ * nearest button or lever is operated instead. The group-boundary door is left shut
+ * (opening it would march the mob into the inter-group gap — behaviour #2), and
+ * pressure-plate-controlled doors rely on the mob walking onto the plate.</p>
  *
  * <p>All queries are server-authoritative: every method first checks the entity is on
  * a {@link ServerLevel} and returns the "not on a train" answer otherwise.</p>
@@ -59,6 +64,9 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
 
     /** How far around the mob to look for a door it's standing against. */
     private static final int DOOR_REACH = 2;
+
+    /** How far from an iron door to look for its button/lever control. */
+    private static final int CONTROL_REACH = 3;
 
     @Override
     public boolean isOnTrain(Entity self) {
@@ -134,16 +142,27 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         // and look for a door the mob is up against. Fall back to the world position in
         // case a build projects carriage blocks at the apparent location.
         Vector3d sub = c.ship().worldToShip(new Vector3d(self.getX(), self.getY(), self.getZ()));
-        if (tryOpenDoorNear(self, level, BlockPos.containing(sub.x, sub.y, sub.z))) {
+        BlockPos subPos = BlockPos.containing(sub.x, sub.y, sub.z);
+        // Hand-openable doors (wooden/copper) open directly.
+        if (tryOpenDoorNear(self, level, subPos) || tryOpenDoorNear(self, level, self.blockPosition())) {
             return;
         }
-        tryOpenDoorNear(self, level, self.blockPosition());
+        // Iron doors are redstone-only — operate their adjacent button/lever instead.
+        // But never the group-boundary door: opening it would walk the mob into the
+        // inter-group gap (crossing it is behaviour #2). nextCarriageTarget is null there.
+        if (atForwardBoundary(self)) {
+            return;
+        }
+        if (tryOperateIronDoorControl(level, subPos)) {
+            return;
+        }
+        tryOperateIronDoorControl(level, self.blockPosition());
     }
 
     /**
      * Open one closed, hand-openable door (wooden or copper) within {@link #DOOR_REACH}
      * of {@code base}; returns true if one was opened. Iron doors are redstone-only and
-     * skipped here — operating their button/lever is a separate follow-up.
+     * skipped here — {@link #tryOperateIronDoorControl} drives their button/lever instead.
      */
     private static boolean tryOpenDoorNear(Entity self, ServerLevel level, BlockPos base) {
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
@@ -163,6 +182,96 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
             }
         }
         return false;
+    }
+
+    /**
+     * Find a closed iron door within {@link #DOOR_REACH} of {@code base} and operate its
+     * nearest button/lever control; returns true if a control was operated. Iron doors are
+     * redstone-only, so {@link #tryOpenDoorNear} can't open them by hand — we drive their
+     * control instead, in the same sub-level coordinate space.
+     */
+    private static boolean tryOperateIronDoorControl(ServerLevel level, BlockPos base) {
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        for (int dy = 0; dy <= 1; dy++) {
+            for (int dx = -DOOR_REACH; dx <= DOOR_REACH; dx++) {
+                for (int dz = -DOOR_REACH; dz <= DOOR_REACH; dz++) {
+                    cursor.set(base.getX() + dx, base.getY() + dy, base.getZ() + dz);
+                    BlockState state = level.getBlockState(cursor);
+                    if (state.is(Blocks.IRON_DOOR)
+                            && state.getBlock() instanceof DoorBlock door
+                            && !door.isOpen(state)
+                            && operateControlNear(level, cursor.immutable())) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Press/pull the nearest unpowered button or lever within {@link #CONTROL_REACH} of
+     * {@code doorPos}; returns true if one was operated. Only OFF controls are touched, so
+     * a lever already holding a door open is left alone, and an auto-unpressing button is
+     * simply re-pressed on a later tick (this reflex runs every tick) — keeping the iron
+     * door open until the mob has passed through.
+     */
+    private static boolean operateControlNear(ServerLevel level, BlockPos doorPos) {
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        BlockState bestState = null;
+        BlockPos bestPos = null;
+        double bestDistSq = Double.MAX_VALUE;
+        for (int dy = -CONTROL_REACH; dy <= CONTROL_REACH; dy++) {
+            for (int dx = -CONTROL_REACH; dx <= CONTROL_REACH; dx++) {
+                for (int dz = -CONTROL_REACH; dz <= CONTROL_REACH; dz++) {
+                    cursor.set(doorPos.getX() + dx, doorPos.getY() + dy, doorPos.getZ() + dz);
+                    BlockState state = level.getBlockState(cursor);
+                    if (!isOffControl(state)) {
+                        continue;
+                    }
+                    double distSq = cursor.distSqr(doorPos);
+                    if (distSq < bestDistSq) {
+                        bestDistSq = distSq;
+                        bestPos = cursor.immutable();
+                        bestState = state;
+                    }
+                }
+            }
+        }
+        if (bestState == null) {
+            return false;
+        }
+        if (bestState.getBlock() instanceof LeverBlock lever) {
+            lever.pull(bestState, level, bestPos, null);
+        } else if (bestState.getBlock() instanceof ButtonBlock button) {
+            button.press(bestState, level, bestPos, null);
+        }
+        return true;
+    }
+
+    /** True for an unpowered (OFF) button or lever — a control that turns power on when operated. */
+    private static boolean isOffControl(BlockState state) {
+        if (state.getBlock() instanceof ButtonBlock) {
+            return !state.getValue(ButtonBlock.POWERED);
+        }
+        if (state.getBlock() instanceof LeverBlock) {
+            return !state.getValue(LeverBlock.POWERED);
+        }
+        return false;
+    }
+
+    /**
+     * True if {@code self} is at the forward (march-direction) edge of its carriage group,
+     * where the only door ahead is the boundary door into the inter-group gap. Read from
+     * the mob's latched explore direction; {@link #nextCarriageTarget} is {@code null} when
+     * no further room exists in that direction within the group.
+     */
+    private boolean atForwardBoundary(Entity self) {
+        if (!(self instanceof PlayerMobEntity mob)) {
+            return false;
+        }
+        int dir = mob.getTrainExploreDir();
+        return dir != 0 && nextCarriageTarget(self, dir) == null;
     }
 
     // ---- Resolution ------------------------------------------------------
