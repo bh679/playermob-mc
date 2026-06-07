@@ -146,4 +146,118 @@ class ItemPickupPolicyTest {
         assertFalse(ItemPickupPolicy.wantsBuildingBlock(backpack, new ItemStack(Items.STONE, 10)),
             "10 <= smallest carried (20) → keep what we have");
     }
+
+    // ---- Wood / stone chest-loot policy ----------------------------------
+
+    @Test
+    void classifiesWood() {
+        assertTrue(ItemPickupPolicy.isWood(new ItemStack(Items.OAK_LOG)), "oak log");
+        assertTrue(ItemPickupPolicy.isWood(new ItemStack(Items.SPRUCE_LOG)), "spruce log");
+        assertTrue(ItemPickupPolicy.isWood(new ItemStack(Items.OAK_PLANKS)), "oak planks");
+        assertTrue(ItemPickupPolicy.isWood(new ItemStack(Items.CRIMSON_STEM)), "crimson stem");
+        assertTrue(ItemPickupPolicy.isWood(new ItemStack(Items.CRIMSON_PLANKS)), "crimson planks");
+        assertTrue(ItemPickupPolicy.isWood(new ItemStack(Items.BAMBOO_PLANKS)), "bamboo planks");
+        assertFalse(ItemPickupPolicy.isWood(new ItemStack(Items.COBBLESTONE)), "stone is not wood");
+        assertFalse(ItemPickupPolicy.isWood(new ItemStack(Items.DIAMOND)), "diamond is not wood");
+    }
+
+    @Test
+    void classifiesStoneFamily() {
+        assertTrue(ItemPickupPolicy.isStone(new ItemStack(Items.STONE)), "stone");
+        assertTrue(ItemPickupPolicy.isStone(new ItemStack(Items.COBBLESTONE)), "cobblestone");
+        assertTrue(ItemPickupPolicy.isStone(new ItemStack(Items.DEEPSLATE)), "deepslate");
+        assertTrue(ItemPickupPolicy.isStone(new ItemStack(Items.COBBLED_DEEPSLATE)), "cobbled deepslate");
+        assertTrue(ItemPickupPolicy.isStone(new ItemStack(Items.GRANITE)), "granite");
+        assertTrue(ItemPickupPolicy.isStone(new ItemStack(Items.POLISHED_ANDESITE)), "polished andesite");
+        assertTrue(ItemPickupPolicy.isStone(new ItemStack(Items.STONE_BRICKS)), "stone bricks");
+        assertTrue(ItemPickupPolicy.isStone(new ItemStack(Items.DEEPSLATE_TILES)), "deepslate tiles");
+        assertTrue(ItemPickupPolicy.isStone(new ItemStack(Items.BLACKSTONE)), "blackstone");
+        assertTrue(ItemPickupPolicy.isStone(new ItemStack(Items.TUFF_BRICKS)), "tuff bricks");
+        assertFalse(ItemPickupPolicy.isStone(new ItemStack(Items.OAK_PLANKS)), "planks are not stone");
+        assertFalse(ItemPickupPolicy.isStone(new ItemStack(Items.DIRT)), "dirt is not stone");
+        assertFalse(ItemPickupPolicy.isStone(new ItemStack(Items.DIAMOND)), "diamond is not stone");
+    }
+
+    @Test
+    void classifiesBlockResourceOrNull() {
+        assertEquals(ItemPickupPolicy.BlockResource.WOOD,
+            ItemPickupPolicy.blockResource(new ItemStack(Items.OAK_PLANKS)), "planks → WOOD");
+        assertEquals(ItemPickupPolicy.BlockResource.STONE,
+            ItemPickupPolicy.blockResource(new ItemStack(Items.COBBLESTONE)), "cobblestone → STONE");
+        assertNull(ItemPickupPolicy.blockResource(new ItemStack(Items.DIRT)), "dirt → neither");
+        assertNull(ItemPickupPolicy.blockResource(new ItemStack(Items.SAND)), "sand → neither");
+        assertNull(ItemPickupPolicy.blockResource(new ItemStack(Items.DIAMOND)), "diamond → neither");
+    }
+
+    @Test
+    void detectsToolCraftableStone() {
+        assertTrue(ItemPickupPolicy.isToolCraftableStone(new ItemStack(Items.COBBLESTONE)), "cobblestone");
+        assertTrue(ItemPickupPolicy.isToolCraftableStone(new ItemStack(Items.BLACKSTONE)), "blackstone");
+        assertTrue(ItemPickupPolicy.isToolCraftableStone(new ItemStack(Items.COBBLED_DEEPSLATE)), "cobbled deepslate");
+        assertFalse(ItemPickupPolicy.isToolCraftableStone(new ItemStack(Items.STONE)), "plain stone can't craft tools");
+        assertFalse(ItemPickupPolicy.isToolCraftableStone(new ItemStack(Items.GRANITE)), "granite can't");
+        assertFalse(ItemPickupPolicy.isToolCraftableStone(new ItemStack(Items.STONE_BRICKS)), "stone bricks can't");
+    }
+
+    @Test
+    void countsResourcePerType() {
+        SimpleContainer backpack = new SimpleContainer(8);
+        backpack.setItem(0, new ItemStack(Items.OAK_PLANKS, 32));
+        backpack.setItem(1, new ItemStack(Items.OAK_LOG, 16));
+        backpack.setItem(2, new ItemStack(Items.STONE, 10));
+        backpack.setItem(3, new ItemStack(Items.DIAMOND, 5)); // neither — excluded
+        assertEquals(48, ItemPickupPolicy.countResource(backpack, ItemPickupPolicy.BlockResource.WOOD), "32+16 wood");
+        assertEquals(10, ItemPickupPolicy.countResource(backpack, ItemPickupPolicy.BlockResource.STONE), "10 stone");
+    }
+
+    @Test
+    void capsAreIndependent() {
+        SimpleContainer backpack = new SimpleContainer(8);
+        backpack.setItem(0, new ItemStack(Items.OAK_PLANKS, 64)); // wood at its cap
+        assertFalse(ItemPickupPolicy.wantsResource(backpack, new ItemStack(Items.OAK_LOG, 4),
+            ItemPickupPolicy.BlockResource.WOOD), "wood capped → small pile rejected");
+        assertTrue(ItemPickupPolicy.wantsResource(backpack, new ItemStack(Items.STONE, 4),
+            ItemPickupPolicy.BlockResource.STONE), "stone empty → still wants stone");
+    }
+
+    @Test
+    void woodTradesUpOnlyForStrictlyLargerPileAtCap() {
+        SimpleContainer backpack = new SimpleContainer(8);
+        backpack.setItem(0, new ItemStack(Items.OAK_PLANKS, 20));
+        backpack.setItem(1, new ItemStack(Items.SPRUCE_LOG, 20));
+        backpack.setItem(2, new ItemStack(Items.BIRCH_PLANKS, 24));
+        assertEquals(64, ItemPickupPolicy.countResource(backpack, ItemPickupPolicy.BlockResource.WOOD), "wood at cap");
+        assertTrue(ItemPickupPolicy.wantsResource(backpack, new ItemStack(Items.OAK_LOG, 32),
+            ItemPickupPolicy.BlockResource.WOOD), "32 > smallest pile (20) → trade up");
+        assertFalse(ItemPickupPolicy.wantsResource(backpack, new ItemStack(Items.OAK_LOG, 10),
+            ItemPickupPolicy.BlockResource.WOOD), "10 <= smallest pile (20) → keep what we have");
+    }
+
+    @Test
+    void stoneTradeUpPrioritizesToolCraftableAtCap() {
+        // At the stone cap with entirely decorative stone: a tool-craftable stack trades up
+        // even at a smaller count, because tool-craftable out-ranks decorative.
+        SimpleContainer decorative = new SimpleContainer(8);
+        decorative.setItem(0, new ItemStack(Items.GRANITE, 64));
+        assertEquals(64, ItemPickupPolicy.countResource(decorative, ItemPickupPolicy.BlockResource.STONE), "stone at cap");
+        assertTrue(ItemPickupPolicy.wantsResource(decorative, new ItemStack(Items.COBBLESTONE, 1),
+            ItemPickupPolicy.BlockResource.STONE),
+            "tool-craftable cobblestone (1) displaces decorative granite (64)");
+
+        // Inverse: decorative cannot displace equal-count tool-craftable stone.
+        SimpleContainer toolCraftable = new SimpleContainer(8);
+        toolCraftable.setItem(0, new ItemStack(Items.COBBLESTONE, 64));
+        assertFalse(ItemPickupPolicy.wantsResource(toolCraftable, new ItemStack(Items.GRANITE, 64),
+            ItemPickupPolicy.BlockResource.STONE),
+            "decorative granite (64) can't displace tool-craftable cobblestone (64)");
+    }
+
+    @Test
+    void lowestValueResourceSlotPrefersDisplacingDecorative() {
+        SimpleContainer backpack = new SimpleContainer(8);
+        backpack.setItem(0, new ItemStack(Items.COBBLESTONE, 4)); // tool-craftable — higher value
+        backpack.setItem(1, new ItemStack(Items.GRANITE, 64));    // decorative — lower value despite bigger pile
+        assertEquals(1, ItemPickupPolicy.lowestValueResourceSlot(backpack, ItemPickupPolicy.BlockResource.STONE),
+            "decorative granite is the displacement target over tool-craftable cobblestone");
+    }
 }

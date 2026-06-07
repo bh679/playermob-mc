@@ -1,6 +1,7 @@
 package games.brennan.playermob.entity;
 
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.tags.ItemTags;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.ai.attributes.Attributes;
@@ -50,6 +51,17 @@ public final class ItemPickupPolicy {
     public static final int BUILDING_BLOCK_CAP = 64;
 
     /**
+     * Bulk materials a mob stocks up on from <em>chests</em> (distinct from the
+     * pooled floor-pickup {@link #BUILDING_BLOCK_CAP}): a stack of each, capped
+     * independently. See {@link #wantsResource}.
+     */
+    public enum BlockResource { WOOD, STONE }
+
+    /** Per-type chest-loot cap — up to one stack of wood AND one stack of stone. */
+    public static final int WOOD_CAP = 64;
+    public static final int STONE_CAP = 64;
+
+    /**
      * Curated "good loot" set. Items here get hoarded in the backpack even
      * though the mob can't equip or eat them. Block forms (e.g. diamond block)
      * are intentionally absent — they fall through to the building-block cap.
@@ -74,6 +86,56 @@ public final class ItemPickupPolicy {
         Items.NETHER_STAR,
         Items.ECHO_SHARD,
         Items.TOTEM_OF_UNDYING
+    );
+
+    /**
+     * The broad "stone" family the mob loots from chests: plain stone, cobblestone,
+     * deepslate, granite/diorite/andesite/tuff, blackstone, and their cut / polished /
+     * brick / chiseled variants. No single vanilla item tag covers this set, so it's
+     * curated here (mirrors {@link #VALUABLES}). Tool-craftable members
+     * (cobblestone/blackstone/cobbled-deepslate) are detected separately via
+     * {@link #isToolCraftableStone} and valued higher. Extend freely; membership is
+     * the whole contract.
+     */
+    private static final Set<Item> STONE_FAMILY = Set.of(
+        Items.STONE, Items.COBBLESTONE, Items.MOSSY_COBBLESTONE, Items.SMOOTH_STONE,
+        Items.STONE_BRICKS, Items.MOSSY_STONE_BRICKS, Items.CRACKED_STONE_BRICKS,
+        Items.CHISELED_STONE_BRICKS,
+        Items.GRANITE, Items.POLISHED_GRANITE,
+        Items.DIORITE, Items.POLISHED_DIORITE,
+        Items.ANDESITE, Items.POLISHED_ANDESITE,
+        Items.DEEPSLATE, Items.COBBLED_DEEPSLATE, Items.POLISHED_DEEPSLATE,
+        Items.DEEPSLATE_BRICKS, Items.CRACKED_DEEPSLATE_BRICKS,
+        Items.DEEPSLATE_TILES, Items.CRACKED_DEEPSLATE_TILES, Items.CHISELED_DEEPSLATE,
+        Items.TUFF, Items.POLISHED_TUFF, Items.TUFF_BRICKS,
+        Items.CHISELED_TUFF, Items.CHISELED_TUFF_BRICKS,
+        Items.BLACKSTONE, Items.POLISHED_BLACKSTONE, Items.POLISHED_BLACKSTONE_BRICKS,
+        Items.CRACKED_POLISHED_BLACKSTONE_BRICKS, Items.CHISELED_POLISHED_BLACKSTONE,
+        Items.GILDED_BLACKSTONE
+    );
+
+    /**
+     * The {@code #minecraft:stone_tool_materials} members — the complete vanilla set of stone
+     * that crafts stone tools. Authoritative for vanilla; {@link #isToolCraftableStone} also
+     * consults the tag for modded additions. All three are members of {@link #STONE_FAMILY}.
+     */
+    private static final Set<Item> TOOL_CRAFTABLE_STONE = Set.of(
+        Items.COBBLESTONE, Items.BLACKSTONE, Items.COBBLED_DEEPSLATE
+    );
+
+    /**
+     * Common vanilla logs/stems + planks — a fallback for {@link #isWood} so the classifier
+     * works in unit tests (which run without datapack-loaded tags). At runtime the {@code #logs}
+     * / {@code #planks} tags are authoritative and also cover stripped logs, wood/hyphae blocks,
+     * and modded woods not listed here.
+     */
+    private static final Set<Item> COMMON_WOODS = Set.of(
+        Items.OAK_LOG, Items.SPRUCE_LOG, Items.BIRCH_LOG, Items.JUNGLE_LOG,
+        Items.ACACIA_LOG, Items.DARK_OAK_LOG, Items.MANGROVE_LOG, Items.CHERRY_LOG,
+        Items.CRIMSON_STEM, Items.WARPED_STEM,
+        Items.OAK_PLANKS, Items.SPRUCE_PLANKS, Items.BIRCH_PLANKS, Items.JUNGLE_PLANKS,
+        Items.ACACIA_PLANKS, Items.DARK_OAK_PLANKS, Items.MANGROVE_PLANKS, Items.CHERRY_PLANKS,
+        Items.BAMBOO_PLANKS, Items.CRIMSON_PLANKS, Items.WARPED_PLANKS
     );
 
     /**
@@ -220,5 +282,107 @@ public final class ItemPickupPolicy {
         int smallest = smallestBuildingBlockSlot(backpack);
         if (smallest < 0) return false;
         return found.getCount() > backpack.getItem(smallest).getCount();
+    }
+
+    // ---- Wood / stone chest looting (per-resource caps) -------------------
+
+    /**
+     * True if {@code stack} is any log/stem or any planks. The {@code #logs} / {@code #planks}
+     * tags drive this at runtime — covering every vanilla variant (stripped, wood/hyphae) plus
+     * modded woods. The {@link #COMMON_WOODS} fallback set covers the common vanilla logs/planks
+     * so the classifier still works in unit tests, which run without datapack-loaded tags.
+     */
+    public static boolean isWood(ItemStack stack) {
+        return stack.is(ItemTags.LOGS) || stack.is(ItemTags.PLANKS)
+            || COMMON_WOODS.contains(stack.getItem());
+    }
+
+    /** True if {@code stack} is in the broad {@link #STONE_FAMILY}. */
+    public static boolean isStone(ItemStack stack) {
+        return STONE_FAMILY.contains(stack.getItem());
+    }
+
+    /**
+     * True for stone that can craft stone tools — the {@code #minecraft:stone_tool_materials}
+     * members (cobblestone, blackstone, cobbled-deepslate). Valued above decorative stone so the
+     * mob's stone pool converges toward the useful kind. The {@link #TOOL_CRAFTABLE_STONE} set is
+     * the complete vanilla truth (and keeps unit tests working without datapack tags); the tag
+     * adds any modded tool-stone at runtime. Implies {@link #isStone}.
+     */
+    public static boolean isToolCraftableStone(ItemStack stack) {
+        return TOOL_CRAFTABLE_STONE.contains(stack.getItem())
+            || stack.is(ItemTags.STONE_TOOL_MATERIALS);
+    }
+
+    /**
+     * Classify {@code stack} as a capped chest resource, or {@code null} if it's
+     * neither wood nor stone. The two families are disjoint, so check order is cosmetic.
+     */
+    public static BlockResource blockResource(ItemStack stack) {
+        if (isWood(stack)) return BlockResource.WOOD;
+        if (isStone(stack)) return BlockResource.STONE;
+        return null;
+    }
+
+    private static int capFor(BlockResource resource) {
+        return resource == BlockResource.WOOD ? WOOD_CAP : STONE_CAP;
+    }
+
+    private static boolean matches(BlockResource resource, ItemStack stack) {
+        return resource == BlockResource.WOOD ? isWood(stack) : isStone(stack);
+    }
+
+    /** Total count of {@code resource} stacks across {@code container}. Enforces the per-type cap. */
+    public static int countResource(Container container, BlockResource resource) {
+        int total = 0;
+        for (int i = 0; i < container.getContainerSize(); i++) {
+            ItemStack stack = container.getItem(i);
+            if (matches(resource, stack)) total += stack.getCount();
+        }
+        return total;
+    }
+
+    /**
+     * Trade-up rank of a stack within its resource: higher beats lower. Lexicographic
+     * <strong>(tool-craftable tier, then pile count)</strong> — for STONE a tool-craftable
+     * stack outranks a decorative one regardless of size; ties and all WOOD compare by count.
+     * This is where the "prioritize tool-craftable stone" rule lives.
+     */
+    static long tradeUpValue(BlockResource resource, ItemStack stack) {
+        long tier = (resource == BlockResource.STONE && isToolCraftableStone(stack)) ? 1L : 0L;
+        return (tier << 32) | (stack.getCount() & 0xffffffffL);
+    }
+
+    /**
+     * Slot index of the <em>lowest</em>-{@link #tradeUpValue} stack of {@code resource}
+     * in {@code container} (the displacement target when trading up), or {@code -1} if none.
+     */
+    public static int lowestValueResourceSlot(Container container, BlockResource resource) {
+        int slot = -1;
+        long min = Long.MAX_VALUE;
+        for (int i = 0; i < container.getContainerSize(); i++) {
+            ItemStack stack = container.getItem(i);
+            if (matches(resource, stack)) {
+                long value = tradeUpValue(resource, stack);
+                if (value < min) {
+                    min = value;
+                    slot = i;
+                }
+            }
+        }
+        return slot;
+    }
+
+    /**
+     * Whether the mob wants {@code found} (already known to be {@code resource}). True while
+     * under the per-type cap; once at the cap, only if {@code found} strictly out-ranks the
+     * lowest-value stack already carried (bigger pile, or — for stone — tool-craftable over
+     * decorative). Mirrors {@link #wantsBuildingBlock} with the resource/priority dimension added.
+     */
+    public static boolean wantsResource(Container backpack, ItemStack found, BlockResource resource) {
+        if (countResource(backpack, resource) < capFor(resource)) return true;
+        int lowSlot = lowestValueResourceSlot(backpack, resource);
+        if (lowSlot < 0) return false;
+        return tradeUpValue(resource, found) > tradeUpValue(resource, backpack.getItem(lowSlot));
     }
 }
