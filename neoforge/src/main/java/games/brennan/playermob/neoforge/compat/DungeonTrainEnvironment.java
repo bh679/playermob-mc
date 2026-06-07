@@ -20,7 +20,9 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3d;
 import org.joml.primitives.AABBdc;
 
+import java.util.Map;
 import java.util.UUID;
+import java.util.WeakHashMap;
 
 /**
  * Dungeon Train-backed {@link TrainEnvironment}. The only class in PlayerMob that
@@ -77,6 +79,17 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
     /** Max eye-to-control distance for the mob to operate a control (≈ a player's block reach). */
     private static final double INTERACT_REACH = 4.5;
     private static final double INTERACT_REACH_SQR = INTERACT_REACH * INTERACT_REACH;
+
+    /** Ticks the mob keeps facing — and punching at — a control it just operated, so it reads as deliberate. */
+    private static final int CONTROL_GAZE_TICKS = 16;
+
+    /**
+     * Per-mob "keep looking at / swinging at the control I just operated" hint:
+     * {@code {ticksLeft, dx, dy, dz}} where {@code (dx,dy,dz)} is the control's offset from the
+     * mob's eyes. Stored mob-relative so the look tracks both the moving carriage and the mob's
+     * own drift. Server-thread only; weak keys so entries vanish with the mob.
+     */
+    private static final Map<Entity, double[]> CONTROL_GAZE = new WeakHashMap<>();
 
     @Override
     public boolean isOnTrain(Entity self) {
@@ -146,6 +159,9 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         Trains.Carriage c = carriageAt(self);
         if (c == null) {
             return; // not on a train — leave doors to PlayerMobDoorGoal
+        }
+        if (self instanceof Mob gazer) {
+            applyControlGaze(gazer); // keep facing + punching a just-operated control — a deliberate look
         }
         // The carriage's blocks live in the sub-level coordinate space (where the
         // navigation paths), not at the mob's apparent world position — convert there
@@ -263,10 +279,12 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         if (bestState == null) {
             return false;
         }
-        // Turn to face the control and swing — a visible interaction. Carriage rotation is
-        // locked to identity, so the sub-frame eye→control offset is the world-frame offset.
+        // Turn to face the control and swing, then hold the gaze + repeated swing for a short
+        // window so the look and punch read deliberately. Carriage rotation is locked to identity,
+        // so the sub-frame eye→control offset is the world-frame offset.
         Vec3 offset = bestCenter.subtract(eye);
         mob.getLookControl().setLookAt(mob.getX() + offset.x, mob.getEyeY() + offset.y, mob.getZ() + offset.z);
+        CONTROL_GAZE.put(mob, new double[]{CONTROL_GAZE_TICKS, offset.x, offset.y, offset.z});
         mob.swing(InteractionHand.MAIN_HAND);
         if (bestState.getBlock() instanceof LeverBlock lever) {
             lever.pull(bestState, level, bestPos, null);
@@ -274,6 +292,29 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
             button.press(bestState, level, bestPos, null);
         }
         return true;
+    }
+
+    /**
+     * Keep {@code mob} looking at — and swinging its arm at — the control it most recently
+     * operated, for a short window, so the interaction reads as a deliberate "look at it and
+     * punch it" rather than a one-tick glance the movement goal immediately overrides. Runs every
+     * tick from {@link #openBlockingDoor} (called after the goal selector), so this look wins.
+     * {@link Mob#swing} self-gates to a punch roughly every half-swing, so calling it each tick
+     * yields a visible repeated arm-swing. The stored offset is mob-relative, so it tracks the
+     * moving carriage and the mob's own drift.
+     */
+    private static void applyControlGaze(Mob mob) {
+        double[] g = CONTROL_GAZE.get(mob);
+        if (g == null) {
+            return;
+        }
+        if (g[0] <= 0) {
+            CONTROL_GAZE.remove(mob);
+            return;
+        }
+        g[0] -= 1;
+        mob.getLookControl().setLookAt(mob.getX() + g[1], mob.getEyeY() + g[2], mob.getZ() + g[3]);
+        mob.swing(InteractionHand.MAIN_HAND);
     }
 
     /**
