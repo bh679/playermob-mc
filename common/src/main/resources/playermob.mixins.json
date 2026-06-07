@@ -5,7 +5,7 @@
   "compatibilityLevel": "JAVA_21",
   "mixins": [
     "MobTargetSelectorAccessor",
-    "PillagerTargetsPlayerMobMixin"
+    "RaiderTargetsPlayerMobMixin"
   ],
   "client": [],
   "server": [],
