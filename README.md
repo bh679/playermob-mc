@@ -32,6 +32,12 @@ Built jars land in:
 - `forge/build/libs/playermob-forge-<version>.jar`
 - `neoforge/build/libs/playermob-neoforge-<version>.jar`
 
+## For modders
+
+PlayerMob is built to be extended. The [wiki](https://github.com/bh679/playermob-mc/wiki)
+is a full modder guide — developer setup, datapack skins, `/summon` NBT, the entity
+Java API, AI goals, and the soft-dependency integration pattern.
+
 ## License
 
 PolyForm Shield 1.0.0 — see [LICENSE](LICENSE).
