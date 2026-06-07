@@ -178,7 +178,9 @@ public final class ItemPickupPolicy {
             stack.getOrDefault(DataComponents.ATTRIBUTE_MODIFIERS, ItemAttributeModifiers.EMPTY);
         double[] damage = {0.0};
         mods.forEach(EquipmentSlot.MAINHAND, (attribute, modifier) -> {
-            if (attribute.is(Attributes.ATTACK_DAMAGE)) {
+            // Holder.equals (identity for registry attributes) avoids the deprecated
+            // Holder.is(Holder<T>) overload; mirrors EquipmentEvaluator.sumAddValue.
+            if (attribute.equals(Attributes.ATTACK_DAMAGE)) {
                 damage[0] += modifier.amount();
             }
         });
