@@ -316,6 +316,27 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      */
     private boolean crossingGap;
 
+    /** How long door-opening is suppressed after a stuck-recovery close, so the mob can cross. ~2 s. */
+    private static final int DOOR_CLOSE_HOLD_TICKS = 40;
+    /** Half-width of the cube scanned around the mob for an open door to close when stuck (off-train). */
+    private static final int DOOR_RECOVERY_REACH = 2;
+
+    /**
+     * Off-train detector for the "close a door that's blocking me" recovery. The on-train
+     * (Dungeon Train) reflex keeps its own per-mob detectors, so this one only runs off a
+     * train. Transient AI state (never saved): a stuck run restarts cleanly across a reload.
+     * See {@link #recoverFromStuckDoor()} and {@link DoorStuckMonitor}.
+     */
+    private final DoorStuckMonitor offTrainDoorStuck = new DoorStuckMonitor();
+
+    /**
+     * Ticks left during which this mob opens no doors, so a door the stuck-recovery just closed
+     * isn't reopened before the mob can cross the perpendicular path the open swing was blocking.
+     * Set by {@link #holdDoorsClosed()} (on or off a train), decremented each server tick, and read
+     * by both door openers via {@link #isHoldingDoorsClosed()}. Transient (never saved).
+     */
+    private int doorCloseHoldTicks;
+
     public PlayerMobEntity(EntityType<? extends PlayerMobEntity> type, Level level) {
         super(type, level);
         // Preserve combat-kill XP parity. Monster's constructor sets xpReward=5;
@@ -448,16 +469,45 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         }
         latchTrainExploreDirection();
 
+        // Tick down the door-close hold (armed by stuck-recovery, on or off a train) so a door it
+        // just closed isn't reopened until the mob has had time to cross the now-clear path.
+        if (doorCloseHoldTicks > 0) {
+            doorCloseHoldTicks--;
+        }
+
         if (TrainConfinement.isConfined(this)) {
             // Remember we're aboard, so TrainRecoveryGoal can tell "fell off" from
             // "never boarded" (see ticksSinceOnTrain / RECOVERY_WINDOW_TICKS).
             lastOnTrainTick = tickCount;
-            // Open any door we're up against. Vanilla's DoorInteractGoal opens doors by
-            // inspecting nav path nodes + collision, which doesn't fire on a moving Sable
-            // carriage — so the train seam reaches for the door block directly (in the
-            // carriage's own coordinate space), every tick, regardless of which goal owns
-            // movement.
+            // Open any door we're up against — and, when wedged, close one whose open swing is
+            // blocking us. Vanilla's DoorInteractGoal opens doors by inspecting nav path nodes +
+            // collision, which doesn't fire on a moving Sable carriage — so the train seam reaches
+            // for the door block directly (in the carriage's own coordinate space), every tick,
+            // regardless of which goal owns movement.
             TrainConfinement.openBlockingDoor(this);
+        } else {
+            // Off a train, opening is handled by PlayerMobDoorGoal; this reflex adds the
+            // close-when-stuck half — an open door can block the perpendicular path.
+            recoverFromStuckDoor();
+        }
+    }
+
+    /**
+     * Off-train door recovery: when the mob has been wedged for a while ({@link DoorStuckMonitor})
+     * while actively pathing, close the nearest open, hand-closable door and arm the hold so it
+     * isn't reopened before the mob can cross. An open door's panel swings across the perpendicular
+     * edge of its cell, which vanilla pathing treats as passable — so a mob whose route turns at the
+     * doorway jams against it, and closing clears the way. On a train the Dungeon-Train reflex does
+     * the same job in the carriage's coordinate space, so this branch never runs while confined.
+     */
+    private void recoverFromStuckDoor() {
+        if (!(level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        boolean tryingToMove = !getNavigation().isDone();
+        if (offTrainDoorStuck.tick(getX(), getZ(), tryingToMove)
+                && DoorRecovery.closeBlockingOpenDoor(this, serverLevel, blockPosition(), DOOR_RECOVERY_REACH)) {
+            holdDoorsClosed();
         }
     }
 
@@ -842,6 +892,24 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      */
     public boolean closesDoors() {
         return this.closesDoors;
+    }
+
+    /**
+     * Arm the door-close hold: for {@link #DOOR_CLOSE_HOLD_TICKS} this mob opens no doors, so a
+     * door the stuck-recovery just closed (to clear an open swing blocking its path) isn't reopened
+     * before it can cross. Called by the stuck-recovery on and off a train.
+     */
+    public void holdDoorsClosed() {
+        this.doorCloseHoldTicks = DOOR_CLOSE_HOLD_TICKS;
+    }
+
+    /**
+     * Whether door-opening is currently suppressed for this mob (see {@link #holdDoorsClosed()}).
+     * Consulted by {@link PlayerMobDoorGoal} and the Dungeon-Train door reflex so neither reopens a
+     * door the stuck-recovery just closed.
+     */
+    public boolean isHoldingDoorsClosed() {
+        return this.doorCloseHoldTicks > 0;
     }
 
     // ---- InventoryCarrier ------------------------------------------------

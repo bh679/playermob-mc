@@ -3,6 +3,8 @@ package games.brennan.playermob.neoforge.compat;
 import games.brennan.dungeontrain.ship.ManagedShip;
 import games.brennan.dungeontrain.train.Trains;
 import games.brennan.playermob.compat.TrainEnvironment;
+import games.brennan.playermob.entity.DoorRecovery;
+import games.brennan.playermob.entity.DoorStuckMonitor;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -94,6 +96,14 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
      * own drift. Server-thread only; weak keys so entries vanish with the mob.
      */
     private static final Map<Entity, double[]> CONTROL_GAZE = new WeakHashMap<>();
+
+    /**
+     * Per-mob "am I wedged?" detector for the door close-recovery, measured in the carriage's
+     * sub-level frame (a riding mob's world position drifts with the moving carriage, so world
+     * space would never read as stuck). Server-thread only; weak keys so entries vanish with the
+     * mob, exactly like {@link #CONTROL_GAZE}.
+     */
+    private static final Map<Entity, DoorStuckMonitor> STUCK = new WeakHashMap<>();
 
     @Override
     public boolean isOnTrain(Entity self) {
@@ -420,6 +430,25 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         // case a build projects carriage blocks at the apparent location.
         Vector3d sub = c.ship().worldToShip(new Vector3d(self.getX(), self.getY(), self.getZ()));
         BlockPos subPos = BlockPos.containing(sub.x, sub.y, sub.z);
+
+        // Stuck-recovery. Track no-progress in the carriage's own (sub-level) frame — a riding mob's
+        // world position drifts with the moving carriage, so world space would never read as stuck.
+        // An open door's panel swings across the perpendicular edge of its cell; a mob whose route
+        // turns at the doorway jams against it (vanilla pathing thinks "open = passable"). When
+        // wedged, close the nearest such door and hold off reopening (the early return below) so the
+        // mob can cross before the open logic — which reopens any closed hand-door every tick — undoes it.
+        if (self instanceof PlayerMobEntity playerMob) {
+            boolean tryingToMove = !playerMob.getNavigation().isDone();
+            boolean stuck = STUCK.computeIfAbsent(self, k -> new DoorStuckMonitor()).tick(sub.x, sub.z, tryingToMove);
+            if (playerMob.isHoldingDoorsClosed()) {
+                return; // holding a recovery close — don't reopen anything yet
+            }
+            if (stuck && DoorRecovery.closeBlockingOpenDoor(self, level, subPos, DOOR_REACH)) {
+                playerMob.holdDoorsClosed();
+                return;
+            }
+        }
+
         // Hand-openable doors (wooden/copper) open directly.
         if (tryOpenDoorNear(self, level, subPos) || tryOpenDoorNear(self, level, self.blockPosition())) {
             return;
