@@ -3,7 +3,10 @@
   "minVersion": "0.8",
   "package": "games.brennan.playermob.mixin",
   "compatibilityLevel": "JAVA_21",
-  "mixins": [],
+  "mixins": [
+    "MobTargetSelectorAccessor",
+    "PillagerTargetsPlayerMobMixin"
+  ],
   "client": [],
   "server": [],
   "injectors": {
