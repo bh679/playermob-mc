@@ -1,6 +1,7 @@
 package games.brennan.playermob.client;
 
 import java.util.function.IntSupplier;
+import java.util.function.ToIntFunction;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.Minecraft;
@@ -24,10 +25,11 @@ import net.minecraft.client.gui.screens.TitleScreen;
  * <p>The in-world path respects F1 (hideGui); the F3 debug overlay draws over it,
  * which is fine.</p>
  *
- * <p>The in-world copy can be pushed down via {@link #setExtraTopOffset} when
- * another mod draws in the same top-left corner — currently Dungeon Train,
- * whose own version label sits at the identical spot when DT runs from a dev
- * branch. The main-menu copy is never offset (DT has no main-menu label).</p>
+ * <p>Both copies can be pushed down when another mod draws in the same top-left
+ * corner — currently Dungeon Train. In-world, DT's version HUD sits at the
+ * identical spot on a dev branch ({@link #setExtraTopOffset}); on the main menu,
+ * DT adds a version button there whenever it is loaded ({@link
+ * #setMenuTopSupplier}, which positions our label below DT's actual widget).</p>
  */
 @Environment(EnvType.CLIENT)
 public final class VersionHudRenderer {
@@ -45,6 +47,15 @@ public final class VersionHudRenderer {
      * in all of those cases is unchanged.
      */
     private static volatile IntSupplier extraTopOffset = () -> 0;
+
+    /**
+     * Absolute top Y (GUI px) for the <b>main-menu</b> label, as a function of the
+     * current screen, or {@code <= 0} to fall back to {@link #MARGIN}. Installed by
+     * a loader when another mod owns the title-screen top-left — Dungeon Train adds
+     * a version button there — so our label can sit directly below that mod's
+     * actual widget. Defaults to no change; never set on Fabric/Forge or without DT.
+     */
+    private static volatile ToIntFunction<Screen> menuTopSupplier = screen -> 0;
 
     private VersionHudRenderer() {}
 
@@ -78,6 +89,22 @@ public final class VersionHudRenderer {
     }
 
     /**
+     * Install a supplier of the main-menu label's absolute top Y (GUI px) for the
+     * given screen, or {@code null} to clear it. Used by {@code DungeonTrainHud} on
+     * NeoForge to drop the label below Dungeon Train's title-screen version button.
+     * A return {@code <= 0} means "no other mod is there" → default {@link #MARGIN}.
+     */
+    public static void setMenuTopSupplier(ToIntFunction<Screen> supplier) {
+        menuTopSupplier = (supplier != null) ? supplier : (screen -> 0);
+    }
+
+    /** Resolved main-menu top Y: the supplier's value if positive, else {@link #MARGIN}. */
+    static int menuTopFor(Screen screen) {
+        int top = menuTopSupplier.applyAsInt(screen);
+        return top > 0 ? top : MARGIN;
+    }
+
+    /**
      * In-world HUD pass. No-op when the GUI is hidden (F1) or when this is a
      * release ({@code main}) build. Pushed down by {@link #extraTopOffsetPx()}
      * when a loader installed an offset (Dungeon Train's HUD sharing the corner).
@@ -93,11 +120,12 @@ public final class VersionHudRenderer {
      * Screen render pass — draws on the main menu ({@link TitleScreen}) only;
      * all other screens are skipped. F1/hideGui is an in-world toggle, so it is
      * intentionally not consulted here (the menu label should not depend on an
-     * in-world setting). Always at {@code MARGIN} — the offset is in-world only.
+     * in-world setting). Dropped below another mod's title-screen widget via
+     * {@link #menuTopFor(Screen)} (Dungeon Train's version button); else {@link #MARGIN}.
      */
     public static void renderOnScreen(GuiGraphics graphics, Screen screen) {
         if (screen instanceof TitleScreen) {
-            draw(graphics, MARGIN);
+            draw(graphics, menuTopFor(screen));
         }
     }
 
