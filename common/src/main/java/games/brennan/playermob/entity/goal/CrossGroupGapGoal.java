@@ -2,7 +2,6 @@ package games.brennan.playermob.entity.goal;
 
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.PlayerMobEntity;
-import net.minecraft.util.Mth;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.phys.Vec3;
 
@@ -22,16 +21,16 @@ import java.util.EnumSet;
  * exclusive because this one only engages once {@code nextCarriageTarget} is
  * {@code null}.</p>
  *
- * <p><b>Move <em>with</em> the train.</b> The train translates through world space every
- * tick, and an airborne mob is no longer carried by the ship — so driving the leap with
- * raw world-space velocity flings it off the train. Instead, the goal first <em>measures
- * the train's carry velocity</em> from the mob's own per-tick displacement while it stands
- * at the gap edge (a riding mob standing still is moved only by the train), then drives
- * the hop as {@code carry + a gentle drift toward the target + a floor-height controller}.
- * The carry keeps the mob locked to the train (it doesn't speed off or fall behind), the
- * drift is small (the mob crosses at roughly walking pace, not a boost), and the floor
- * controller keeps it level so it can never strand in the gap. No block-placement /
- * fall-recovery (behaviour #2) is needed.</p>
+ * <p><b>A sprint jump that moves with the train.</b> The train translates through world space
+ * every tick, and an airborne mob is no longer carried by the ship — so the goal first
+ * <em>measures the train's carry velocity</em> from the mob's own per-tick displacement while it
+ * stands at the gap edge (a riding mob standing still is moved only by the train). The leap is then
+ * a ballistic sprint jump <em>relative to the train</em>: a vanilla jump straight up plus a
+ * sustained sprint toward the target, both on top of the carry, with gravity arcing it back down
+ * onto the far group — exactly how a sprinting player crosses the gap. Staying genuinely airborne
+ * (a real arc, not a floor-skim) matters: Sable only sticks a riding mob to a carriage while it is
+ * grounded, so a low skim re-grounds on the origin and gets re-grabbed mid-leap. No block-placement
+ * / fall-recovery (behaviour #2) is needed.</p>
  *
  * <p>While committed to a hop the mob declines new combat targets
  * ({@link PlayerMobEntity#setCrossingGap}) so a passing hostile can't abandon it mid-air,
@@ -54,13 +53,14 @@ public final class CrossGroupGapGoal extends Goal {
     private static final int EMPTY_SCAN_COOLDOWN = 20;     // 1s between checks when off-train / not latched
     private static final int BOUNDARY_COOLDOWN = 40;       // 2s when there's no further group to cross to
 
-    // Hop tuning — the drift is the mob's speed *relative to the train*, so it stays gentle
-    // regardless of how fast the train itself moves. Refined in-game at Gate 2.
-    private static final double DRIFT_SPEED = 0.15; // blocks/tick toward the target, on top of the train carry
-    private static final double LAUNCH_UP = 0.42;   // one modest upward hop to clear the carriage lip
-    private static final double LIFT_GAIN = 0.30;   // proportional pull back toward the launch floor
-    private static final double LIFT_MIN = -0.20;
-    private static final double LIFT_MAX = 0.40;
+    // Sprint-jump tuning. The leap is a ballistic arc, like a player: a vanilla jump straight up
+    // plus a sustained sprint toward the target (air control), then gravity brings it down onto the
+    // far group. The sprint is added on top of the train carry, so it tracks a moving train; it must
+    // clear a normal carriage-group gap the way a sprinting player does. Confirmed via in-game
+    // trajectory diagnostics: the earlier "gentle floor-skim" re-grounded on the origin and stalled,
+    // and a held-altitude hover floated too high and too far.
+    private static final double SPRINT_SPEED = 0.38; // horizontal sprint toward the target, on top of carry
+    private static final double LAUNCH_UP = 0.42;    // vanilla jump impulse; gravity arcs the rest
 
     private final PlayerMobEntity mob;
     private final double moveSpeed;
@@ -220,15 +220,18 @@ public final class CrossGroupGapGoal extends Goal {
         }
     }
 
-    /** Drive the mob across the gap: move with the train (carry) + a gentle drift, floor-tracked. */
+    /** Ballistic sprint-jump across the gap: a vanilla-arc vertical plus a sustained sprint toward
+     *  the (carry-tracked) far group, until it re-boards on the far side. */
     private void tickFlight() {
         flightTicks++;
+
+        boolean confined = TrainConfinement.isConfined(mob);
 
         // Landed? Check first, against last tick's target. Either we re-boarded a group
         // after leaving the origin's footprint, or we reached the target room (covers a gap
         // small enough we never left a box). Re-boarding is the primary signal and needs no
         // target precision.
-        if (!TrainConfinement.isConfined(mob)) {
+        if (!confined) {
             leftOrigin = true;
         } else if (leftOrigin
                 || (target != null && mob.distanceToSqr(target.x, target.y, target.z) < REACH_DISTANCE_SQR)) {
@@ -236,24 +239,21 @@ public final class CrossGroupGapGoal extends Goal {
             return;
         }
 
-        // Re-aim. While the mob is still close enough for its carriage to resolve, track the
-        // live group. Once it's out over the gap, carriageAt can't resolve it and
-        // nextGroupTarget returns null — so advance the last target by the train carry, which
-        // is exactly how fast the (rigidly attached) next group is moving, keeping the aim
-        // locked on it instead of on a world-fixed stale point.
-        Vec3 next = TrainConfinement.nextGroupTarget(mob, mob.getTrainExploreDir());
-        if (next != null) {
-            target = next;
-        } else if (target != null) {
-            target = target.add(launchCarry);
-        }
+        // Track the moving far group by advancing the frozen launch target by the train carry —
+        // never re-resolve nextGroupTarget mid-air: once the mob drifts it can latch onto a farther
+        // group and the aim jumps (seen in diagnostics: horiz leapt 8 -> 40).
         if (target == null) {
             stop();
             return;
         }
+        target = target.add(launchCarry);
         mob.getLookControl().setLookAt(target.x, target.y, target.z);
 
-        applyHopVelocity(Mth.clamp((launchFloorY - mob.getY()) * LIFT_GAIN, LIFT_MIN, LIFT_MAX));
+        // Sustain the sprint toward the target on top of the carry, but leave the vertical to
+        // gravity — a natural jump arc that rises, peaks, and falls onto the far group.
+        Vec3 fwd = launchVelocity(mob.position(), target, SPRINT_SPEED, 0.0);
+        Vec3 v = mob.getDeltaMovement();
+        mob.setDeltaMovement(launchCarry.x + fwd.x, v.y, launchCarry.z + fwd.z);
     }
 
     private void launch() {
@@ -264,22 +264,10 @@ public final class CrossGroupGapGoal extends Goal {
         launchCarry = measuredCarry; // freeze the train's carry velocity for the airborne phase
         mob.setCrossingGap(true);
         mob.getNavigation().stop();
-        applyHopVelocity(LAUNCH_UP);
-    }
-
-    /**
-     * Set the mob's velocity to {@code trainCarry + gentleDriftTowardTarget}, with the given
-     * vertical component added to the carry's vertical. Keeps the hop moving with the train
-     * rather than adding a large world-space velocity on top of it.
-     */
-    private void applyHopVelocity(double verticalComponent) {
-        Vec3 drift = (target == null)
-            ? Vec3.ZERO
-            : launchVelocity(mob.position(), target, DRIFT_SPEED, 0.0); // horizontal drift only
-        mob.setDeltaMovement(
-            launchCarry.x + drift.x,
-            launchCarry.y + verticalComponent,
-            launchCarry.z + drift.z);
+        // Sprint-jump takeoff: a sprint toward the target plus the train carry, with a vanilla jump
+        // up. From here gravity does the arc (see tickFlight) — a normal player sprint jump.
+        Vec3 fwd = launchVelocity(mob.position(), target, SPRINT_SPEED, 0.0);
+        mob.setDeltaMovement(launchCarry.x + fwd.x, LAUNCH_UP, launchCarry.z + fwd.z);
     }
 
     private void issueMove() {
@@ -292,7 +280,7 @@ public final class CrossGroupGapGoal extends Goal {
      * Velocity that carries an entity at {@code from} toward {@code to} at
      * {@code horizontalSpeed} blocks/tick in the XZ plane, with vertical component
      * {@code vy}. Degenerate (target directly above/below) yields a purely vertical
-     * vector. Pure function of its inputs — the hop's drift aim is unit-tested through it.
+     * vector. Pure function of its inputs — the hop's sprint aim is unit-tested through it.
      */
     static Vec3 launchVelocity(Vec3 from, Vec3 to, double horizontalSpeed, double vy) {
         double dx = to.x - from.x;
