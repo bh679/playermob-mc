@@ -199,6 +199,13 @@ jobs:
           loaders: neoforge
           game-versions: 1.21.1
           java: 21
+          # Dungeon Train is an optional NeoForge-only integration: PlayerMob detects it at
+          # runtime (ModList.isLoaded("dungeontrain")) and confines mobs to the train. The
+          # PUBLISH SLUG is "dungeon-train" on both platforms (curseforge id 1527512); the
+          # runtime mod id "dungeontrain" is unrelated to the slug. Declared only on the
+          # NeoForge file since DT cannot load on Fabric/Forge.
+          dependencies: |
+            dungeon-train(optional){curseforge:dungeon-train}{modrinth:dungeon-train}
           retry-attempts: 2
           retry-delay: 10000
           fail-mode: warn
