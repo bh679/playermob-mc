@@ -54,6 +54,17 @@ public final class PlayerMobDoorGoal extends DoorInteractGoal {
         this.playerMob = mob;
     }
 
+    /**
+     * Suppressed while the mob is holding doors closed after a stuck-recovery close, so this goal
+     * can't immediately reopen the very door the recovery just shut to clear a blocked perpendicular
+     * path (an open door's panel swings across the perpendicular edge of its cell). See
+     * {@link PlayerMobEntity#isHoldingDoorsClosed()}.
+     */
+    @Override
+    public boolean canUse() {
+        return !this.playerMob.isHoldingDoorsClosed() && super.canUse();
+    }
+
     @Override
     public void start() {
         this.forgetTime = CLOSE_DELAY_TICKS;
