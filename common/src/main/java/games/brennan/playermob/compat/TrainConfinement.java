@@ -85,6 +85,15 @@ public final class TrainConfinement {
     }
 
     /**
+     * Open a closed door {@code self} is standing against on a train (wooden
+     * directly, iron/copper via its control). No-op off a train / without a train
+     * mod — see {@link TrainEnvironment#openBlockingDoor}.
+     */
+    public static void openBlockingDoor(Entity self) {
+        environment.openBlockingDoor(self);
+    }
+
+    /**
      * The fixed march direction for a mob that boarded at {@code carriageIndex}:
      * march toward carriage 0 and continue past it. Negative side marches up
      * ({@code +1}); the centre and positive side march down ({@code -1}). Chosen

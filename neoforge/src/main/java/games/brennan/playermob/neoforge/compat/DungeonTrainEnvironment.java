@@ -1,55 +1,68 @@
 package games.brennan.playermob.neoforge.compat;
 
-import games.brennan.dungeontrain.ship.ManagedShip;
-import games.brennan.dungeontrain.ship.Shipyards;
-import games.brennan.dungeontrain.train.TrainTransformProvider;
+import games.brennan.dungeontrain.train.Trains;
 import games.brennan.playermob.compat.TrainEnvironment;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.DoorBlock;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3d;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.joml.primitives.AABBdc;
 
 import java.util.UUID;
 
 /**
- * Dungeon Train-backed {@link TrainEnvironment}. This is the <em>only</em> class
- * in PlayerMob that references Dungeon Train ({@code dungeontrain}) symbols, and
- * it is instantiated solely from inside the {@code ModList.isLoaded("dungeontrain")}
- * guard in {@code PlayerMobNeoForge} — so the JVM never classloads it (or the DT
- * types it imports) when Dungeon Train is absent. Compiled against DT's public
- * API via {@code modCompileOnly}; never bundled or hard-required at runtime.
+ * Dungeon Train-backed {@link TrainEnvironment}. The only class in PlayerMob that
+ * references Dungeon Train ({@code dungeontrain}) symbols; instantiated solely from
+ * inside the {@code ModList.isLoaded("dungeontrain")} guard in
+ * {@code PlayerMobNeoForge}, so the JVM never classloads it (or the DT/JOML types it
+ * imports) when Dungeon Train is absent.
  *
- * <p>A Dungeon Train carriage is a moving Sable sub-level driven by a {@link
- * TrainTransformProvider}, which carries the train-wide {@code trainId}. We
- * resolve "which train owns this block" through DT's public façade:
- * {@code Shipyards.of(level).findAt(pos)} → {@link ManagedShip} →
- * {@link ManagedShip#getKinematicDriver()}; a driver that is a {@link
- * TrainTransformProvider} yields the train's {@link UUID} via
- * {@link TrainTransformProvider#getTrainId()}. Any null/absent link in that chain
- * means "not on a train".</p>
+ * <p><b>Matching a mob to its carriage.</b> A carriage group is a moving Sable
+ * sub-level, but a mob riding it stays in the <em>parent</em> {@link ServerLevel}
+ * (Sable's "entities stick to sub-levels" model), so its {@code level()} is the
+ * overworld and {@code getX/Y/Z} are world-space. {@code Shipyards.findAt} keys off
+ * sub-level-local block storage and does not see a riding mob's world position, so we
+ * instead test that position against each group's current world bounding box
+ * ({@link games.brennan.dungeontrain.ship.ManagedShip#worldAABB()}) over
+ * {@link Trains#allCarriages(ServerLevel)}. (This also fixes behaviour #1's
+ * confinement, which used the non-working {@code findAt} path.)</p>
  *
- * <p>{@code Shipyards.of} requires a {@link ServerLevel}, so every query first
- * checks the entity is on the server and returns {@code false} otherwise — these
- * predicates are only ever consulted from server-side AI in any case.</p>
+ * <p><b>Room index.</b> One {@link games.brennan.dungeontrain.train.TrainTransformProvider}
+ * exists per group and reports the group's pIdx range
+ * ({@code getPIdx()}..{@code getGroupHighestPIdx()}). The train runs along world-X
+ * with rooms laid head-to-tail, so a mob's signed carriage index is read by mapping
+ * its world-X across that AABB onto the pIdx range. (Assumes the group is axis-aligned
+ * along X, which Dungeon Train guarantees for a rigid group.)</p>
+ *
+ * <p><b>Doors.</b> A carriage's blocks live in the sub-level's coordinate space (the
+ * same far-offset space the navigation paths in), not at the mob's apparent world
+ * position — so door-opening converts the mob's position via
+ * {@link games.brennan.dungeontrain.ship.ManagedShip#worldToShip}. Wooden and copper
+ * doors are hand-openable and opened directly; iron doors are redstone-only and left
+ * for a follow-up (button/lever/pressure-plate operation).</p>
+ *
+ * <p>All queries are server-authoritative: every method first checks the entity is on
+ * a {@link ServerLevel} and returns the "not on a train" answer otherwise.</p>
  */
 public final class DungeonTrainEnvironment implements TrainEnvironment {
 
     /**
-     * Temporary geometry probe — launch with {@code -Dplayermob.trainDebug=true}
-     * to log the world↔model mapping (mob world pos, {@code worldToShip} result,
-     * shipyard origin, carriage length, derived room index, group pIdx range) so
-     * the coordinate convention can be confirmed in-game. Throttled; left dormant
-     * (flag off by default) and removed once the mapping is verified.
+     * Inflate a carriage's world AABB by this many blocks when testing whether a mob
+     * is "on" it — a mob on the floor or brushing a wall should still resolve. Small
+     * enough not to claim a mob standing in the gap between groups.
      */
-    private static final boolean DEBUG = Boolean.getBoolean("playermob.trainDebug");
-    private static final Logger LOGGER = LoggerFactory.getLogger("playermob/dungeontrain");
+    private static final double RIDE_MARGIN = 1.0;
+
+    /** How far around the mob to look for a door it's standing against. */
+    private static final int DOOR_REACH = 2;
 
     @Override
     public boolean isOnTrain(Entity self) {
-        return trainIdAt(self, self.blockPosition()) != null;
+        return carriageAt(self) != null;
     }
 
     @Override
@@ -57,130 +70,152 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         if (self.level() != candidate.level()) {
             return false;
         }
-        UUID mine = trainIdAt(self, self.blockPosition());
-        if (mine == null) {
-            return false;
-        }
-        return mine.equals(trainIdAt(candidate, candidate.blockPosition()));
+        UUID mine = trainIdAt(self);
+        return mine != null && mine.equals(trainIdAt(candidate));
     }
 
     @Override
     public boolean sameTrain(Entity self, BlockPos candidatePos) {
-        UUID mine = trainIdAt(self, self.blockPosition());
+        if (!(self.level() instanceof ServerLevel level)) {
+            return false;
+        }
+        UUID mine = trainIdAt(self);
         if (mine == null) {
             return false;
         }
-        return mine.equals(trainIdAt(self, candidatePos));
-    }
-
-    /**
-     * The {@code trainId} of the carriage occupying {@code pos} in the (server)
-     * level of {@code ctx}, or {@code null} if {@code pos} is not on any train
-     * (or {@code ctx} is client-side).
-     */
-    private static UUID trainIdAt(Entity ctx, BlockPos pos) {
-        if (!(ctx.level() instanceof ServerLevel level)) {
-            return null;
-        }
-        ManagedShip ship = Shipyards.of(level).findAt(pos);
-        if (ship == null) {
-            return null;
-        }
-        if (ship.getKinematicDriver() instanceof TrainTransformProvider provider) {
-            return provider.getTrainId();
-        }
-        return null;
+        Trains.Carriage at = carriageAtPos(level,
+            candidatePos.getX() + 0.5, candidatePos.getY() + 0.5, candidatePos.getZ() + 0.5);
+        return at != null && mine.equals(at.provider().getTrainId());
     }
 
     // ---- Carriage exploration (behaviour #3) -----------------------------
 
     @Override
     public int carriageIndex(Entity self) {
-        Carriage c = carriageAt(self);
-        if (c == null) {
-            return NO_CARRIAGE;
-        }
-        Vector3d local = toShip(c, self);
-        int room = roomIndex(c.provider, local.x);
-        if (DEBUG && (self.tickCount & 31) == 0) {
-            logProbe(self, c, local, room);
-        }
-        // Fail-safe: the mob is standing inside its own group, so its derived
-        // room index MUST fall within [getPIdx(), getGroupHighestPIdx()]. If it
-        // doesn't, the world↔model mapping is wrong for this build of DT/Sable —
-        // report "no carriage" so the explore behaviour cleanly no-ops instead of
-        // sending the mob the wrong way or into a wall.
-        return c.provider.containsPIdx(room) ? room : NO_CARRIAGE;
+        Trains.Carriage c = carriageAt(self);
+        return c == null ? NO_CARRIAGE : roomPidx(c, self.getX());
     }
 
     @Override
     public Vec3 nextCarriageTarget(Entity self, int dir) {
-        Carriage c = carriageAt(self);
+        Trains.Carriage c = carriageAt(self);
         if (c == null) {
             return null;
         }
-        Vector3d local = toShip(c, self);
-        int room = roomIndex(c.provider, local.x);
-        if (!c.provider.containsPIdx(room)) {
-            return null; // geometry not trustworthy (see carriageIndex) — no-op
+        AABBdc bb = c.ship().worldAABB();
+        if (bb == null) {
+            return null;
         }
-        int target = room + dir;
-        if (!c.provider.containsPIdx(target)) {
+        int low = c.provider().getPIdx();
+        int high = c.provider().getGroupHighestPIdx();
+        int target = roomPidx(c, self.getX()) + dir;
+        if (target < low || target > high) {
             return null; // next room is in another group — physical gap, behaviour #2
         }
-        // Ship-fixed centre of the target room in model space, transformed to the
-        // carriage's *current* world position. The point is fixed to the moving
-        // ship, so a mob pathing to it closes distance as it walks; callers
-        // re-query each tick to follow the carriage.
-        int length = c.provider.dims().length();
-        double localX = c.provider.getShipyardOrigin().getX() + (double) target * length + length / 2.0;
-        // shipToWorld owns (mutates and returns) its argument — hand it a fresh
-        // vector and never one we still need to read.
-        Vector3d world = c.ship.shipToWorld(new Vector3d(localX, local.y, local.z));
-        return new Vec3(world.x, world.y, world.z);
+        double roomLen = (bb.maxX() - bb.minX()) / (high - low + 1);
+        // Centre of the target room in the carriage's *current* world position;
+        // recomputed each tick by the caller, so it tracks the moving carriage.
+        double targetX = bb.minX() + (target - low + 0.5) * roomLen;
+        double centerZ = (bb.minZ() + bb.maxZ()) / 2.0;
+        return new Vec3(targetX, self.getY(), centerZ);
     }
 
-    /** The signed room index for a model-space X within {@code provider}'s group. */
-    private static int roomIndex(TrainTransformProvider provider, double localX) {
-        int length = provider.dims().length();
-        return (int) Math.floor((localX - provider.getShipyardOrigin().getX()) / length);
+    @Override
+    public void openBlockingDoor(Entity self) {
+        if (!(self.level() instanceof ServerLevel level)) {
+            return;
+        }
+        Trains.Carriage c = carriageAt(self);
+        if (c == null) {
+            return; // not on a train — leave doors to PlayerMobDoorGoal
+        }
+        // The carriage's blocks live in the sub-level coordinate space (where the
+        // navigation paths), not at the mob's apparent world position — convert there
+        // and look for a door the mob is up against. Fall back to the world position in
+        // case a build projects carriage blocks at the apparent location.
+        Vector3d sub = c.ship().worldToShip(new Vector3d(self.getX(), self.getY(), self.getZ()));
+        if (tryOpenDoorNear(self, level, BlockPos.containing(sub.x, sub.y, sub.z))) {
+            return;
+        }
+        tryOpenDoorNear(self, level, self.blockPosition());
     }
 
-    /** {@code self}'s position in {@code c}'s model space. The returned vector is owned by the caller. */
-    private static Vector3d toShip(Carriage c, Entity self) {
-        // worldToShip owns (mutates and returns) its argument — pass it fresh.
-        return c.ship.worldToShip(new Vector3d(self.getX(), self.getY(), self.getZ()));
+    /**
+     * Open one closed, hand-openable door (wooden or copper) within {@link #DOOR_REACH}
+     * of {@code base}; returns true if one was opened. Iron doors are redstone-only and
+     * skipped here — operating their button/lever is a separate follow-up.
+     */
+    private static boolean tryOpenDoorNear(Entity self, ServerLevel level, BlockPos base) {
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        for (int dy = 0; dy <= 1; dy++) {
+            for (int dx = -DOOR_REACH; dx <= DOOR_REACH; dx++) {
+                for (int dz = -DOOR_REACH; dz <= DOOR_REACH; dz++) {
+                    cursor.set(base.getX() + dx, base.getY() + dy, base.getZ() + dz);
+                    BlockState state = level.getBlockState(cursor);
+                    if (!(state.getBlock() instanceof DoorBlock door)
+                            || door.isOpen(state)
+                            || state.is(Blocks.IRON_DOOR)) {
+                        continue;
+                    }
+                    door.setOpen(self, level, state, cursor.immutable(), true);
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
-    /** Resolve the carriage group {@code self} stands in, or {@code null} if it's not on a train. */
-    private static Carriage carriageAt(Entity self) {
+    // ---- Resolution ------------------------------------------------------
+
+    /** The train id of the carriage {@code self} is riding, or {@code null}. */
+    private static UUID trainIdAt(Entity self) {
+        Trains.Carriage c = carriageAt(self);
+        return c == null ? null : c.provider().getTrainId();
+    }
+
+    /** The carriage group {@code self} is currently riding, or {@code null} if not on a train. */
+    private static Trains.Carriage carriageAt(Entity self) {
         if (!(self.level() instanceof ServerLevel level)) {
             return null;
         }
-        ManagedShip ship = Shipyards.of(level).findAt(self.blockPosition());
-        if (ship == null) {
-            return null;
-        }
-        if (ship.getKinematicDriver() instanceof TrainTransformProvider provider) {
-            return new Carriage(ship, provider);
+        return carriageAtPos(level, self.getX(), self.getY(), self.getZ());
+    }
+
+    /** The carriage whose current world box contains {@code (x,y,z)} (inflated by {@link #RIDE_MARGIN}). */
+    private static Trains.Carriage carriageAtPos(ServerLevel level, double x, double y, double z) {
+        for (Trains.Carriage c : Trains.allCarriages(level)) {
+            AABBdc bb = c.ship().worldAABB();
+            if (bb != null && contains(bb, x, y, z)) {
+                return c;
+            }
         }
         return null;
     }
 
-    private static void logProbe(Entity self, Carriage c, Vector3d local, int room) {
-        LOGGER.info(
-            "probe world=({},{},{}) local=({},{},{}) origin={} len={} room={} pIdx={} high={} size={} contains={}",
-            f(self.getX()), f(self.getY()), f(self.getZ()),
-            f(local.x), f(local.y), f(local.z),
-            c.provider.getShipyardOrigin(), c.provider.dims().length(),
-            room, c.provider.getPIdx(), c.provider.getGroupHighestPIdx(),
-            c.provider.getGroupSize(), c.provider.containsPIdx(room));
+    private static boolean contains(AABBdc bb, double x, double y, double z) {
+        return x >= bb.minX() - RIDE_MARGIN && x <= bb.maxX() + RIDE_MARGIN
+            && y >= bb.minY() - RIDE_MARGIN && y <= bb.maxY() + RIDE_MARGIN
+            && z >= bb.minZ() - RIDE_MARGIN && z <= bb.maxZ() + RIDE_MARGIN;
     }
 
-    private static String f(double d) {
-        return String.format("%.2f", d);
+    /**
+     * The mob's signed carriage index: map its world-X across the group's world AABB
+     * onto the group's pIdx range, clamped into {@code [low, high]} (the mob is inside
+     * this group's box, so its index must lie within the range).
+     */
+    private static int roomPidx(Trains.Carriage c, double worldX) {
+        int low = c.provider().getPIdx();
+        int high = c.provider().getGroupHighestPIdx();
+        AABBdc bb = c.ship().worldAABB();
+        int rooms = high - low + 1;
+        if (bb == null || rooms <= 0) {
+            return low;
+        }
+        double roomLen = (bb.maxX() - bb.minX()) / rooms;
+        if (roomLen <= 0) {
+            return low;
+        }
+        int p = low + (int) Math.round((worldX - bb.minX()) / roomLen - 0.5);
+        return Math.max(low, Math.min(high, p));
     }
-
-    /** A resolved carriage group: the Sable ship plus its train transform driver. */
-    private record Carriage(ManagedShip ship, TrainTransformProvider provider) {}
 }

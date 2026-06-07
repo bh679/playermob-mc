@@ -77,6 +77,19 @@ public interface TrainEnvironment {
     Vec3 nextCarriageTarget(Entity self, int dir);
 
     /**
+     * If {@code self} is on a train and standing against a closed door, open it —
+     * wooden doors directly, power-operated (iron/copper) doors by operating their
+     * adjacent control. A no-op default (off-train environments do nothing); the
+     * Dungeon-Train impl resolves the carriage's block-coordinate space, which is a
+     * moving Sable sub-level whose blocks don't sit at the mob's world position.
+     *
+     * <p>Run as a per-tick reflex rather than a goal, because vanilla
+     * {@code DoorInteractGoal}'s path-node + collision mechanism doesn't fire on a
+     * moving sub-level — so doors on a carriage otherwise never open.</p>
+     */
+    default void openBlockingDoor(Entity self) {}
+
+    /**
      * No-op environment used whenever no train mod is active. Reports every
      * entity as not on a train, so confinement never engages.
      */

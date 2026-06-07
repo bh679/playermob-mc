@@ -380,6 +380,15 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
             setTarget(null);
         }
         latchTrainExploreDirection();
+
+        if (TrainConfinement.isConfined(this)) {
+            // Open any door we're up against. Vanilla's DoorInteractGoal opens doors by
+            // inspecting nav path nodes + collision, which doesn't fire on a moving Sable
+            // carriage — so the train seam reaches for the door block directly (in the
+            // carriage's own coordinate space), every tick, regardless of which goal owns
+            // movement.
+            TrainConfinement.openBlockingDoor(this);
+        }
     }
 
     /**
