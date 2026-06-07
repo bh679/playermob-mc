@@ -96,6 +96,11 @@ public class PlayerMobMenu extends AbstractContainerMenu {
             new SimpleContainer(EQUIPMENT_COUNT), new SimpleContainer(BACKPACK_COUNT));
     }
 
+    /** The mob being edited — client-resolved via {@link #fromEntityId}; null on the client fallback. */
+    public PlayerMobEntity getMob() {
+        return mob;
+    }
+
     // ---- Slot layout ------------------------------------------------------
 
     private void addEquipmentSlots() {

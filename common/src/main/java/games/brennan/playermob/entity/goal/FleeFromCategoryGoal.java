@@ -1,7 +1,7 @@
 package games.brennan.playermob.entity.goal;
 
-import games.brennan.playermob.entity.Personality;
 import games.brennan.playermob.entity.PlayerMobEntity;
+import games.brennan.playermob.entity.Reaction;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.ai.util.DefaultRandomPos;
@@ -10,9 +10,9 @@ import net.minecraft.world.phys.Vec3;
 import java.util.EnumSet;
 
 /**
- * The <b>Shy</b> behaviour, as a flee → hide loop toward any entity the mob is
- * {@link Personality#SHY} toward (players and/or hostile mobs — Shy is
- * disallowed for animals/villagers):
+ * The <b>flee</b> behaviour, as a flee → hide loop toward any entity the mob
+ * currently reacts to with {@link Reaction#FLEE} (a low fight/flight mob facing a
+ * threat in its personal space, or anything it has come to hate):
  *
  * <ol>
  *   <li><b>Flee</b> — sprint to a position away from the threat (vanilla's
@@ -70,7 +70,7 @@ public final class FleeFromCategoryGoal extends Goal {
             cooldownTicks--;
             return false;
         }
-        LivingEntity candidate = mob.nearestWithPersonality(Personality.SHY, detectRange);
+        LivingEntity candidate = mob.nearestWhereReaction(Reaction.FLEE, detectRange);
         if (candidate == null) return false;
         // Unless the threat is right on top of us, if there's a chest worth braving
         // yield so the raid goal can sneak-grab it (crouching). Once it's looted the
@@ -87,7 +87,7 @@ public final class FleeFromCategoryGoal extends Goal {
     @Override
     public boolean canContinueToUse() {
         if (threat == null || !threat.isAlive()) return false;
-        if (mob.personalityToward(threat) != Personality.SHY) return false;
+        if (mob.reactionToward(threat) != Reaction.FLEE) return false;
         if (mob.distanceTo(threat) > detectRange + 4.0) return false;
         return phase == Phase.FLEE || hideTicksLeft > 0;
     }

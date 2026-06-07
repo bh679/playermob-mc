@@ -1,7 +1,7 @@
 package games.brennan.playermob;
 
-import games.brennan.playermob.entity.Personality;
-import games.brennan.playermob.entity.PersonalityProfile;
+import games.brennan.playermob.entity.Archetype;
+import games.brennan.playermob.entity.DispositionTraits;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.menu.PlayerMobMenu;
 import games.brennan.playermob.menu.PlayerMobMenuOpener;
@@ -98,34 +98,24 @@ public final class PlayerMobRegistry {
     public static final int SPAWN_EGG_SECONDARY = 0x4F3A2A;
 
     /** Registry path for an archetype egg, e.g. {@code player_mob_shy_spawn_egg}. */
-    public static String personalitySpawnEggPath(Personality personality) {
-        return "player_mob_" + personality.name().toLowerCase(Locale.ROOT) + "_spawn_egg";
+    public static String archetypeSpawnEggPath(Archetype archetype) {
+        return "player_mob_" + archetype.name().toLowerCase(Locale.ROOT) + "_spawn_egg";
     }
 
-    public static ResourceLocation personalitySpawnEggId(Personality personality) {
-        return ResourceLocation.fromNamespaceAndPath(PlayerMob.MOD_ID, personalitySpawnEggPath(personality));
+    public static ResourceLocation archetypeSpawnEggId(Archetype archetype) {
+        return ResourceLocation.fromNamespaceAndPath(PlayerMob.MOD_ID, archetypeSpawnEggPath(archetype));
     }
 
     /**
      * The {@code entity_data} an archetype egg stamps onto the mob it spawns —
-     * just the player-facing personality. {@code finalizeSpawn} then randomises
-     * the other categories (see {@link PersonalityProfile#rollUnsetRandom}).
+     * the preset's two trait values. Both load as explicit, so
+     * {@code finalizeSpawn}'s roll leaves them untouched (see {@link DispositionTraits}).
      */
-    public static CompoundTag personalityEggData(Personality personality) {
+    public static CompoundTag archetypeEggData(Archetype archetype) {
         CompoundTag tag = new CompoundTag();
-        tag.putInt(PersonalityProfile.TAG_PLAYERS, personality.ordinal());
+        tag.putInt(DispositionTraits.TAG_FIGHT_FLIGHT, archetype.fightFlight);
+        tag.putInt(DispositionTraits.TAG_FRIENDLINESS, archetype.friendliness);
         return tag;
-    }
-
-    /** Distinct spot colour per personality so the eggs read apart in the creative menu. */
-    public static int personalityEggColor(Personality personality) {
-        return switch (personality) {
-            case AGGRESSIVE -> 0xB02E26; // red
-            case FRIENDLY   -> 0x5E7C16; // green
-            case PASSIVE    -> 0x8E8E8E; // grey
-            case SKEPTICAL  -> 0xE0A030; // amber
-            case SHY        -> 0x3AB3DA; // light blue
-        };
     }
 
     /** The fully-random spawn egg (the original default egg). */
@@ -134,15 +124,15 @@ public final class PlayerMobRegistry {
     }
 
     /**
-     * An archetype egg that pins the player-facing personality via the
-     * {@code entity_data} component; the entity's {@code finalizeSpawn} fills the
-     * remaining categories at random.
+     * An archetype egg that pins its two trait values via the {@code entity_data}
+     * component; the entity's {@code finalizeSpawn} keeps the pinned traits and
+     * rolls nothing further.
      */
-    public static SpawnEggItem createPersonalitySpawnEgg(EntityType<? extends Mob> type, Personality personality) {
+    public static SpawnEggItem createArchetypeSpawnEgg(EntityType<? extends Mob> type, Archetype archetype) {
         return new SpawnEggItem(
             type,
             SPAWN_EGG_PRIMARY,
-            personalityEggColor(personality),
-            new Item.Properties().component(DataComponents.ENTITY_DATA, CustomData.of(personalityEggData(personality))));
+            archetype.eggColor,
+            new Item.Properties().component(DataComponents.ENTITY_DATA, CustomData.of(archetypeEggData(archetype))));
     }
 }

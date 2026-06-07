@@ -3,7 +3,7 @@ package games.brennan.playermob.neoforge;
 import games.brennan.playermob.PlayerMob;
 import games.brennan.playermob.PlayerMobRegistry;
 import games.brennan.playermob.compat.TrainConfinement;
-import games.brennan.playermob.entity.Personality;
+import games.brennan.playermob.entity.Archetype;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.menu.PlayerMobMenu;
 import games.brennan.playermob.skin.PlayerMobSkinReloadListener;
@@ -32,7 +32,7 @@ import net.neoforged.neoforge.registries.DeferredRegister;
 
 /**
  * NeoForge loader entrypoint. Registers the entity type, the random spawn egg,
- * the five player-facing personality archetype eggs (in a static block),
+ * the five player-facing archetype eggs (in a static block),
  * attributes, and creative-tab placement via DeferredRegister + the matching
  * event-bus listeners, then hands off to {@link PlayerMob#init()} once
  * registration completes (FMLCommonSetupEvent).
@@ -59,12 +59,12 @@ public final class PlayerMobNeoForge {
         ITEMS.register(PlayerMobRegistry.PLAYER_MOB_SPAWN_EGG_PATH, () ->
             PlayerMobRegistry.createRandomSpawnEgg(PLAYER_MOB.get()));
 
-    // Player-facing archetype eggs — one per personality. Registered for their
+    // Player-facing archetype eggs — one per preset. Registered for their
     // side effect; resolved from BuiltInRegistries at tab-build time.
     static {
-        for (Personality personality : Personality.values()) {
-            ITEMS.register(PlayerMobRegistry.personalitySpawnEggPath(personality), () ->
-                PlayerMobRegistry.createPersonalitySpawnEgg(PLAYER_MOB.get(), personality));
+        for (Archetype archetype : Archetype.values()) {
+            ITEMS.register(PlayerMobRegistry.archetypeSpawnEggPath(archetype), () ->
+                PlayerMobRegistry.createArchetypeSpawnEgg(PLAYER_MOB.get(), archetype));
         }
     }
 
@@ -105,9 +105,9 @@ public final class PlayerMobNeoForge {
     private static void onBuildCreativeTab(BuildCreativeModeTabContentsEvent event) {
         if (event.getTabKey() == CreativeModeTabs.SPAWN_EGGS) {
             event.accept(PLAYER_MOB_SPAWN_EGG.get());
-            for (Personality personality : Personality.values()) {
+            for (Archetype archetype : Archetype.values()) {
                 event.accept(BuiltInRegistries.ITEM.get(
-                    PlayerMobRegistry.personalitySpawnEggId(personality)));
+                    PlayerMobRegistry.archetypeSpawnEggId(archetype)));
             }
         }
     }

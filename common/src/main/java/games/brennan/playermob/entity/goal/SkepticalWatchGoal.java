@@ -1,16 +1,16 @@
 package games.brennan.playermob.entity.goal;
 
-import games.brennan.playermob.entity.Personality;
 import games.brennan.playermob.entity.PlayerMobEntity;
+import games.brennan.playermob.entity.Reaction;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
 
 import java.util.EnumSet;
 
 /**
- * The <b>Skeptical</b> behaviour: when an entity the mob is
- * {@link Personality#SKEPTICAL} toward (players and/or hostile mobs) wanders
- * into view, stop whatever it was doing, face it, and hold a wary stare for
+ * The <b>Skeptical</b> behaviour: when an entity the mob currently reacts to with
+ * {@link Reaction#WATCH} (wary of someone who has entered its personal space)
+ * wanders into view, stop whatever it was doing, face it, and hold a wary stare for
  * 1–5 seconds before resuming tasks. If that entity comes within
  * {@code closeRange}, ready defences — raise a held shield and/or pull a weapon
  * from the backpack into an empty main hand — and keep watching until it backs
@@ -51,7 +51,7 @@ public final class SkepticalWatchGoal extends Goal {
             return false;
         }
         if (mob.getTarget() != null) return false; // fighting takes over
-        LivingEntity candidate = mob.nearestWithPersonality(Personality.SKEPTICAL, watchRange);
+        LivingEntity candidate = mob.nearestWhereReaction(Reaction.WATCH, watchRange);
         if (candidate == null) return false;
         this.watched = candidate;
         return true;
@@ -62,7 +62,7 @@ public final class SkepticalWatchGoal extends Goal {
         return watched != null
             && watched.isAlive()
             && mob.getTarget() == null
-            && mob.personalityToward(watched) == Personality.SKEPTICAL
+            && mob.reactionToward(watched) == Reaction.WATCH
             && mob.distanceTo(watched) <= watchRange + 4.0
             && (stareTicksLeft > 0 || mob.distanceTo(watched) <= closeRange);
     }

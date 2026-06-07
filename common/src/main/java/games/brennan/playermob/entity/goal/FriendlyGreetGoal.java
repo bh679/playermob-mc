@@ -1,7 +1,8 @@
 package games.brennan.playermob.entity.goal;
 
-import games.brennan.playermob.entity.Personality;
+import games.brennan.playermob.entity.DispositionResolver;
 import games.brennan.playermob.entity.PlayerMobEntity;
+import games.brennan.playermob.entity.Reaction;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
 
@@ -9,14 +10,14 @@ import java.util.EnumSet;
 
 /**
  * The <b>Friendly</b> behaviour, as a one-shot greeting sequence performed when
- * the mob first notices an entity it is {@link Personality#FRIENDLY} toward
- * (players, animals, villagers):
+ * the mob first notices an entity it currently reacts to with
+ * {@link Reaction#GREET} (a friendly-natured mob toward someone it doesn't dislike):
  *
  * <ol>
  *   <li><b>Follow</b> — walk up to the friend.</li>
  *   <li><b>Crouch</b> — bob into a crouch a random 3–10 times as a greeting.</li>
- *   <li><b>Gift</b> — drop one item from the backpack toward the friend
- *       (no-op if the backpack is empty).</li>
+ *   <li><b>Gift</b> — only once it has come to love them (feeling ≥ 7), drop one
+ *       item from the backpack toward the friend (a default token if empty).</li>
  * </ol>
  *
  * <p>When a cycle finishes the mob picks one of two things, matching the
@@ -67,7 +68,7 @@ public final class FriendlyGreetGoal extends Goal {
             return false;
         }
         if (mob.getTarget() != null) return false;
-        LivingEntity candidate = mob.nearestWithPersonality(Personality.FRIENDLY, range);
+        LivingEntity candidate = mob.nearestWhereReaction(Reaction.GREET, range);
         if (candidate == null) return false;
         this.friend = candidate;
         return true;
@@ -79,7 +80,7 @@ public final class FriendlyGreetGoal extends Goal {
             && friend != null
             && friend.isAlive()
             && mob.getTarget() == null
-            && mob.personalityToward(friend) == Personality.FRIENDLY
+            && mob.reactionToward(friend) == Reaction.GREET
             && mob.distanceTo(friend) <= range + 6.0;
     }
 
@@ -136,7 +137,11 @@ public final class FriendlyGreetGoal extends Goal {
 
     private void tickGift() {
         mob.setCrouching(false);
-        mob.giveItemTo(friend); // tosses a backpack item, or a default token gift if empty
+        // A friendly mob greets everyone it likes, but only parts with a gift for
+        // someone it has truly come to love (feeling >= 7).
+        if (mob.feelingToward(friend) >= DispositionResolver.FEELING_LOVE) {
+            mob.giveItemTo(friend); // tosses a backpack item, or a default token gift if empty
+        }
         phase = Phase.DONE;     // cycle complete — stop() decides greet-again vs disengage
     }
 

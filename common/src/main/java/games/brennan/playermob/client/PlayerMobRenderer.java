@@ -114,19 +114,25 @@ public final class PlayerMobRenderer
 
     @Override
     public ResourceLocation getTextureLocation(PlayerMobEntity entity) {
+        return resolveSkin(entity);
+    }
+
+    /**
+     * Resolve a PlayerMob's skin to a renderable texture — shared by
+     * {@link #getTextureLocation} and the menu UI (so a relationship row can draw
+     * a target PlayerMob's face). v2 prefers the Mojang URL skin (via
+     * {@link PlayerMobSkinTextures}, which returns {@code DefaultPlayerSkin} while
+     * the async fetch is in flight, then flips to the real texture once cached);
+     * otherwise the bundled vanilla default keyed off SkinIndex (v1 behaviour),
+     * clamped defensively to skin 0.
+     */
+    public static ResourceLocation resolveSkin(PlayerMobEntity entity) {
         String url = entity.getSkinTextureUrl();
         if (!url.isEmpty()) {
-            // v2: Mojang URL skin via SkinManager. Returns DefaultPlayerSkin
-            // while async fetch is in flight, then flips to the real texture
-            // once cached — that's the graceful offline / CDN-outage fallback.
             return PlayerMobSkinTextures.lookup(url, entity.isSkinSlim());
         }
-        // No URL ⇒ legacy 0.2.0 mob, or registry-empty new mob. Render the
-        // bundled vanilla default keyed off SkinIndex (v1 behaviour).
         int idx = entity.getSkinIndex();
         if (idx < 0 || idx >= SKIN_TEXTURES.length) {
-            // Defensive: should never happen — clamp on the entity already
-            // guards. Falls back to skin 0 (alex) if it does.
             return SKIN_TEXTURES[0];
         }
         return SKIN_TEXTURES[idx];

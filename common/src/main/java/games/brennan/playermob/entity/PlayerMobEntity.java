@@ -102,14 +102,16 @@ import java.util.UUID;
  * {@link CrossbowAttackMob} (which extends {@link RangedAttackMob}) for
  * vanilla ranged-goal compatibility.</p>
  *
- * <p><b>Personalities</b> ({@link PersonalityProfile}) drive how the mob
- * treats each {@link TargetCategory} of entity (players, hostile mobs, animals,
- * villagers) — Aggressive, Friendly, Passive, Skeptical, or Shy. The
- * target-selector attacks anything the mob is {@link Personality#AGGRESSIVE}
- * toward; {@link FleeFromCategoryGoal}, {@link SkepticalWatchGoal}, and
- * {@link FriendlyGreetGoal} cover the rest and self-gate on the live
- * personality (a runtime flip via {@link #hurt} re-wires nothing). Server-side
- * only; the crouch gesture rides the vanilla-synced pose ({@link #setCrouching}).</p>
+ * <p><b>Disposition</b> is numeric: two locked traits ({@link DispositionTraits} —
+ * fight/flight and friendliness) plus an evolving per-individual
+ * {@link FeelingLedger} feeling toward each player and PlayerMob.
+ * {@link DispositionResolver} collapses these into a {@link Reaction} per target
+ * each tick; the target-selector attacks anything it resolves {@link Reaction#FIGHT},
+ * and {@link FleeFromCategoryGoal}, {@link SkepticalWatchGoal}, and
+ * {@link FriendlyGreetGoal} cover FLEE/WATCH/GREET. Low-friendliness mobs react
+ * only inside a feeling-scaled personal-space bubble. Being attacked cools the
+ * feeling toward the attacker (see {@link #hurt}). Server-side only; the crouch
+ * gesture rides the vanilla-synced pose ({@link #setCrouching}).</p>
  *
  * <p><b>Skins</b> — Each mob rolls its look in {@link #finalizeSpawn}. It
  * always rolls a bundled-vanilla index in {@code [0, SKIN_COUNT)}, then with
@@ -163,6 +165,18 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private static final EntityDataAccessor<Boolean> DATA_SKIN_SLIM =
         SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.BOOLEAN);
 
+    // Disposition mirror — server-only traits/feelings pushed to the client for the
+    // menu UI (see pushDispositionToClient). Not persisted (the NBT path handles that).
+    private static final EntityDataAccessor<Integer> DATA_FIGHT_FLIGHT =
+        SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.INT);
+
+    private static final EntityDataAccessor<Integer> DATA_FRIENDLINESS =
+        SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.INT);
+
+    /** Encoded feeling ledger ({@code "uuid=feeling;…"}) for the client menu UI. */
+    private static final EntityDataAccessor<String> DATA_FEELINGS =
+        SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.STRING);
+
     // ---- Constants --------------------------------------------------------
 
     /**
@@ -200,6 +214,12 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private static final long RECENTLY_EXPLORED_TTL_TICKS = 1200L;
 
     /**
+     * Feeling lost per point of damage taken from a player/PlayerMob. A ~4-damage
+     * blow cools feeling by 2 (neutral 5 → "hate" 3); chip damage cools slowly.
+     */
+    private static final float DMG_TO_FEELING = 0.5F;
+
+    /**
      * Chest {@code triggerEvent} ID for "viewer count changed" — drives the
      * lid animation. See {@link ChestBlockEntity#triggerEvent}.
      */
@@ -219,11 +239,16 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     // ---- Fields -----------------------------------------------------------
 
     /**
-     * Per-category personalities (who the mob attacks / greets / flees /
-     * watches). Server-side only. Rolled at spawn, set by spawn eggs /
-     * {@code /summon}, persisted to NBT, and flipped by {@link #hurt}.
+     * The two locked personal traits (fight/flight, friendliness). Server-side
+     * only. Rolled at spawn, set by spawn eggs / {@code /summon}, persisted to NBT.
      */
-    private final PersonalityProfile personalities = new PersonalityProfile();
+    private final DispositionTraits traits = new DispositionTraits();
+
+    /**
+     * Evolving per-individual feelings toward players and other PlayerMobs.
+     * Server-side only; persisted to NBT. Phase A only decreases them (on attack).
+     */
+    private final FeelingLedger feelings = new FeelingLedger();
 
     private final SimpleContainer inventory = new SimpleContainer(INVENTORY_SIZE);
 
@@ -318,16 +343,23 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         builder.define(DATA_SKIN_INDEX, 0);
         builder.define(DATA_SKIN_TEXTURE_URL, "");
         builder.define(DATA_SKIN_SLIM, false);
+        builder.define(DATA_FIGHT_FLIGHT, DispositionTraits.DEFAULT);
+        builder.define(DATA_FRIENDLINESS, DispositionTraits.DEFAULT);
+        builder.define(DATA_FEELINGS, "");
     }
 
     @Override
     protected void registerGoals() {
         this.goalSelector.addGoal(0, new FloatGoal(this));
-        // Personality social goals — priority 1 so they preempt raiding/strolling
-        // when their disposition applies. Each self-gates on the live personality;
-        // Skeptical/Friendly also gate on "no target" so they yield to combat.
+        // Social goals (flee / watch / greet) — priority 1 so they preempt
+        // raiding/strolling when their reaction applies. Each self-gates on the
+        // live reaction; Skeptical/Friendly also gate on "no target" so they yield to combat.
+        // Flee range 10 → detectRange 16 (range + DETECT_RANGE_BONUS) covers the
+        // widest fight/flight bubble (fr0 hated ≈ MAX_RANGE); the mob still only
+        // flees ~10 blocks before hiding.
         this.goalSelector.addGoal(1, new FleeFromCategoryGoal(this, /* range */ 10.0F, /* walk */ 1.0, /* sprint */ 1.3));
-        this.goalSelector.addGoal(1, new SkepticalWatchGoal(this, /* watchRange */ 10.0, /* closeRange */ 4.0));
+        // Watch scan = MAX_RANGE so fr0's ~15-block skeptical ring is visible.
+        this.goalSelector.addGoal(1, new SkepticalWatchGoal(this, /* watchRange */ DispositionResolver.MAX_RANGE, /* closeRange */ 4.0));
         this.goalSelector.addGoal(1, new FriendlyGreetGoal(this, /* range */ 10.0, /* approachSpeed */ 0.9));
         // Open (and, for "tidy" mobs, close) wooden doors on the path. Declares
         // no flags, so it runs alongside whatever movement goal owns the walk.
@@ -361,7 +393,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             10,
             true,
             false,
-            candidate -> personalityToward(candidate) == Personality.AGGRESSIVE
+            candidate -> reactionToward(candidate) == Reaction.FIGHT
                 && TrainConfinement.allowsTarget(this, candidate)));
         // Hunt food animals only while hungry, and below the hostile-targeting
         // goal (2) so defending against a zombie always beats chasing a cow.
@@ -471,9 +503,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
                 setSkinSlim(skin.model() == SkinModel.SLIM);
             });
         }
-        // Randomise any personality categories not pinned by a spawn egg's
-        // entity_data or /summon NBT (player-facing eggs leave PLAYERS set).
-        personalities.rollUnsetRandom(world.getRandom());
+        // Roll any trait not pinned by a spawn egg's entity_data or /summon NBT
+        // (an archetype egg / partial summon leaves the rest to chance).
+        traits.rollIfUnset(world.getRandom());
+        pushDispositionToClient();
         // Roll the door-closing personality (~50% close behind, ~50% leave open).
         this.closesDoors = world.getRandom().nextBoolean();
         return super.finalizeSpawn(world, difficulty, reason, data);
@@ -496,24 +529,49 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         return true;
     }
 
-    // ---- Personality accessors + behaviour helpers ------------------------
+    // ---- Disposition accessors + behaviour helpers ------------------------
 
-    /** The mob's personality toward a live entity, or {@code null} if uncategorised. */
-    public Personality personalityToward(LivingEntity entity) {
-        return personalities.personalityToward(entity);
+    public int fightFlight() {
+        return traits.fightFlight();
+    }
+
+    public int friendliness() {
+        return traits.friendliness();
+    }
+
+    /** The mob's current feeling (0–10, default 5) toward a specific entity. */
+    public float feelingToward(LivingEntity entity) {
+        return feelings.feelingToward(entity.getUUID());
     }
 
     /**
-     * Nearest living entity within {@code range} that the mob holds the given
-     * {@code personality} toward. Used by the social goals to find their subject.
+     * The mob's computed {@link Reaction} toward a live entity — never null
+     * ({@link Reaction#IGNORE} for an uncategorised / creative / spectator
+     * target). Feelings are only consulted for players and other PlayerMobs.
      */
-    public LivingEntity nearestWithPersonality(Personality personality, double range) {
+    public Reaction reactionToward(LivingEntity entity) {
+        TargetCategory category = TargetCategory.classify(entity);
+        if (category == null) {
+            return Reaction.IGNORE;
+        }
+        float feeling = category == TargetCategory.PLAYERS
+            ? feelings.feelingToward(entity.getUUID())
+            : FeelingLedger.DEFAULT;
+        return DispositionResolver.resolve(
+            traits.fightFlight(), traits.friendliness(), feeling, category, distanceTo(entity));
+    }
+
+    /**
+     * Nearest living entity within {@code range} the mob currently reacts to with
+     * {@code reaction}. Used by the social goals to find their subject.
+     */
+    public LivingEntity nearestWhereReaction(Reaction reaction, double range) {
         AABB box = getBoundingBox().inflate(range);
         LivingEntity closest = null;
         double closestSq = range * range;
         List<LivingEntity> candidates = level().getEntitiesOfClass(
             LivingEntity.class, box,
-            e -> e != this && e.isAlive() && personalities.personalityToward(e) == personality);
+            e -> e != this && e.isAlive() && reactionToward(e) == reaction);
         for (LivingEntity e : candidates) {
             double distSq = distanceToSqr(e);
             if (distSq < closestSq) {
@@ -522,6 +580,30 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             }
         }
         return closest;
+    }
+
+    // ---- Client-synced disposition (for the menu UI) ----------------------
+
+    /** Push the server-side traits + feelings into the synced fields the client reads. */
+    private void pushDispositionToClient() {
+        this.entityData.set(DATA_FIGHT_FLIGHT, traits.fightFlight());
+        this.entityData.set(DATA_FRIENDLINESS, traits.friendliness());
+        this.entityData.set(DATA_FEELINGS, feelings.encode());
+    }
+
+    /** Client-synced fight/flight (0–10), for the menu UI. */
+    public int getSyncedFightFlight() {
+        return this.entityData.get(DATA_FIGHT_FLIGHT);
+    }
+
+    /** Client-synced friendliness (0–10), for the menu UI. */
+    public int getSyncedFriendliness() {
+        return this.entityData.get(DATA_FRIENDLINESS);
+    }
+
+    /** Client-synced feelings (UUID → 0–10), decoded from the synced string. */
+    public Map<UUID, Float> getSyncedFeelings() {
+        return FeelingLedger.decode(this.entityData.get(DATA_FEELINGS));
     }
 
     /** True if the main hand holds a recognised weapon (drives the provoked fight/flee choice). */
@@ -1371,7 +1453,8 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     @Override
     public void addAdditionalSaveData(CompoundTag tag) {
         super.addAdditionalSaveData(tag);
-        personalities.save(tag);
+        traits.save(tag);
+        feelings.save(tag);
         tag.putInt(TAG_SKIN_INDEX, getSkinIndex());
         tag.putBoolean(TAG_CLOSES_DOORS, this.closesDoors);
         // Train march direction — additive. Only written once latched (!= 0) so a
@@ -1415,8 +1498,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     @Override
     public void readAdditionalSaveData(CompoundTag tag) {
         super.readAdditionalSaveData(tag);
-        // Per-category personalities; missing tags keep category defaults.
-        personalities.load(tag);
+        // Traits + feelings; missing keys keep defaults. Legacy *Personality keys ignored.
+        traits.load(tag);
+        feelings.load(tag);
+        pushDispositionToClient();
         setSkinIndex(tag.getInt(TAG_SKIN_INDEX));
         // Missing key (pre-door-feature saves) ⇒ false ⇒ leave-open. Additive.
         this.closesDoors = tag.getBoolean(TAG_CLOSES_DOORS);
@@ -1483,11 +1568,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     // ---- Provocation reaction --------------------------------------------
 
     /**
-     * When struck by a categorisable entity the mob isn't already reacting to,
-     * flip its personality toward that category: stand and fight ({@link
-     * Personality#AGGRESSIVE}) if armed, else flee ({@link Personality#SHY},
-     * clamped to Aggressive where Shy is disallowed). On a flip to Shy we drop
-     * the retaliation target so {@link FleeFromCategoryGoal} takes over.
+     * When struck by a categorisable entity: cool the mob's feeling toward a
+     * player/PlayerMob attacker in proportion to the damage ({@link #DMG_TO_FEELING}),
+     * then react immediately — a fighter ({@code fightFlight >= 5}) retaliates;
+     * a flighty mob drops the retaliation target so {@link FleeFromCategoryGoal}
+     * takes over. Creative/spectator attackers are ignored entirely.
      */
     @Override
     public boolean hurt(DamageSource source, float amount) {
@@ -1503,8 +1588,15 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             }
             TargetCategory category = TargetCategory.classify(attacker);
             if (category != null) {
-                Personality reaction = personalities.provoke(category, isArmed());
-                if (reaction == Personality.SHY) {
+                // A player/PlayerMob hit cools the feeling toward them, ∝ damage
+                // (a solid blow can flip neutral straight into "hate").
+                if (category == TargetCategory.PLAYERS) {
+                    feelings.adjust(attacker.getUUID(), -amount * DMG_TO_FEELING);
+                    pushDispositionToClient();
+                }
+                // Immediate response: fighters retaliate (keep the HurtByTargetGoal
+                // target); flighty mobs drop it so FleeFromCategoryGoal takes over.
+                if (DispositionResolver.onHurt(traits.fightFlight()) == DispositionResolver.HurtResponse.FLEE) {
                     setTarget(null);
                     setLastHurtByMob(null);
                 }

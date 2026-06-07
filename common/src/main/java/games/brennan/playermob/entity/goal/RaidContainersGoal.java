@@ -1,8 +1,8 @@
 package games.brennan.playermob.entity.goal;
 
 import games.brennan.playermob.compat.TrainConfinement;
-import games.brennan.playermob.entity.Personality;
 import games.brennan.playermob.entity.PlayerMobEntity;
+import games.brennan.playermob.entity.Reaction;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.ai.goal.Goal;
@@ -171,13 +171,13 @@ public final class RaidContainersGoal extends Goal {
     }
 
     /**
-     * Crouch for the whole raid when an entity this mob is Shy toward is nearby,
+     * Crouch for the whole raid when an entity this mob would flee is nearby,
      * so a timid mob sneaks to the chest and back. Throttled — the scan isn't free.
      */
     private void updateSneak() {
         if (--sneakCheckTicks <= 0) {
             sneakCheckTicks = SNEAK_CHECK_INTERVAL;
-            sneaking = mob.nearestWithPersonality(Personality.SHY, SNEAK_WATCH_RANGE) != null;
+            sneaking = mob.nearestWhereReaction(Reaction.FLEE, SNEAK_WATCH_RANGE) != null;
         }
         mob.setCrouching(sneaking);
     }
