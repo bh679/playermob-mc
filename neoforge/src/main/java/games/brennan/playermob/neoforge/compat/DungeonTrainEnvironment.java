@@ -5,12 +5,17 @@ import games.brennan.playermob.compat.TrainEnvironment;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.Mob;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.ButtonBlock;
 import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.LeverBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3d;
 import org.joml.primitives.AABBdc;
@@ -45,8 +50,9 @@ import java.util.UUID;
  * same far-offset space the navigation paths in), not at the mob's apparent world
  * position — so door-opening converts the mob's position via
  * {@link games.brennan.dungeontrain.ship.ManagedShip#worldToShip}. Wooden and copper
- * doors are hand-openable and opened directly; iron doors are redstone-only, so their
- * nearest button or lever is operated instead. The group-boundary door is left shut
+ * doors are hand-openable and opened directly; iron doors are redstone-only, so the mob
+ * turns to a reachable button/lever it has line of sight to and swings to operate it. The
+ * group-boundary door is left shut
  * (opening it would march the mob into the inter-group gap — behaviour #2), and
  * pressure-plate-controlled doors rely on the mob walking onto the plate.</p>
  *
@@ -67,6 +73,10 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
 
     /** How far from an iron door to look for its button/lever control. */
     private static final int CONTROL_REACH = 3;
+
+    /** Max eye-to-control distance for the mob to operate a control (≈ a player's block reach). */
+    private static final double INTERACT_REACH = 4.5;
+    private static final double INTERACT_REACH_SQR = INTERACT_REACH * INTERACT_REACH;
 
     @Override
     public boolean isOnTrain(Entity self) {
@@ -153,10 +163,9 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         if (atForwardBoundary(self)) {
             return;
         }
-        if (tryOperateIronDoorControl(level, subPos)) {
-            return;
+        if (self instanceof Mob mob) {
+            tryOperateIronDoorControl(mob, level, c, subPos);
         }
-        tryOperateIronDoorControl(level, self.blockPosition());
     }
 
     /**
@@ -186,11 +195,11 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
 
     /**
      * Find a closed iron door within {@link #DOOR_REACH} of {@code base} and operate its
-     * nearest button/lever control; returns true if a control was operated. Iron doors are
-     * redstone-only, so {@link #tryOpenDoorNear} can't open them by hand — we drive their
-     * control instead, in the same sub-level coordinate space.
+     * nearest reachable, visible button/lever control; returns true if a control was operated.
+     * Iron doors are redstone-only, so {@link #tryOpenDoorNear} can't open them by hand — we
+     * drive their control instead, in the same sub-level coordinate space.
      */
-    private static boolean tryOperateIronDoorControl(ServerLevel level, BlockPos base) {
+    private static boolean tryOperateIronDoorControl(Mob mob, ServerLevel level, Trains.Carriage c, BlockPos base) {
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         for (int dy = 0; dy <= 1; dy++) {
             for (int dx = -DOOR_REACH; dx <= DOOR_REACH; dx++) {
@@ -200,7 +209,7 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
                     if (state.is(Blocks.IRON_DOOR)
                             && state.getBlock() instanceof DoorBlock door
                             && !door.isOpen(state)
-                            && operateControlNear(level, cursor.immutable())) {
+                            && operateControlNear(mob, level, c, cursor.immutable())) {
                         return true;
                     }
                 }
@@ -210,16 +219,23 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
     }
 
     /**
-     * Press/pull the nearest unpowered button or lever within {@link #CONTROL_REACH} of
-     * {@code doorPos}; returns true if one was operated. Only OFF controls are touched, so
-     * a lever already holding a door open is left alone, and an auto-unpressing button is
-     * simply re-pressed on a later tick (this reflex runs every tick) — keeping the iron
-     * door open until the mob has passed through.
+     * Operate the nearest unpowered button/lever the mob can actually reach and see within
+     * {@link #CONTROL_REACH} of {@code doorPos}; returns true if one was operated. The mob must
+     * be within {@link #INTERACT_REACH} of the control and have a clear line of sight to it — it
+     * never powers a control through a wall — and it turns to face the control and swings its
+     * arm, so the press is a visible interaction rather than a remote toggle.
+     *
+     * <p>Only OFF controls are touched: a lever already holding a door open is left alone, and an
+     * auto-unpressing button is re-pressed on a later tick (this reflex runs every tick), keeping
+     * the iron door open until the mob has passed through.</p>
      */
-    private static boolean operateControlNear(ServerLevel level, BlockPos doorPos) {
+    private static boolean operateControlNear(Mob mob, ServerLevel level, Trains.Carriage c, BlockPos doorPos) {
+        Vector3d eyeShip = c.ship().worldToShip(new Vector3d(mob.getX(), mob.getEyeY(), mob.getZ()));
+        Vec3 eye = new Vec3(eyeShip.x, eyeShip.y, eyeShip.z);
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         BlockState bestState = null;
         BlockPos bestPos = null;
+        Vec3 bestCenter = null;
         double bestDistSq = Double.MAX_VALUE;
         for (int dy = -CONTROL_REACH; dy <= CONTROL_REACH; dy++) {
             for (int dx = -CONTROL_REACH; dx <= CONTROL_REACH; dx++) {
@@ -229,24 +245,50 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
                     if (!isOffControl(state)) {
                         continue;
                     }
-                    double distSq = cursor.distSqr(doorPos);
-                    if (distSq < bestDistSq) {
-                        bestDistSq = distSq;
-                        bestPos = cursor.immutable();
-                        bestState = state;
+                    Vec3 center = Vec3.atCenterOf(cursor);
+                    double distSq = eye.distanceToSqr(center);
+                    if (distSq > INTERACT_REACH_SQR || distSq >= bestDistSq) {
+                        continue; // out of arm's reach, or farther than a candidate we have
                     }
+                    if (!hasLineOfSight(level, mob, eye, center, cursor.immutable())) {
+                        continue; // can't see it — don't power it through a wall
+                    }
+                    bestDistSq = distSq;
+                    bestPos = cursor.immutable();
+                    bestState = state;
+                    bestCenter = center;
                 }
             }
         }
         if (bestState == null) {
             return false;
         }
+        // Turn to face the control and swing — a visible interaction. Carriage rotation is
+        // locked to identity, so the sub-frame eye→control offset is the world-frame offset.
+        Vec3 offset = bestCenter.subtract(eye);
+        mob.getLookControl().setLookAt(mob.getX() + offset.x, mob.getEyeY() + offset.y, mob.getZ() + offset.z);
+        mob.swing(InteractionHand.MAIN_HAND);
         if (bestState.getBlock() instanceof LeverBlock lever) {
             lever.pull(bestState, level, bestPos, null);
         } else if (bestState.getBlock() instanceof ButtonBlock button) {
             button.press(bestState, level, bestPos, null);
         }
         return true;
+    }
+
+    /**
+     * True if {@code mob} has a clear line of sight from {@code eye} to the control at
+     * {@code targetPos} (centre {@code target}), both in sub-level coordinates. Buttons and
+     * levers have little or no collision, so a clear shot registers as a MISS or as a hit
+     * at/after the control's distance (e.g. the wall it's mounted on); only a solid block
+     * strictly in front of the control counts as blocked.
+     */
+    private static boolean hasLineOfSight(ServerLevel level, Mob mob, Vec3 eye, Vec3 target, BlockPos targetPos) {
+        BlockHitResult hit = level.clip(
+            new ClipContext(eye, target, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mob));
+        return hit.getType() == HitResult.Type.MISS
+            || hit.getBlockPos().equals(targetPos)
+            || hit.getLocation().distanceToSqr(eye) + 1.0e-4 >= target.distanceToSqr(eye);
     }
 
     /** True for an unpowered (OFF) button or lever — a control that turns power on when operated. */
