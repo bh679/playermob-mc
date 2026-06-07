@@ -4,6 +4,7 @@ import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.compat.TrainEnvironment;
 import games.brennan.playermob.entity.BlockSourcePolicy;
 import games.brennan.playermob.entity.EquipmentEvaluator;
+import games.brennan.playermob.entity.ItemPickupPolicy;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -70,8 +71,13 @@ public final class TrainRecoveryGoal extends Goal {
     /** Gather scan cube half-extent and reach. */
     private static final int GATHER_SCAN_RADIUS = 5;
     private static final double GATHER_REACH_SQR = 9.0;     // 3 blocks
-    private static final int GATHER_BREAK_TICKS = 12;        // brief, believable break
     private static final int GATHER_PATH_TIMEOUT = 80;       // 4s to reach a gather block
+    /** Realistic break-time bounds; the actual duration scales with hardness ÷ tool speed. */
+    private static final int MIN_BREAK_TICKS = 5;
+    private static final int MAX_BREAK_TICKS = 120;
+    /** "Reach for the tool" pause after an auto tool-swap: 0.1–1.0s. */
+    private static final int TOOL_SWAP_MIN_TICKS = 2;
+    private static final int TOOL_SWAP_MAX_TICKS = 20;
     /** Rescan delay after the goal stops (success or abandon). */
     private static final int POST_COOLDOWN_TICKS = 40;
 
@@ -90,6 +96,8 @@ public final class TrainRecoveryGoal extends Goal {
     private TrainEnvironment.ReboardTarget target;
     private BlockPos gatherTargetPos;
     private int gatherBreakTicks = 0;
+    private int breakTicksTotal = 0;   // 0 = not yet sized for the current gather target
+    private int toolReadyTick = 0;     // tick the post-tool-swap pause ends
 
     public TrainRecoveryGoal(PlayerMobEntity mob, double moveSpeed) {
         this.mob = mob;
@@ -199,36 +207,91 @@ public final class TrainRecoveryGoal extends Goal {
             moveTowardCarriage();
         }
 
-        int slot = BlockSourcePolicy.firstPlaceableSlot(mob.getInventory());
-        if (slot < 0) {                       // out of blocks → go gather
-            phase = Phase.GATHER;
-            phaseTicks = 0;
-            gatherTargetPos = null;
+        int slot = bridgeBlockSlot();              // non-log placeable; non-gravity preferred
+        if (slot < 0) {
+            // No directly-placeable block — craft logs into planks if we have any,
+            // otherwise go gather one.
+            if (firstCraftableLogSlot() >= 0) {
+                phase = Phase.CRAFT;
+                phaseTicks = 0;
+            } else {
+                phase = Phase.GATHER;
+                phaseTicks = 0;
+                gatherTargetPos = null;
+            }
             return;
         }
-        // Prefer turning logs into planks (4× the bridge blocks) before placing.
-        if (BlockSourcePolicy.isCraftableLog(mob.getInventory().getItem(slot))) {
-            phase = Phase.CRAFT;
-            phaseTicks = 0;
-            return;
-        }
-
-        BlockPos place = BlockSourcePolicy.nextBridgePos(mob.blockPosition(), box);
-        if (place == null) {
-            // Level with the carriage's base layer — jump the final block onto it.
-            mob.getJumpControl().jump();
-            return;
-        }
-        // Pace placements so the mob has time to climb the previous one.
-        if (phaseTicks % PLACE_INTERVAL_TICKS != 0) return;
         if (placementsUsed >= MAX_PLACEMENTS) {     // bridge isn't working → abandon
             stop();
             return;
         }
+        // Stairs by default; jump-stack a pillar for gravity blocks (a staircase of
+        // sand/gravel would just fall).
+        BlockState block = ((BlockItem) mob.getInventory().getItem(slot).getItem())
+            .getBlock().defaultBlockState();
+        if (BlockSourcePolicy.isGravityBlock(block)) {
+            tickJumpStack(slot, box);
+        } else {
+            tickStairs(slot, box);
+        }
+    }
+
+    /** Staircase bridging: place one step out-and-up toward the carriage, then climb it. */
+    private void tickStairs(int slot, AABB box) {
+        BlockPos place = BlockSourcePolicy.nextBridgePos(mob.blockPosition(), box);
+        if (place == null) {
+            mob.getJumpControl().jump();            // level with the base layer — hop aboard
+            return;
+        }
+        if (phaseTicks % PLACE_INTERVAL_TICKS != 0) return;   // let it climb the previous step
         mob.getLookControl().setLookAt(place.getX() + 0.5, place.getY() + 0.5, place.getZ() + 0.5);
         if (tryPlaceBridgeBlock(place, slot)) {
             placementsUsed++;
         }
+    }
+
+    /**
+     * Jump-stack a pillar under the mob's own feet with a gravity block: jump, and
+     * near the apex place a block in the just-vacated foot space so it settles and
+     * the mob lands one block higher. Repeats until level with the carriage base.
+     * The jump cycle paces placement naturally (one per launch).
+     */
+    private void tickJumpStack(int slot, AABB box) {
+        if (mob.blockPosition().getY() >= Mth.floor(box.minY)) {
+            mob.getJumpControl().jump();            // high enough — hop across
+            return;
+        }
+        if (mob.onGround()) {
+            mob.getJumpControl().jump();            // launch; place once airborne
+            return;
+        }
+        if (mob.getDeltaMovement().y > 0.0) return; // wait for the apex / descent
+        BlockPos under = BlockPos.containing(mob.getX(), mob.getY() - 0.2, mob.getZ());
+        mob.getLookControl().setLookAt(under.getX() + 0.5, under.getY(), under.getZ() + 0.5);
+        if (tryPlaceBridgeBlock(under, slot)) {
+            placementsUsed++;
+        }
+    }
+
+    /**
+     * A directly-placeable non-log block slot, preferring non-gravity blocks (for
+     * staircase bridging) over gravity blocks (jump-stack), or {@code -1} if none.
+     * Logs are excluded — they're crafted into planks first.
+     */
+    private int bridgeBlockSlot() {
+        var inv = mob.getInventory();
+        int gravitySlot = -1;
+        for (int i = 0; i < inv.getContainerSize(); i++) {
+            ItemStack s = inv.getItem(i);
+            if (!ItemPickupPolicy.isBuildingBlock(s) || BlockSourcePolicy.isCraftableLog(s)) continue;
+            BlockState bs = ((BlockItem) s.getItem()).getBlock().defaultBlockState();
+            if (BlockSourcePolicy.isGravityBlock(bs)) {
+                if (gravitySlot < 0) gravitySlot = i;
+                continue;
+            }
+            return i;
+        }
+        return gravitySlot;
     }
 
     /**
@@ -271,6 +334,8 @@ public final class TrainRecoveryGoal extends Goal {
                 return;
             }
             gatherBreakTicks = 0;
+            breakTicksTotal = 0;
+            toolReadyTick = 0;
             mob.getNavigation().moveTo(
                 gatherTargetPos.getX() + 0.5, gatherTargetPos.getY(), gatherTargetPos.getZ() + 0.5, moveSpeed);
             return;
@@ -292,17 +357,26 @@ public final class TrainRecoveryGoal extends Goal {
             }
             return;
         }
-        // In reach: face it and break with a short windup. Gather targets are
-        // hand-breakable (dirt/sand/gravel/logs), so no tool is needed — we just
-        // swing, mirroring HarvestCropsGoal.
+        // In reach: auto-select the best tool (a brief pause to "switch"), then
+        // break over a realistic, hardness-and-tool-scaled duration.
         mob.getNavigation().stop();
         mob.getLookControl().setLookAt(
             gatherTargetPos.getX() + 0.5, gatherTargetPos.getY() + 0.5, gatherTargetPos.getZ() + 0.5);
+        if (breakTicksTotal == 0) {
+            // First tick in reach: pick the right tool and size the break.
+            if (mob.equipBetterToolFor(state)) {
+                toolReadyTick = mob.tickCount + TOOL_SWAP_MIN_TICKS
+                    + mob.getRandom().nextInt(TOOL_SWAP_MAX_TICKS - TOOL_SWAP_MIN_TICKS + 1);
+            }
+            breakTicksTotal = breakTicksFor(state);
+            gatherBreakTicks = 0;
+        }
+        if (mob.tickCount < toolReadyTick) return;      // reach-for-the-tool pause
         if (gatherBreakTicks % 4 == 0) mob.swing(InteractionHand.MAIN_HAND);
         gatherBreakTicks++;
-        if (gatherBreakTicks >= GATHER_BREAK_TICKS) {
+        if (gatherBreakTicks >= breakTicksTotal) {
             harvestGatherTarget(state);
-            phase = Phase.BRIDGE;                       // re-evaluate with the new material
+            phase = Phase.BRIDGE;                        // re-evaluate with the new material
             phaseTicks = 0;
         }
     }
@@ -324,7 +398,17 @@ public final class TrainRecoveryGoal extends Goal {
         gatherTargetPos = null;
     }
 
-    /** Nearest cheap, tool-harvestable, non-track block worth breaking for a bridge block. */
+    /** Realistic break duration for {@code state} with the mob's current main-hand tool. */
+    private int breakTicksFor(BlockState state) {
+        float hardness = state.getDestroySpeed(mob.level(), gatherTargetPos);
+        if (hardness <= 0.0f) return MIN_BREAK_TICKS;   // instabreak-ish
+        float toolSpeed = Math.max(1.0f, mob.getMainHandItem().getDestroySpeed(state));
+        // Vanilla mining time ≈ hardness × 30 ÷ tool speed ticks for a harvestable block.
+        int ticks = Math.round(hardness * 30.0f / toolSpeed);
+        return Mth.clamp(ticks, MIN_BREAK_TICKS, MAX_BREAK_TICKS);
+    }
+
+    /** Nearest cheap, hand-breakable, non-track block worth breaking for a bridge block. */
     private BlockPos findGatherTarget() {
         BlockPos origin = mob.blockPosition();
         BlockPos feetBelow = origin.below();

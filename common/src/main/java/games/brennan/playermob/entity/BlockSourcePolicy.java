@@ -10,6 +10,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.FallingBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 
@@ -154,6 +155,16 @@ public final class BlockSourcePolicy {
             || state.is(Blocks.STONE_BRICKS)
             || state.is(Blocks.STONE_BRICK_STAIRS)
             || state.is(Blocks.STONE_BRICK_SLAB);
+    }
+
+    /**
+     * True if {@code state}'s block falls under gravity (sand, gravel, concrete
+     * powder, anvils…). Recovery bridges with these by jump-stacking a pillar
+     * <em>under</em> the mob rather than building a staircase out into the air,
+     * which a falling block can't form.
+     */
+    public static boolean isGravityBlock(BlockState state) {
+        return state.getBlock() instanceof FallingBlock;
     }
 
     // ---- Staircase math --------------------------------------------------

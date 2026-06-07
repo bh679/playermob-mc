@@ -469,6 +469,39 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     }
 
     /**
+     * Auto-equip the best tool the mob owns for breaking {@code state} (highest
+     * {@link ItemStack#getDestroySpeed}), swapping it into the main hand and
+     * stashing the displaced item. Returns {@code true} if a swap happened — so the
+     * caller can add a short "reach for the tool" pause. No-op (returns {@code false})
+     * when the main hand is already the fastest, or nothing beats an empty hand.
+     */
+    public boolean equipBetterToolFor(BlockState state) {
+        float bestSpeed = getMainHandItem().getDestroySpeed(state);
+        int bestSlot = -1;
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            ItemStack candidate = inventory.getItem(i);
+            if (candidate.isEmpty()) continue;
+            float speed = candidate.getDestroySpeed(state);
+            if (speed > bestSpeed) {
+                bestSpeed = speed;
+                bestSlot = i;
+            }
+        }
+        if (bestSlot < 0) {
+            return false;
+        }
+        ItemStack tool = inventory.getItem(bestSlot).copy();
+        ItemStack previous = getMainHandItem();
+        inventory.setItem(bestSlot, ItemStack.EMPTY);
+        setItemSlot(EquipmentSlot.MAINHAND, tool);
+        if (!previous.isEmpty()) {
+            ItemStack leftover = EquipmentEvaluator.addToContainer(inventory, previous);
+            if (!leftover.isEmpty()) spawnAtLocation(leftover);
+        }
+        return true;
+    }
+
+    /**
      * Players in Creative or Spectator mode are ignored by all AI — the mob
      * treats them as not present. {@link TargetCategory#classify} returns
      * {@code null} for them (covering proactive targeting and the social goals);

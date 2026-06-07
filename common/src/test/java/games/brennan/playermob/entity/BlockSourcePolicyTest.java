@@ -112,6 +112,14 @@ class BlockSourcePolicyTest {
         assertFalse(BlockSourcePolicy.isProtectedTrackBlock(Blocks.DIRT.defaultBlockState()));
     }
 
+    @Test
+    void gravityBlocksDetected() {
+        assertTrue(BlockSourcePolicy.isGravityBlock(Blocks.SAND.defaultBlockState()), "sand falls");
+        assertTrue(BlockSourcePolicy.isGravityBlock(Blocks.GRAVEL.defaultBlockState()), "gravel falls");
+        assertFalse(BlockSourcePolicy.isGravityBlock(Blocks.DIRT.defaultBlockState()), "dirt doesn't fall");
+        assertFalse(BlockSourcePolicy.isGravityBlock(Blocks.COBBLESTONE.defaultBlockState()));
+    }
+
     // ---- Staircase math --------------------------------------------------
 
     @Test
