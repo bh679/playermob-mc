@@ -2,10 +2,13 @@ package games.brennan.playermob.compat;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.phys.Vec3;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -63,10 +66,37 @@ class TrainConfinementTest {
         assertTrue(TrainConfinement.allowsTarget(null, POS), "same-train block is allowed");
     }
 
-    /** Configurable stand-in for a train mod's environment. */
+    @Test
+    void absentEnvironmentHasNoCarriage() {
+        TrainConfinement.install(TrainEnvironment.ABSENT);
+        assertEquals(TrainConfinement.NO_CARRIAGE, TrainConfinement.carriageIndex(null),
+            "ABSENT reports no carriage");
+        assertNull(TrainConfinement.nextCarriageTarget(null, -1),
+            "ABSENT has no next-carriage waypoint");
+    }
+
+    @Test
+    void boardingDirectionMarchesTowardZero() {
+        // Negative side marches up (+1) toward 0; the centre and the positive side
+        // march down (-1) through 0. The direction is latched once and kept, so a
+        // mob that boarded negative keeps +1 even after its index turns positive.
+        assertEquals(+1, TrainConfinement.boardingDirection(-5), "deep negative → up");
+        assertEquals(+1, TrainConfinement.boardingDirection(-1), "just below 0 → up");
+        assertEquals(-1, TrainConfinement.boardingDirection(0), "at 0 → down (default)");
+        assertEquals(-1, TrainConfinement.boardingDirection(1), "just above 0 → down");
+        assertEquals(-1, TrainConfinement.boardingDirection(5), "deep positive → down");
+    }
+
+    /**
+     * Configurable stand-in for a train mod's environment. The carriage-geometry
+     * methods are stubbed (NO_CARRIAGE / null) — their real behaviour is DT-backed
+     * geometry covered by the in-game Gate 2 test, not unit-testable here.
+     */
     private record FakeTrain(boolean selfOnTrain, boolean sameTrainResult) implements TrainEnvironment {
         @Override public boolean isOnTrain(Entity self) { return selfOnTrain; }
         @Override public boolean sameTrain(Entity self, Entity candidate) { return sameTrainResult; }
         @Override public boolean sameTrain(Entity self, BlockPos candidatePos) { return sameTrainResult; }
+        @Override public int carriageIndex(Entity self) { return NO_CARRIAGE; }
+        @Override public Vec3 nextCarriageTarget(Entity self, int dir) { return null; }
     }
 }

@@ -2,6 +2,7 @@ package games.brennan.playermob.compat;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * Optional-mod integration seam describing the "train" a PlayerMob may be
@@ -47,6 +48,35 @@ public interface TrainEnvironment {
     boolean sameTrain(Entity self, BlockPos candidatePos);
 
     /**
+     * Sentinel returned by {@link #carriageIndex(Entity)} when {@code self} is
+     * not on a train (or its carriage can't be resolved). Distinct from any
+     * real signed carriage index, which is small and centred on 0.
+     */
+    int NO_CARRIAGE = Integer.MIN_VALUE;
+
+    /**
+     * The signed carriage (room) index — Dungeon Train's {@code pIdx} — of the
+     * carriage {@code self} is currently standing in, or {@link #NO_CARRIAGE} if
+     * {@code self} is not on a train. The train runs along world-X with carriage
+     * {@code 0} at the origin, so the sign tells you which side of centre the mob
+     * is on. Used once, on boarding, to fix the mob's march direction (see
+     * {@link TrainConfinement#boardingDirection(int)}).
+     */
+    int carriageIndex(Entity self);
+
+    /**
+     * A current world-space waypoint at the centre of the next carriage room in
+     * step direction {@code dir} ({@code -1} toward decreasing index, {@code +1}
+     * toward increasing) <em>within the same carriage group</em>, or {@code null}
+     * if {@code self} is not on a train or the step would leave the group (a
+     * physical gap to the next group — crossing it is behaviour #2, deferred).
+     *
+     * <p>Carriages move every tick, so the returned point is only valid for the
+     * tick it was queried — callers re-query each tick while pathing to it.</p>
+     */
+    Vec3 nextCarriageTarget(Entity self, int dir);
+
+    /**
      * No-op environment used whenever no train mod is active. Reports every
      * entity as not on a train, so confinement never engages.
      */
@@ -54,5 +84,7 @@ public interface TrainEnvironment {
         @Override public boolean isOnTrain(Entity self) { return false; }
         @Override public boolean sameTrain(Entity self, Entity candidate) { return false; }
         @Override public boolean sameTrain(Entity self, BlockPos candidatePos) { return false; }
+        @Override public int carriageIndex(Entity self) { return NO_CARRIAGE; }
+        @Override public Vec3 nextCarriageTarget(Entity self, int dir) { return null; }
     };
 }

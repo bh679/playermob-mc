@@ -2,6 +2,7 @@ package games.brennan.playermob.entity;
 
 import games.brennan.playermob.PlayerMobRegistry;
 import games.brennan.playermob.compat.TrainConfinement;
+import games.brennan.playermob.entity.goal.AdvanceCarriageGoal;
 import games.brennan.playermob.entity.goal.CollectFloorItemsGoal;
 import games.brennan.playermob.entity.goal.EatFoodGoal;
 import games.brennan.playermob.entity.goal.FleeFromCategoryGoal;
@@ -208,6 +209,7 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     private static final String TAG_SKIN_TEXTURE_URL = "SkinTextureUrl";
     private static final String TAG_SKIN_SLIM = "SkinSlim";
     private static final String TAG_CLOSES_DOORS = "ClosesDoors";
+    private static final String TAG_TRAIN_EXPLORE_DIR = "TrainExploreDir";
     private static final String TAG_EXPLORED_BLOCKS = "ExploredBlocks";
     private static final String TAG_EXPLORED_ENTITIES = "ExploredEntities";
     private static final String TAG_POS = "Pos";
@@ -259,6 +261,23 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
      * persistence rather than a synched DataTracker entry.</p>
      */
     private boolean closesDoors;
+
+    /**
+     * Fixed march direction while exploring a Dungeon Train: {@code -1} toward
+     * decreasing carriage index, {@code +1} toward increasing, {@code 0} = not yet
+     * latched. Set once, the first server tick the mob is found on a train, from
+     * the sign of its boarding carriage index (see {@link #customServerAiStep} and
+     * {@link TrainConfinement#boardingDirection(int)}), then kept — so the mob
+     * keeps marching the same way after passing carriage 0, and the choice
+     * survives save/load. Read each tick by {@link AdvanceCarriageGoal}.
+     *
+     * <p>Server-only AI state — never rendered — so a plain field with NBT
+     * persistence, not a synched DataTracker entry (mirrors {@link #closesDoors}).
+     * Defaults to {@code 0} (no train mod ⇒ never latched ⇒ the goal no-ops).
+     * NOTE: not reset when the mob leaves a train; behaviour #2 (cross-group
+     * traversal) must revisit re-latching on a genuine disembark/re-board.</p>
+     */
+    private int trainExploreDir;
 
     public PlayerMobEntity(EntityType<? extends PlayerMobEntity> type, Level level) {
         super(type, level);
@@ -320,6 +339,11 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         // NOT here — it runs as a target goal so the priority-2 attack goal does
         // the killing (see below).
         this.goalSelector.addGoal(6, new HarvestCropsGoal(this, /* speed */ 0.9, /* radius */ 8));
+        // On a Dungeon Train, once the current carriage room is clear (combat 2,
+        // raid/collect 3, harvest 6 all preempt this), march to the next room.
+        // No-op off a train (the seam reports "not confined"). Below harvest so
+        // "fully explore" includes farming; above idle stroll.
+        this.goalSelector.addGoal(7, new AdvanceCarriageGoal(this, /* speed */ 0.9));
         this.goalSelector.addGoal(8, new WaterAvoidingRandomStrollGoal(this, 0.6));
         this.goalSelector.addGoal(9, new LookAtPlayerGoal(this, LivingEntity.class, 8.0F));
         this.goalSelector.addGoal(10, new RandomLookAroundGoal(this));
@@ -355,6 +379,36 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         if (target != null && !TrainConfinement.allowsTarget(this, target)) {
             setTarget(null);
         }
+        latchTrainExploreDirection();
+    }
+
+    /**
+     * The first server tick the mob is found on a train, fix its march direction
+     * from the sign of its boarding carriage index and keep it (see
+     * {@link #trainExploreDir}). Once latched ({@code != 0}) this short-circuits,
+     * so the train seam isn't queried every tick. No-op without a train mod
+     * ({@link TrainConfinement#isConfined} is always false) — zero cost. The
+     * carriage-index call self-checks its geometry and returns
+     * {@link TrainConfinement#NO_CARRIAGE} if it can't be trusted, in which case
+     * we leave the direction unlatched and try again next tick.
+     */
+    private void latchTrainExploreDirection() {
+        if (trainExploreDir != 0 || !TrainConfinement.isConfined(this)) {
+            return;
+        }
+        int idx = TrainConfinement.carriageIndex(this);
+        if (idx != TrainConfinement.NO_CARRIAGE) {
+            trainExploreDir = TrainConfinement.boardingDirection(idx);
+        }
+    }
+
+    /**
+     * Fixed Dungeon-Train march direction ({@code -1}/{@code +1}), or {@code 0} if
+     * the mob hasn't boarded a train yet. Read each tick by
+     * {@link AdvanceCarriageGoal}. See {@link #trainExploreDir}.
+     */
+    public int getTrainExploreDir() {
+        return this.trainExploreDir;
     }
 
     /**
@@ -1209,6 +1263,12 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         personalities.save(tag);
         tag.putInt(TAG_SKIN_INDEX, getSkinIndex());
         tag.putBoolean(TAG_CLOSES_DOORS, this.closesDoors);
+        // Train march direction — additive. Only written once latched (!= 0) so a
+        // mob that never boarded a train round-trips no key (matches the URL-skin
+        // additive pattern above).
+        if (this.trainExploreDir != 0) {
+            tag.putInt(TAG_TRAIN_EXPLORE_DIR, this.trainExploreDir);
+        }
         // URL skin tags are purely additive on top of v1 (SkinIndex). Only
         // write the URL key when set, so 0.2.0-loaded mobs that never had a
         // URL assigned don't round-trip an empty string back into the save.
@@ -1249,6 +1309,8 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         setSkinIndex(tag.getInt(TAG_SKIN_INDEX));
         // Missing key (pre-door-feature saves) ⇒ false ⇒ leave-open. Additive.
         this.closesDoors = tag.getBoolean(TAG_CLOSES_DOORS);
+        // Missing key ⇒ 0 ⇒ unlatched ⇒ re-derived on the next train boarding. Additive.
+        this.trainExploreDir = tag.getInt(TAG_TRAIN_EXPLORE_DIR);
         // Backward compat: 0.2.0 saves have no SkinTextureUrl tag. Missing key
         // ⇒ URL stays the default "" ⇒ renderer uses the legacy bundled-
         // vanilla path keyed off SkinIndex. New v2 mobs round-trip the URL.

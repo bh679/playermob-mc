@@ -2,6 +2,7 @@ package games.brennan.playermob.compat;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * Stateless gate the PlayerMob AI consults to decide whether a candidate
@@ -59,5 +60,38 @@ public final class TrainConfinement {
     public static boolean allowsTarget(Entity self, BlockPos pos) {
         TrainEnvironment env = environment;
         return !env.isOnTrain(self) || env.sameTrain(self, pos);
+    }
+
+    // ---- Carriage exploration (behaviour #3) -----------------------------
+
+    /** Re-export of {@link TrainEnvironment#NO_CARRIAGE} for AI-side callers. */
+    public static final int NO_CARRIAGE = TrainEnvironment.NO_CARRIAGE;
+
+    /**
+     * The signed carriage index {@code self} is standing in, or {@link #NO_CARRIAGE}
+     * if it isn't on a train. Always {@code NO_CARRIAGE} without a train mod.
+     */
+    public static int carriageIndex(Entity self) {
+        return environment.carriageIndex(self);
+    }
+
+    /**
+     * World-space waypoint at the centre of the next carriage room in step
+     * direction {@code dir} within the same group, or {@code null} if not on a
+     * train or at the group boundary. Always {@code null} without a train mod.
+     */
+    public static Vec3 nextCarriageTarget(Entity self, int dir) {
+        return environment.nextCarriageTarget(self, dir);
+    }
+
+    /**
+     * The fixed march direction for a mob that boarded at {@code carriageIndex}:
+     * march toward carriage 0 and continue past it. Negative side marches up
+     * ({@code +1}); the centre and positive side march down ({@code -1}). Chosen
+     * once on boarding and kept thereafter, so the mob keeps going after crossing
+     * 0. Pure function of the index — the unit-tested core of the boarding rule.
+     */
+    public static int boardingDirection(int carriageIndex) {
+        return carriageIndex < 0 ? +1 : -1;
     }
 }
