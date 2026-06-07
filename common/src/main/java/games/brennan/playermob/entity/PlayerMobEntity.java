@@ -339,22 +339,43 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     }
 
     /**
-     * When standing on a Dungeon Train carriage, never hold an attack target that
-     * has left the train. Acquisition is already filtered (the priority-2 target
-     * goal and {@link HuntForFoodGoal}); this central sweep additionally drops a
-     * target that <em>wanders</em> off, covering every target source (hostile,
-     * retaliation, hunt) in one place — clearing it also makes the priority-2
-     * {@code WeaponAwareAttackGoal} stand down. No-op unless a train mod is
-     * installed and the mob is actually on a train: {@link
-     * TrainConfinement#allowsTarget} short-circuits to {@code true} otherwise.
+     * Central held-target sweep, covering every target source (hostile,
+     * retaliation, hunt) in one place — clearing the target also makes the
+     * priority-2 {@code WeaponAwareAttackGoal} stand down. Drops a target that:
+     *
+     * <ul>
+     *   <li>has switched to <b>Creative or Spectator</b> mid-engagement (or was
+     *       acquired by the vanilla {@link HurtByTargetGoal} retaliation path,
+     *       which bypasses {@link TargetCategory#classify}) — see
+     *       {@link #isIgnoredPlayer}; or</li>
+     *   <li>has <b>left the Dungeon Train</b> carriage the mob is riding.
+     *       Acquisition is already filtered (the priority-2 target goal and
+     *       {@link HuntForFoodGoal}); this sweep additionally drops a target that
+     *       <em>wanders</em> off. No-op unless a train mod is installed and the
+     *       mob is on a train: {@link TrainConfinement#allowsTarget}
+     *       short-circuits to {@code true} otherwise.</li>
+     * </ul>
      */
     @Override
     protected void customServerAiStep() {
         super.customServerAiStep();
         LivingEntity target = getTarget();
-        if (target != null && !TrainConfinement.allowsTarget(this, target)) {
+        if (target != null && (isIgnoredPlayer(target) || !TrainConfinement.allowsTarget(this, target))) {
             setTarget(null);
         }
+    }
+
+    /**
+     * Players in Creative or Spectator mode are ignored by all AI — the mob
+     * treats them as not present. {@link TargetCategory#classify} returns
+     * {@code null} for them (covering proactive targeting and the social goals);
+     * this helper covers the two paths {@code classify} can't — the vanilla
+     * {@link HurtByTargetGoal} retaliation target ({@link #customServerAiStep})
+     * and the {@link #hurt} provoke/retaliate flip. {@code isCreative()} matches
+     * Creative only; {@code isSpectator()} matches Spectator only.
+     */
+    private static boolean isIgnoredPlayer(LivingEntity entity) {
+        return entity instanceof Player player && (player.isCreative() || player.isSpectator());
     }
 
     /**
@@ -1395,6 +1416,14 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     public boolean hurt(DamageSource source, float amount) {
         boolean result = super.hurt(source, amount);
         if (result && !level().isClientSide && source.getEntity() instanceof LivingEntity attacker) {
+            // Creative/Spectator players are ignored: take the hit (they can still
+            // kill the mob) but never retaliate or flip personality toward them.
+            // super.hurt() already set lastHurtByMob — clear it so the vanilla
+            // HurtByTargetGoal doesn't re-acquire them every tick.
+            if (isIgnoredPlayer(attacker)) {
+                setLastHurtByMob(null);
+                return result;
+            }
             TargetCategory category = TargetCategory.classify(attacker);
             if (category != null) {
                 Personality reaction = personalities.provoke(category, isArmed());
