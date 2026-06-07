@@ -62,6 +62,16 @@ public final class TrainConfinement {
         return !env.isOnTrain(self) || env.sameTrain(self, pos);
     }
 
+    /**
+     * The carriage nearest {@code self} within {@code radius}, or {@code null} if
+     * none is loaded in range (always {@code null} without a train mod). Used by
+     * the recovery AI to find where to re-board after a fall; see
+     * {@link TrainEnvironment#nearestCarriage}.
+     */
+    public static TrainEnvironment.ReboardTarget nearestCarriage(Entity self, double radius) {
+        return environment.nearestCarriage(self, radius);
+    }
+
     // ---- Carriage exploration (behaviour #3) -----------------------------
 
     /** Re-export of {@link TrainEnvironment#NO_CARRIAGE} for AI-side callers. */

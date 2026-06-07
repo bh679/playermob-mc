@@ -13,6 +13,7 @@ import games.brennan.playermob.entity.goal.PlayerMobDoorGoal;
 import games.brennan.playermob.entity.goal.RaidArmorStandsGoal;
 import games.brennan.playermob.entity.goal.RaidContainersGoal;
 import games.brennan.playermob.entity.goal.SkepticalWatchGoal;
+import games.brennan.playermob.entity.goal.TrainRecoveryGoal;
 import games.brennan.playermob.entity.goal.WeaponAwareAttackGoal;
 import games.brennan.playermob.skin.PlayerMobSkin;
 import games.brennan.playermob.skin.PlayerMobSkinRegistry;
@@ -200,6 +201,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private static final long RECENTLY_EXPLORED_TTL_TICKS = 1200L;
 
     /**
+     * How long after leaving a Dungeon Train a PlayerMob still counts as "fell
+     * off" and will try to climb back on — see {@link TrainRecoveryGoal}. 200
+     * ticks (10s) is generous enough to start recovery after a fall, tight enough
+     * that a mob doesn't board a train it merely brushed past long ago.
+     */
+    public static final int RECOVERY_WINDOW_TICKS = 200;
+
+    /**
      * Chest {@code triggerEvent} ID for "viewer count changed" — drives the
      * lid animation. See {@link ChestBlockEntity#triggerEvent}.
      */
@@ -263,6 +272,15 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private boolean closesDoors;
 
     /**
+     * Server tick of the last moment this mob stood on a train carriage, or a
+     * large negative sentinel if it never has. Drives {@link #ticksSinceOnTrain}
+     * so {@link TrainRecoveryGoal} fires only for a mob that actually fell off a
+     * train. Transient (not saved) — a reloaded mob just isn't "recovering" until
+     * it rides again.
+     */
+    private int lastOnTrainTick = -100_000;
+
+    /**
      * Fixed march direction while exploring a Dungeon Train: {@code -1} toward
      * decreasing carriage index, {@code +1} toward increasing, {@code 0} = not yet
      * latched. Set once, the first server tick the mob is found on a train, from
@@ -323,6 +341,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     @Override
     protected void registerGoals() {
         this.goalSelector.addGoal(0, new FloatGoal(this));
+        // Fell off a Dungeon Train carriage? Getting back on preempts everything
+        // but swimming — added before the other priority-1 goals so its canUse is
+        // evaluated first. No-op without a train mod (nearestCarriage → null).
+        this.goalSelector.addGoal(1, new TrainRecoveryGoal(this, /* speed */ 1.0));
         // Personality social goals — priority 1 so they preempt raiding/strolling
         // when their disposition applies. Each self-gates on the live personality;
         // Skeptical/Friendly also gate on "no target" so they yield to combat.
@@ -396,6 +418,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         latchTrainExploreDirection();
 
         if (TrainConfinement.isConfined(this)) {
+            // Remember we're aboard, so TrainRecoveryGoal can tell "fell off" from
+            // "never boarded" (see ticksSinceOnTrain / RECOVERY_WINDOW_TICKS).
+            lastOnTrainTick = tickCount;
             // Open any door we're up against. Vanilla's DoorInteractGoal opens doors by
             // inspecting nav path nodes + collision, which doesn't fire on a moving Sable
             // carriage — so the train seam reaches for the door block directly (in the
@@ -432,6 +457,15 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      */
     public int getTrainExploreDir() {
         return this.trainExploreDir;
+    }
+
+    /**
+     * Ticks since this mob was last on a train carriage (large when it never has).
+     * {@link TrainRecoveryGoal} compares it against {@link #RECOVERY_WINDOW_TICKS}
+     * so recovery fires only for a mob that recently fell off a train.
+     */
+    public int ticksSinceOnTrain() {
+        return tickCount - lastOnTrainTick;
     }
 
     /**

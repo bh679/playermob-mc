@@ -2,6 +2,7 @@ package games.brennan.playermob.compat;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -46,6 +47,27 @@ public interface TrainEnvironment {
      * position is interpreted in {@code self}'s level.
      */
     boolean sameTrain(Entity self, BlockPos candidatePos);
+
+    /**
+     * The carriage nearest to {@code self} within {@code radius} blocks as a
+     * {@link ReboardTarget} (its current world AABB + world velocity), or
+     * {@code null} if no carriage is loaded in range (always {@code null} without
+     * a train mod). Server-authoritative; unlike {@link #isOnTrain}/{@link #sameTrain}
+     * this resolves a carriage the entity is <em>not</em> on — the "where do I
+     * re-board?" query the recovery AI ({@code TrainRecoveryGoal}) uses after
+     * falling onto the track bed. The carriage moves, so the result is a one-tick
+     * snapshot; re-query each tick while chasing it.
+     */
+    ReboardTarget nearestCarriage(Entity self, double radius);
+
+    /**
+     * Where a fallen PlayerMob should head to climb back aboard: the nearest
+     * carriage's current world-space bounding box and its world velocity
+     * (blocks/tick). Vanilla types only, so this seam compiles on every loader;
+     * the Dungeon-Train impl fills it from {@code ManagedShip.worldAABB()} and
+     * {@code TrainTransformProvider.getTargetVelocity()}.
+     */
+    record ReboardTarget(AABB worldBox, Vec3 velocity) {}
 
     /**
      * Sentinel returned by {@link #carriageIndex(Entity)} when {@code self} is
@@ -99,5 +121,6 @@ public interface TrainEnvironment {
         @Override public boolean sameTrain(Entity self, BlockPos candidatePos) { return false; }
         @Override public int carriageIndex(Entity self) { return NO_CARRIAGE; }
         @Override public Vec3 nextCarriageTarget(Entity self, int dir) { return null; }
+        @Override public ReboardTarget nearestCarriage(Entity self, double radius) { return null; }
     };
 }

@@ -98,5 +98,6 @@ class TrainConfinementTest {
         @Override public boolean sameTrain(Entity self, BlockPos candidatePos) { return sameTrainResult; }
         @Override public int carriageIndex(Entity self) { return NO_CARRIAGE; }
         @Override public Vec3 nextCarriageTarget(Entity self, int dir) { return null; }
+        @Override public ReboardTarget nearestCarriage(Entity self, double radius) { return null; }
     }
 }

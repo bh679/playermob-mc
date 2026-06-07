@@ -8,8 +8,10 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3d;
+import org.joml.Vector3dc;
 import org.joml.primitives.AABBdc;
 
 import java.util.UUID;
@@ -86,6 +88,48 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         Trains.Carriage at = carriageAtPos(level,
             candidatePos.getX() + 0.5, candidatePos.getY() + 0.5, candidatePos.getZ() + 0.5);
         return at != null && mine.equals(at.provider().getTrainId());
+    }
+
+    // ---- Recovery (behaviour #2) -----------------------------------------
+
+    @Override
+    public TrainEnvironment.ReboardTarget nearestCarriage(Entity self, double radius) {
+        if (!(self.level() instanceof ServerLevel level)) {
+            return null;
+        }
+        double px = self.getX();
+        double py = self.getY();
+        double pz = self.getZ();
+        double radiusSq = radius * radius;
+        Trains.Carriage best = null;
+        AABBdc bestBox = null;
+        double bestDistSq = Double.MAX_VALUE;
+        for (Trains.Carriage c : Trains.allCarriages(level)) {
+            AABBdc bb = c.ship().worldAABB();
+            // Skip a sub-level Sable hasn't ticked yet (null / zero-volume AABB) —
+            // no resolvable world position to path toward.
+            if (bb == null
+                    || bb.maxX() <= bb.minX() || bb.maxY() <= bb.minY() || bb.maxZ() <= bb.minZ()) {
+                continue;
+            }
+            double distSq = distanceSqToBox(px, py, pz, bb);
+            if (distSq < bestDistSq && distSq <= radiusSq) {
+                bestDistSq = distSq;
+                best = c;
+                bestBox = bb;
+            }
+        }
+        if (best == null) {
+            return null;
+        }
+        AABB worldBox = new AABB(
+            bestBox.minX(), bestBox.minY(), bestBox.minZ(),
+            bestBox.maxX(), bestBox.maxY(), bestBox.maxZ());
+        // DT's target velocity is blocks/second (the m/s speed knob); the recovery
+        // goal reasons in ticks, so convert to blocks/tick (20 tps).
+        Vector3dc v = best.provider().getTargetVelocity();
+        Vec3 velocity = new Vec3(v.x() / 20.0, v.y() / 20.0, v.z() / 20.0);
+        return new TrainEnvironment.ReboardTarget(worldBox, velocity);
     }
 
     // ---- Carriage exploration (behaviour #3) -----------------------------
@@ -196,6 +240,14 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         return x >= bb.minX() - RIDE_MARGIN && x <= bb.maxX() + RIDE_MARGIN
             && y >= bb.minY() - RIDE_MARGIN && y <= bb.maxY() + RIDE_MARGIN
             && z >= bb.minZ() - RIDE_MARGIN && z <= bb.maxZ() + RIDE_MARGIN;
+    }
+
+    /** Squared distance from {@code (px,py,pz)} to the nearest point on {@code bb}. */
+    private static double distanceSqToBox(double px, double py, double pz, AABBdc bb) {
+        double dx = Math.max(Math.max(bb.minX() - px, 0.0), px - bb.maxX());
+        double dy = Math.max(Math.max(bb.minY() - py, 0.0), py - bb.maxY());
+        double dz = Math.max(Math.max(bb.minZ() - pz, 0.0), pz - bb.maxZ());
+        return dx * dx + dy * dy + dz * dz;
     }
 
     /**
