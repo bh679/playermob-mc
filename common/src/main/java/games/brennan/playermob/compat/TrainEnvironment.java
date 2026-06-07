@@ -112,6 +112,25 @@ public interface TrainEnvironment {
     default void openBlockingDoor(Entity self) {}
 
     /**
+     * A world-space deck point on the carriage the mob can actually board <em>right
+     * now</em> — an opening it can step/hop into (a flatbed section, or a gap in the
+     * wall at least the mob's height) with solid floor beneath — or {@code null} when
+     * the carriage is walled at the mob's position and no opening is currently
+     * alongside. In that null case the recovery goal holds beside the moving train and
+     * waits for an open carriage (flatbed / hole) to slide into reach rather than
+     * bonking the wall.
+     *
+     * <p>Resolves the carriage's real blocks in its sub-level coordinate space (the
+     * far-offset shipyard region, not the mob's apparent world position), so only the
+     * Dungeon-Train impl returns non-null; every other environment keeps the
+     * {@code null} default and the goal just hops straight on (no walls to clear).</p>
+     *
+     * @param self        the recovering mob, positioned beside the carriage at ~deck height
+     * @param carriageBox the carriage's current world AABB (from {@link ReboardTarget#worldBox()})
+     */
+    default Vec3 boardingSpot(Entity self, AABB carriageBox) { return null; }
+
+    /**
      * No-op environment used whenever no train mod is active. Reports every
      * entity as not on a train, so confinement never engages.
      */

@@ -2,6 +2,7 @@ package games.brennan.playermob.compat;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -70,6 +71,16 @@ public final class TrainConfinement {
      */
     public static TrainEnvironment.ReboardTarget nearestCarriage(Entity self, double radius) {
         return environment.nearestCarriage(self, radius);
+    }
+
+    /**
+     * A world-space deck point the mob can board right now (an opening with floor under
+     * it), or {@code null} if the carriage is walled where the mob is — in which case
+     * recovery waits beside the moving train for an open carriage. Always {@code null}
+     * without a train mod; see {@link TrainEnvironment#boardingSpot}.
+     */
+    public static Vec3 boardingSpot(Entity self, AABB carriageBox) {
+        return environment.boardingSpot(self, carriageBox);
     }
 
     // ---- Carriage exploration (behaviour #3) -----------------------------

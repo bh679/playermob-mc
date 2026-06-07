@@ -281,6 +281,15 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private int lastOnTrainTick = -100_000;
 
     /**
+     * True only while {@link TrainRecoveryGoal} is actively climbing this mob back
+     * onto a train (set on the goal's start, cleared on stop). Off the train, recovery
+     * is the mob's <em>sole</em> focus — this flag suppresses combat (target
+     * acquisition + held targets) so it never breaks off to chase a mob mid-recovery.
+     * Transient server-only AI state.
+     */
+    private boolean recovering;
+
+    /**
      * Fixed march direction while exploring a Dungeon Train: {@code -1} toward
      * decreasing carriage index, {@code +1} toward increasing, {@code 0} = not yet
      * latched. Set once, the first server tick the mob is found on a train, from
@@ -314,6 +323,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (this.getNavigation() instanceof GroundPathNavigation groundNav) {
             groundNav.setCanOpenDoors(true);
         }
+        // Let the path cross water (float on the surface) instead of treating it as a
+        // wall — so a mob recovering back onto a train can swim toward it / to the
+        // nearest shore. FloatGoal (priority 0) keeps it from sinking.
+        this.getNavigation().setCanFloat(true);
     }
 
     /**
@@ -383,7 +396,8 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             10,
             true,
             false,
-            candidate -> personalityToward(candidate) == Personality.AGGRESSIVE
+            candidate -> !recovering
+                && personalityToward(candidate) == Personality.AGGRESSIVE
                 && TrainConfinement.allowsTarget(this, candidate)));
         // Hunt food animals only while hungry, and below the hostile-targeting
         // goal (2) so defending against a zombie always beats chasing a cow.
@@ -412,8 +426,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     protected void customServerAiStep() {
         super.customServerAiStep();
         LivingEntity target = getTarget();
-        if (target != null && (isIgnoredPlayer(target) || !TrainConfinement.allowsTarget(this, target))) {
-            setTarget(null);
+        if (target != null
+                && (recovering || isIgnoredPlayer(target) || !TrainConfinement.allowsTarget(this, target))) {
+            setTarget(null);   // recovering back onto a train preempts all combat
         }
         latchTrainExploreDirection();
 
@@ -466,6 +481,20 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      */
     public int ticksSinceOnTrain() {
         return tickCount - lastOnTrainTick;
+    }
+
+    /**
+     * Marks whether {@link TrainRecoveryGoal} is actively recovering this mob (set on
+     * its start, cleared on its stop). While {@code true}, combat is suppressed so
+     * getting back aboard is the mob's only focus (see {@link #recovering}).
+     */
+    public void setRecovering(boolean recovering) {
+        this.recovering = recovering;
+    }
+
+    /** True while actively climbing back onto a train (see {@link #recovering}). */
+    public boolean isRecovering() {
+        return this.recovering;
     }
 
     /**

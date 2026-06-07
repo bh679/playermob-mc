@@ -122,6 +122,18 @@ class BlockSourcePolicyTest {
     }
 
     @Test
+    void clearableObstructionExcludesSolidBuildingBlocks() {
+        // Must NOT flag solid building blocks — else the mob breaks the very stair/pillar it
+        // just placed (the place-then-rebreak loop). The clearable cases are foliage (LEAVES /
+        // REPLACEABLE tags), covered by the in-game smoke test since tags need a bound datapack.
+        assertFalse(BlockSourcePolicy.isClearableObstruction(Blocks.DIRT.defaultBlockState()),
+            "dirt is footing/building material, not a soft obstruction");
+        assertFalse(BlockSourcePolicy.isClearableObstruction(Blocks.SAND.defaultBlockState()));
+        assertFalse(BlockSourcePolicy.isClearableObstruction(Blocks.STONE.defaultBlockState()));
+        assertFalse(BlockSourcePolicy.isClearableObstruction(Blocks.COBBLESTONE.defaultBlockState()));
+    }
+
+    @Test
     void gravityBlocksDetected() {
         assertTrue(BlockSourcePolicy.isGravityBlock(Blocks.SAND.defaultBlockState()), "sand falls");
         assertTrue(BlockSourcePolicy.isGravityBlock(Blocks.GRAVEL.defaultBlockState()), "gravel falls");

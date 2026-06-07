@@ -156,6 +156,20 @@ public final class BlockSourcePolicy {
     }
 
     /**
+     * A soft, <em>non-structural</em> block worth breaking just to clear the way up: tree
+     * leaves and replaceable plants (grass/ferns/vines/snow). A recovering mob that climbs
+     * into a tree must punch through the foliage rather than stall against it.
+     *
+     * <p>Deliberately excludes the hand-breakable solids (dirt/sand/cobble/planks): those are
+     * the mob's own bridge/stair blocks and real footing — flagging them would make the mob
+     * break the very step it just placed (an infinite place-then-rebreak loop). The caller
+     * also excludes the protected track separately.</p>
+     */
+    public static boolean isClearableObstruction(BlockState state) {
+        return state.is(BlockTags.LEAVES) || state.is(BlockTags.REPLACEABLE);
+    }
+
+    /**
      * Whether {@code state} is worth harvesting for a bridge block: always for
      * hand-breakable blocks, and for stone-class blocks only when the mob holds
      * a pickaxe ({@code hasPickaxe}).
@@ -211,7 +225,7 @@ public final class BlockSourcePolicy {
     }
 
     /** The dominant horizontal {@link Direction} from {@code foot} toward {@code box}'s centre. */
-    static Direction horizontalDirToward(BlockPos foot, AABB box) {
+    public static Direction horizontalDirToward(BlockPos foot, AABB box) {
         double dx = (box.minX + box.maxX) / 2.0 - (foot.getX() + 0.5);
         double dz = (box.minZ + box.maxZ) / 2.0 - (foot.getZ() + 0.5);
         if (Math.abs(dx) >= Math.abs(dz)) {
