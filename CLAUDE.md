@@ -16,7 +16,7 @@ with full human oversight at each stage.
 - **Gradle layout:** Architectury subprojects — `common/`, `fabric/`, `forge/`, `neoforge/`. See `build.gradle` + `settings.gradle`.
 - **Repo:** `bh679/playermob-mc`
 - **GitHub Project:** Not yet created — track features as GitHub Issues until a board is set up.
-- **Wiki:** Not yet created.
+- **Wiki:** https://github.com/bh679/playermob-mc/wiki — modder documentation (build-on-top guide).
 
 ---
 
