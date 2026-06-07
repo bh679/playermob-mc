@@ -4,6 +4,7 @@ import games.brennan.playermob.PlayerMobRegistry;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.goal.AdvanceCarriageGoal;
 import games.brennan.playermob.entity.goal.CollectFloorItemsGoal;
+import games.brennan.playermob.entity.goal.CrossGroupGapGoal;
 import games.brennan.playermob.entity.goal.EatFoodGoal;
 import games.brennan.playermob.entity.goal.FleeFromCategoryGoal;
 import games.brennan.playermob.entity.goal.FriendlyGreetGoal;
@@ -279,6 +280,15 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      */
     private int trainExploreDir;
 
+    /**
+     * True only while {@link CrossGroupGapGoal} is carrying the mob across the gap
+     * between two carriage groups. Transient AI state (never saved): a leap is short and
+     * always restarts from scratch, so it has no meaning across a reload. While set, the
+     * hostile-targeting goal declines new targets, so a passing mob can't preempt the
+     * leap and abandon the PlayerMob mid-gap.
+     */
+    private boolean crossingGap;
+
     public PlayerMobEntity(EntityType<? extends PlayerMobEntity> type, Level level) {
         super(type, level);
         // Preserve combat-kill XP parity. Monster's constructor sets xpReward=5;
@@ -350,6 +360,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // No-op off a train (the seam reports "not confined"). Below harvest so
         // "fully explore" includes farming; above idle stroll.
         this.goalSelector.addGoal(7, new AdvanceCarriageGoal(this, /* speed */ 0.9));
+        // When the next room is across a group gap (AdvanceCarriageGoal stops), leap the
+        // gap to the adjacent group and keep marching. Same priority/flags as the advance
+        // goal; mutually exclusive because it only fires when the within-group target is
+        // null. No-op off a train.
+        this.goalSelector.addGoal(7, new CrossGroupGapGoal(this, /* speed */ 0.9));
         this.goalSelector.addGoal(8, new WaterAvoidingRandomStrollGoal(this, 0.6));
         this.goalSelector.addGoal(9, new LookAtPlayerGoal(this, LivingEntity.class, 8.0F));
         this.goalSelector.addGoal(10, new RandomLookAroundGoal(this));
@@ -362,6 +377,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             true,
             false,
             candidate -> personalityToward(candidate) == Personality.AGGRESSIVE
+                && !this.crossingGap
                 && TrainConfinement.allowsTarget(this, candidate)));
         // Hunt food animals only while hungry, and below the hostile-targeting
         // goal (2) so defending against a zombie always beats chasing a cow.
@@ -432,6 +448,15 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      */
     public int getTrainExploreDir() {
         return this.trainExploreDir;
+    }
+
+    /**
+     * Set by {@link CrossGroupGapGoal} for the duration of a cross-gap leap. While
+     * {@code true}, the mob declines new combat targets so the leap can't be preempted.
+     * See {@link #crossingGap}.
+     */
+    public void setCrossingGap(boolean crossingGap) {
+        this.crossingGap = crossingGap;
     }
 
     /**

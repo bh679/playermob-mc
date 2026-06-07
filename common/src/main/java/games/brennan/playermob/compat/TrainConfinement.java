@@ -85,6 +85,17 @@ public final class TrainConfinement {
     }
 
     /**
+     * World-space waypoint at the centre of the nearest room of the adjacent
+     * same-train group in step direction {@code dir}, or {@code null} if not on a
+     * train or there is no further group that way. Always {@code null} without a
+     * train mod. Used by {@code CrossGroupGapGoal} to aim the cross-gap leap once
+     * {@link #nextCarriageTarget} runs out of rooms in the current group.
+     */
+    public static Vec3 nextGroupTarget(Entity self, int dir) {
+        return environment.nextGroupTarget(self, dir);
+    }
+
+    /**
      * Open a closed door {@code self} is standing against on a train (wooden
      * directly, iron/copper via its control). No-op off a train / without a train
      * mod — see {@link TrainEnvironment#openBlockingDoor}.
