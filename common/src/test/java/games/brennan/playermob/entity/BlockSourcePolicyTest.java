@@ -51,6 +51,15 @@ class BlockSourcePolicyTest {
     }
 
     @Test
+    void bridgeBlockCountTreatsLogsAsFourPlanks() {
+        SimpleContainer b = new SimpleContainer(4);
+        b.setItem(0, new ItemStack(Items.COBBLESTONE, 3));  // 3 placeable blocks
+        b.setItem(1, new ItemStack(Items.OAK_LOG, 2));      // 2 logs → 8 planks
+        b.setItem(2, new ItemStack(Items.STICK, 5));        // not a block → 0
+        assertEquals(11, BlockSourcePolicy.bridgeBlockCount(b));
+    }
+
+    @Test
     void emptyBackpackHasNoPlaceableBlock() {
         SimpleContainer backpack = new SimpleContainer(4);
         backpack.setItem(0, new ItemStack(Items.STICK));

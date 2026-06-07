@@ -68,6 +68,25 @@ public final class BlockSourcePolicy {
         return -1;
     }
 
+    /**
+     * Effective number of bridge blocks {@code backpack} can supply: each placeable
+     * building block counts once, and each craftable log counts as 4 (it crafts into
+     * 4 planks). Lets recovery work out whether it has gathered enough to climb back
+     * on before it stops collecting.
+     */
+    public static int bridgeBlockCount(Container backpack) {
+        int total = 0;
+        for (int i = 0; i < backpack.getContainerSize(); i++) {
+            ItemStack stack = backpack.getItem(i);
+            if (isCraftableLog(stack)) {
+                total += stack.getCount() * 4;
+            } else if (ItemPickupPolicy.isBuildingBlock(stack)) {
+                total += stack.getCount();
+            }
+        }
+        return total;
+    }
+
     // ---- Logs → planks (recovery's craft step) ---------------------------
 
     /**

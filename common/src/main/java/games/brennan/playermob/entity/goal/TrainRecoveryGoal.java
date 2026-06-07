@@ -329,13 +329,20 @@ public final class TrainRecoveryGoal extends Goal {
     private void tickGather() {
         if (gatherTargetPos == null) {
             gatherTargetPos = findGatherTarget();
-            if (gatherTargetPos == null) {       // nothing reachable to harvest → give up
-                stop();
+            if (gatherTargetPos == null) {
+                // Nothing more reachable — bridge with whatever we've collected, or give up.
+                if (BlockSourcePolicy.bridgeBlockCount(mob.getInventory()) > 0) {
+                    phase = Phase.BRIDGE;
+                    phaseTicks = 0;
+                } else {
+                    stop();
+                }
                 return;
             }
             gatherBreakTicks = 0;
             breakTicksTotal = 0;
             toolReadyTick = 0;
+            phaseTicks = 0;
             mob.getNavigation().moveTo(
                 gatherTargetPos.getX() + 0.5, gatherTargetPos.getY(), gatherTargetPos.getZ() + 0.5, moveSpeed);
             return;
@@ -376,8 +383,12 @@ public final class TrainRecoveryGoal extends Goal {
         gatherBreakTicks++;
         if (gatherBreakTicks >= breakTicksTotal) {
             harvestGatherTarget(state);
-            phase = Phase.BRIDGE;                        // re-evaluate with the new material
-            phaseTicks = 0;
+            // Collect enough to climb back on before finishing — only then bridge.
+            if (BlockSourcePolicy.bridgeBlockCount(mob.getInventory()) >= blocksNeeded()) {
+                phase = Phase.BRIDGE;
+                phaseTicks = 0;
+            }
+            // else: stay in GATHER; next tick picks the next block.
         }
     }
 
@@ -406,6 +417,17 @@ public final class TrainRecoveryGoal extends Goal {
         // Vanilla mining time ≈ hardness × 30 ÷ tool speed ticks for a harvestable block.
         int ticks = Math.round(hardness * 30.0f / toolSpeed);
         return Mth.clamp(ticks, MIN_BREAK_TICKS, MAX_BREAK_TICKS);
+    }
+
+    /**
+     * Roughly how many bridge blocks the mob needs to climb back onto the carriage
+     * from where it is now — the vertical gap up to the carriage floor (one block
+     * per staircase step), clamped to {@link #MAX_PLACEMENTS}. Recovery gathers up
+     * to this many before it stops collecting and starts bridging.
+     */
+    private int blocksNeeded() {
+        int climb = Mth.floor(target.worldBox().minY) - mob.blockPosition().getY();
+        return Mth.clamp(climb, 1, MAX_PLACEMENTS);
     }
 
     /** Nearest cheap, hand-breakable, non-track block worth breaking for a bridge block. */
