@@ -1,11 +1,13 @@
 package games.brennan.playermob.client;
 
 import games.brennan.playermob.entity.PlayerMobEntity;
+import games.brennan.playermob.entity.TraitEditButtons;
 import games.brennan.playermob.menu.PlayerMobMenu;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.PlayerFaceRenderer;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.multiplayer.PlayerInfo;
@@ -34,7 +36,10 @@ import java.util.UUID;
  * (Fight/Flight, Friendliness) and a <b>Relationships</b> list — one row per
  * individual the mob has a feeling toward, each with that target's face, name,
  * and feeling (0–10, hate→love). All read live from the entity's synced
- * disposition fields, so values update while the menu is open.</p>
+ * disposition fields, so values update while the menu is open. Each trait has
+ * {@code [-]}/{@code [+]} buttons that edit it in Creative over the vanilla
+ * container-button channel (see {@link PlayerMobMenu#clickMenuButton}); the
+ * server clamps and re-syncs, so the panel reflects the edit next frame.</p>
  *
  * <p>{@link Environment} {@code CLIENT}-only — stripped from dedicated server
  * jars at load time, same pattern as {@code PlayerMobRenderer}. Registered per
@@ -55,7 +60,7 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     private static final int INVENTORY_WIDTH = 176;   // the original window's content width
     private static final int PANEL_X = INVENTORY_WIDTH + 4;
     private static final int PANEL_TOP = 8;
-    private static final int BAR_WIDTH = 100;
+    private static final int BAR_WIDTH = 108;
     private static final int FACE_SIZE = 8;
     private static final int ROW_HEIGHT = 12;
     private static final int MAX_RELATIONSHIP_ROWS = 8;
@@ -63,15 +68,81 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     private static final int VALUE_COLOR = 0x202020;
     private static final int MUTED_COLOR = 0x808080;
 
+    // Vertical offsets of each panel element from the panel top (topPos + PANEL_TOP).
+    // Shared by the renderer (labels/bars) and init() (edit buttons) so they stay aligned.
+    private static final int TRAITS_HEADER_DY = 0;
+    private static final int FF_LABEL_DY = 12;
+    private static final int FF_BAR_DY = 26;
+    private static final int FRIEND_LABEL_DY = 35;
+    private static final int FRIEND_BAR_DY = 49;
+    private static final int REL_HEADER_DY = 58;
+    private static final int REL_ROWS_DY = 69;
+
+    // Trait edit cluster: [-] value [+], right-aligned to the bar's right edge.
+    private static final int BUTTON_SIZE = 12;
+    private static final int BUTTON_GAP = 2;
+    private static final int VALUE_FIELD_W = 14; // room for the value drawn between the buttons
+    private static final int CLUSTER_W = BUTTON_SIZE * 2 + BUTTON_GAP * 2 + VALUE_FIELD_W;
+
     /** Names are stable for a session — resolve once per UUID. */
     private final Map<UUID, String> nameCache = new HashMap<>();
 
     public PlayerMobScreen(PlayerMobMenu menu, Inventory playerInv, Component title) {
         super(menu, playerInv, title);
-        this.imageWidth = 288; // 176 inventory + ~112 disposition panel
+        this.imageWidth = 300; // 176 inventory + ~124 disposition panel (incl. edit buttons)
         this.imageHeight = 186;
         // Recompute since the field initialiser used the default height.
         this.inventoryLabelY = this.imageHeight - 94;
+    }
+
+    /**
+     * Add the Creative trait-edit buttons. Runs after {@code super.init()} has
+     * set {@code leftPos}/{@code topPos}, so button bounds resolve to absolute
+     * screen coordinates. Skipped on the client fallback (no resolved mob — the
+     * panel renders "(no data)" instead).
+     */
+    @Override
+    protected void init() {
+        super.init();
+        if (this.menu.getMob() == null) {
+            return;
+        }
+        int top = this.topPos + PANEL_TOP;
+        addTraitButtons(top + FF_LABEL_DY, TraitEditButtons.FIGHT_FLIGHT_DOWN, TraitEditButtons.FIGHT_FLIGHT_UP);
+        addTraitButtons(top + FRIEND_LABEL_DY, TraitEditButtons.FRIENDLINESS_DOWN, TraitEditButtons.FRIENDLINESS_UP);
+    }
+
+    /** A {@code [-] [+]} button pair for one trait, on its label line. */
+    private void addTraitButtons(int labelY, int downId, int upId) {
+        int y = labelY - 2; // centre the 12px button on the ~8px label text
+        addRenderableWidget(Button.builder(Component.literal("-"), b -> sendButton(downId))
+            .bounds(minusX(), y, BUTTON_SIZE, BUTTON_SIZE).build());
+        addRenderableWidget(Button.builder(Component.literal("+"), b -> sendButton(upId))
+            .bounds(plusX(), y, BUTTON_SIZE, BUTTON_SIZE).build());
+    }
+
+    /** Send a trait edit over the vanilla container-button channel; the server clamps + re-syncs. */
+    private void sendButton(int id) {
+        if (this.minecraft != null && this.minecraft.gameMode != null) {
+            this.minecraft.gameMode.handleInventoryButtonClick(this.menu.containerId, id);
+        }
+    }
+
+    // Edit-cluster geometry (right-aligned to the bar). Depends on leftPos, set by init().
+    private int clusterLeft() {
+        return this.leftPos + PANEL_X + BAR_WIDTH - CLUSTER_W;
+    }
+
+    private int minusX() {
+        return clusterLeft();
+    }
+
+    private int plusX() {
+        return clusterLeft() + BUTTON_SIZE + BUTTON_GAP + VALUE_FIELD_W + BUTTON_GAP;
+    }
+
+    private int valueCenterX() {
+        return clusterLeft() + BUTTON_SIZE + BUTTON_GAP + VALUE_FIELD_W / 2;
     }
 
     @Override
@@ -118,21 +189,19 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
 
     private void drawDispositionPanel(GuiGraphics g) {
         int x = this.leftPos + PANEL_X;
-        int y = this.topPos + PANEL_TOP;
+        int top = this.topPos + PANEL_TOP;
         PlayerMobEntity mob = this.menu.getMob();
         if (mob == null) {
-            g.drawString(this.font, Component.literal("(no data)"), x, y, MUTED_COLOR, false);
+            g.drawString(this.font, Component.literal("(no data)"), x, top, MUTED_COLOR, false);
             return;
         }
 
-        g.drawString(this.font, Component.literal("Traits"), x, y, LABEL_COLOR, false);
-        y += 11;
-        y = drawTraitBar(g, x, y, "Fight/Flight", mob.getSyncedFightFlight());
-        y = drawTraitBar(g, x, y, "Friendliness", mob.getSyncedFriendliness());
-        y += 4;
+        g.drawString(this.font, Component.literal("Traits"), x, top + TRAITS_HEADER_DY, LABEL_COLOR, false);
+        drawTrait(g, x, top + FF_LABEL_DY, top + FF_BAR_DY, "Fight/Flight", mob.getSyncedFightFlight());
+        drawTrait(g, x, top + FRIEND_LABEL_DY, top + FRIEND_BAR_DY, "Friendliness", mob.getSyncedFriendliness());
 
-        g.drawString(this.font, Component.literal("Relationships"), x, y, LABEL_COLOR, false);
-        y += 11;
+        g.drawString(this.font, Component.literal("Relationships"), x, top + REL_HEADER_DY, LABEL_COLOR, false);
+        int y = top + REL_ROWS_DY;
 
         Map<UUID, Float> feelings = mob.getSyncedFeelings();
         if (feelings.isEmpty()) {
@@ -153,13 +222,19 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
         }
     }
 
-    private int drawTraitBar(GuiGraphics g, int x, int y, String label, int value) {
-        g.drawString(this.font, Component.literal(label + ": " + value), x, y, VALUE_COLOR, false);
-        y += 10;
-        g.fill(x, y, x + BAR_WIDTH, y + 3, 0xFF555555);
-        int filled = Math.round(BAR_WIDTH * (clamp01(value / 10f)));
-        g.fill(x, y, x + filled, y + 3, 0xFF4060C0);
-        return y + 3 + 4;
+    /**
+     * One trait row: the label on the left, the live value centred between its
+     * {@code [-]}/{@code [+]} edit buttons (those are widgets added in
+     * {@link #init()}), and a 0–10 fill bar below.
+     */
+    private void drawTrait(GuiGraphics g, int x, int labelY, int barY, String label, int value) {
+        g.drawString(this.font, Component.literal(label), x, labelY, VALUE_COLOR, false);
+        String text = String.valueOf(value);
+        g.drawString(this.font, Component.literal(text),
+            valueCenterX() - this.font.width(text) / 2, labelY, VALUE_COLOR, false);
+        g.fill(x, barY, x + BAR_WIDTH, barY + 3, 0xFF555555);
+        int filled = Math.round(BAR_WIDTH * clamp01(value / 10f));
+        g.fill(x, barY, x + filled, barY + 3, 0xFF4060C0);
     }
 
     private void drawRelationshipRow(GuiGraphics g, int x, int y, UUID id, float feeling) {
