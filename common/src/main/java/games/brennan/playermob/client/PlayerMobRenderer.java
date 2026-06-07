@@ -1,11 +1,13 @@
 package games.brennan.playermob.client;
 
+import com.mojang.blaze3d.vertex.PoseStack;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.model.HumanoidModel;
 import net.minecraft.client.model.PlayerModel;
 import net.minecraft.client.model.geom.ModelLayers;
+import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.entity.HumanoidMobRenderer;
 import net.minecraft.client.renderer.entity.layers.HumanoidArmorLayer;
@@ -16,13 +18,16 @@ import net.minecraft.resources.ResourceLocation;
  * Renders a {@link PlayerMobEntity} using the vanilla {@link PlayerModel} —
  * same model used for real players, so the mob is shaped like one.
  *
- * <p><b>Skins come from the vanilla client jar.</b> Each mob picks one of
- * the 9 default Minecraft player skins ({@link #SKIN_NAMES}) shipped at
+ * <p><b>Two skin sources</b> — v2 prefers a Mojang texture URL via
+ * {@link PlayerMobSkinTextures} (datapack-fed registry; per-entity real
+ * player skins). When the entity has no URL — legacy 0.2.0 mobs in saved
+ * worlds, or new mobs spawned while {@code PlayerMobSkinRegistry} is empty —
+ * the renderer falls back to one of the 9 bundled vanilla default skins
+ * ({@link #SKIN_NAMES}) shipped at
  * {@code assets/minecraft/textures/entity/player/wide/<name>.png}. We don't
- * bundle our own copies — pointing at the {@code minecraft:} namespace
- * resources keeps the jar small and gives the mob authentic "real player"
- * faces (Steve, Alex, plus the 7 newer defaults added in 1.19.3:
- * Ari, Efe, Kai, Makena, Noor, Sunny, Zuri).</p>
+ * ship any PNG bytes ourselves; we either point at vanilla's resources or
+ * stream from Mojang's CDN via vanilla's {@code SkinManager} pipeline (so
+ * the on-disk skin cache is shared with vanilla).</p>
  *
  * <p><b>Render layers added explicitly:</b> {@link HumanoidMobRenderer} does
  * NOT auto-add armor / held-item layers (unlike {@code PlayerRenderer}). If
@@ -39,9 +44,12 @@ import net.minecraft.resources.ResourceLocation;
  * mobs in saved worlds have a stored {@code SkinIndex} that maps to a
  * specific position in this array.</p>
  *
- * <p>Wide model (Steve-style arms) used in v1. Future v2 may add slim
- * variant support and per-entity GameProfile-backed Mojang skin URLs (see
- * GH issue #1).</p>
+ * <p>Wide model (Steve-style arms) only — even when the URL skin's
+ * {@code SkinSlim} flag is set, the renderer uses the wide
+ * {@link PlayerModel} (slim arms will look slightly thick). Per-entity
+ * slim/wide model swapping is a v3 follow-up — needs override of
+ * {@code render(...)} to hot-swap the model field, which the layer
+ * renderers' captured references make non-trivial.</p>
  *
  * <p>{@link Environment} {@code CLIENT}-only — stripped from dedicated
  * server jars at load time. Server-side code that needs the skin count
@@ -90,8 +98,31 @@ public final class PlayerMobRenderer
         this.addLayer(new ItemInHandLayer<>(this, ctx.getItemInHandRenderer()));
     }
 
+    /**
+     * {@link HumanoidMobRenderer} never sets the model's {@code crouching} flag
+     * — only {@code PlayerRenderer} does, for real players — so the sneak pose
+     * driven by {@link PlayerMobEntity#setCrouching} (Friendly greeting, Shy
+     * hiding) would otherwise never render. Mirror the entity's crouch state
+     * onto the model each frame, exactly as PlayerRenderer does.
+     */
+    @Override
+    public void render(PlayerMobEntity entity, float entityYaw, float partialTick,
+                       PoseStack poseStack, MultiBufferSource buffer, int packedLight) {
+        this.getModel().crouching = entity.isCrouching();
+        super.render(entity, entityYaw, partialTick, poseStack, buffer, packedLight);
+    }
+
     @Override
     public ResourceLocation getTextureLocation(PlayerMobEntity entity) {
+        String url = entity.getSkinTextureUrl();
+        if (!url.isEmpty()) {
+            // v2: Mojang URL skin via SkinManager. Returns DefaultPlayerSkin
+            // while async fetch is in flight, then flips to the real texture
+            // once cached — that's the graceful offline / CDN-outage fallback.
+            return PlayerMobSkinTextures.lookup(url, entity.isSkinSlim());
+        }
+        // No URL ⇒ legacy 0.2.0 mob, or registry-empty new mob. Render the
+        // bundled vanilla default keyed off SkinIndex (v1 behaviour).
         int idx = entity.getSkinIndex();
         if (idx < 0 || idx >= SKIN_TEXTURES.length) {
             // Defensive: should never happen — clamp on the entity already

@@ -17,8 +17,33 @@ configurations {
     developmentNeoForge.extendsFrom common
 }
 
+repositories {
+    mavenCentral()
+    // Modrinth maven — source of the optional Dungeon Train compile-only artifact.
+    maven {
+        name = "Modrinth"
+        url = "https://api.modrinth.com/maven"
+        content { includeGroup "maven.modrinth" }
+    }
+}
+
 dependencies {
     neoForge "net.neoforged:neoforge:${rootProject.neoforge_version}"
+
+    // --- Optional Dungeon Train integration (mod id `dungeontrain`, NeoForge-only) ---
+    // Compile-only against DT's public API: NOT bundled and NOT a runtime
+    // requirement of our jar. The integration is gated at runtime by
+    // ModList.isLoaded("dungeontrain") (see PlayerMobNeoForge#installDungeonTrain),
+    // so the published jar loads identically with or without DT. transitive=false
+    // keeps DT's own deps off our compile classpath — we only need its classes.
+    modCompileOnly("maven.modrinth:dungeon-train:${rootProject.dungeon_train_version}") { transitive = false }
+    // DT's ManagedShip API names JOML types (including joml-primitives' AABBdc) in
+    // its method signatures, so these must resolve at compile time even though we
+    // call none of those methods. Plain libraries — no Loom remap, not shipped.
+    compileOnly "org.joml:joml:1.10.5"
+    compileOnly "org.joml:joml-primitives:1.10.0"
+    // To exercise the live integration in a dev client, drop the Dungeon Train and
+    // Sable jars into neoforge/run/mods/ (git-ignored) before `neoforge:runClient`.
 
     common(project(path: ":common", configuration: "namedElements")) { transitive false }
     shadowCommon(project(path: ":common", configuration: "transformProductionNeoForge")) { transitive false }

@@ -15,6 +15,12 @@ import java.util.EnumSet;
  * the MOVE+LOOK+JUMP flags so the goal selector sees a single occupant for
  * combat — switching mid-combat won't lose the slot.
  *
+ * <p>Before each delegate (re)selection it asks the entity to
+ * {@link PlayerMobEntity#equipBestWeaponForTarget draw the best weapon for the
+ * range} — ranged when the target is far, melee when close — so the mob uses
+ * its whole weapon toolkit, not just whatever it picked up last. On
+ * {@link #stop} it reverts to holding the best melee.</p>
+ *
  * <p>Internally delegates to three goals — {@link PlayerMobCrossbowAttackGoal},
  * {@link PlayerMobBowAttackGoal}, {@link MeleeAttackGoal} — chosen per tick by
  * inspecting the main-hand stack. When the held weapon changes mid-combat
@@ -71,7 +77,9 @@ public final class WeaponAwareAttackGoal extends Goal {
         LivingEntity target = mob.getTarget();
         if (target == null || !target.isAlive()) return false;
         if (active == null) return false;
-        // If the operator swaps weapons mid-combat, hand off cleanly.
+        // Draw the best weapon for the current range before (re)selecting the delegate.
+        mob.equipBestWeaponForTarget(target);
+        // If the weapon changed (auto-switch or operator swap), hand off cleanly.
         Goal desired = pickGoalForMainhand();
         if (desired != active) {
             active.stop();
@@ -88,6 +96,8 @@ public final class WeaponAwareAttackGoal extends Goal {
 
     @Override
     public void start() {
+        // Equip the situational weapon first so the chosen delegate matches it.
+        mob.equipBestWeaponForTarget(mob.getTarget());
         active = pickGoalForMainhand();
         active.start();
     }
@@ -98,6 +108,8 @@ public final class WeaponAwareAttackGoal extends Goal {
             active.stop();
             active = null;
         }
+        // Combat over — revert to holding the best melee weapon.
+        mob.equipBestMeleeInHand();
     }
 
     @Override

@@ -1,5 +1,7 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.compat.TrainConfinement;
+import games.brennan.playermob.entity.Personality;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.Container;
@@ -55,6 +57,8 @@ public final class RaidContainersGoal extends Goal {
     private static final int POST_VISIT_COOLDOWN = 20;    // 1s after finishing before rescanning
     private static final int EMPTY_SCAN_COOLDOWN = 40;    // 2s between scans when nothing found
     private static final double REACH_DISTANCE_SQR = 4.0; // 2 blocks
+    private static final double SNEAK_WATCH_RANGE = 16.0; // crouch while raiding if a feared entity is this close
+    private static final int SNEAK_CHECK_INTERVAL = 10;   // re-evaluate the sneak state every 0.5s
 
     private enum Phase { IDLE, PATHING, OPENING, LOOTING, CLOSING }
 
@@ -74,6 +78,10 @@ public final class RaidContainersGoal extends Goal {
      * advance currentSlot to next interesting one and schedule a new delay".
      */
     private int nextSwapAt = -1;
+
+    /** True while sneaking a raid because a feared (Shy-toward) entity is nearby. */
+    private boolean sneaking = false;
+    private int sneakCheckTicks = 0;
 
     public RaidContainersGoal(PlayerMobEntity mob, double moveSpeed, int scanRadius) {
         this.mob = mob;
@@ -106,7 +114,8 @@ public final class RaidContainersGoal extends Goal {
                 && targetPos != null
                 && mob.isAlive()
                 && !mob.isDeadOrDying()
-                && mob.getTarget() == null;
+                && mob.getTarget() == null
+                && TrainConfinement.allowsTarget(mob, targetPos);
     }
 
     @Override
@@ -126,6 +135,8 @@ public final class RaidContainersGoal extends Goal {
     public void stop() {
         // Always close — entity's tracker is idempotent if nothing's open.
         mob.closeOpenedContainer();
+        mob.setCrouching(false);
+        sneaking = false;
         mob.getNavigation().stop();
         if (targetPos != null) {
             mob.markBlockExplored(targetPos);
@@ -148,6 +159,7 @@ public final class RaidContainersGoal extends Goal {
     public void tick() {
         if (targetPos == null) return;
         phaseTicks++;
+        updateSneak();
 
         switch (phase) {
             case PATHING -> tickPathing();
@@ -156,6 +168,18 @@ public final class RaidContainersGoal extends Goal {
             case CLOSING -> tickClosing();
             default -> { /* IDLE */ }
         }
+    }
+
+    /**
+     * Crouch for the whole raid when an entity this mob is Shy toward is nearby,
+     * so a timid mob sneaks to the chest and back. Throttled — the scan isn't free.
+     */
+    private void updateSneak() {
+        if (--sneakCheckTicks <= 0) {
+            sneakCheckTicks = SNEAK_CHECK_INTERVAL;
+            sneaking = mob.nearestWithPersonality(Personality.SHY, SNEAK_WATCH_RANGE) != null;
+        }
+        mob.setCrouching(sneaking);
     }
 
     private void tickPathing() {
@@ -260,6 +284,7 @@ public final class RaidContainersGoal extends Goal {
                     BlockEntity be = level.getBlockEntity(cursor);
                     if (!isLootableContainer(be)) continue;
                     if (mob.isBlockExplored(cursor, now)) continue;
+                    if (!TrainConfinement.allowsTarget(mob, cursor)) continue;
                     double distSq = mobPos.distSqr(cursor);
                     if (distSq < closestDistSq) {
                         closestDistSq = distSq;

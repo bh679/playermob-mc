@@ -1,4 +1,10 @@
 {
   "entity.playermob.player_mob": "Player",
-  "item.playermob.player_mob_spawn_egg": "Player Spawn Egg"
+  "item.playermob.player_mob_spawn_egg": "Player Spawn Egg",
+  "item.playermob.player_mob_aggressive_spawn_egg": "Aggressive Player Spawn Egg",
+  "item.playermob.player_mob_friendly_spawn_egg": "Friendly Player Spawn Egg",
+  "item.playermob.player_mob_passive_spawn_egg": "Passive Player Spawn Egg",
+  "item.playermob.player_mob_skeptical_spawn_egg": "Skeptical Player Spawn Egg",
+  "item.playermob.player_mob_shy_spawn_egg": "Shy Player Spawn Egg",
+  "container.playermob.player_mob": "Player"
 }

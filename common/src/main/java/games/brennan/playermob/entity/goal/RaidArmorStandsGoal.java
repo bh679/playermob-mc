@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.ai.goal.Goal;
@@ -82,7 +83,8 @@ public final class RaidArmorStandsGoal extends Goal {
         return phase != Phase.IDLE
                 && target != null
                 && target.isAlive()
-                && mob.getTarget() == null;
+                && mob.getTarget() == null
+                && TrainConfinement.allowsTarget(mob, target);
     }
 
     @Override
@@ -174,7 +176,8 @@ public final class RaidArmorStandsGoal extends Goal {
         long now = mob.tickCount;
         List<ArmorStand> nearby = mob.level().getEntitiesOfClass(
             ArmorStand.class, box,
-            s -> s.isAlive() && !mob.isEntityExplored(s.getUUID(), now));
+            s -> s.isAlive() && !mob.isEntityExplored(s.getUUID(), now)
+                && TrainConfinement.allowsTarget(mob, s));
         ArmorStand closest = null;
         double closestDistSq = Double.MAX_VALUE;
         for (ArmorStand s : nearby) {
