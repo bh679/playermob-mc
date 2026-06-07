@@ -1,7 +1,9 @@
 package games.brennan.playermob.client;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -31,5 +33,32 @@ class VersionHudRendererTest {
     void hiddenWhenBranchMissing() {
         // Defensive: a null branch (resource absent) should not render a label.
         assertFalse(VersionHudRenderer.shouldDisplay(null));
+    }
+
+    // ---- In-world top offset (Dungeon Train HUD de-overlap) ------------------
+    // Static holder, so reset after each case to avoid cross-test leakage.
+    @AfterEach
+    void clearOffset() {
+        VersionHudRenderer.setExtraTopOffset(null);
+    }
+
+    @Test
+    void noOffsetByDefault() {
+        // Fabric/Forge, or NeoForge without DT (on a branch): label stays put.
+        assertEquals(0, VersionHudRenderer.extraTopOffsetPx());
+    }
+
+    @Test
+    void installedSupplierIsApplied() {
+        // NeoForge installs a supplier when DT is on a branch — read each frame.
+        VersionHudRenderer.setExtraTopOffset(() -> 11);
+        assertEquals(11, VersionHudRenderer.extraTopOffsetPx());
+    }
+
+    @Test
+    void nullSupplierResetsToZero() {
+        VersionHudRenderer.setExtraTopOffset(() -> 11);
+        VersionHudRenderer.setExtraTopOffset(null);
+        assertEquals(0, VersionHudRenderer.extraTopOffsetPx());
     }
 }
