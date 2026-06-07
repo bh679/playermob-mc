@@ -73,6 +73,17 @@ class TrainConfinementTest {
             "ABSENT reports no carriage");
         assertNull(TrainConfinement.nextCarriageTarget(null, -1),
             "ABSENT has no next-carriage waypoint");
+        assertNull(TrainConfinement.nextGroupTarget(null, -1),
+            "ABSENT has no next-group waypoint");
+    }
+
+    @Test
+    void noTrainModHasNoCrossGroupTarget() {
+        // A train env that reports "on a train" but no geometry still yields no
+        // cross-group waypoint — the AdvanceCarriage/CrossGroupGap goals then no-op.
+        TrainConfinement.install(new FakeTrain(true, true));
+        assertNull(TrainConfinement.nextGroupTarget(null, -1));
+        assertNull(TrainConfinement.nextGroupTarget(null, +1));
     }
 
     @Test
@@ -98,6 +109,7 @@ class TrainConfinementTest {
         @Override public boolean sameTrain(Entity self, BlockPos candidatePos) { return sameTrainResult; }
         @Override public int carriageIndex(Entity self) { return NO_CARRIAGE; }
         @Override public Vec3 nextCarriageTarget(Entity self, int dir) { return null; }
+        @Override public Vec3 nextGroupTarget(Entity self, int dir) { return null; }
         @Override public ReboardTarget nearestCarriage(Entity self, double radius) { return null; }
     }
 }

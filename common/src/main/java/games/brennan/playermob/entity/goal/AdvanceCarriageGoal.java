@@ -35,10 +35,11 @@ import java.util.EnumSet;
  *
  * <p><b>Scope.</b> Within a single carriage <em>group</em>. When the next room
  * would be in another group (a physical gap, no longer the same sub-level),
- * {@code nextCarriageTarget} returns {@code null} and the mob stops — crossing the
- * gap is behaviour #2. Off a train (always on Fabric/Forge, and on NeoForge
- * without Dungeon Train) {@link TrainConfinement#isConfined} is false and this
- * goal never engages, so behaviour is unchanged.</p>
+ * {@code nextCarriageTarget} returns {@code null} and this goal yields;
+ * {@link CrossGroupGapGoal} (same priority) then leaps the gap to the adjacent
+ * group, after which this goal resumes there. Off a train (always on Fabric/Forge,
+ * and on NeoForge without Dungeon Train) {@link TrainConfinement#isConfined} is
+ * false and this goal never engages, so behaviour is unchanged.</p>
  */
 public final class AdvanceCarriageGoal extends Goal {
 
@@ -48,7 +49,7 @@ public final class AdvanceCarriageGoal extends Goal {
     private static final int REPATH_INTERVAL = 10;       // re-issue moveTo every 0.5s to track the moving room
     private static final int POST_VISIT_COOLDOWN = 10;   // 0.5s after a hop before rescanning
     private static final int EMPTY_SCAN_COOLDOWN = 20;   // 1s between checks when off-train / not yet latched
-    private static final int BOUNDARY_COOLDOWN = 40;     // 2s at a group boundary (waiting on behaviour #2)
+    private static final int BOUNDARY_COOLDOWN = 40;     // 2s at a group boundary (CrossGroupGapGoal leaps it)
 
     private final PlayerMobEntity mob;
     private final double moveSpeed;

@@ -99,6 +99,25 @@ public interface TrainEnvironment {
     Vec3 nextCarriageTarget(Entity self, int dir);
 
     /**
+     * A current world-space waypoint at the centre of the <em>nearest room of the
+     * adjacent carriage group</em> in march direction {@code dir} — the next group
+     * of the <em>same</em> train beyond this group's boundary — or {@code null} if
+     * {@code self} is not on a train or there is no further group that way (the
+     * genuine end of the train).
+     *
+     * <p>This is the cross-group analogue of {@link #nextCarriageTarget}: it is
+     * resolved once {@code nextCarriageTarget} has run out of rooms within the
+     * current group (a physical gap to the next group). The returned room is the one
+     * facing the gap, so a mob that crosses lands at the near edge of the next group
+     * and resumes within-group marching in the same direction. Crossing the gap
+     * itself is {@code CrossGroupGapGoal}'s job.</p>
+     *
+     * <p>Like {@link #nextCarriageTarget}, the carriages move, so the point is only
+     * valid for the tick it was queried.</p>
+     */
+    Vec3 nextGroupTarget(Entity self, int dir);
+
+    /**
      * If {@code self} is on a train and standing against a closed door, open it —
      * wooden doors directly, power-operated (iron/copper) doors by operating their
      * adjacent control. A no-op default (off-train environments do nothing); the
@@ -140,6 +159,7 @@ public interface TrainEnvironment {
         @Override public boolean sameTrain(Entity self, BlockPos candidatePos) { return false; }
         @Override public int carriageIndex(Entity self) { return NO_CARRIAGE; }
         @Override public Vec3 nextCarriageTarget(Entity self, int dir) { return null; }
+        @Override public Vec3 nextGroupTarget(Entity self, int dir) { return null; }
         @Override public ReboardTarget nearestCarriage(Entity self, double radius) { return null; }
     };
 }
