@@ -6,55 +6,70 @@ package games.brennan.playermob.entity;
  * {@link DispositionTraits#friendliness() friendliness} trait. A mob only ever
  * gifts someone it has come to love ({@code feeling >= }{@link
  * DispositionResolver#FEELING_LOVE 7}, gated by {@code FriendlyGreetGoal}), so in
- * practice this maps the 7–10 "love" band — wider/more friendly mobs part with
- * better things — onto three tiers:
+ * practice this maps the 7–10 "love" band onto three rungs of value:
  *
  * <ul>
- *   <li>{@link GiftTier#TRINKET} — a flower (the baseline gesture).</li>
- *   <li>{@link GiftTier#STAPLE} — a bit of food (a warmer, useful gift).</li>
- *   <li>{@link GiftTier#GEAR} — a real armour/weapon upgrade, reserved for a
- *       deeply loved friend a very friendly mob trusts.</li>
+ *   <li>{@link GiftTier#SURPLUS} — things it won't miss: excess food, spare blocks.</li>
+ *   <li>{@link GiftTier#SPARE} — a tool/weapon/armour it already holds a better
+ *       duplicate of (redundant; costs it nothing).</li>
+ *   <li>{@link GiftTier#UPGRADE} — a real gear upgrade for the recipient, even at
+ *       its own expense (reserved for a deeply-loved friend a very friendly mob trusts).</li>
  * </ul>
  *
- * <p>All-static and world-free — takes primitives only — so it unit-tests like
- * {@link DispositionResolver}. The actual item selection (which flower, which
- * backpack piece) lives on the entity; this class only picks the <em>tier</em>.
- * {@link #tierFor} is total over the whole {@code [0,10] × [0,10]} grid (floor is
- * {@code TRINKET}) so it's defined even for feelings the gift path never reaches.</p>
+ * <p>{@link #tierFor} picks the <b>top</b> rung the mob will reach for;
+ * {@link #cascadeFrom} expands that into the ordered list of rungs to try,
+ * richest-first, so a mob that lacks its top-rung item gracefully steps down to a
+ * cheaper gift rather than giving nothing. Both are all-static, world-free, and
+ * unit-tested like {@link DispositionResolver}; the actual item selection (which
+ * spare piece, which food) lives on the entity.</p>
  */
 public final class GiftPolicy {
 
     private GiftPolicy() {}
 
-    /** How valuable a gift the mob is willing to part with. */
+    /** Rung of gift value, cheapest → richest. */
     public enum GiftTier {
-        /** A flower — the baseline friendly gesture. */
-        TRINKET,
-        /** A bit of food — a warmer, useful gift. */
-        STAPLE,
-        /** A real armour/weapon upgrade for the recipient. */
-        GEAR
+        /** Excess food or spare building blocks — things the mob won't miss. */
+        SURPLUS,
+        /** Gear the mob already holds a better duplicate of. */
+        SPARE,
+        /** A real gear upgrade for the recipient, at the mob's own expense. */
+        UPGRADE
     }
 
-    /** Feeling at/above which a sufficiently friendly mob donates real gear. */
-    static final float GEAR_FEELING = 9.0F;
-    /** Friendliness at/above which a deeply-loved friend earns a gear gift. */
-    static final int GEAR_FRIENDLINESS = 8;
-    /** Feeling at/above which the gift steps up from a trinket to a food staple. */
-    static final float STAPLE_FEELING = 8.0F;
+    /** Feeling at/above which (with enough friendliness) the mob sacrifices a real upgrade. */
+    static final float UPGRADE_FEELING = 9.0F;
+    /** Friendliness at/above which a deeply-loved friend earns an upgrade gift. */
+    static final int UPGRADE_FRIENDLINESS = 8;
+    /** Feeling at/above which the mob will part with spare gear. */
+    static final float SPARE_FEELING = 8.0F;
 
     /**
-     * The gift tier for the given feeling (0–10) and friendliness (0–10). Gear
-     * needs <em>both</em> a near-maximal feeling and a high friendliness; a warm
-     * feeling alone earns a staple; everything else is a trinket.
+     * The top gift rung for the given feeling (0–10) and friendliness (0–10). An
+     * upgrade needs <em>both</em> a near-maximal feeling and high friendliness;
+     * spare gear needs a strong feeling; everything else is surplus.
      */
     public static GiftTier tierFor(float feeling, int friendliness) {
-        if (feeling >= GEAR_FEELING && friendliness >= GEAR_FRIENDLINESS) {
-            return GiftTier.GEAR;
+        if (feeling >= UPGRADE_FEELING && friendliness >= UPGRADE_FRIENDLINESS) {
+            return GiftTier.UPGRADE;
         }
-        if (feeling >= STAPLE_FEELING) {
-            return GiftTier.STAPLE;
+        if (feeling >= SPARE_FEELING) {
+            return GiftTier.SPARE;
         }
-        return GiftTier.TRINKET;
+        return GiftTier.SURPLUS;
+    }
+
+    /**
+     * The rungs to attempt, richest-first, cascading down from {@code top}: a mob
+     * that can't satisfy its top rung falls back to a cheaper gift. {@code UPGRADE}
+     * → {UPGRADE, SPARE, SURPLUS}; {@code SPARE} → {SPARE, SURPLUS}; {@code SURPLUS}
+     * → {SURPLUS}.
+     */
+    public static GiftTier[] cascadeFrom(GiftTier top) {
+        return switch (top) {
+            case UPGRADE -> new GiftTier[] { GiftTier.UPGRADE, GiftTier.SPARE, GiftTier.SURPLUS };
+            case SPARE -> new GiftTier[] { GiftTier.SPARE, GiftTier.SURPLUS };
+            case SURPLUS -> new GiftTier[] { GiftTier.SURPLUS };
+        };
     }
 }

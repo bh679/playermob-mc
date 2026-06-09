@@ -5,6 +5,8 @@ import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.entity.Reaction;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.ItemStack;
 
 import java.util.EnumSet;
 
@@ -16,8 +18,10 @@ import java.util.EnumSet;
  * <ol>
  *   <li><b>Follow</b> — walk up to the friend.</li>
  *   <li><b>Crouch</b> — bob into a crouch a random 3–10 times as a greeting.</li>
- *   <li><b>Gift</b> — only once it has come to love them (feeling ≥ 7), drop one
- *       item from the backpack toward the friend (a default token if empty).</li>
+ *   <li><b>Gift</b> — only once it has come to love them (feeling ≥ 7), give a
+ *       present scaled by how loved they are ({@code GiftPolicy}): surplus it won't
+ *       miss, spare gear, or a real upgrade. With nothing suitable in its pack it
+ *       <b>fetches</b> a nearby dropped item to give; failing that, a flower.</li>
  * </ol>
  *
  * <p>When a cycle finishes the mob picks one of two things, matching the
@@ -37,8 +41,10 @@ public final class FriendlyGreetGoal extends Goal {
     private static final int MIN_DISENGAGE_TICKS = 200;       // ~10s of "go raid / wander"
     private static final int MAX_DISENGAGE_TICKS = 400;       // ~20s
     private static final float CHANCE_TO_DISENGAGE = 0.5F;    // else greet again
+    private static final int FETCH_TIMEOUT_TICKS = 100;       // 5s to reach a fetched gift before giving up
+    private static final double FETCH_REACH_SQR = 4.0;        // 2 blocks — close enough to grab it
 
-    private enum Phase { FOLLOW, CROUCH, GIFT, DONE }
+    private enum Phase { FOLLOW, CROUCH, GIFT, FETCH, DONE }
 
     private final PlayerMobEntity mob;
     private final double range;
@@ -52,6 +58,8 @@ public final class FriendlyGreetGoal extends Goal {
     private int halfPeriodTicks;
     private boolean crouchDown;
     private int cooldownTicks;
+    private ItemEntity fetchItem;
+    private int fetchTicks;
 
     public FriendlyGreetGoal(PlayerMobEntity mob, double range, double approachSpeed) {
         this.mob = mob;
@@ -97,14 +105,18 @@ public final class FriendlyGreetGoal extends Goal {
     @Override
     public void tick() {
         if (friend == null) return;
-        mob.getLookControl().setLookAt(friend, 30.0F, 30.0F);
 
         switch (phase) {
-            case FOLLOW -> tickFollow();
-            case CROUCH -> tickCrouch();
-            case GIFT -> tickGift();
+            case FOLLOW -> { lookAtFriend(); tickFollow(); }
+            case CROUCH -> { lookAtFriend(); tickCrouch(); }
+            case GIFT -> { lookAtFriend(); tickGift(); }
+            case FETCH -> tickFetch(); // looks at the item it's fetching, not the friend
             default -> { /* DONE — canContinueToUse ends the goal next evaluation */ }
         }
+    }
+
+    private void lookAtFriend() {
+        mob.getLookControl().setLookAt(friend, 30.0F, 30.0F);
     }
 
     private void tickFollow() {
@@ -139,10 +151,51 @@ public final class FriendlyGreetGoal extends Goal {
         mob.setCrouching(false);
         // A friendly mob greets everyone it likes, but only parts with a gift for
         // someone it has truly come to love (feeling >= 7).
-        if (mob.feelingToward(friend) >= DispositionResolver.FEELING_LOVE) {
-            mob.giveItemTo(friend); // tosses a backpack item, or a default token gift if empty
+        if (mob.feelingToward(friend) < DispositionResolver.FEELING_LOVE) {
+            phase = Phase.DONE;
+            return;
         }
+        // Prefer a real item from the pack, its value scaled by how loved they are.
+        ItemStack gift = mob.selectGiftFromInventory(friend);
+        if (!gift.isEmpty()) {
+            mob.tossGift(friend, gift);
+            phase = Phase.DONE;
+            return;
+        }
+        // Pack has nothing to give — go fetch a nearby dropped item to gift instead.
+        ItemEntity nearby = mob.findGiftableNearbyItem(range);
+        if (nearby != null) {
+            fetchItem = nearby;
+            fetchTicks = 0;
+            phase = Phase.FETCH;
+            mob.getNavigation().moveTo(fetchItem, approachSpeed);
+            return;
+        }
+        // Nothing to give and nothing nearby — a flower keeps the gesture warm.
+        mob.tossGift(friend, mob.trinketGift());
         phase = Phase.DONE;     // cycle complete — stop() decides greet-again vs disengage
+    }
+
+    /** Walk to the dropped item we chose to fetch, then lob it to the friend. */
+    private void tickFetch() {
+        if (fetchItem == null || !fetchItem.isAlive() || fetchItem.isRemoved()) {
+            mob.tossGift(friend, mob.trinketGift()); // item vanished → flower fallback
+            phase = Phase.DONE;
+            return;
+        }
+        mob.getLookControl().setLookAt(fetchItem, 30.0F, 30.0F);
+        if (mob.distanceToSqr(fetchItem) <= FETCH_REACH_SQR) {
+            mob.getNavigation().stop();
+            ItemStack gift = fetchItem.getItem().copy();
+            fetchItem.discard();
+            mob.tossGift(friend, gift);
+            phase = Phase.DONE;
+        } else if (++fetchTicks > FETCH_TIMEOUT_TICKS) {
+            mob.tossGift(friend, mob.trinketGift()); // couldn't reach it → flower fallback
+            phase = Phase.DONE;
+        } else if (mob.getNavigation().isDone()) {
+            mob.getNavigation().moveTo(fetchItem, approachSpeed); // re-issue if the path stalled
+        }
     }
 
     @Override
@@ -156,6 +209,7 @@ public final class FriendlyGreetGoal extends Goal {
                 + mob.getRandom().nextInt(MAX_DISENGAGE_TICKS - MIN_DISENGAGE_TICKS + 1);
         }
         this.friend = null;
+        this.fetchItem = null;
         this.phase = Phase.DONE;
     }
 

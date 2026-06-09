@@ -928,41 +928,39 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         setYHeadRot(yaw);
     }
 
-    /**
-     * Friendly "gift": choose a present whose quality scales with how loved the
-     * recipient is ({@link GiftPolicy}) and toss it arcing toward {@code target}
-     * from eye height like a player's Q-drop. The gesture always lands — the lowest
-     * tier is a freshly-minted flower — so this never returns false.
-     */
-    public boolean giveItemTo(LivingEntity target) {
-        tossGift(target, chooseGift(target));
-        return true;
-    }
+    /** Food carried beyond this item count is "excess" the mob will give away. */
+    private static final int FOOD_KEEP_COUNT = 20;
 
     /**
-     * Pick the gift for {@code target}, its quality scaled by feeling +
-     * friendliness ({@link GiftPolicy#tierFor}):
+     * Choose a gift for {@code recipient} from <em>what the mob is actually
+     * carrying</em>, its value scaled by how loved they are ({@link GiftPolicy}).
+     * Tries the richest rung the feeling+friendliness allows and cascades down
+     * ({@link GiftPolicy#cascadeFrom}):
      * <ul>
-     *   <li><b>GEAR</b> — a deeply-loved friend of a very friendly mob gets a real
-     *       armour/weapon upgrade donated from the backpack (player-shaped
-     *       recipients only, so an animal/villager is never handed armour). If no
-     *       backpack piece would upgrade them, it steps down to a staple.</li>
-     *   <li><b>STAPLE</b> — a bit of food.</li>
-     *   <li><b>TRINKET</b> — a flower (the baseline gesture).</li>
+     *   <li><b>UPGRADE</b> — a backpack gear piece that upgrades the recipient
+     *       (player-shaped recipients only, so an animal is never handed armour);</li>
+     *   <li><b>SPARE</b> — gear the mob already holds an equal/better duplicate of;</li>
+     *   <li><b>SURPLUS</b> — excess food (kept above {@value #FOOD_KEEP_COUNT}) or a spare block stack.</li>
      * </ul>
-     * Gear comes only from the backpack, so the mob never disarms itself.
+     * Returns the chosen stack <em>already removed</em> from the backpack, or
+     * {@link ItemStack#EMPTY} if the pack has nothing to give at any rung (the
+     * caller then fetches a nearby item, or mints a token as a last resort). Gear is
+     * only ever sourced from the backpack, so the mob never disarms itself.
      */
-    private ItemStack chooseGift(LivingEntity target) {
-        GiftPolicy.GiftTier tier = GiftPolicy.tierFor(feelingToward(target), friendliness());
-        if (tier == GiftPolicy.GiftTier.GEAR
-                && (target instanceof Player || target instanceof PlayerMobEntity)) {
-            ItemStack gear = takeBestGearUpgradeFor(target);
-            if (!gear.isEmpty()) {
-                return gear;
+    public ItemStack selectGiftFromInventory(LivingEntity recipient) {
+        GiftPolicy.GiftTier top = GiftPolicy.tierFor(feelingToward(recipient), friendliness());
+        boolean playerShaped = recipient instanceof Player || recipient instanceof PlayerMobEntity;
+        for (GiftPolicy.GiftTier rung : GiftPolicy.cascadeFrom(top)) {
+            ItemStack gift = switch (rung) {
+                case UPGRADE -> playerShaped ? takeBestGearUpgradeFor(recipient) : ItemStack.EMPTY;
+                case SPARE -> takeSpareGear();
+                case SURPLUS -> takeSurplus();
+            };
+            if (!gift.isEmpty()) {
+                return gift;
             }
-            tier = GiftPolicy.GiftTier.STAPLE; // nothing in the pack would upgrade them
         }
-        return tier == GiftPolicy.GiftTier.STAPLE ? stapleGift() : trinketGift();
+        return ItemStack.EMPTY;
     }
 
     /**
@@ -971,9 +969,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * for which {@link EquipmentEvaluator#shouldReplace} beats what the recipient
      * already wears/holds in that slot — or {@link ItemStack#EMPTY} if the backpack
      * holds no upgrade. {@code getEquipmentSlotForItem} is item-driven (same slot
-     * for any humanoid), so it's read off the mob. Read-only scan, then one removal
-     * — no mid-iteration mutation. All recognised gear stacks to 1, so the whole
-     * stack is the gift.
+     * for any humanoid), so it's read off the mob. Read-only scan, then one removal.
      */
     private ItemStack takeBestGearUpgradeFor(LivingEntity recipient) {
         int bestSlot = -1;
@@ -992,8 +988,103 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         return bestSlot < 0 ? ItemStack.EMPTY : inventory.removeItemNoUpdate(bestSlot);
     }
 
+    /**
+     * Find and remove the best backpack equipment piece the mob already holds an
+     * equal-or-better of in its slot — redundant kit it can give away for free. A
+     * piece that would <em>upgrade</em> the mob (better than what's equipped, or
+     * filling an empty slot it wants) is kept, so this never disarms the mob.
+     */
+    private ItemStack takeSpareGear() {
+        int bestSlot = -1;
+        double bestScore = Double.NEGATIVE_INFINITY;
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            ItemStack candidate = inventory.getItem(i);
+            if (candidate.isEmpty()) continue;
+            if (!EquipmentEvaluator.shouldReplace(candidate, ItemStack.EMPTY)) continue; // not recognised gear
+            EquipmentSlot slot = getEquipmentSlotForItem(candidate);
+            ItemStack equipped = getItemBySlot(slot);
+            if (equipped.isEmpty()) continue;                                   // empty slot → mob wants it
+            if (EquipmentEvaluator.shouldReplace(candidate, equipped)) continue; // upgrade for mob → keep
+            double s = EquipmentEvaluator.score(candidate);
+            if (s > bestScore) {
+                bestScore = s;
+                bestSlot = i;
+            }
+        }
+        return bestSlot < 0 ? ItemStack.EMPTY : inventory.removeItemNoUpdate(bestSlot);
+    }
+
+    /**
+     * A surplus gift: excess food (the lowest-nutrition stack, only when carrying
+     * more than {@value #FOOD_KEEP_COUNT} food items — giving just the amount over
+     * the buffer), else a spare building-block stack. {@link ItemStack#EMPTY} if it
+     * has neither.
+     */
+    private ItemStack takeSurplus() {
+        int foodCount = carriedFoodCount();
+        if (foodCount > FOOD_KEEP_COUNT) {
+            int slot = lowestNutritionFoodSlot();
+            if (slot >= 0) {
+                int give = Math.min(inventory.getItem(slot).getCount(), foodCount - FOOD_KEEP_COUNT);
+                return inventory.removeItem(slot, give);
+            }
+        }
+        int blockSlot = ItemPickupPolicy.smallestBuildingBlockSlot(inventory);
+        return blockSlot < 0 ? ItemStack.EMPTY : inventory.removeItemNoUpdate(blockSlot);
+    }
+
+    /** Total food items carried (count, not nutrition) — drives the surplus-food gift. */
+    private int carriedFoodCount() {
+        int total = 0;
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            ItemStack stack = inventory.getItem(i);
+            if (!stack.isEmpty() && stack.get(DataComponents.FOOD) != null) {
+                total += stack.getCount();
+            }
+        }
+        return total;
+    }
+
+    /** Backpack slot of the lowest-nutrition food (give the cheap food, keep the good), or -1. */
+    private int lowestNutritionFoodSlot() {
+        int slot = -1;
+        int lowest = Integer.MAX_VALUE;
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            ItemStack stack = inventory.getItem(i);
+            if (stack.isEmpty()) continue;
+            FoodProperties food = stack.get(DataComponents.FOOD);
+            if (food != null && food.nutrition() < lowest) {
+                lowest = food.nutrition();
+                slot = i;
+            }
+        }
+        return slot;
+    }
+
+    /**
+     * Nearest alive, pickup-ready, train-allowed dropped item within {@code radius}
+     * — what the greet goal walks to and gives when its pack has nothing to offer.
+     * Reuses the {@code CollectFloorItemsGoal} scan shape, minus the self-interest
+     * filter: any item will do as a gift.
+     */
+    public ItemEntity findGiftableNearbyItem(double radius) {
+        AABB box = getBoundingBox().inflate(radius);
+        ItemEntity closest = null;
+        double closestSq = radius * radius;
+        for (ItemEntity item : level().getEntitiesOfClass(ItemEntity.class, box,
+                e -> e.isAlive() && !e.isRemoved() && !e.hasPickUpDelay()
+                    && TrainConfinement.allowsTarget(this, e))) {
+            double d = distanceToSqr(item);
+            if (d < closestSq) {
+                closestSq = d;
+                closest = item;
+            }
+        }
+        return closest;
+    }
+
     /** Toss {@code gift} arcing toward {@code target} from eye height, like a player's Q-drop. */
-    private void tossGift(LivingEntity target, ItemStack gift) {
+    public void tossGift(LivingEntity target, ItemStack gift) {
         double fromX = getX();
         double fromY = getEyeY() - 0.1;
         double fromZ = getZ();
@@ -1012,18 +1103,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         level().addFreshEntity(thrown);
     }
 
-    /** A flower — the baseline trinket gift. */
-    private ItemStack trinketGift() {
+    /** A flower — the last-resort gift when the pack is empty and nothing's nearby to fetch. */
+    public ItemStack trinketGift() {
         return new ItemStack(getRandom().nextBoolean() ? Items.POPPY : Items.DANDELION);
-    }
-
-    /** A bit of food — the mid-tier "staple" gift. */
-    private ItemStack stapleGift() {
-        return switch (getRandom().nextInt(3)) {
-            case 0 -> new ItemStack(Items.BREAD);
-            case 1 -> new ItemStack(Items.APPLE);
-            default -> new ItemStack(Items.COOKIE);
-        };
     }
 
     /** Whether world-griefing (and thus chest raiding) is permitted here. */
