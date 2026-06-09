@@ -1,46 +1,65 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.entity.AimCone;
 import games.brennan.playermob.entity.ArrowThreat;
 import games.brennan.playermob.entity.PlayerMobEntity;
-import net.minecraft.world.entity.projectile.AbstractArrow;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.ai.goal.Goal;
+import net.minecraft.world.entity.projectile.AbstractArrow;
 import net.minecraft.world.item.BowItem;
 import net.minecraft.world.item.CrossbowItem;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.component.ChargedProjectiles;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.List;
 
 /**
- * Defensive reflex: when an arrow is in flight and heading at the mob, and the mob
- * is holding a shield, raise it and square the body up so vanilla's directional
- * block actually deflects the hit — then lower it once the volley passes. This is
- * what lets a sword-and-board PlayerMob survive a skeleton instead of eating every
- * arrow.
+ * Defensive reflex: raise a held shield against ranged fire and square the body up
+ * so vanilla's directional block actually deflects the hit, then lower it once the
+ * threat passes. This is what lets a sword-and-board PlayerMob survive a skeleton or
+ * pillager instead of eating every shot.
  *
- * <p>Declares <b>no flags</b> (like {@code PlayerMobDoorGoal}), so it layers on top
- * of whatever owns movement — the mob keeps meleeing via {@code WeaponAwareAttackGoal}
- * (priority 2) and raises its off-hand shield between swings, rather than this reflex
- * freezing combat by stealing MOVE/LOOK.</p>
+ * <p><b>Why it triggers on the enemy's <i>charge</i>, not just the arrow.</b>
+ * Vanilla shields don't block until they've been raised for ~5 ticks
+ * ({@code LivingEntity.isBlocking()} checks {@code useDuration - remaining >= 5}).
+ * An arrow fired from close range arrives in fewer ticks than that, so reacting only
+ * once it's airborne raises the shield too late to count. The primary trigger is
+ * therefore "someone is <i>drawing/charging</i> a ranged weapon aimed at me" — that
+ * gives the shield its warm-up during the enemy's draw, so it's genuinely blocking by
+ * the time the shot looses. An in-flight arrow on a collision course is kept as a
+ * secondary trigger (covers shots from an un-classified source / already loosed).</p>
  *
- * <p>Threat detection is delegated to the pure, unit-tested {@link ArrowThreat};
- * this class only does the {@link AbstractArrow} scan and the shield/face plumbing
- * (all reused from {@link PlayerMobEntity}: {@code raiseShieldIfHeld},
- * {@code lowerShield}, {@code faceBodyToward}). "Arrow" means any
- * {@link AbstractArrow} — normal/tipped/spectral arrows and thrown tridents.</p>
+ * <p>Detection:</p>
+ * <ul>
+ *   <li><b>Charging shooter</b> ({@link #findAimingShooter}) — a nearby
+ *       {@link LivingEntity} drawing a bow / charging or holding a charged crossbow,
+ *       that is aimed at this mob (a {@link Mob} whose {@code getTarget()} is us, or —
+ *       for players, who have no target — one whose view cone covers us via
+ *       {@link AimCone}), with line of sight.</li>
+ *   <li><b>Incoming arrow</b> ({@link #findIncomingArrow}) — any {@link AbstractArrow}
+ *       (arrows + thrown tridents) on a near-collision course per the pure
+ *       {@link ArrowThreat} test.</li>
+ * </ul>
  *
- * <p>An archer mob actively shooting back is left to shoot (see
- * {@link #isActivelyShootingBack}) rather than freezing to block; a melee mob, or an
- * archer with no target, blocks freely. Charging a bow already suppresses the raise
- * (a mob can only use one item at a time — {@code raiseShieldIfHeld} bails while
- * {@code isUsingItem()}), and {@link #isBusyUsingNonShield} keeps {@code canUse}
- * honest about it.</p>
+ * <p>Declares <b>no flags</b> (like {@code PlayerMobDoorGoal}), so it layers on top of
+ * whatever owns movement — a sword-and-board mob keeps meleeing via
+ * {@code WeaponAwareAttackGoal} (priority 2) and raises its off-hand shield between
+ * swings rather than this reflex freezing combat. An archer mob actively engaging a
+ * target keeps shooting ({@link #isActivelyShootingBack}); charging its own bow
+ * suppresses the raise too ({@link #isBusyUsingNonShield}). No shield in hand ⇒ no-op.</p>
  */
 public final class BlockArrowsGoal extends Goal {
 
-    /** Block radius around the mob to scan for in-flight arrows. */
-    private static final double SCAN_RADIUS = 16.0;
+    /** Block radius to scan for in-flight arrows. */
+    private static final double ARROW_SCAN_RADIUS = 16.0;
+
+    /** Block radius to scan for a shooter charging a ranged weapon at the mob. */
+    private static final double SHOOTER_SCAN_RANGE = 20.0;
 
     /** Added to the mob's half-width to size the "this arrow will hit me" disc. */
     private static final double HIT_MARGIN = 0.5;
@@ -48,12 +67,15 @@ public final class BlockArrowsGoal extends Goal {
     /** Don't start blocking arrows whose closest approach is more than this many ticks out (~1s). */
     private static final double MAX_LEAD_TICKS = 20.0;
 
-    /** Keep the shield up this many ticks after the last threat, so quick volleys don't flicker it. */
-    private static final int GRACE_TICKS = 5;
+    /** Cosine of the aim-cone half-angle for player shooters (~53°). Higher = tighter. */
+    private static final double AIM_COS_THRESHOLD = 0.6;
+
+    /** Keep the shield up this many ticks after the last threat, so quick volleys / re-draws don't flicker it. */
+    private static final int GRACE_TICKS = 8;
 
     private final PlayerMobEntity mob;
 
-    /** Last server tick an incoming arrow was seen — drives the {@link #GRACE_TICKS} hold. */
+    /** Last server tick a ranged threat was seen — drives the {@link #GRACE_TICKS} hold. */
     private int lastThreatTick = Integer.MIN_VALUE;
 
     public BlockArrowsGoal(PlayerMobEntity mob) {
@@ -64,26 +86,38 @@ public final class BlockArrowsGoal extends Goal {
     @Override
     public boolean canUse() {
         if (!mob.hasShieldReady()) return false;
-        if (isBusyUsingNonShield()) return false;   // don't interrupt a bow charge
-        if (isActivelyShootingBack()) return false; // archer engaging a target shoots, doesn't freeze
-        return findIncomingArrow() != null;
+        if (isBusyUsingNonShield()) return false;   // don't interrupt charging its own bow
+        if (isActivelyShootingBack()) return false; // an archer engaging a target shoots, doesn't block
+        return hasRangedThreat();
     }
 
     @Override
     public boolean canContinueToUse() {
         if (!mob.hasShieldReady()) return false;
-        if (findIncomingArrow() != null) return true;
-        // Brief grace after the last arrow so a stream of shots keeps the shield up.
+        if (isActivelyShootingBack()) return false;
+        if (hasRangedThreat()) return true;
+        // Brief grace after the last threat so a stream of shots / re-draws holds the block.
         return mob.tickCount - lastThreatTick <= GRACE_TICKS;
     }
 
     @Override
     public void tick() {
+        // An airborne arrow is the most imminent thing to face; otherwise face the
+        // shooter we're anticipating so the warm-up shield is already squared up.
         AbstractArrow arrow = findIncomingArrow();
-        if (arrow == null) return;
+        double faceX;
+        double faceZ;
+        if (arrow != null) {
+            faceX = arrow.getX();
+            faceZ = arrow.getZ();
+        } else {
+            LivingEntity shooter = findAimingShooter();
+            if (shooter == null) return;
+            faceX = shooter.getX();
+            faceZ = shooter.getZ();
+        }
         mob.raiseShieldIfHeld();
-        // Vanilla only blocks hits from the facing arc — square up to the arrow.
-        mob.faceBodyToward(arrow.getX(), arrow.getZ());
+        mob.faceBodyToward(faceX, faceZ);
         lastThreatTick = mob.tickCount;
     }
 
@@ -97,7 +131,11 @@ public final class BlockArrowsGoal extends Goal {
         return true;
     }
 
-    /** True while the mob is mid-use of a non-shield item (e.g. charging a bow). */
+    private boolean hasRangedThreat() {
+        return findIncomingArrow() != null || findAimingShooter() != null;
+    }
+
+    /** True while the mob is mid-use of a non-shield item (e.g. charging its own bow). */
     private boolean isBusyUsingNonShield() {
         return mob.isUsingItem() && !mob.getUseItem().is(Items.SHIELD);
     }
@@ -110,9 +148,82 @@ public final class BlockArrowsGoal extends Goal {
     }
 
     /**
+     * Nearest entity drawing/charging a ranged weapon aimed at the mob, or {@code null}.
+     * This is the primary, anticipatory trigger (see class javadoc on the shield warm-up).
+     */
+    private LivingEntity findAimingShooter() {
+        double mobCx = mob.getX();
+        double mobCy = mob.getY() + mob.getBbHeight() * 0.5;
+        double mobCz = mob.getZ();
+
+        AABB scan = mob.getBoundingBox().inflate(SHOOTER_SCAN_RANGE);
+        List<LivingEntity> candidates = mob.level().getEntitiesOfClass(
+            LivingEntity.class, scan,
+            e -> e != mob && e.isAlive() && isPreparingRangedAttack(e));
+
+        LivingEntity closest = null;
+        double closestSqr = Double.MAX_VALUE;
+        for (LivingEntity shooter : candidates) {
+            if (!isAimedAtMob(shooter, mobCx, mobCy, mobCz)) continue;
+            double distSqr = shooter.distanceToSqr(mobCx, mobCy, mobCz);
+            if (distSqr < closestSqr) {
+                closestSqr = distSqr;
+                closest = shooter;
+            }
+        }
+        return closest;
+    }
+
+    /**
+     * Whether {@code shooter} is drawing a bow, or charging / holding a charged crossbow.
+     * The "actively drawing/charging" case is read off {@code isUsingItem()} — vanilla's
+     * bow and crossbow attack goals both call {@code startUsingItem} during the draw, so
+     * this covers players, skeletons, and charging pillagers alike. {@link #holdsChargedCrossbow}
+     * then covers the post-charge hold (loaded crossbow, not yet loosed).
+     */
+    private static boolean isPreparingRangedAttack(LivingEntity shooter) {
+        if (shooter.isUsingItem()) {
+            ItemStack using = shooter.getUseItem();
+            if (using.getItem() instanceof BowItem || using.getItem() instanceof CrossbowItem) {
+                return true;
+            }
+        }
+        return holdsChargedCrossbow(shooter);
+    }
+
+    private static boolean holdsChargedCrossbow(LivingEntity shooter) {
+        return isChargedCrossbow(shooter.getMainHandItem())
+            || isChargedCrossbow(shooter.getOffhandItem());
+    }
+
+    private static boolean isChargedCrossbow(ItemStack stack) {
+        if (!(stack.getItem() instanceof CrossbowItem)) return false;
+        // 1.21.1: charged state is the CHARGED_PROJECTILES component (see PlayerMobCrossbowAttackGoal).
+        ChargedProjectiles charged = stack.get(DataComponents.CHARGED_PROJECTILES);
+        return charged != null && !charged.isEmpty();
+    }
+
+    /**
+     * Whether {@code shooter} is pointing at this mob: definitive for a {@link Mob} that
+     * has locked onto us as its target; otherwise (players, untargeted mobs) a view-cone
+     * test via {@link AimCone}. Both require line of sight.
+     */
+    private boolean isAimedAtMob(LivingEntity shooter, double mobCx, double mobCy, double mobCz) {
+        if (shooter instanceof Mob other && other.getTarget() == mob) {
+            return shooter.hasLineOfSight(mob);
+        }
+        Vec3 look = shooter.getViewVector(1.0F);
+        double dx = mobCx - shooter.getX();
+        double dy = mobCy - shooter.getEyeY();
+        double dz = mobCz - shooter.getZ();
+        return AimCone.facesWithin(look.x, look.y, look.z, dx, dy, dz, AIM_COS_THRESHOLD)
+            && shooter.hasLineOfSight(mob);
+    }
+
+    /**
      * Nearest in-flight arrow on a collision course with the mob, or {@code null}.
-     * Skips the mob's own shots and (via {@link ArrowThreat}'s velocity gate)
-     * arrows already stuck in the ground.
+     * Skips the mob's own shots and (via {@link ArrowThreat}'s velocity gate) arrows
+     * already stuck in the ground. Secondary trigger — see class javadoc.
      */
     private AbstractArrow findIncomingArrow() {
         double mobX = mob.getX();
@@ -120,7 +231,7 @@ public final class BlockArrowsGoal extends Goal {
         double mobZ = mob.getZ();
         double hitRadius = mob.getBbWidth() * 0.5 + HIT_MARGIN;
 
-        AABB scan = mob.getBoundingBox().inflate(SCAN_RADIUS);
+        AABB scan = mob.getBoundingBox().inflate(ARROW_SCAN_RADIUS);
         List<AbstractArrow> arrows = mob.level().getEntitiesOfClass(
             AbstractArrow.class, scan,
             a -> a.isAlive() && a.getOwner() != mob);
