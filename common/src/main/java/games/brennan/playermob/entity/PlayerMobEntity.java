@@ -220,6 +220,23 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private static final float DMG_TO_FEELING = 0.5F;
 
     /**
+     * Ticks between the Phase B social scan (encounter / crouch / travel / harm /
+     * defend). ~4×/second — frequent enough to catch a deliberate crouch yet well
+     * inside the ~100-tick decay window of {@code getLastHurtByMob} the defend/harm
+     * checks rely on.
+     */
+    private static final int SOCIAL_SCAN_INTERVAL = 5;
+
+    /** Radius of the social scan — the disposition resolver's widest reaction range. */
+    private static final double SOCIAL_SCAN_RANGE = DispositionResolver.MAX_RANGE;
+
+    /**
+     * Half-angle (degrees) of the cone in which a croucher counts as "looking at"
+     * the mob, so a crouch only greets the mob it's aimed at — a 90° frontal arc.
+     */
+    private static final float CROUCH_LOOK_CONE_DEGREES = 45.0F;
+
+    /**
      * Chest {@code triggerEvent} ID for "viewer count changed" — drives the
      * lid animation. See {@link ChestBlockEntity#triggerEvent}.
      */
@@ -263,6 +280,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * block map.
      */
     private final Map<UUID, Long> recentlyExploredEntities = new HashMap<>();
+
+    /**
+     * Per-individual "was crouch-greeting this mob at the last social scan" (crouching
+     * + facing it + line of sight), so a held greeting counts once on its rising edge.
+     * Transient — rebuilt each scan from who's in range, so it never retains anyone who
+     * logged out or wandered off.
+     */
+    private final Map<UUID, Boolean> crouchHeld = new HashMap<>();
 
     /**
      * Position of the container this mob currently has visually "open" (chest
@@ -435,6 +460,118 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             // movement.
             TrainConfinement.openBlockingDoor(this);
         }
+
+        tickFeelingEvents();
+    }
+
+    /**
+     * The positive feeling-events (Phase B), driven off one throttled nearby scan.
+     * A per-entity phase offset ({@code + getId()}) staggers a co-located group so
+     * they don't all scan the same tick. One {@link Reaction#GREET}-style sweep feeds
+     * encounter / crouch / travel / harm; {@link #checkDefended} uses the vanilla
+     * hurt-by tracking (no scan). All changes are batched into one
+     * {@link #pushDispositionToClient} so the open menu updates live.
+     */
+    private void tickFeelingEvents() {
+        if ((this.tickCount + getId()) % SOCIAL_SCAN_INTERVAL != 0) {
+            return;
+        }
+        boolean changed = false;
+
+        int carriage = TrainConfinement.carriageIndex(this);
+        boolean onTrain = carriage != TrainConfinement.NO_CARRIAGE;
+
+        List<LivingEntity> nearby = level().getEntitiesOfClass(LivingEntity.class,
+            getBoundingBox().inflate(SOCIAL_SCAN_RANGE), e -> e != this && e.isAlive());
+
+        // Rebuild the crouch-state map from who's in range now, so it never retains
+        // logged-out / wandered-off players.
+        Map<UUID, Boolean> nextCrouch = new HashMap<>();
+
+        for (LivingEntity e : nearby) {
+            if (TargetCategory.classify(e) != TargetCategory.PLAYERS) {
+                continue;
+            }
+            UUID id = e.getUUID();
+
+            // Encounter — remember everyone seen (roster).
+            if (hasLineOfSight(e)) {
+                changed |= feelings.encounter(id);
+            }
+
+            // Crouch — a player OR PlayerMob crouching AT this mob (facing it, in
+            // sight) greets it. Counts on the rising edge of "crouching + looking at
+            // me", so it fires once when the croucher both sneaks and turns to face
+            // the mob — and a greeting PlayerMob, whose head is turned to its target,
+            // registers between mobs too.
+            boolean greetCrouch = e.isCrouching() && crouchTargetsMe(e);
+            nextCrouch.put(id, greetCrouch);
+            Boolean was = crouchHeld.get(id);
+            if (greetCrouch && (was == null || !was)) {
+                changed |= feelings.crouch(id);
+            }
+
+            // Travel-together — same train, advancing carriages, not in combat with them.
+            if (onTrain && getTarget() != e && TrainConfinement.allowsTarget(this, e)) {
+                changed |= feelings.travel(id, carriage);
+            }
+
+            // Harm-a-loved-one — witnessed attack on an individual the mob loves.
+            if (feelings.feelingToward(id) >= DispositionResolver.FEELING_LOVE) {
+                LivingEntity attacker = e.getLastHurtByMob();
+                if (attacker != null && attacker != this && attacker != e
+                        && TargetCategory.classify(attacker) == TargetCategory.PLAYERS) {
+                    changed |= feelings.harm(attacker.getUUID(), e.getLastHurtByMobTimestamp());
+                }
+            }
+        }
+
+        crouchHeld.clear();
+        crouchHeld.putAll(nextCrouch);
+
+        changed |= checkDefended();
+
+        if (changed) {
+            pushDispositionToClient();
+        }
+    }
+
+    /**
+     * Defended-me event: if the mob is currently being attacked by a hostile mob and
+     * something attacked <em>that</em> hostile, credit the attacker (a player /
+     * PlayerMob) with a defence. Scoped to hostile attackers so a player-vs-player
+     * brawl doesn't read as "defending me". Debounced per-individual in the ledger.
+     */
+    private boolean checkDefended() {
+        LivingEntity myAttacker = getLastHurtByMob();
+        if (myAttacker == null || !myAttacker.isAlive()) {
+            return false;
+        }
+        if (TargetCategory.classify(myAttacker) != TargetCategory.HOSTILE_MOBS) {
+            return false;
+        }
+        LivingEntity defender = myAttacker.getLastHurtByMob();
+        if (defender == null || defender == this
+                || TargetCategory.classify(defender) != TargetCategory.PLAYERS) {
+            return false;
+        }
+        return feelings.defend(defender.getUUID(), myAttacker.getLastHurtByMobTimestamp());
+    }
+
+    /**
+     * Whether {@code croucher} is directing a crouch at THIS mob — it must see the
+     * mob and have its head turned toward it (within {@link #CROUCH_LOOK_CONE_DEGREES}
+     * of facing). Keeps a crouch from counting unless aimed at the mob, and lets a
+     * greeting PlayerMob (head turned to its friend) register the gesture mob-to-mob.
+     */
+    private boolean crouchTargetsMe(LivingEntity croucher) {
+        if (!croucher.hasLineOfSight(this)) {
+            return false;
+        }
+        double dx = getX() - croucher.getX();
+        double dz = getZ() - croucher.getZ();
+        float yawToMe = (float) (Mth.atan2(dz, dx) * (180.0 / Math.PI)) - 90.0F;
+        return Mth.degreesDifferenceAbs(croucher.getYHeadRot(), yawToMe) <= CROUCH_LOOK_CONE_DEGREES;
     }
 
     /**
@@ -705,6 +842,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         Vec3 velocity = new Vec3(dx, dy + horizontal * 0.15, dz).normalize().scale(0.45);
         thrown.setDeltaMovement(velocity);
         thrown.setPickUpDelay(10);
+        // Attribute the toss so a PlayerMob recipient credits it as a gift (and the
+        // giver never self-credits picking its own toss back up). Pickup delay is
+        // independent of the thrower, so this doesn't change re-collection timing.
+        thrown.setThrower(this);
         level().addFreshEntity(thrown);
         return true;
     }
@@ -1068,6 +1209,22 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         ItemStack stack = itemEntity.getItem();
         if (stack.isEmpty() || itemEntity.hasPickUpDelay()) return false;
 
+        // Capture gift attribution + value BEFORE the take, which may shrink/discard
+        // the entity. Credit only once the item is fully absorbed (below), so a stack
+        // taken across several ticks isn't counted as several gifts.
+        LivingEntity gifter = giftSource(itemEntity);
+        ItemStack giftCopy = gifter != null ? stack.copy() : null;
+
+        boolean took = takeFloorItem(itemEntity, stack);
+
+        if (took && gifter != null && (itemEntity.isRemoved() || itemEntity.getItem().isEmpty())) {
+            creditGift(gifter, giftCopy);
+        }
+        return took;
+    }
+
+    /** The branch logic of {@link #tryPickUpFloorItem}, factored out for the gift hook. */
+    private boolean takeFloorItem(ItemEntity itemEntity, ItemStack stack) {
         ItemPickupPolicy.WeaponCategory cat = ItemPickupPolicy.weaponCategory(stack);
         if (cat != null) {
             return finishPickup(itemEntity, stack, reconcileWeaponPickup(cat, stack));
@@ -1086,6 +1243,30 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             return finishPickup(itemEntity, stack, pickUpBlockCapped(stack));
         }
         return false;
+    }
+
+    /**
+     * The player / PlayerMob that threw {@code itemEntity}, if it should count as a
+     * gift — i.e. a non-self thrower the mob holds disposition toward. Creative /
+     * spectator throwers classify as {@code null} and are ignored, same as everywhere.
+     */
+    private LivingEntity giftSource(ItemEntity itemEntity) {
+        if (!(itemEntity.getOwner() instanceof LivingEntity owner)) return null;
+        if (owner == this) return null;
+        if (TargetCategory.classify(owner) != TargetCategory.PLAYERS) return null;
+        return owner;
+    }
+
+    /**
+     * Raise feeling toward {@code gifter} by the gift's value over the mob's current
+     * gear in that slot ({@link EquipmentEvaluator#score} — non-gear scores 0, so it
+     * yields the floor). Pushes the change so the open menu updates live.
+     */
+    private void creditGift(LivingEntity gifter, ItemStack gift) {
+        double giftScore = EquipmentEvaluator.score(gift);
+        double currentScore = EquipmentEvaluator.score(getItemBySlot(getEquipmentSlotForItem(gift)));
+        feelings.adjust(gifter.getUUID(), FeelingRecord.giftDelta(giftScore, currentScore));
+        pushDispositionToClient();
     }
 
     /**
@@ -1591,7 +1772,8 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
                 // A player/PlayerMob hit cools the feeling toward them, ∝ damage
                 // (a solid blow can flip neutral straight into "hate").
                 if (category == TargetCategory.PLAYERS) {
-                    feelings.adjust(attacker.getUUID(), -amount * DMG_TO_FEELING);
+                    // recordAttack (not adjust): a ≥1-feeling loss re-opens crouch headroom.
+                    feelings.recordAttack(attacker.getUUID(), -amount * DMG_TO_FEELING);
                     pushDispositionToClient();
                 }
                 // Immediate response: fighters retaliate (keep the HurtByTargetGoal
