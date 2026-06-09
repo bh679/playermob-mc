@@ -207,6 +207,20 @@ public final class DispositionResolver {
         return onHurt(fightFlight);
     }
 
+    /** A defender bails only if the foe's power exceeds the mob's by more than this factor. */
+    static final double DEFEND_HOPELESS_RATIO = 2.0;
+
+    /**
+     * Whether a mob should wade in to defend a loved one against {@code foe} — true
+     * unless the fight is hopeless (foe power more than {@link #DEFEND_HOPELESS_RATIO}×
+     * the mob's). Deliberately <em>independent of fight/flight</em>: love and loyalty
+     * drive defending, so even a timid mob joins for a friend unless badly outmatched.
+     * (Contrast {@link #canWin}, which governs the mob's own fights.)
+     */
+    public static boolean defendIsWorthwhile(double selfPower, double foePower) {
+        return selfPower * DEFEND_HOPELESS_RATIO >= foePower;
+    }
+
     static double clamp(double value, double lo, double hi) {
         if (value < lo) return lo;
         if (value > hi) return hi;

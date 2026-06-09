@@ -9,9 +9,9 @@ import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
 import net.minecraft.world.entity.ai.goal.RandomStrollGoal;
 import net.minecraft.world.entity.ai.goal.WrappedGoal;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.stream.Collectors;
 
 /**
  * Builds the human-readable "what is this mob doing" readout from the goals
@@ -42,14 +42,39 @@ public final class ObjectiveReadout {
      * @return newline-joined readout, never {@code null}; {@link #IDLE} when nothing runs
      */
     public static String of(GoalSelector selector) {
-        List<String> lines = selector.getAvailableGoals().stream()
+        return of(selector, null);
+    }
+
+    /**
+     * Two-selector readout. Any running {@link DescribableGoal} in the
+     * {@code targetSelector} (the <em>why</em> — e.g. {@code DefendLovedOneGoal} →
+     * "Defending") is listed first, then the running {@code goalSelector} objectives
+     * (the <em>how</em> — "Attacking", "Raiding chest", …). Vanilla target goals
+     * (HurtByTarget / NearestAttackable / Hunt) don't implement {@link DescribableGoal}
+     * and are omitted, so the target line stays signal rather than noise.
+     *
+     * @param targetSelector the mob's {@code targetSelector}, or {@code null} to skip it
+     */
+    public static String of(GoalSelector goalSelector, GoalSelector targetSelector) {
+        List<String> lines = new ArrayList<>();
+        if (targetSelector != null) {
+            targetSelector.getAvailableGoals().stream()
+                .filter(WrappedGoal::isRunning)
+                .sorted(Comparator.comparingInt(WrappedGoal::getPriority))
+                .map(WrappedGoal::getGoal)
+                .filter(g -> g instanceof DescribableGoal)
+                .map(ObjectiveReadout::describe)
+                .filter(s -> s != null && !s.isEmpty())
+                .forEach(lines::add);
+        }
+        goalSelector.getAvailableGoals().stream()
             .filter(WrappedGoal::isRunning)
             .sorted(Comparator.comparingInt(WrappedGoal::getPriority))
             .map(WrappedGoal::getGoal)
             .filter(g -> !isNoise(g))
             .map(ObjectiveReadout::describe)
             .filter(s -> s != null && !s.isEmpty())
-            .collect(Collectors.toList());
+            .forEach(lines::add);
         return lines.isEmpty() ? IDLE : String.join("\n", lines);
     }
 

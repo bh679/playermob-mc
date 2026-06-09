@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import static games.brennan.playermob.entity.DispositionResolver.applyWinAssessment;
 import static games.brennan.playermob.entity.DispositionResolver.canWin;
 import static games.brennan.playermob.entity.DispositionResolver.combatPower;
+import static games.brennan.playermob.entity.DispositionResolver.defendIsWorthwhile;
 import static games.brennan.playermob.entity.DispositionResolver.onHurt;
 import static games.brennan.playermob.entity.DispositionResolver.requiredRatio;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -38,6 +39,18 @@ class DispositionWinAssessmentTest {
         assertTrue(canWin(6, 9.0, 10.0));         // ff6 wins at 0.9x
         assertFalse(canWin(4, 10.0, 10.0));       // ff4 needs 1.1x
         assertTrue(canWin(4, 11.0, 10.0));
+    }
+
+    // ---- defendIsWorthwhile (loyalty: defend unless hopeless) ----
+
+    @Test
+    void defendsUnlessHopelesslyOutmatched() {
+        assertTrue(defendIsWorthwhile(20, 20));   // parity — defends
+        assertTrue(defendIsWorthwhile(20, 22));   // unarmed mob vs bare zombie — now defends
+        assertTrue(defendIsWorthwhile(20, 40));   // boundary: foe == self×2 → still defends (inclusive)
+        assertFalse(defendIsWorthwhile(20, 41));  // foe > self×2 → hopeless, bails
+        assertFalse(defendIsWorthwhile(10, 50));  // 5× outmatched — bails
+        assertTrue(defendIsWorthwhile(50, 90));   // a strong mob wades into almost anything
     }
 
     // ---- combat power ----

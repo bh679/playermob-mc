@@ -594,7 +594,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // and written only on change, so it costs a tracking packet only when the
         // text actually changes.
         if (this.tickCount % 5 == 0) {
-            String readout = ObjectiveReadout.of(this.goalSelector);
+            String readout = ObjectiveReadout.of(this.goalSelector, this.targetSelector);
             if (!readout.equals(this.entityData.get(DATA_OBJECTIVES))) {
                 this.entityData.set(DATA_OBJECTIVES, readout);
             }
@@ -1028,19 +1028,16 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     }
 
     /**
-     * Whether this mob is brave enough to wade into a fight against {@code foe} —
-     * the courage gate for {@link DefendLovedOneGoal}. A brave mob (above the mid
-     * band) always joins, a timid one (below it) never does, and a middling one
-     * joins only if it reckons it can win ({@link DispositionResolver#canWin}). Uses
-     * the raw power check rather than {@link #reactionToward}, so defending a friend
-     * overrides the social personal-space bubble (a mob will charge a player it would
-     * otherwise only WATCH).
+     * Whether this mob will wade into a fight against {@code foe} to defend a loved
+     * one — the gate for {@link DefendLovedOneGoal}. Love and loyalty drive it, so a
+     * mob defends regardless of its fight/flight trait <em>unless the fight is
+     * hopeless</em> ({@link DispositionResolver#defendIsWorthwhile}). Uses the raw
+     * power check rather than {@link #reactionToward}, so defending a friend overrides
+     * the social personal-space bubble (a mob will charge a player it would otherwise
+     * only WATCH).
      */
     public boolean wouldEngageFoe(LivingEntity foe) {
-        int ff = traits.fightFlight();
-        if (ff < DispositionResolver.MID_BAND_LO) return false;
-        if (ff > DispositionResolver.MID_BAND_HI) return true;
-        return DispositionResolver.canWin(ff, selfCombatPower(), combatPowerOf(foe));
+        return DispositionResolver.defendIsWorthwhile(selfCombatPower(), combatPowerOf(foe));
     }
 
     /**
