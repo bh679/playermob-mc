@@ -51,12 +51,14 @@ import net.minecraft.world.item.component.ChargedProjectiles;
  * mobs in saved worlds have a stored {@code SkinIndex} that maps to a
  * specific position in this array.</p>
  *
- * <p>Wide model (Steve-style arms) only — even when the URL skin's
- * {@code SkinSlim} flag is set, the renderer uses the wide
- * {@link PlayerModel} (slim arms will look slightly thick). Per-entity
- * slim/wide model swapping is a v3 follow-up — needs override of
- * {@code render(...)} to hot-swap the model field, which the layer
- * renderers' captured references make non-trivial.</p>
+ * <p><b>Slim &amp; wide arms</b> — the renderer bakes both a wide
+ * ({@link ModelLayers#PLAYER}) and a slim ({@link ModelLayers#PLAYER_SLIM})
+ * {@link PlayerModel} once, and {@code render(...)} picks per-mob from
+ * {@link PlayerMobEntity#isSkinSlim()} by swapping the {@code model} field
+ * before {@code super.render(...)}. Render layers read {@code getModel()}
+ * each frame, so the armor / held-item layers follow the swap. Armor itself
+ * stays the wide armor model — matching how vanilla draws armor on
+ * slim-armed players.</p>
  *
  * <p>{@link Environment} {@code CLIENT}-only — stripped from dedicated
  * server jars at load time. Server-side code that needs the skin count
@@ -86,14 +88,31 @@ public final class PlayerMobRenderer
     /** Shadow disc radius below the entity, matches the player's 0.5. */
     private static final float SHADOW_RADIUS = 0.5F;
 
+    /**
+     * The two body models, baked once at construction. {@code render(...)} swaps
+     * {@code this.model} between them per-mob based on
+     * {@link PlayerMobEntity#isSkinSlim()}: {@code wideModel} is the Steve-style
+     * model handed to {@code super(...)} ({@link ModelLayers#PLAYER}),
+     * {@code slimModel} is the Alex-style 3-pixel-arm model
+     * ({@link ModelLayers#PLAYER_SLIM}).
+     */
+    private final PlayerModel<PlayerMobEntity> wideModel;
+    private final PlayerModel<PlayerMobEntity> slimModel;
+
     public PlayerMobRenderer(EntityRendererProvider.Context ctx) {
         super(ctx,
               new PlayerModel<>(ctx.bakeLayer(ModelLayers.PLAYER), /* slim */ false),
               SHADOW_RADIUS);
 
+        // Bake both arm variants once. The wide model is the instance we just
+        // handed super (now this.model / getModel()); the slim model is swapped
+        // in per-frame by render() for mobs whose skin was authored slim.
+        this.wideModel = this.getModel();
+        this.slimModel = new PlayerModel<>(ctx.bakeLayer(ModelLayers.PLAYER_SLIM), /* slim */ true);
+
         // Armor layer — draws helmet/chest/legs/boots when slots are populated.
-        // Inner / outer models are the standard player armor models (wide
-        // variant matches our wide PlayerModel above).
+        // Inner / outer models are the standard (wide) player armor models —
+        // vanilla draws this same armor model on slim-armed players too.
         this.addLayer(new HumanoidArmorLayer<>(
             this,
             new HumanoidModel<>(ctx.bakeLayer(ModelLayers.PLAYER_INNER_ARMOR)),
@@ -106,12 +125,14 @@ public final class PlayerMobRenderer
     }
 
     /**
-     * {@link HumanoidMobRenderer} never sets the model's player-specific properties
-     * — only {@code PlayerRenderer} does, for real players — so we mirror them onto
-     * the (shared) model each frame:
+     * Per-frame model setup that {@link HumanoidMobRenderer} doesn't do (only
+     * {@code PlayerRenderer} does, for real players):
      * <ul>
+     *   <li>swap {@code this.model} to the slim or wide variant for this mob's skin
+     *       (see the class javadoc) — done first so everything below, and the layers,
+     *       act on the chosen model;</li>
      *   <li>{@code crouching} — the sneak pose driven by {@link PlayerMobEntity#setCrouching}
-     *       (Friendly greeting, Shy hiding).</li>
+     *       (Friendly greeting, Shy hiding);</li>
      *   <li>arm poses — so held items render like a player's; most importantly a raised
      *       shield shows the BLOCK pose (arm up, shield in front) while the mob is blocking
      *       ranged fire, exactly like a player holding right-click. See {@link #applyArmPoses}.</li>
@@ -120,6 +141,9 @@ public final class PlayerMobRenderer
     @Override
     public void render(PlayerMobEntity entity, float entityYaw, float partialTick,
                        PoseStack poseStack, MultiBufferSource buffer, int packedLight) {
+        // Pick THIS mob's arm model before anything reads it. Render layers go
+        // through getModel() each frame, so the armor / held-item layers follow.
+        this.model = entity.isSkinSlim() ? slimModel : wideModel;
         PlayerModel<PlayerMobEntity> model = this.getModel();
         model.crouching = entity.isCrouching();
         applyArmPoses(entity, model);

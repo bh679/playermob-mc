@@ -7,10 +7,10 @@ import net.minecraft.util.StringRepresentable;
  * The player-model variant a skin is authored for. Mirrors vanilla
  * {@code net.minecraft.client.resources.PlayerSkin.Model}.
  *
- * <p>v2 ships <b>WIDE only</b> in the default skin pack — the renderer
- * currently always uses the wide {@code PlayerModel}, so SLIM entries are
- * accepted by the JSON codec but render with slightly thick arms. Slim-model
- * swap support is a v3 follow-up.</p>
+ * <p>Both variants render correctly: the renderer bakes a wide and a slim
+ * {@code PlayerModel} and swaps per-mob on {@code PlayerMobEntity.isSkinSlim()},
+ * so a {@code SLIM} entry draws with Alex-style 3-pixel arms. The default skin
+ * pack mixes both (e.g. Bread_Crisper is slim).</p>
  */
 public enum SkinModel implements StringRepresentable {
     WIDE("wide"),
