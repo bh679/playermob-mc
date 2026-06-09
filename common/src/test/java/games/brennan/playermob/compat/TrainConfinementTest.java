@@ -110,5 +110,6 @@ class TrainConfinementTest {
         @Override public int carriageIndex(Entity self) { return NO_CARRIAGE; }
         @Override public Vec3 nextCarriageTarget(Entity self, int dir) { return null; }
         @Override public Vec3 nextGroupTarget(Entity self, int dir) { return null; }
+        @Override public ReboardTarget nearestCarriage(Entity self, double radius) { return null; }
     }
 }

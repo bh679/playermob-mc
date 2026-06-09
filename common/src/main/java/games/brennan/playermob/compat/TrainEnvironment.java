@@ -2,6 +2,7 @@ package games.brennan.playermob.compat;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -46,6 +47,27 @@ public interface TrainEnvironment {
      * position is interpreted in {@code self}'s level.
      */
     boolean sameTrain(Entity self, BlockPos candidatePos);
+
+    /**
+     * The carriage nearest to {@code self} within {@code radius} blocks as a
+     * {@link ReboardTarget} (its current world AABB + world velocity), or
+     * {@code null} if no carriage is loaded in range (always {@code null} without
+     * a train mod). Server-authoritative; unlike {@link #isOnTrain}/{@link #sameTrain}
+     * this resolves a carriage the entity is <em>not</em> on — the "where do I
+     * re-board?" query the recovery AI ({@code TrainRecoveryGoal}) uses after
+     * falling onto the track bed. The carriage moves, so the result is a one-tick
+     * snapshot; re-query each tick while chasing it.
+     */
+    ReboardTarget nearestCarriage(Entity self, double radius);
+
+    /**
+     * Where a fallen PlayerMob should head to climb back aboard: the nearest
+     * carriage's current world-space bounding box and its world velocity
+     * (blocks/tick). Vanilla types only, so this seam compiles on every loader;
+     * the Dungeon-Train impl fills it from {@code ManagedShip.worldAABB()} and
+     * {@code TrainTransformProvider.getTargetVelocity()}.
+     */
+    record ReboardTarget(AABB worldBox, Vec3 velocity) {}
 
     /**
      * Sentinel returned by {@link #carriageIndex(Entity)} when {@code self} is
@@ -109,6 +131,25 @@ public interface TrainEnvironment {
     default void openBlockingDoor(Entity self) {}
 
     /**
+     * A world-space deck point on the carriage the mob can actually board <em>right
+     * now</em> — an opening it can step/hop into (a flatbed section, or a gap in the
+     * wall at least the mob's height) with solid floor beneath — or {@code null} when
+     * the carriage is walled at the mob's position and no opening is currently
+     * alongside. In that null case the recovery goal holds beside the moving train and
+     * waits for an open carriage (flatbed / hole) to slide into reach rather than
+     * bonking the wall.
+     *
+     * <p>Resolves the carriage's real blocks in its sub-level coordinate space (the
+     * far-offset shipyard region, not the mob's apparent world position), so only the
+     * Dungeon-Train impl returns non-null; every other environment keeps the
+     * {@code null} default and the goal just hops straight on (no walls to clear).</p>
+     *
+     * @param self        the recovering mob, positioned beside the carriage at ~deck height
+     * @param carriageBox the carriage's current world AABB (from {@link ReboardTarget#worldBox()})
+     */
+    default Vec3 boardingSpot(Entity self, AABB carriageBox) { return null; }
+
+    /**
      * No-op environment used whenever no train mod is active. Reports every
      * entity as not on a train, so confinement never engages.
      */
@@ -119,5 +160,6 @@ public interface TrainEnvironment {
         @Override public int carriageIndex(Entity self) { return NO_CARRIAGE; }
         @Override public Vec3 nextCarriageTarget(Entity self, int dir) { return null; }
         @Override public Vec3 nextGroupTarget(Entity self, int dir) { return null; }
+        @Override public ReboardTarget nearestCarriage(Entity self, double radius) { return null; }
     };
 }

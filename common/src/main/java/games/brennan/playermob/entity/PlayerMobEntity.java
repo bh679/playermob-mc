@@ -14,6 +14,7 @@ import games.brennan.playermob.entity.goal.PlayerMobDoorGoal;
 import games.brennan.playermob.entity.goal.RaidArmorStandsGoal;
 import games.brennan.playermob.entity.goal.RaidContainersGoal;
 import games.brennan.playermob.entity.goal.SkepticalWatchGoal;
+import games.brennan.playermob.entity.goal.TrainRecoveryGoal;
 import games.brennan.playermob.entity.goal.WeaponAwareAttackGoal;
 import games.brennan.playermob.skin.PlayerMobSkin;
 import games.brennan.playermob.skin.PlayerMobSkinRegistry;
@@ -201,6 +202,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private static final long RECENTLY_EXPLORED_TTL_TICKS = 1200L;
 
     /**
+     * How long after leaving a Dungeon Train a PlayerMob still counts as "fell
+     * off" and will try to climb back on — see {@link TrainRecoveryGoal}. 200
+     * ticks (10s) is generous enough to start recovery after a fall, tight enough
+     * that a mob doesn't board a train it merely brushed past long ago.
+     */
+    public static final int RECOVERY_WINDOW_TICKS = 200;
+
+    /**
      * Chest {@code triggerEvent} ID for "viewer count changed" — drives the
      * lid animation. See {@link ChestBlockEntity#triggerEvent}.
      */
@@ -264,6 +273,24 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private boolean closesDoors;
 
     /**
+     * Server tick of the last moment this mob stood on a train carriage, or a
+     * large negative sentinel if it never has. Drives {@link #ticksSinceOnTrain}
+     * so {@link TrainRecoveryGoal} fires only for a mob that actually fell off a
+     * train. Transient (not saved) — a reloaded mob just isn't "recovering" until
+     * it rides again.
+     */
+    private int lastOnTrainTick = -100_000;
+
+    /**
+     * True only while {@link TrainRecoveryGoal} is actively climbing this mob back
+     * onto a train (set on the goal's start, cleared on stop). Off the train, recovery
+     * is the mob's <em>sole</em> focus — this flag suppresses combat (target
+     * acquisition + held targets) so it never breaks off to chase a mob mid-recovery.
+     * Transient server-only AI state.
+     */
+    private boolean recovering;
+
+    /**
      * Fixed march direction while exploring a Dungeon Train: {@code -1} toward
      * decreasing carriage index, {@code +1} toward increasing, {@code 0} = not yet
      * latched. Set once, the first server tick the mob is found on a train, from
@@ -289,6 +316,27 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      */
     private boolean crossingGap;
 
+    /** How long door-opening is suppressed after a stuck-recovery close, so the mob can cross. ~2 s. */
+    private static final int DOOR_CLOSE_HOLD_TICKS = 40;
+    /** Half-width of the cube scanned around the mob for an open door to close when stuck (off-train). */
+    private static final int DOOR_RECOVERY_REACH = 2;
+
+    /**
+     * Off-train detector for the "close a door that's blocking me" recovery. The on-train
+     * (Dungeon Train) reflex keeps its own per-mob detectors, so this one only runs off a
+     * train. Transient AI state (never saved): a stuck run restarts cleanly across a reload.
+     * See {@link #recoverFromStuckDoor()} and {@link DoorStuckMonitor}.
+     */
+    private final DoorStuckMonitor offTrainDoorStuck = new DoorStuckMonitor();
+
+    /**
+     * Ticks left during which this mob opens no doors, so a door the stuck-recovery just closed
+     * isn't reopened before the mob can cross the perpendicular path the open swing was blocking.
+     * Set by {@link #holdDoorsClosed()} (on or off a train), decremented each server tick, and read
+     * by both door openers via {@link #isHoldingDoorsClosed()}. Transient (never saved).
+     */
+    private int doorCloseHoldTicks;
+
     public PlayerMobEntity(EntityType<? extends PlayerMobEntity> type, Level level) {
         super(type, level);
         // Preserve combat-kill XP parity. Monster's constructor sets xpReward=5;
@@ -306,6 +354,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (this.getNavigation() instanceof GroundPathNavigation groundNav) {
             groundNav.setCanOpenDoors(true);
         }
+        // Let the path cross water (float on the surface) instead of treating it as a
+        // wall — so a mob recovering back onto a train can swim toward it / to the
+        // nearest shore. FloatGoal (priority 0) keeps it from sinking.
+        this.getNavigation().setCanFloat(true);
     }
 
     /**
@@ -333,6 +385,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     @Override
     protected void registerGoals() {
         this.goalSelector.addGoal(0, new FloatGoal(this));
+        // Fell off a Dungeon Train carriage? Getting back on preempts everything
+        // but swimming — added before the other priority-1 goals so its canUse is
+        // evaluated first. No-op without a train mod (nearestCarriage → null).
+        this.goalSelector.addGoal(1, new TrainRecoveryGoal(this, /* speed */ 1.0));
         // Personality social goals — priority 1 so they preempt raiding/strolling
         // when their disposition applies. Each self-gates on the live personality;
         // Skeptical/Friendly also gate on "no target" so they yield to combat.
@@ -376,8 +432,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             10,
             true,
             false,
-            candidate -> personalityToward(candidate) == Personality.AGGRESSIVE
+            candidate -> !recovering
                 && !this.crossingGap
+                && personalityToward(candidate) == Personality.AGGRESSIVE
                 && TrainConfinement.allowsTarget(this, candidate)));
         // Hunt food animals only while hungry, and below the hostile-targeting
         // goal (2) so defending against a zombie always beats chasing a cow.
@@ -406,18 +463,51 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     protected void customServerAiStep() {
         super.customServerAiStep();
         LivingEntity target = getTarget();
-        if (target != null && (isIgnoredPlayer(target) || !TrainConfinement.allowsTarget(this, target))) {
-            setTarget(null);
+        if (target != null
+                && (recovering || isIgnoredPlayer(target) || !TrainConfinement.allowsTarget(this, target))) {
+            setTarget(null);   // recovering back onto a train preempts all combat
         }
         latchTrainExploreDirection();
 
+        // Tick down the door-close hold (armed by stuck-recovery, on or off a train) so a door it
+        // just closed isn't reopened until the mob has had time to cross the now-clear path.
+        if (doorCloseHoldTicks > 0) {
+            doorCloseHoldTicks--;
+        }
+
         if (TrainConfinement.isConfined(this)) {
-            // Open any door we're up against. Vanilla's DoorInteractGoal opens doors by
-            // inspecting nav path nodes + collision, which doesn't fire on a moving Sable
-            // carriage — so the train seam reaches for the door block directly (in the
-            // carriage's own coordinate space), every tick, regardless of which goal owns
-            // movement.
+            // Remember we're aboard, so TrainRecoveryGoal can tell "fell off" from
+            // "never boarded" (see ticksSinceOnTrain / RECOVERY_WINDOW_TICKS).
+            lastOnTrainTick = tickCount;
+            // Open any door we're up against — and, when wedged, close one whose open swing is
+            // blocking us. Vanilla's DoorInteractGoal opens doors by inspecting nav path nodes +
+            // collision, which doesn't fire on a moving Sable carriage — so the train seam reaches
+            // for the door block directly (in the carriage's own coordinate space), every tick,
+            // regardless of which goal owns movement.
             TrainConfinement.openBlockingDoor(this);
+        } else {
+            // Off a train, opening is handled by PlayerMobDoorGoal; this reflex adds the
+            // close-when-stuck half — an open door can block the perpendicular path.
+            recoverFromStuckDoor();
+        }
+    }
+
+    /**
+     * Off-train door recovery: when the mob has been wedged for a while ({@link DoorStuckMonitor})
+     * while actively pathing, close the nearest open, hand-closable door and arm the hold so it
+     * isn't reopened before the mob can cross. An open door's panel swings across the perpendicular
+     * edge of its cell, which vanilla pathing treats as passable — so a mob whose route turns at the
+     * doorway jams against it, and closing clears the way. On a train the Dungeon-Train reflex does
+     * the same job in the carriage's coordinate space, so this branch never runs while confined.
+     */
+    private void recoverFromStuckDoor() {
+        if (!(level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        boolean tryingToMove = !getNavigation().isDone();
+        if (offTrainDoorStuck.tick(getX(), getZ(), tryingToMove)
+                && DoorRecovery.closeBlockingOpenDoor(this, serverLevel, blockPosition(), DOOR_RECOVERY_REACH)) {
+            holdDoorsClosed();
         }
     }
 
@@ -451,12 +541,68 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     }
 
     /**
+     * Ticks since this mob was last on a train carriage (large when it never has).
+     * {@link TrainRecoveryGoal} compares it against {@link #RECOVERY_WINDOW_TICKS}
+     * so recovery fires only for a mob that recently fell off a train.
+     */
+    public int ticksSinceOnTrain() {
+        return tickCount - lastOnTrainTick;
+    }
+
+    /**
+     * Marks whether {@link TrainRecoveryGoal} is actively recovering this mob (set on
+     * its start, cleared on its stop). While {@code true}, combat is suppressed so
+     * getting back aboard is the mob's only focus (see {@link #recovering}).
+     */
+    public void setRecovering(boolean recovering) {
+        this.recovering = recovering;
+    }
+
+    /** True while actively climbing back onto a train (see {@link #recovering}). */
+    public boolean isRecovering() {
+        return this.recovering;
+    }
+
+    /**
      * Set by {@link CrossGroupGapGoal} for the duration of a cross-gap leap. While
      * {@code true}, the mob declines new combat targets so the leap can't be preempted.
      * See {@link #crossingGap}.
      */
     public void setCrossingGap(boolean crossingGap) {
         this.crossingGap = crossingGap;
+    }
+
+    /**
+     * Auto-equip the best tool the mob owns for breaking {@code state} (highest
+     * {@link ItemStack#getDestroySpeed}), swapping it into the main hand and
+     * stashing the displaced item. Returns {@code true} if a swap happened — so the
+     * caller can add a short "reach for the tool" pause. No-op (returns {@code false})
+     * when the main hand is already the fastest, or nothing beats an empty hand.
+     */
+    public boolean equipBetterToolFor(BlockState state) {
+        float bestSpeed = getMainHandItem().getDestroySpeed(state);
+        int bestSlot = -1;
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            ItemStack candidate = inventory.getItem(i);
+            if (candidate.isEmpty()) continue;
+            float speed = candidate.getDestroySpeed(state);
+            if (speed > bestSpeed) {
+                bestSpeed = speed;
+                bestSlot = i;
+            }
+        }
+        if (bestSlot < 0) {
+            return false;
+        }
+        ItemStack tool = inventory.getItem(bestSlot).copy();
+        ItemStack previous = getMainHandItem();
+        inventory.setItem(bestSlot, ItemStack.EMPTY);
+        setItemSlot(EquipmentSlot.MAINHAND, tool);
+        if (!previous.isEmpty()) {
+            ItemStack leftover = EquipmentEvaluator.addToContainer(inventory, previous);
+            if (!leftover.isEmpty()) spawnAtLocation(leftover);
+        }
+        return true;
     }
 
     /**
@@ -746,6 +892,24 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      */
     public boolean closesDoors() {
         return this.closesDoors;
+    }
+
+    /**
+     * Arm the door-close hold: for {@link #DOOR_CLOSE_HOLD_TICKS} this mob opens no doors, so a
+     * door the stuck-recovery just closed (to clear an open swing blocking its path) isn't reopened
+     * before it can cross. Called by the stuck-recovery on and off a train.
+     */
+    public void holdDoorsClosed() {
+        this.doorCloseHoldTicks = DOOR_CLOSE_HOLD_TICKS;
+    }
+
+    /**
+     * Whether door-opening is currently suppressed for this mob (see {@link #holdDoorsClosed()}).
+     * Consulted by {@link PlayerMobDoorGoal} and the Dungeon-Train door reflex so neither reopens a
+     * door the stuck-recovery just closed.
+     */
+    public boolean isHoldingDoorsClosed() {
+        return this.doorCloseHoldTicks > 0;
     }
 
     // ---- InventoryCarrier ------------------------------------------------

@@ -1,10 +1,14 @@
 package games.brennan.playermob.neoforge.compat;
 
+import games.brennan.dungeontrain.ship.ManagedShip;
 import games.brennan.dungeontrain.train.Trains;
 import games.brennan.playermob.compat.TrainEnvironment;
+import games.brennan.playermob.entity.DoorRecovery;
+import games.brennan.playermob.entity.DoorStuckMonitor;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.Mob;
@@ -14,10 +18,12 @@ import net.minecraft.world.level.block.ButtonBlock;
 import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.LeverBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3d;
+import org.joml.Vector3dc;
 import org.joml.primitives.AABBdc;
 
 import java.util.Map;
@@ -91,6 +97,14 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
      */
     private static final Map<Entity, double[]> CONTROL_GAZE = new WeakHashMap<>();
 
+    /**
+     * Per-mob "am I wedged?" detector for the door close-recovery, measured in the carriage's
+     * sub-level frame (a riding mob's world position drifts with the moving carriage, so world
+     * space would never read as stuck). Server-thread only; weak keys so entries vanish with the
+     * mob, exactly like {@link #CONTROL_GAZE}.
+     */
+    private static final Map<Entity, DoorStuckMonitor> STUCK = new WeakHashMap<>();
+
     @Override
     public boolean isOnTrain(Entity self) {
         return carriageAt(self) != null;
@@ -117,6 +131,196 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         Trains.Carriage at = carriageAtPos(level,
             candidatePos.getX() + 0.5, candidatePos.getY() + 0.5, candidatePos.getZ() + 0.5);
         return at != null && mine.equals(at.provider().getTrainId());
+    }
+
+    // ---- Recovery (behaviour #2) -----------------------------------------
+
+    @Override
+    public TrainEnvironment.ReboardTarget nearestCarriage(Entity self, double radius) {
+        if (!(self.level() instanceof ServerLevel level)) {
+            return null;
+        }
+        double px = self.getX();
+        double py = self.getY();
+        double pz = self.getZ();
+        double radiusSq = radius * radius;
+        Trains.Carriage best = null;
+        AABBdc bestBox = null;
+        double bestDistSq = Double.MAX_VALUE;
+        for (Trains.Carriage c : Trains.allCarriages(level)) {
+            AABBdc bb = c.ship().worldAABB();
+            // Skip a sub-level Sable hasn't ticked yet (null / zero-volume AABB) —
+            // no resolvable world position to path toward.
+            if (bb == null
+                    || bb.maxX() <= bb.minX() || bb.maxY() <= bb.minY() || bb.maxZ() <= bb.minZ()) {
+                continue;
+            }
+            double distSq = distanceSqToBox(px, py, pz, bb);
+            if (distSq < bestDistSq && distSq <= radiusSq) {
+                bestDistSq = distSq;
+                best = c;
+                bestBox = bb;
+            }
+        }
+        if (best == null) {
+            return null;
+        }
+        AABB worldBox = new AABB(
+            bestBox.minX(), bestBox.minY(), bestBox.minZ(),
+            bestBox.maxX(), bestBox.maxY(), bestBox.maxZ());
+        // DT's target velocity is blocks/second (the m/s speed knob); the recovery
+        // goal reasons in ticks, so convert to blocks/tick (20 tps).
+        Vector3dc v = best.provider().getTargetVelocity();
+        Vec3 velocity = new Vec3(v.x() / 20.0, v.y() / 20.0, v.z() / 20.0);
+        return new TrainEnvironment.ReboardTarget(worldBox, velocity);
+    }
+
+    /** Horizontal blocks the mob can clear in one leap when boarding from atop its tower. */
+    private static final int BOARD_REACH = 3;
+
+    @Override
+    public Vec3 boardingSpot(Entity self, AABB carriageWorldBox) {
+        if (!(self.level() instanceof ServerLevel level)) {
+            return null;
+        }
+        Trains.Carriage c = nearestCarriageHandle(level, self.getX(), self.getY(), self.getZ());
+        if (c == null) {
+            return null;
+        }
+        AABBdc bb = c.ship().worldAABB();
+        if (bb == null) {
+            return null;
+        }
+        ManagedShip ship = c.ship();
+        double mx = self.getX();
+        double my = self.getY();
+        double mz = self.getZ();
+        int mobFootY = Mth.floor(my);
+        int deckY = Mth.floor(bb.minY());
+        // From atop its tower the mob can drop into ANY carriage column it now sits above and
+        // can reach in a leap: a flatbed / open-top section, a low or half wall, an opening
+        // that clears its height, or an open group-end. Scan the interior columns within jump
+        // reach and pick the nearest such landing spot whose approach corridor is also clear.
+        int loX = Math.max(Mth.floor(bb.minX()), Mth.floor(mx) - BOARD_REACH);
+        int hiX = Math.min(Mth.ceil(bb.maxX()) - 1, Mth.floor(mx) + BOARD_REACH);
+        int loZ = Mth.floor(bb.minZ());
+        int hiZ = Mth.ceil(bb.maxZ()) - 1;
+        Vec3 best = null;
+        double bestDistSq = Double.MAX_VALUE;
+        for (int xi = loX; xi <= hiX; xi++) {
+            for (int zi = loZ; zi <= hiZ; zi++) {
+                double wx = xi + 0.5;
+                double wz = zi + 0.5;
+                double hdx = wx - mx;
+                double hdz = wz - mz;
+                double horizSq = hdx * hdx + hdz * hdz;
+                if (horizSq > (double) BOARD_REACH * BOARD_REACH) {
+                    continue;                               // out of jump reach
+                }
+                Double footY = dropInFootY(ship, level, wx, wz, deckY, mobFootY);
+                if (footY == null) {
+                    continue;
+                }
+                if (footY > mobFootY + 1) {
+                    continue;                               // landing is higher than the mob can hop up to
+                }
+                if (!corridorClear(ship, level, mx, mz, wx, wz, mobFootY)) {
+                    continue;                               // a too-tall wall blocks the leap
+                }
+                double dy = footY - my;
+                double distSq = horizSq + dy * dy;
+                if (distSq < bestDistSq) {
+                    bestDistSq = distSq;
+                    best = new Vec3(wx, footY, wz);
+                }
+            }
+        }
+        return best;
+    }
+
+    /**
+     * Feet Y to land if the mob — standing at {@code mobFootY} atop its tower — can drop into
+     * the carriage column at world {@code (wx, wz)}: a standable floor near the deck, with the
+     * whole column OPEN (no collision) from that floor up through the mob's height, so nothing
+     * (roof, full-height wall) blocks the drop. Covers flatbeds, open tops, low/half walls, an
+     * opening that clears the mob's height, and open group-ends. {@code null} if the column is
+     * roofed/walled above the mob. Reads go through {@link ManagedShip#worldToShip} — the
+     * carriage's blocks live in its sub-level coordinate space.
+     */
+    private static Double dropInFootY(ManagedShip ship, ServerLevel level,
+                                      double wx, double wz, int deckY, int mobFootY) {
+        Integer floorY = null;
+        for (int fy = deckY + 1; fy >= deckY - 1; fy--) {
+            if (shipSolid(ship, level, wx, fy, wz)) {
+                floorY = fy;
+                break;
+            }
+        }
+        if (floorY == null) {
+            return null;                                    // nothing to land on
+        }
+        int footY = floorY + 1;
+        // Open from the stand position up to (at least) the mob's height — the mob is above
+        // everything here and can drop straight in.
+        int top = Math.max(mobFootY, footY + 1);
+        for (int y = footY; y <= top; y++) {
+            if (shipSolid(ship, level, wx, y, wz)) {
+                return null;
+            }
+        }
+        return (double) footY;
+    }
+
+    /**
+     * The straight horizontal corridor from {@code (fromX,fromZ)} to {@code (toX,toZ)} is open
+     * at heights {@code y} and {@code y+1} — so the mob can move in at its tower height without
+     * bonking a wall/roof on the way to the landing column. Sampled in ~half-block steps.
+     */
+    private static boolean corridorClear(ManagedShip ship, ServerLevel level,
+                                         double fromX, double fromZ, double toX, double toZ, int y) {
+        double dx = toX - fromX;
+        double dz = toZ - fromZ;
+        int steps = Math.max(1, (int) Math.ceil(Math.sqrt(dx * dx + dz * dz) * 2.0));
+        for (int i = 1; i <= steps; i++) {
+            double t = i / (double) steps;
+            double cx = fromX + dx * t;
+            double cz = fromZ + dz * t;
+            if (shipSolid(ship, level, cx, y, cz) || shipSolid(ship, level, cx, y + 1, cz)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** True if the carriage has no collision at world cell {@code (wx,wy,wz)} (air / passable). */
+    private static boolean shipPassable(ManagedShip ship, ServerLevel level, double wx, double wy, double wz) {
+        Vector3d s = ship.worldToShip(new Vector3d(wx, wy, wz));
+        BlockPos p = BlockPos.containing(s.x, s.y, s.z);
+        return level.getBlockState(p).getCollisionShape(level, p).isEmpty();
+    }
+
+    /** True if the carriage has a standable (collidable) block at world cell {@code (wx,wy,wz)}. */
+    private static boolean shipSolid(ManagedShip ship, ServerLevel level, double wx, double wy, double wz) {
+        return !shipPassable(ship, level, wx, wy, wz);
+    }
+
+    /** Nearest carriage to {@code (px,py,pz)} with a valid world box (no radius bound), or null. */
+    private static Trains.Carriage nearestCarriageHandle(ServerLevel level, double px, double py, double pz) {
+        Trains.Carriage best = null;
+        double bestDistSq = Double.MAX_VALUE;
+        for (Trains.Carriage c : Trains.allCarriages(level)) {
+            AABBdc bb = c.ship().worldAABB();
+            if (bb == null
+                    || bb.maxX() <= bb.minX() || bb.maxY() <= bb.minY() || bb.maxZ() <= bb.minZ()) {
+                continue;
+            }
+            double distSq = distanceSqToBox(px, py, pz, bb);
+            if (distSq < bestDistSq) {
+                bestDistSq = distSq;
+                best = c;
+            }
+        }
+        return best;
     }
 
     // ---- Carriage exploration (behaviour #3) -----------------------------
@@ -226,6 +430,25 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         // case a build projects carriage blocks at the apparent location.
         Vector3d sub = c.ship().worldToShip(new Vector3d(self.getX(), self.getY(), self.getZ()));
         BlockPos subPos = BlockPos.containing(sub.x, sub.y, sub.z);
+
+        // Stuck-recovery. Track no-progress in the carriage's own (sub-level) frame — a riding mob's
+        // world position drifts with the moving carriage, so world space would never read as stuck.
+        // An open door's panel swings across the perpendicular edge of its cell; a mob whose route
+        // turns at the doorway jams against it (vanilla pathing thinks "open = passable"). When
+        // wedged, close the nearest such door and hold off reopening (the early return below) so the
+        // mob can cross before the open logic — which reopens any closed hand-door every tick — undoes it.
+        if (self instanceof PlayerMobEntity playerMob) {
+            boolean tryingToMove = !playerMob.getNavigation().isDone();
+            boolean stuck = STUCK.computeIfAbsent(self, k -> new DoorStuckMonitor()).tick(sub.x, sub.z, tryingToMove);
+            if (playerMob.isHoldingDoorsClosed()) {
+                return; // holding a recovery close — don't reopen anything yet
+            }
+            if (stuck && DoorRecovery.closeBlockingOpenDoor(self, level, subPos, DOOR_REACH)) {
+                playerMob.holdDoorsClosed();
+                return;
+            }
+        }
+
         // Hand-openable doors (wooden/copper) open directly.
         if (tryOpenDoorNear(self, level, subPos) || tryOpenDoorNear(self, level, self.blockPosition())) {
             return;
@@ -445,6 +668,14 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         return x >= bb.minX() - RIDE_MARGIN && x <= bb.maxX() + RIDE_MARGIN
             && y >= bb.minY() - RIDE_MARGIN && y <= bb.maxY() + RIDE_MARGIN
             && z >= bb.minZ() - RIDE_MARGIN && z <= bb.maxZ() + RIDE_MARGIN;
+    }
+
+    /** Squared distance from {@code (px,py,pz)} to the nearest point on {@code bb}. */
+    private static double distanceSqToBox(double px, double py, double pz, AABBdc bb) {
+        double dx = Math.max(Math.max(bb.minX() - px, 0.0), px - bb.maxX());
+        double dy = Math.max(Math.max(bb.minY() - py, 0.0), py - bb.maxY());
+        double dz = Math.max(Math.max(bb.minZ() - pz, 0.0), pz - bb.maxZ());
+        return dx * dx + dy * dy + dz * dz;
     }
 
     /**
