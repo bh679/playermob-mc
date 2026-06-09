@@ -47,11 +47,13 @@ import java.util.List;
  * </ul>
  *
  * <p>Declares <b>no flags</b> (like {@code PlayerMobDoorGoal}), so it layers on top of
- * whatever owns movement — a sword-and-board mob keeps meleeing via
- * {@code WeaponAwareAttackGoal} (priority 2) and raises its off-hand shield between
- * swings rather than this reflex freezing combat. An archer mob actively engaging a
- * target keeps shooting ({@link #isActivelyShootingBack}); charging its own bow
- * suppresses the raise too ({@link #isBusyUsingNonShield}). No shield in hand ⇒ no-op.</p>
+ * whatever owns movement — a sword-and-board mob keeps approaching/meleeing via
+ * {@code WeaponAwareAttackGoal} (priority 2) and only blocks while it isn't striking.
+ * The mob lowers the guard whenever it's committed to its own attack
+ * ({@link #isCommittedToAttack}): shooting back, or within melee reach of its target —
+ * it takes the hit to land one. It still blocks while <em>closing</em> on a ranged
+ * attacker (not yet in reach). Charging its own bow suppresses the raise too
+ * ({@link #isBusyUsingNonShield}). No shield in hand ⇒ no-op.</p>
  */
 public final class BlockArrowsGoal extends Goal {
 
@@ -86,15 +88,15 @@ public final class BlockArrowsGoal extends Goal {
     @Override
     public boolean canUse() {
         if (!mob.hasShieldReady()) return false;
-        if (isBusyUsingNonShield()) return false;   // don't interrupt charging its own bow
-        if (isActivelyShootingBack()) return false; // an archer engaging a target shoots, doesn't block
+        if (isBusyUsingNonShield()) return false; // don't interrupt charging its own bow
+        if (isCommittedToAttack()) return false;  // striking its own target -> drop guard to land the hit
         return hasRangedThreat();
     }
 
     @Override
     public boolean canContinueToUse() {
         if (!mob.hasShieldReady()) return false;
-        if (isActivelyShootingBack()) return false;
+        if (isCommittedToAttack()) return false;
         if (hasRangedThreat()) return true;
         // Brief grace after the last threat so a stream of shots / re-draws holds the block.
         return mob.tickCount - lastThreatTick <= GRACE_TICKS;
@@ -140,11 +142,30 @@ public final class BlockArrowsGoal extends Goal {
         return mob.isUsingItem() && !mob.getUseItem().is(Items.SHIELD);
     }
 
+    /**
+     * The mob declines to block while committed to its own attack — it drops the guard
+     * to strike (shooting back, or in melee reach of its target), accepting it may take
+     * the hit. A mob still <em>closing</em> on a ranged attacker is not yet in reach, so
+     * it keeps blocking as it approaches and only lowers once adjacent.
+     */
+    private boolean isCommittedToAttack() {
+        return isActivelyShootingBack() || isAttackingInMelee();
+    }
+
     /** True when the mob is holding a ranged weapon and has a target — it should shoot, not block. */
     private boolean isActivelyShootingBack() {
         if (mob.getTarget() == null) return false;
         return mob.getMainHandItem().getItem() instanceof BowItem
             || mob.getMainHandItem().getItem() instanceof CrossbowItem;
+    }
+
+    /** True when the mob has a target within melee reach — it's striking, so it lowers the shield. */
+    private boolean isAttackingInMelee() {
+        LivingEntity target = mob.getTarget();
+        if (target == null || !target.isAlive()) return false;
+        // Vanilla MeleeAttackGoal.getAttackReachSqr.
+        double reachSqr = mob.getBbWidth() * 2.0F * mob.getBbWidth() * 2.0F + target.getBbWidth();
+        return mob.distanceToSqr(target) <= reachSqr;
     }
 
     /**
