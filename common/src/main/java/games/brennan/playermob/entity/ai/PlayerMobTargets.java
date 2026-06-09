@@ -1,4 +1,4 @@
-package games.brennan.playermob.mixin.support;
+package games.brennan.playermob.entity.ai;
 
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.world.entity.Mob;
@@ -21,6 +21,11 @@ import java.util.function.Predicate;
  * net.minecraft.world.entity.LivingEntity)} — vanilla's own helper covering attackable type,
  * within-follow-range distance, line-of-sight, and team checks — so we neither loosen nor
  * reimplement vanilla's targeting rules.</p>
+ *
+ * <p><b>Package note:</b> this is a plain helper, deliberately <em>outside</em>
+ * {@code games.brennan.playermob.mixin.*}. Mixin owns that package and throws
+ * {@code IllegalClassLoadError} if a non-mixin class there is referenced directly from
+ * transformed (injected) code.</p>
  */
 public final class PlayerMobTargets {
 

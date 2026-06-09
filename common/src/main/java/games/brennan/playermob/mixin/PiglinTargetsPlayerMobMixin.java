@@ -1,7 +1,7 @@
 package games.brennan.playermob.mixin;
 
 import games.brennan.playermob.entity.PlayerMobEntity;
-import games.brennan.playermob.mixin.support.PlayerMobTargets;
+import games.brennan.playermob.entity.ai.PlayerMobTargets;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.monster.piglin.Piglin;
 import net.minecraft.world.entity.monster.piglin.PiglinAi;
