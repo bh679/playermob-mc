@@ -31,7 +31,7 @@ import java.util.EnumSet;
  * wanders off to a chest). Self-gates on {@code target == null} so it yields to
  * combat.</p>
  */
-public final class FriendlyGreetGoal extends Goal {
+public final class FriendlyGreetGoal extends Goal implements DescribableGoal {
 
     private static final double FOLLOW_STOP_DISTANCE = 3.0;   // close enough to greet
     private static final int FOLLOW_TIMEOUT_TICKS = 100;      // greet in place if it can't get closer (5s)
@@ -66,6 +66,21 @@ public final class FriendlyGreetGoal extends Goal {
         this.range = range;
         this.approachSpeed = approachSpeed;
         setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
+    }
+
+    @Override
+    public String objective() {
+        return "Greeting";
+    }
+
+    @Override
+    public String subObjective() {
+        return switch (phase) {
+            case FOLLOW -> "approaching";
+            case CROUCH -> "bowing";
+            case GIFT -> "giving gift";
+            default -> null;
+        };
     }
 
     @Override

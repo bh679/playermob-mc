@@ -27,7 +27,7 @@ import java.util.EnumSet;
  * the LOOK flag from the selector. It still drifts via the lower-priority
  * stroll goal during the brief eating window.</p>
  */
-public final class EatFoodGoal extends Goal {
+public final class EatFoodGoal extends Goal implements DescribableGoal {
 
     /**
      * Eat when HP drops below this fraction of max HP. Also the threshold below
@@ -53,6 +53,11 @@ public final class EatFoodGoal extends Goal {
     public EatFoodGoal(PlayerMobEntity mob) {
         this.mob = mob;
         setFlags(EnumSet.of(Flag.LOOK));
+    }
+
+    @Override
+    public String objective() {
+        return "Eating";
     }
 
     @Override

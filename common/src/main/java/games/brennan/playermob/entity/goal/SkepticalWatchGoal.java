@@ -21,7 +21,7 @@ import java.util.EnumSet;
  * priority 1 so the stare briefly preempts strolling/raiding — "continue their
  * tasks" resumes once the stare timer elapses or the watched entity leaves.</p>
  */
-public final class SkepticalWatchGoal extends Goal {
+public final class SkepticalWatchGoal extends Goal implements DescribableGoal {
 
     private static final int MIN_STARE_TICKS = 20;     // 1s
     private static final int MAX_STARE_TICKS = 100;    // 5s
@@ -40,6 +40,19 @@ public final class SkepticalWatchGoal extends Goal {
         this.watchRange = watchRange;
         this.closeRange = closeRange;
         setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
+    }
+
+    @Override
+    public String objective() {
+        return "Watching warily";
+    }
+
+    @Override
+    public String subObjective() {
+        if (watched == null) {
+            return null;
+        }
+        return mob.isUsingItem() ? "guarding" : watched.getName().getString();
     }
 
     @Override

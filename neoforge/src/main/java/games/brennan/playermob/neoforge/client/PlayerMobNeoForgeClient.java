@@ -8,6 +8,8 @@ import games.brennan.playermob.neoforge.PlayerMobNeoForge;
 import net.minecraft.client.gui.LayeredDraw;
 import net.minecraft.resources.ResourceLocation;
 import net.neoforged.bus.api.IEventBus;
+import net.neoforged.fml.ModList;
+import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
 import net.neoforged.neoforge.client.event.EntityRenderersEvent;
 import net.neoforged.neoforge.client.event.RegisterGuiLayersEvent;
 import net.neoforged.neoforge.client.event.RegisterMenuScreensEvent;
@@ -32,6 +34,7 @@ public final class PlayerMobNeoForgeClient {
         modBus.addListener(PlayerMobNeoForgeClient::onRegisterRenderers);
         modBus.addListener(PlayerMobNeoForgeClient::onRegisterScreens);
         modBus.addListener(PlayerMobNeoForgeClient::onRegisterGuiLayers);
+        modBus.addListener(PlayerMobNeoForgeClient::onClientSetup);
         // Screen render events fire on the game bus, not the mod bus.
         NeoForge.EVENT_BUS.addListener(PlayerMobNeoForgeClient::onScreenRender);
     }
@@ -52,5 +55,24 @@ public final class PlayerMobNeoForgeClient {
 
     private static void onScreenRender(ScreenEvent.Render.Post event) {
         VersionHudRenderer.renderOnScreen(event.getGuiGraphics(), event.getScreen());
+    }
+
+    /**
+     * Optional Dungeon Train HUD de-overlap. Gate on DT's presence so the
+     * DT-touching helper (and its Dungeon Train imports) is only classloaded when
+     * DT is installed — mirrors {@link PlayerMobNeoForge}'s {@code installDungeonTrain()}.
+     */
+    private static void onClientSetup(FMLClientSetupEvent event) {
+        if (ModList.get().isLoaded("dungeontrain")) {
+            installDungeonTrainHudOffset();
+        }
+    }
+
+    /**
+     * Isolated so {@code DungeonTrainHud} and the Dungeon Train symbols it imports
+     * are never classloaded unless {@code dungeontrain} is present.
+     */
+    private static void installDungeonTrainHudOffset() {
+        games.brennan.playermob.neoforge.compat.DungeonTrainHud.installVersionHudOffset();
     }
 }

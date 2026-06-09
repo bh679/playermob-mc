@@ -24,7 +24,7 @@ import java.util.EnumSet;
  * self-defence wins the TARGET-flag tie while defending a friend still outranks
  * proactively hunting a random hostile.</p>
  */
-public final class DefendLovedOneGoal extends TargetGoal {
+public final class DefendLovedOneGoal extends TargetGoal implements DescribableGoal {
 
     /** Minimum friendliness for the mob to bother defending anyone. */
     static final int DEFEND_FRIENDLINESS = 6;
@@ -40,6 +40,11 @@ public final class DefendLovedOneGoal extends TargetGoal {
         this.self = mob;
         this.range = range;
         setFlags(EnumSet.of(Flag.TARGET));
+    }
+
+    @Override
+    public String objective() {
+        return "Defending";
     }
 
     @Override

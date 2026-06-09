@@ -68,8 +68,9 @@ public final class PlayerMobSkinTextures {
      *
      * @param textureUrl the Mojang CDN texture URL (or any URL the client
      *                   can HTTP-GET a 64×64 PNG from).
-     * @param slim       true if the underlying skin is slim-arms — currently
-     *                   informational (the renderer doesn't model-swap yet).
+     * @param slim       true if the underlying skin is slim-arms. Drives the
+     *                   texture's {@code metadata.model} here; the renderer
+     *                   separately swaps to the slim body model per-mob.
      */
     public static ResourceLocation lookup(String textureUrl, boolean slim) {
         if (textureUrl == null || textureUrl.isEmpty()) {

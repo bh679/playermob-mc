@@ -51,7 +51,7 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     private static final int SLOT_SHADOW = 0xFF373737; // top/left inner edge
     private static final int SLOT_HILIGHT = 0xFFFFFFFF; // bottom/right inner edge
 
-    // Disposition panel layout (relative to the window origin).
+    // ---- Disposition (feelings) panel — immediately right of the slots ----
     private static final int INVENTORY_WIDTH = 176;   // the original window's content width
     private static final int PANEL_X = INVENTORY_WIDTH + 4;
     private static final int PANEL_TOP = 8;
@@ -62,13 +62,22 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     private static final int LABEL_COLOR = 0x404040;
     private static final int VALUE_COLOR = 0x202020;
     private static final int MUTED_COLOR = 0x808080;
+    private static final int DISPOSITION_WIDTH = 112; // width of the disposition column
+
+    // ---- Creative objectives column — right of the disposition panel ----
+    private static final int OBJECTIVES_X = INVENTORY_WIDTH + DISPOSITION_WIDTH;
+    private static final int OBJECTIVES_GUTTER = 124; // width reserved for the objectives column
+    private static final int OBJECTIVES_HEADER_COLOR = 0x404040;
+    private static final int OBJECTIVES_TEXT_COLOR = 0x404040;
+    private static final int OBJECTIVES_SUB_COLOR = 0x707070;
 
     /** Names are stable for a session — resolve once per UUID. */
     private final Map<UUID, String> nameCache = new HashMap<>();
 
     public PlayerMobScreen(PlayerMobMenu menu, Inventory playerInv, Component title) {
         super(menu, playerInv, title);
-        this.imageWidth = 288; // 176 inventory + ~112 disposition panel
+        // 176 inventory + 112 disposition panel + 124 objectives column.
+        this.imageWidth = INVENTORY_WIDTH + DISPOSITION_WIDTH + OBJECTIVES_GUTTER;
         this.imageHeight = 186;
         // Recompute since the field initialiser used the default height.
         this.inventoryLabelY = this.imageHeight - 94;
@@ -79,6 +88,47 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
         super.render(guiGraphics, mouseX, mouseY, partialTick);
         drawDispositionPanel(guiGraphics);
         this.renderTooltip(guiGraphics, mouseX, mouseY);
+    }
+
+    /**
+     * Draws the Creative objectives column to the right of the inventory: the
+     * mob's live goal stack ("Objective" then an indented phase), read from the
+     * synced {@link PlayerMobEntity#getObjectivesReadout()}. Refreshes each frame
+     * as the mob's goals change. Drawn in {@code renderLabels} so it's in the
+     * window-local coordinate space (origin at the top-left of the panel).
+     */
+    @Override
+    protected void renderLabels(GuiGraphics guiGraphics, int mouseX, int mouseY) {
+        super.renderLabels(guiGraphics, mouseX, mouseY);
+
+        PlayerMobEntity mob = this.menu.getMob();
+        if (mob == null) {
+            return; // client fallback before the entity resolved — no live state
+        }
+
+        int gx = OBJECTIVES_X + 7;
+        guiGraphics.drawString(this.font, "Objectives", gx, 6, OBJECTIVES_HEADER_COLOR, false);
+
+        String readout = mob.getObjectivesReadout();
+        if (readout == null || readout.isEmpty()) {
+            readout = "Idle";
+        }
+
+        int y = 20;
+        for (String entry : readout.split("\n")) {
+            int sep = entry.indexOf(" — ");
+            if (sep >= 0) {
+                guiGraphics.drawString(this.font, entry.substring(0, sep),
+                    gx, y, OBJECTIVES_TEXT_COLOR, false);
+                y += this.font.lineHeight + 1;
+                guiGraphics.drawString(this.font, "  " + entry.substring(sep + 3),
+                    gx, y, OBJECTIVES_SUB_COLOR, false);
+                y += this.font.lineHeight + 3;
+            } else {
+                guiGraphics.drawString(this.font, entry, gx, y, OBJECTIVES_TEXT_COLOR, false);
+                y += this.font.lineHeight + 3;
+            }
+        }
     }
 
     @Override
@@ -101,6 +151,11 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
         for (Slot slot : this.menu.slots) {
             drawSlotRecess(guiGraphics, x + slot.x, y + slot.y);
         }
+
+        // Bevelled divider between the disposition panel and the objectives column.
+        int dividerX = x + OBJECTIVES_X;
+        guiGraphics.fill(dividerX - 1, y + 4, dividerX, y + this.imageHeight - 4, PANEL_SHADOW);
+        guiGraphics.fill(dividerX, y + 4, dividerX + 1, y + this.imageHeight - 4, PANEL_HILIGHT);
     }
 
     /** Draws an 18×18 recessed cell whose 16×16 interior sits at ({@code sx},{@code sy}). */
