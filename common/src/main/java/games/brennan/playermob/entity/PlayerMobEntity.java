@@ -516,12 +516,20 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
                 changed |= feelings.travel(id, carriage);
             }
 
-            // Harm-a-loved-one — witnessed attack on an individual the mob loves.
-            if (feelings.feelingToward(id) >= DispositionResolver.FEELING_LOVE) {
-                LivingEntity attacker = e.getLastHurtByMob();
-                if (attacker != null && attacker != this && attacker != e
-                        && TargetCategory.classify(attacker) == TargetCategory.PLAYERS) {
-                    changed |= feelings.harm(attacker.getUUID(), e.getLastHurtByMobTimestamp());
+            // Witnessed attack — A hit nearby V. If the mob loves V it resents A
+            // (harm-a-loved-one); otherwise an aggressive mob comes to admire A for the
+            // violence, gated by how much it likes V (DispositionResolver). Mutually
+            // exclusive: harm owns feeling >= LOVE, admiration only fires below it.
+            float feelingV = feelings.feelingToward(id);
+            LivingEntity attacker = e.getLastHurtByMob();
+            if (attacker != null && attacker != this && attacker != e
+                    && TargetCategory.classify(attacker) == TargetCategory.PLAYERS) {
+                int eventTick = e.getLastHurtByMobTimestamp();
+                if (feelingV >= DispositionResolver.FEELING_LOVE) {
+                    changed |= feelings.harm(attacker.getUUID(), eventTick);
+                } else if (DispositionResolver.approvesWitnessedAttack(traits.fightFlight(), feelingV)) {
+                    changed |= feelings.admire(attacker.getUUID(),
+                        DispositionResolver.admireBonus(feelingV), eventTick);
                 }
             }
         }

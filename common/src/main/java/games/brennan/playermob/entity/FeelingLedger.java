@@ -147,6 +147,23 @@ public final class FeelingLedger {
     }
 
     /**
+     * Raise the feeling toward {@code id} (an attacker) by {@code bonus} — an aggressive mob's
+     * admiration for a witnessed attack it approves of — at game tick {@code eventTick} (debounced
+     * per-individual, sharing the witnessed-event tick with {@link #harm}). Uses the plain
+     * {@link FeelingRecord#adjusted} path so it grants no crouch headroom. Returns {@code true} if
+     * feeling changed.
+     */
+    public boolean admire(UUID id, float bonus, int eventTick) {
+        FeelingRecord before = recordFor(id);
+        if (eventTick <= before.lastWitnessTick()) {
+            return false;
+        }
+        FeelingRecord credited = before.adjusted(bonus);
+        put(id, credited.withWitnessTick(eventTick));
+        return credited.feeling() != before.feeling();
+    }
+
+    /**
      * Credit travelling together to {@code newIndex}. The first poll on a train only
      * records position; later carriage changes add feeling. Returns {@code true} if
      * feeling changed (the position-only first poll returns {@code false}).

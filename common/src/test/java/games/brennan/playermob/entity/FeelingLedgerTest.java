@@ -111,6 +111,33 @@ class FeelingLedgerTest {
         assertEquals(6.0f, ledger.feelingToward(id), EPS);
     }
 
+    @Test
+    void admireRaisesFeelingDebouncedAndClamped() {
+        FeelingLedger ledger = new FeelingLedger();
+        UUID id = UUID.randomUUID();
+        assertTrue(ledger.admire(id, 0.2f, 50));            // 5 → 5.2
+        assertFalse(ledger.admire(id, 0.2f, 50), "same event tick is debounced");
+        assertEquals(5.2f, ledger.feelingToward(id), EPS);
+        assertTrue(ledger.admire(id, 0.5f, 51));            // 5.2 → 5.7
+        assertEquals(5.7f, ledger.feelingToward(id), EPS);
+        ledger.set(id, 10.0f);
+        assertFalse(ledger.admire(id, 0.5f, 60), "already at the ceiling → no change");
+        assertEquals(10.0f, ledger.feelingToward(id), EPS);
+    }
+
+    @Test
+    void admireGrantsNoCrouchHeadroom() {
+        // Admiration uses the plain adjusted() path, so (unlike a direct attack-loss) it must not
+        // re-open crouch budget — an attacker can't farm a crouch bonus by being admired.
+        FeelingLedger ledger = new FeelingLedger();
+        UUID id = UUID.randomUUID();
+        ledger.admire(id, 0.5f, 10);
+        FeelingRecord r = ledger.recordFor(id);
+        assertEquals(FeelingRecord.CROUCH_CAP_BASE, r.crouchCap(), EPS);
+        assertEquals(0.0f, r.crouchBudgetUsed(), EPS);
+        assertEquals(0, r.defendCount());
+    }
+
     // ---- NBT round-trip incl. legacy Phase A entries ----
 
     @Test
