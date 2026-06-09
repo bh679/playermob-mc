@@ -231,6 +231,12 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private static final double SOCIAL_SCAN_RANGE = DispositionResolver.MAX_RANGE;
 
     /**
+     * Half-angle (degrees) of the cone in which a croucher counts as "looking at"
+     * the mob, so a crouch only greets the mob it's aimed at — a 90° frontal arc.
+     */
+    private static final float CROUCH_LOOK_CONE_DEGREES = 45.0F;
+
+    /**
      * Chest {@code triggerEvent} ID for "viewer count changed" — drives the
      * lid animation. See {@link ChestBlockEntity#triggerEvent}.
      */
@@ -276,9 +282,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private final Map<UUID, Long> recentlyExploredEntities = new HashMap<>();
 
     /**
-     * Per-player "was crouching at the last social scan", so a held crouch counts
-     * once (on the down → up edge). Transient — rebuilt each scan from who's in
-     * range, so it never retains players who logged out or wandered off.
+     * Per-individual "was crouch-greeting this mob at the last social scan" (crouching
+     * + facing it + line of sight), so a held greeting counts once on its rising edge.
+     * Transient — rebuilt each scan from who's in range, so it never retains anyone who
+     * logged out or wandered off.
      */
     private final Map<UUID, Boolean> crouchHeld = new HashMap<>();
 
@@ -492,14 +499,16 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
                 changed |= feelings.encounter(id);
             }
 
-            // Crouch — real players only; a PlayerMob's greeting bob must not count.
-            if (e instanceof Player player) {
-                boolean crouching = player.isCrouching();
-                nextCrouch.put(id, crouching);
-                Boolean was = crouchHeld.get(id);
-                if (crouching && (was == null || !was)) {
-                    changed |= feelings.crouch(id);
-                }
+            // Crouch — a player OR PlayerMob crouching AT this mob (facing it, in
+            // sight) greets it. Counts on the rising edge of "crouching + looking at
+            // me", so it fires once when the croucher both sneaks and turns to face
+            // the mob — and a greeting PlayerMob, whose head is turned to its target,
+            // registers between mobs too.
+            boolean greetCrouch = e.isCrouching() && crouchTargetsMe(e);
+            nextCrouch.put(id, greetCrouch);
+            Boolean was = crouchHeld.get(id);
+            if (greetCrouch && (was == null || !was)) {
+                changed |= feelings.crouch(id);
             }
 
             // Travel-together — same train, advancing carriages, not in combat with them.
@@ -547,6 +556,22 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             return false;
         }
         return feelings.defend(defender.getUUID(), myAttacker.getLastHurtByMobTimestamp());
+    }
+
+    /**
+     * Whether {@code croucher} is directing a crouch at THIS mob — it must see the
+     * mob and have its head turned toward it (within {@link #CROUCH_LOOK_CONE_DEGREES}
+     * of facing). Keeps a crouch from counting unless aimed at the mob, and lets a
+     * greeting PlayerMob (head turned to its friend) register the gesture mob-to-mob.
+     */
+    private boolean crouchTargetsMe(LivingEntity croucher) {
+        if (!croucher.hasLineOfSight(this)) {
+            return false;
+        }
+        double dx = getX() - croucher.getX();
+        double dz = getZ() - croucher.getZ();
+        float yawToMe = (float) (Mth.atan2(dz, dx) * (180.0 / Math.PI)) - 90.0F;
+        return Mth.degreesDifferenceAbs(croucher.getYHeadRot(), yawToMe) <= CROUCH_LOOK_CONE_DEGREES;
     }
 
     /**
