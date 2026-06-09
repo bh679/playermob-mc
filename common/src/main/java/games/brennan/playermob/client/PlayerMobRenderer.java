@@ -49,12 +49,14 @@ import org.joml.Matrix4f;
  * mobs in saved worlds have a stored {@code SkinIndex} that maps to a
  * specific position in this array.</p>
  *
- * <p>Wide model (Steve-style arms) only — even when the URL skin's
- * {@code SkinSlim} flag is set, the renderer uses the wide
- * {@link PlayerModel} (slim arms will look slightly thick). Per-entity
- * slim/wide model swapping is a v3 follow-up — needs override of
- * {@code render(...)} to hot-swap the model field, which the layer
- * renderers' captured references make non-trivial.</p>
+ * <p><b>Slim &amp; wide arms</b> — the renderer bakes both a wide
+ * ({@link ModelLayers#PLAYER}) and a slim ({@link ModelLayers#PLAYER_SLIM})
+ * {@link PlayerModel} once, and {@code render(...)} picks per-mob from
+ * {@link PlayerMobEntity#isSkinSlim()} by swapping the {@code model} field
+ * before {@code super.render(...)}. Render layers read {@code getModel()}
+ * each frame, so the armor / held-item layers follow the swap. Armor itself
+ * stays the wide armor model — matching how vanilla draws armor on
+ * slim-armed players.</p>
  *
  * <p>{@link Environment} {@code CLIENT}-only — stripped from dedicated
  * server jars at load time. Server-side code that needs the skin count
@@ -90,14 +92,31 @@ public final class PlayerMobRenderer
      */
     private static final double MAX_READOUT_DISTANCE_SQR = 24.0 * 24.0;
 
+    /**
+     * The two body models, baked once at construction. {@code render(...)} swaps
+     * {@code this.model} between them per-mob based on
+     * {@link PlayerMobEntity#isSkinSlim()}: {@code wideModel} is the Steve-style
+     * model handed to {@code super(...)} ({@link ModelLayers#PLAYER}),
+     * {@code slimModel} is the Alex-style 3-pixel-arm model
+     * ({@link ModelLayers#PLAYER_SLIM}).
+     */
+    private final PlayerModel<PlayerMobEntity> wideModel;
+    private final PlayerModel<PlayerMobEntity> slimModel;
+
     public PlayerMobRenderer(EntityRendererProvider.Context ctx) {
         super(ctx,
               new PlayerModel<>(ctx.bakeLayer(ModelLayers.PLAYER), /* slim */ false),
               SHADOW_RADIUS);
 
+        // Bake both arm variants once. The wide model is the instance we just
+        // handed super (now this.model / getModel()); the slim model is swapped
+        // in per-frame by render() for mobs whose skin was authored slim.
+        this.wideModel = this.getModel();
+        this.slimModel = new PlayerModel<>(ctx.bakeLayer(ModelLayers.PLAYER_SLIM), /* slim */ true);
+
         // Armor layer — draws helmet/chest/legs/boots when slots are populated.
-        // Inner / outer models are the standard player armor models (wide
-        // variant matches our wide PlayerModel above).
+        // Inner / outer models are the standard (wide) player armor models —
+        // vanilla draws this same armor model on slim-armed players too.
         this.addLayer(new HumanoidArmorLayer<>(
             this,
             new HumanoidModel<>(ctx.bakeLayer(ModelLayers.PLAYER_INNER_ARMOR)),
@@ -119,6 +138,9 @@ public final class PlayerMobRenderer
     @Override
     public void render(PlayerMobEntity entity, float entityYaw, float partialTick,
                        PoseStack poseStack, MultiBufferSource buffer, int packedLight) {
+        // Pick THIS mob's arm model before anything reads it. Render layers go
+        // through getModel() each frame, so the armor / held-item layers follow.
+        this.model = entity.isSkinSlim() ? slimModel : wideModel;
         this.getModel().crouching = entity.isCrouching();
         super.render(entity, entityYaw, partialTick, poseStack, buffer, packedLight);
         renderObjectiveReadout(entity, partialTick, poseStack, buffer, packedLight);
