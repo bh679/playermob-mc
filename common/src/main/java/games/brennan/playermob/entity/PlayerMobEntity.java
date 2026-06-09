@@ -468,8 +468,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * The positive feeling-events (Phase B), driven off one throttled nearby scan.
      * A per-entity phase offset ({@code + getId()}) staggers a co-located group so
      * they don't all scan the same tick. One {@link Reaction#GREET}-style sweep feeds
-     * encounter / crouch / travel / harm; {@link #checkDefended} uses the vanilla
-     * hurt-by tracking (no scan). All changes are batched into one
+     * encounter / crouch / travel; {@link #checkDefended} uses the vanilla hurt-by tracking
+     * (no scan), and witnessed attacks are credited at the damage event (see
+     * {@link #witnessAttack}). All changes are batched into one
      * {@link #pushDispositionToClient} so the open menu updates live.
      */
     private void tickFeelingEvents() {
@@ -515,21 +516,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             if (onTrain && getTarget() != e && TrainConfinement.allowsTarget(this, e)) {
                 changed |= feelings.travel(id, carriage);
             }
-
-            // Witnessed attack — A hit nearby V. One continuous signed reaction toward A
-            // (DispositionResolver.witnessedAttackDelta): an aggressive mob admires the violence
-            // (scaled by fight/flight and by how little it likes V), while harming someone it loves
-            // (feeling >= 7) turns it against A — the more loved V, the deeper the resentment.
-            float feelingV = feelings.feelingToward(id);
-            LivingEntity attacker = e.getLastHurtByMob();
-            if (attacker != null && attacker != this && attacker != e
-                    && TargetCategory.classify(attacker) == TargetCategory.PLAYERS) {
-                float delta = DispositionResolver.witnessedAttackDelta(traits.fightFlight(), feelingV);
-                if (delta != 0.0F) {
-                    changed |= feelings.witness(attacker.getUUID(), delta,
-                        e.getLastHurtByMobTimestamp());
-                }
-            }
+            // Witnessed attacks are no longer polled here — they're credited at the moment damage
+            // lands (LivingHurtWitnessMixin -> WitnessedAttacks -> witnessAttack), so admiration
+            // accumulates per real hit instead of missing most to i-frames / flee / one-attacker slot.
         }
 
         crouchHeld.clear();
@@ -562,6 +551,24 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             return false;
         }
         return feelings.defend(defender.getUUID(), myAttacker.getLastHurtByMobTimestamp());
+    }
+
+    /**
+     * Register a witnessed attack: {@code attacker} just landed real damage on {@code victim}
+     * (both players/PlayerMobs, neither this mob). Forms a feeling toward the attacker — admiration
+     * for violence this mob approves of, resentment for harming someone it loves — scaled by this
+     * mob's fight/flight and its feeling toward the victim
+     * ({@link DispositionResolver#witnessedAttackDelta}). Debounced per attacker on the victim's
+     * hit-tick so one blow counts once. Called server-side from {@code WitnessedAttacks} (driven by
+     * {@link games.brennan.playermob.mixin.LivingHurtWitnessMixin}).
+     */
+    public void witnessAttack(LivingEntity attacker, LivingEntity victim) {
+        float delta = DispositionResolver.witnessedAttackDelta(traits.fightFlight(),
+            feelings.feelingToward(victim.getUUID()));
+        if (delta != 0.0F
+                && feelings.witness(attacker.getUUID(), delta, victim.getLastHurtByMobTimestamp())) {
+            pushDispositionToClient();
+        }
     }
 
     /**
