@@ -14,8 +14,15 @@ import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.entity.HumanoidMobRenderer;
 import net.minecraft.client.renderer.entity.layers.HumanoidArmorLayer;
 import net.minecraft.client.renderer.entity.layers.ItemInHandLayer;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.EntityAttachment;
+import net.minecraft.world.entity.HumanoidArm;
+import net.minecraft.world.item.CrossbowItem;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.UseAnim;
+import net.minecraft.world.item.component.ChargedProjectiles;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
 
@@ -129,11 +136,18 @@ public final class PlayerMobRenderer
     }
 
     /**
-     * {@link HumanoidMobRenderer} never sets the model's {@code crouching} flag
-     * — only {@code PlayerRenderer} does, for real players — so the sneak pose
-     * driven by {@link PlayerMobEntity#setCrouching} (Friendly greeting, Shy
-     * hiding) would otherwise never render. Mirror the entity's crouch state
-     * onto the model each frame, exactly as PlayerRenderer does.
+     * Per-frame model setup that {@link HumanoidMobRenderer} doesn't do (only
+     * {@code PlayerRenderer} does, for real players):
+     * <ul>
+     *   <li>swap {@code this.model} to the slim or wide variant for this mob's skin
+     *       (see the class javadoc) — done first so everything below, and the layers,
+     *       act on the chosen model;</li>
+     *   <li>{@code crouching} — the sneak pose driven by {@link PlayerMobEntity#setCrouching}
+     *       (Friendly greeting, Shy hiding);</li>
+     *   <li>arm poses — so held items render like a player's; most importantly a raised
+     *       shield shows the BLOCK pose (arm up, shield in front) while the mob is blocking
+     *       ranged fire, exactly like a player holding right-click. See {@link #applyArmPoses}.</li>
+     * </ul>
      */
     @Override
     public void render(PlayerMobEntity entity, float entityYaw, float partialTick,
@@ -141,7 +155,9 @@ public final class PlayerMobRenderer
         // Pick THIS mob's arm model before anything reads it. Render layers go
         // through getModel() each frame, so the armor / held-item layers follow.
         this.model = entity.isSkinSlim() ? slimModel : wideModel;
-        this.getModel().crouching = entity.isCrouching();
+        PlayerModel<PlayerMobEntity> model = this.getModel();
+        model.crouching = entity.isCrouching();
+        applyArmPoses(entity, model);
         super.render(entity, entityYaw, partialTick, poseStack, buffer, packedLight);
         renderObjectiveReadout(entity, partialTick, poseStack, buffer, packedLight);
     }
@@ -202,6 +218,61 @@ public final class PlayerMobRenderer
                 Font.DisplayMode.NORMAL, 0, packedLight);
         }
         poseStack.popPose();
+    }
+
+    /**
+     * Mirror vanilla's player arm-pose logic onto the model so held items pose the
+     * way they do on a real player — a blocking shield rises into the BLOCK pose, a
+     * drawn bow into BOW_AND_ARROW, a charging/charged crossbow into CROSSBOW_*, etc.
+     * Faithful port of {@code PlayerRenderer.setModelProperties} + {@code getArmPose}.
+     * Set every frame because the model instance is shared across all PlayerMobs, and
+     * before {@code super.render} runs the model's {@code setupAnim} (which reads these).
+     */
+    private static void applyArmPoses(PlayerMobEntity entity, PlayerModel<PlayerMobEntity> model) {
+        HumanoidModel.ArmPose mainPose = armPose(entity, InteractionHand.MAIN_HAND);
+        HumanoidModel.ArmPose offPose = armPose(entity, InteractionHand.OFF_HAND);
+        // A two-handed main-hand pose (bow/crossbow/spear) frees the off hand to a
+        // plain item-or-empty pose, matching the player.
+        if (mainPose.isTwoHanded()) {
+            offPose = entity.getOffhandItem().isEmpty()
+                ? HumanoidModel.ArmPose.EMPTY : HumanoidModel.ArmPose.ITEM;
+        }
+        if (entity.getMainArm() == HumanoidArm.RIGHT) {
+            model.rightArmPose = mainPose;
+            model.leftArmPose = offPose;
+        } else {
+            model.rightArmPose = offPose;
+            model.leftArmPose = mainPose;
+        }
+    }
+
+    /** Per-hand arm pose, mirroring {@code PlayerRenderer.getArmPose} for a PlayerMob. */
+    private static HumanoidModel.ArmPose armPose(PlayerMobEntity entity, InteractionHand hand) {
+        ItemStack stack = entity.getItemInHand(hand);
+        if (stack.isEmpty()) {
+            return HumanoidModel.ArmPose.EMPTY;
+        }
+        if (entity.getUsedItemHand() == hand && entity.getUseItemRemainingTicks() > 0) {
+            UseAnim useAnim = stack.getUseAnimation();
+            if (useAnim == UseAnim.BLOCK) return HumanoidModel.ArmPose.BLOCK;
+            if (useAnim == UseAnim.BOW) return HumanoidModel.ArmPose.BOW_AND_ARROW;
+            if (useAnim == UseAnim.SPEAR) return HumanoidModel.ArmPose.THROW_SPEAR;
+            if (useAnim == UseAnim.CROSSBOW) return HumanoidModel.ArmPose.CROSSBOW_CHARGE;
+            if (useAnim == UseAnim.SPYGLASS) return HumanoidModel.ArmPose.SPYGLASS;
+            if (useAnim == UseAnim.TOOT_HORN) return HumanoidModel.ArmPose.TOOT_HORN;
+            if (useAnim == UseAnim.BRUSH) return HumanoidModel.ArmPose.BRUSH;
+        } else if (!entity.swinging
+                && stack.getItem() instanceof CrossbowItem
+                && isChargedCrossbow(stack)) {
+            return HumanoidModel.ArmPose.CROSSBOW_HOLD;
+        }
+        return HumanoidModel.ArmPose.ITEM;
+    }
+
+    /** 1.21.1 charged-crossbow test via the CHARGED_PROJECTILES component (see PlayerMobCrossbowAttackGoal). */
+    private static boolean isChargedCrossbow(ItemStack stack) {
+        ChargedProjectiles charged = stack.get(DataComponents.CHARGED_PROJECTILES);
+        return charged != null && !charged.isEmpty();
     }
 
     @Override

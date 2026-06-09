@@ -3,6 +3,7 @@ package games.brennan.playermob.entity;
 import games.brennan.playermob.PlayerMobRegistry;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.goal.AdvanceCarriageGoal;
+import games.brennan.playermob.entity.goal.BlockArrowsGoal;
 import games.brennan.playermob.entity.goal.CollectFloorItemsGoal;
 import games.brennan.playermob.entity.goal.CrossGroupGapGoal;
 import games.brennan.playermob.entity.goal.EatFoodGoal;
@@ -326,6 +327,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      */
     private boolean crossingGap;
 
+    /**
+     * True only while {@link FleeFromCategoryGoal} is running this mob away from a Shy
+     * threat (set on the goal's start, cleared on stop). While set, the arrow-blocking
+     * reflex ({@link BlockArrowsGoal}) stands down — a fleeing mob shouldn't stop to face
+     * and raise its shield, which fights the retreat. Transient server-only AI state.
+     */
+    private boolean fleeing;
+
     /** How long door-opening is suppressed after a stuck-recovery close, so the mob can cross. ~2 s. */
     private static final int DOOR_CLOSE_HOLD_TICKS = 40;
     /** Half-width of the cube scanned around the mob for an open door to close when stuck (off-train). */
@@ -419,6 +428,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // Open (and, for "tidy" mobs, close) wooden doors on the path. Declares
         // no flags, so it runs alongside whatever movement goal owns the walk.
         this.goalSelector.addGoal(1, new PlayerMobDoorGoal(this));
+        // Raise a held shield to deflect an incoming arrow. Declares no flags (like
+        // the door goal) so a sword-and-board mob keeps meleeing via the priority-2
+        // attack goal and blocks between swings rather than freezing. No-op without a
+        // shield in hand.
+        this.goalSelector.addGoal(1, new BlockArrowsGoal(this));
         this.goalSelector.addGoal(2, new WeaponAwareAttackGoal(this, 1.0, 8.0f));
         // EatFoodGoal added BEFORE the raid goals at the same priority so
         // its canUse() is evaluated first — a low-HP mob with food prefers
@@ -606,6 +620,20 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     }
 
     /**
+     * Set by {@link FleeFromCategoryGoal} while the mob is fleeing a Shy threat. While
+     * {@code true}, {@link BlockArrowsGoal} won't raise the shield — blocking (which faces
+     * the threat and stalls) fights the retreat. See {@link #fleeing}.
+     */
+    public void setFleeing(boolean fleeing) {
+        this.fleeing = fleeing;
+    }
+
+    /** True while actively fleeing a Shy threat (see {@link #fleeing}). */
+    public boolean isFleeing() {
+        return this.fleeing;
+    }
+
+    /**
      * Auto-equip the best tool the mob owns for breaking {@code state} (highest
      * {@link ItemStack#getDestroySpeed}), swapping it into the main hand and
      * stashing the displaced item. Returns {@code true} if a swap happened — so the
@@ -775,6 +803,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     }
 
     /**
+     * True if this mob is holding a shield it could raise (either hand). Gates the
+     * arrow-blocking reflex ({@code BlockArrowsGoal}) so a shieldless mob is a no-op.
+     */
+    public boolean hasShieldReady() {
+        return getOffhandItem().is(Items.SHIELD) || getMainHandItem().is(Items.SHIELD);
+    }
+
+    /**
      * Crouch gesture for the Friendly greeting and Shy hiding. The
      * {@code PlayerModel} renders the sneak pose from {@link #isCrouching()}
      * (i.e. {@link #getPose()} {@code == CROUCHING}), not the sneak flag — so we
@@ -792,8 +828,17 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * its shield up must square up to the threat for the block to count.
      */
     public void faceBodyToward(LivingEntity target) {
-        double dx = target.getX() - getX();
-        double dz = target.getZ() - getZ();
+        faceBodyToward(target.getX(), target.getZ());
+    }
+
+    /**
+     * Snap the body (and head) to face a horizontal point. Used by
+     * {@code BlockArrowsGoal} to square up to an incoming arrow's position so the
+     * shield block registers (same facing requirement as {@link #faceBodyToward(LivingEntity)}).
+     */
+    public void faceBodyToward(double targetX, double targetZ) {
+        double dx = targetX - getX();
+        double dz = targetZ - getZ();
         float yaw = (float) (Mth.atan2(dz, dx) * (180.0 / Math.PI)) - 90.0F;
         setYRot(yaw);
         setYBodyRot(yaw);
