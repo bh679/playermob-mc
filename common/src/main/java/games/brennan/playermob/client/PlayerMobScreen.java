@@ -139,8 +139,12 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
             g.drawString(this.font, Component.literal("none yet"), x, y, MUTED_COLOR, false);
             return;
         }
+        // Present (loaded / tab-list) individuals first, then strongest feeling first;
+        // absent ones (met but not currently resolvable) sink to the bottom.
         List<Map.Entry<UUID, Float>> rows = new ArrayList<>(feelings.entrySet());
-        rows.sort(Comparator.comparingDouble((Map.Entry<UUID, Float> e) -> e.getValue()).reversed());
+        rows.sort(Comparator
+            .comparingInt((Map.Entry<UUID, Float> e) -> isPresent(e.getKey()) ? 0 : 1)
+            .thenComparing(Map.Entry::getValue, Comparator.reverseOrder()));
 
         int shown = Math.min(MAX_RELATIONSHIP_ROWS, rows.size());
         for (int i = 0; i < shown; i++) {
@@ -189,6 +193,27 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
             }
         }
         return id.toString().substring(0, 8);
+    }
+
+    /**
+     * Whether {@code id} is currently resolvable client-side — a tab-list player or
+     * a loaded entity. Drives the roster's "present first, absent at the bottom"
+     * sort. Mirrors the resolution {@link #computeName} / {@link #resolveFaceTexture}
+     * use, so a row that sorts as "present" also renders a real name and face.
+     */
+    private boolean isPresent(UUID id) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.getConnection() != null && mc.getConnection().getPlayerInfo(id) != null) {
+            return true;
+        }
+        if (mc.level != null) {
+            for (Entity e : mc.level.entitiesForRendering()) {
+                if (e.getUUID().equals(id)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**
