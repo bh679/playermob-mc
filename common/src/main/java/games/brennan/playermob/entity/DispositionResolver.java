@@ -61,11 +61,11 @@ public final class DispositionResolver {
      */
     static final int WITNESS_APPROVE_MARGIN = 3;
     /** Weight on {@code (fightFlight − feelingTowardVictim)} in the witnessed-attack delta. */
-    static final float WITNESS_LIKE_SCALE = 0.3F;
+    static final float WITNESS_LIKE_SCALE = 0.4F;
     /** Per-fightFlight damping in the witnessed-attack delta. */
     static final float WITNESS_AGGRESSION_SCALE = 0.1F;
     /** Cap on the positive (admiration) witnessed-attack delta. */
-    static final float WITNESS_MAX = 2.0F;
+    static final float WITNESS_MAX = 3.0F;
 
     /** Outcome of being hit — feeling mutation is done by the entity, not here. */
     public enum HurtResponse { RETALIATE, FLEE }
