@@ -96,6 +96,7 @@ public final class FleeFromCategoryGoal extends Goal {
     public void start() {
         this.phase = Phase.FLEE;
         this.hideTicksLeft = 0;
+        mob.setFleeing(true); // suppress the shield-block reflex while running away
     }
 
     @Override
@@ -143,6 +144,7 @@ public final class FleeFromCategoryGoal extends Goal {
     public void stop() {
         mob.setCrouching(false);
         mob.getNavigation().stop();
+        mob.setFleeing(false);
         this.threat = null;
         this.phase = Phase.FLEE;
         this.hideTicksLeft = 0;

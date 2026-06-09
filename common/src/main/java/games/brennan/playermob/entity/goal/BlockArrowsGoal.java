@@ -88,6 +88,7 @@ public final class BlockArrowsGoal extends Goal {
     @Override
     public boolean canUse() {
         if (!mob.hasShieldReady()) return false;
+        if (mob.isFleeing()) return false;        // running away -> don't stop to face & block
         if (isBusyUsingNonShield()) return false; // don't interrupt charging its own bow
         if (isCommittedToAttack()) return false;  // striking its own target -> drop guard to land the hit
         return hasRangedThreat();
@@ -96,6 +97,7 @@ public final class BlockArrowsGoal extends Goal {
     @Override
     public boolean canContinueToUse() {
         if (!mob.hasShieldReady()) return false;
+        if (mob.isFleeing()) return false;
         if (isCommittedToAttack()) return false;
         if (hasRangedThreat()) return true;
         // Brief grace after the last threat so a stream of shots / re-draws holds the block.

@@ -317,6 +317,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      */
     private boolean crossingGap;
 
+    /**
+     * True only while {@link FleeFromCategoryGoal} is running this mob away from a Shy
+     * threat (set on the goal's start, cleared on stop). While set, the arrow-blocking
+     * reflex ({@link BlockArrowsGoal}) stands down — a fleeing mob shouldn't stop to face
+     * and raise its shield, which fights the retreat. Transient server-only AI state.
+     */
+    private boolean fleeing;
+
     /** How long door-opening is suppressed after a stuck-recovery close, so the mob can cross. ~2 s. */
     private static final int DOOR_CLOSE_HOLD_TICKS = 40;
     /** Half-width of the cube scanned around the mob for an open door to close when stuck (off-train). */
@@ -576,6 +584,20 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      */
     public void setCrossingGap(boolean crossingGap) {
         this.crossingGap = crossingGap;
+    }
+
+    /**
+     * Set by {@link FleeFromCategoryGoal} while the mob is fleeing a Shy threat. While
+     * {@code true}, {@link BlockArrowsGoal} won't raise the shield — blocking (which faces
+     * the threat and stalls) fights the retreat. See {@link #fleeing}.
+     */
+    public void setFleeing(boolean fleeing) {
+        this.fleeing = fleeing;
+    }
+
+    /** True while actively fleeing a Shy threat (see {@link #fleeing}). */
+    public boolean isFleeing() {
+        return this.fleeing;
     }
 
     /**
