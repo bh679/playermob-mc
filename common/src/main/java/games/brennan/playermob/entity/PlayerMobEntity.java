@@ -159,8 +159,8 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.STRING);
 
     /**
-     * Slim-arms flag (true = 3-pixel arms, like the Alex model). v2 always
-     * renders wide regardless; the flag is plumbed for v3 model-swap support.
+     * Slim-arms flag (true = 3-pixel arms, like the Alex model). Synced to the
+     * client, where the renderer swaps to the slim body model when set.
      */
     private static final EntityDataAccessor<Boolean> DATA_SKIN_SLIM =
         SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.BOOLEAN);
@@ -873,7 +873,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
 
     /**
      * True if the assigned URL skin was authored for the slim-arms model.
-     * v2 always renders wide regardless — see renderer for details.
+     * The client renderer swaps to the slim body model when this is set.
      */
     public boolean isSkinSlim() {
         return this.entityData.get(DATA_SKIN_SLIM);
