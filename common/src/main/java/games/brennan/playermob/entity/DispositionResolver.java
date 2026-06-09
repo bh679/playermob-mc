@@ -59,8 +59,14 @@ public final class DispositionResolver {
      * the more aggressive the mob, the higher the victim it'll tolerate being attacked.
      */
     static final int WITNESS_APPROVE_MARGIN = 3;
+    /**
+     * How strongly friendliness tempers admiration: each point of friendliness above neutral (5)
+     * raises the admire threshold (cold mobs applaud more readily, warm mobs less; each point below
+     * lowers it). 0 ignores friendliness (pure fight/flight); 1 gives it full weight.
+     */
+    static final float WITNESS_FRIENDLINESS_WEIGHT = 1.0F;
     /** Floor admiration an approving witness grants the attacker per witnessed attack. */
-    static final float ADMIRE_BASE = 0.2F;
+    static final float ADMIRE_BASE = 0.5F;
     /** Extra admiration per point the victim's feeling sits below neutral (more disliked → bigger bump). */
     static final float ADMIRE_PER_POINT = 0.1F;
     /** Ceiling on a single admiration bump (reached when the witness outright hates the victim). */
@@ -141,16 +147,21 @@ public final class DispositionResolver {
     }
 
     /**
-     * Whether an aggressive mob, witnessing attacker A hit victim V, comes to <em>like</em> A.
-     * True iff its feeling toward V is at or below {@code fightFlight − }{@link #WITNESS_APPROVE_MARGIN}
-     * <b>and</b> below {@link #FEELING_LOVE}. The second clause keeps approval disjoint from the
-     * harm-a-loved-one event (which owns feeling ≥ 7), so the two never both fire for one attack —
-     * at fight/flight 10 it caps approval at feeling 6. At fight/flight ≤ 3 the threshold is ≤ 0,
-     * so a timid mob effectively never admires violence.
+     * Whether a mob, witnessing attacker A hit victim V, comes to <em>like</em> A. True iff its
+     * feeling toward V is at or below an aggression threshold <b>and</b> below {@link #FEELING_LOVE}.
+     * The threshold is {@code fightFlight − }{@link #WITNESS_APPROVE_MARGIN}, then tempered by
+     * friendliness ({@link #WITNESS_FRIENDLINESS_WEIGHT} per point above neutral 5): a warmer mob
+     * must dislike V more before it applauds, a colder one applauds more readily — so the cruel
+     * {@code 9/1} archetype admires almost any beating while a brave-but-warm {@code 9/9} only
+     * cheers an attack on someone it nearly hates. The {@code < FEELING_LOVE} clause keeps this
+     * disjoint from harm-a-loved-one (feeling ≥ 7) at any traits, so one witnessed attack is only
+     * ever harm OR admire.
      */
-    public static boolean approvesWitnessedAttack(int fightFlight, float feelingTowardVictim) {
-        return feelingTowardVictim <= fightFlight - WITNESS_APPROVE_MARGIN
-            && feelingTowardVictim < FEELING_LOVE;
+    public static boolean approvesWitnessedAttack(int fightFlight, int friendliness,
+                                                  float feelingTowardVictim) {
+        float threshold = fightFlight - WITNESS_APPROVE_MARGIN
+            - WITNESS_FRIENDLINESS_WEIGHT * (friendliness - DispositionTraits.DEFAULT);
+        return feelingTowardVictim <= threshold && feelingTowardVictim < FEELING_LOVE;
     }
 
     /**

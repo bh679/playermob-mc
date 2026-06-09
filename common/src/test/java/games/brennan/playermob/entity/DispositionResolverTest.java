@@ -121,56 +121,72 @@ class DispositionResolverTest {
     @Test
     void maxAggressionAdmiresUnlessVictimIsAFavourite() {
         // Fight/flight 10: likes the attacker unless it really likes the victim (feeling 7+).
-        assertTrue(approvesWitnessedAttack(10, 0));
-        assertTrue(approvesWitnessedAttack(10, 5));
-        assertTrue(approvesWitnessedAttack(10, 6));
-        assertFalse(approvesWitnessedAttack(10, 7), "feeling 7 is the favourite (harm) band");
-        assertFalse(approvesWitnessedAttack(10, 8));
-        assertFalse(approvesWitnessedAttack(10, 10));
+        assertTrue(approvesWitnessedAttack(10, 5, 0));
+        assertTrue(approvesWitnessedAttack(10, 5, 5));
+        assertTrue(approvesWitnessedAttack(10, 5, 6));
+        assertFalse(approvesWitnessedAttack(10, 5, 7), "feeling 7 is the favourite (harm) band");
+        assertFalse(approvesWitnessedAttack(10, 5, 8));
+        assertFalse(approvesWitnessedAttack(10, 5, 10));
     }
 
     @Test
     void lowAggressionAdmiresOnlyForDislikedVictims() {
         // Fight/flight 6: likes it only if it dislikes the victim (feeling 1–3).
-        assertTrue(approvesWitnessedAttack(6, 1));
-        assertTrue(approvesWitnessedAttack(6, 3));
-        assertFalse(approvesWitnessedAttack(6, 4));
-        assertFalse(approvesWitnessedAttack(6, 5));
+        assertTrue(approvesWitnessedAttack(6, 5, 1));
+        assertTrue(approvesWitnessedAttack(6, 5, 3));
+        assertFalse(approvesWitnessedAttack(6, 5, 4));
+        assertFalse(approvesWitnessedAttack(6, 5, 5));
     }
 
     @Test
     void timidMobsNeverAdmireViolence() {
-        // Threshold = fightFlight − 3. Fight/flight ≤ 2 can never approve (feeling floors at 0);
-        // fight/flight 3 approves only for an utterly-hated victim (feeling 0), nothing higher.
+        // At neutral friendliness (5): threshold = fightFlight − 3. Fight/flight ≤ 2 can never
+        // approve (feeling floors at 0); fight/flight 3 approves only an utterly-hated victim (0).
         for (float feeling = 0; feeling <= 10; feeling++) {
-            assertFalse(approvesWitnessedAttack(2, feeling), "ff=2 never approves");
-            assertFalse(approvesWitnessedAttack(0, feeling), "ff=0 never approves");
+            assertFalse(approvesWitnessedAttack(2, 5, feeling), "ff=2 never approves");
+            assertFalse(approvesWitnessedAttack(0, 5, feeling), "ff=0 never approves");
         }
-        assertTrue(approvesWitnessedAttack(3, 0), "ff=3 admires only its most-hated victim");
-        assertFalse(approvesWitnessedAttack(3, 1), "ff=3 won't approve above feeling 0");
+        assertTrue(approvesWitnessedAttack(3, 5, 0), "ff=3 admires only its most-hated victim");
+        assertFalse(approvesWitnessedAttack(3, 5, 1), "ff=3 won't approve above feeling 0");
     }
 
     @Test
     void approvalNeverOverlapsTheHarmBand() {
-        // The harm-a-loved-one event owns feeling >= FEELING_LOVE; approval must stay out of it
-        // at every fight/flight, so a single witnessed attack is only ever harm OR admire.
+        // The harm-a-loved-one event owns feeling >= FEELING_LOVE; approval must stay out of it at
+        // every fight/flight AND friendliness, so a single witnessed attack is only ever harm OR
+        // admire (the < FEELING_LOVE guard holds even when friendliness pushes the threshold up).
         for (int ff = 0; ff <= 10; ff++) {
-            for (float feeling = DispositionResolver.FEELING_LOVE; feeling <= 10; feeling++) {
-                assertFalse(approvesWitnessedAttack(ff, feeling),
-                    "approval leaked into the harm band: ff=" + ff + " feeling=" + feeling);
+            for (int fr = 0; fr <= 10; fr++) {
+                for (float feeling = DispositionResolver.FEELING_LOVE; feeling <= 10; feeling++) {
+                    assertFalse(approvesWitnessedAttack(ff, fr, feeling),
+                        "approval leaked into the harm band: ff=" + ff + " fr=" + fr + " feeling=" + feeling);
+                }
             }
         }
     }
 
     @Test
+    void friendlinessTempersAdmiration() {
+        // Cold mobs applaud more readily; warm mobs need to dislike the victim more.
+        // 9/1 aggressive archetype: threshold 9−3+4 = 10 → admires anyone it doesn't love.
+        assertTrue(approvesWitnessedAttack(9, 1, 6));
+        assertTrue(approvesWitnessedAttack(9, 1, 0));
+        assertFalse(approvesWitnessedAttack(9, 1, 7), "still never enters the harm band");
+        // 9/9 brave + warm: threshold 9−3−4 = 2 → only an almost-hated victim.
+        assertTrue(approvesWitnessedAttack(9, 9, 2));
+        assertFalse(approvesWitnessedAttack(9, 9, 3));
+        // 1/9 gentle: never.
+        assertFalse(approvesWitnessedAttack(1, 9, 0));
+    }
+
+    @Test
     void admireBonusFloorsAtBaseAndScalesWithDislike() {
-        assertEquals(0.2f, admireBonus(6), EPS); // mildly likes victim → floor
-        assertEquals(0.2f, admireBonus(5), EPS); // neutral → floor
-        assertEquals(0.3f, admireBonus(4), EPS);
-        assertEquals(0.4f, admireBonus(3), EPS);
-        assertEquals(0.5f, admireBonus(2), EPS);
-        assertEquals(0.6f, admireBonus(1), EPS);
-        assertEquals(0.7f, admireBonus(0), EPS); // hates victim → cap
+        assertEquals(0.5f, admireBonus(6), EPS); // mildly likes victim → floor
+        assertEquals(0.5f, admireBonus(5), EPS); // neutral → floor
+        assertEquals(0.6f, admireBonus(4), EPS);
+        assertEquals(0.7f, admireBonus(3), EPS); // base 0.5 + 0.2 reaches the cap
+        assertEquals(0.7f, admireBonus(2), EPS); // capped
+        assertEquals(0.7f, admireBonus(0), EPS); // capped (hates victim)
     }
 
     // ---- totality ----

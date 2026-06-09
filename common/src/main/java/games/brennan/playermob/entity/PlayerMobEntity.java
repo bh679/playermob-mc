@@ -527,7 +527,8 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
                 int eventTick = e.getLastHurtByMobTimestamp();
                 if (feelingV >= DispositionResolver.FEELING_LOVE) {
                     changed |= feelings.harm(attacker.getUUID(), eventTick);
-                } else if (DispositionResolver.approvesWitnessedAttack(traits.fightFlight(), feelingV)) {
+                } else if (DispositionResolver.approvesWitnessedAttack(
+                        traits.fightFlight(), traits.friendliness(), feelingV)) {
                     changed |= feelings.admire(attacker.getUUID(),
                         DispositionResolver.admireBonus(feelingV), eventTick);
                 }
