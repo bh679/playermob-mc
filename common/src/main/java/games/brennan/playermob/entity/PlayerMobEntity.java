@@ -1029,15 +1029,17 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
 
     /**
      * Whether this mob will wade into a fight against {@code foe} to defend a loved
-     * one — the gate for {@link DefendLovedOneGoal}. Love and loyalty drive it, so a
-     * mob defends regardless of its fight/flight trait <em>unless the fight is
-     * hopeless</em> ({@link DispositionResolver#defendIsWorthwhile}). Uses the raw
-     * power check rather than {@link #reactionToward}, so defending a friend overrides
-     * the social personal-space bubble (a mob will charge a player it would otherwise
-     * only WATCH).
+     * one — the gate for {@link DefendLovedOneGoal}. Defending overrides the mob's
+     * lower-priority stance toward the foe (it will charge a player it would otherwise
+     * GREET / WATCH / IGNORE, and drops raiding / strolling to do so — setting the
+     * target makes those goals yield) but <b>never overrides {@link Reaction#FLEE}</b>:
+     * a mob whose nature is to flee that foe keeps fleeing rather than being forced to
+     * fight. Capped by {@link DispositionResolver#defendIsWorthwhile} so even a fearless
+     * mob won't throw itself at a hopelessly stronger foe.
      */
     public boolean wouldEngageFoe(LivingEntity foe) {
-        return DispositionResolver.defendIsWorthwhile(selfCombatPower(), combatPowerOf(foe));
+        return reactionToward(foe) != Reaction.FLEE
+            && DispositionResolver.defendIsWorthwhile(selfCombatPower(), combatPowerOf(foe));
     }
 
     /**
