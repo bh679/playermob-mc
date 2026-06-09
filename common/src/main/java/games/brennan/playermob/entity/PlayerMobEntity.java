@@ -982,6 +982,26 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     // ---- Defend-loved-ones support (DefendLovedOneGoal) -------------------
 
     /**
+     * The last categorisable entity to attack this mob, and the tick it happened —
+     * a defender's signal for "who hurt my friend". Kept separately from the vanilla
+     * {@code lastHurtByMob} because a fleeing mob clears that (so its own retaliation
+     * goal stands down), which would otherwise erase the very record a defender reads.
+     * Session memory: not saved, not synced.
+     */
+    private LivingEntity lastAttacker;
+    private int lastAttackerTick = -10000;
+
+    /** The last categorisable attacker (survives the flee-driven {@code lastHurtByMob} reset), or null. */
+    public LivingEntity getLastAttacker() {
+        return lastAttacker;
+    }
+
+    /** Tick of the last categorisable attack, in this entity's own {@code tickCount} frame. */
+    public int getLastAttackerTick() {
+        return lastAttackerTick;
+    }
+
+    /**
      * Find an individual this mob loves ({@code feeling >= }{@link
      * DispositionResolver#FEELING_LOVE}) that was recently attacked, paired with its
      * attacker, for {@link DefendLovedOneGoal} to target. Scans within {@code range}
@@ -1006,8 +1026,18 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             if (feelingToward(loved) < DispositionResolver.FEELING_LOVE) continue;
             double lovedSq = distanceToSqr(loved);
             if (lovedSq >= closestSq) continue; // farther than a match we already have
-            if (loved.tickCount - loved.getLastHurtByMobTimestamp() > recencyTicks) continue;
-            LivingEntity foe = loved.getLastHurtByMob();
+            // A PlayerMob victim clears its vanilla lastHurtByMob when it flees, so read
+            // its surviving attacker memory; real players don't flee-clear, so use theirs.
+            LivingEntity foe;
+            int hurtTick;
+            if (loved instanceof PlayerMobEntity pm) {
+                foe = pm.getLastAttacker();
+                hurtTick = pm.getLastAttackerTick();
+            } else {
+                foe = loved.getLastHurtByMob();
+                hurtTick = loved.getLastHurtByMobTimestamp();
+            }
+            if (loved.tickCount - hurtTick > recencyTicks) continue;
             if (!isDefensibleFoe(foe, loved, rangeSq)) continue;
             closestSq = lovedSq;
             bestDefended = loved;
@@ -2282,6 +2312,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             }
             TargetCategory category = TargetCategory.classify(attacker);
             if (category != null) {
+                // Remember the attacker independently of the vanilla lastHurtByMob the
+                // flee branch below clears — this is what a defender reads to learn who
+                // hurt a loved one, even when that loved one flees and wipes its own.
+                this.lastAttacker = attacker;
+                this.lastAttackerTick = tickCount;
                 // A player/PlayerMob hit cools the feeling toward them, ∝ damage
                 // (a solid blow can flip neutral straight into "hate").
                 if (category == TargetCategory.PLAYERS) {
