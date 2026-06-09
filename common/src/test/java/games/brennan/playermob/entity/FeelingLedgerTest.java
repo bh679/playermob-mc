@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Pure-logic tests for {@link FeelingLedger} — default-neutral lookups, the Phase B
- * events (encounter / crouch / defend / harm / travel), all-entry persistence with
+ * events (encounter / crouch / defend / witness / travel), all-entry persistence with
  * the strongest-magnitude cap, additive-NBT round-tripping (incl. legacy Phase A
  * entries), and the lossy float sync channel. {@link CompoundTag} needs a registry
  * bootstrap (same as the other NBT tests).
@@ -100,38 +100,29 @@ class FeelingLedgerTest {
     }
 
     @Test
-    void harmIsDebouncedPerEvent() {
+    void witnessAppliesSignedDeltaDebouncedAndClamped() {
         FeelingLedger ledger = new FeelingLedger();
         UUID id = UUID.randomUUID();
-        ledger.set(id, 8.0f);
-        assertTrue(ledger.harm(id, 50));                    // −1 → 7
-        assertFalse(ledger.harm(id, 50), "same event tick is debounced");
-        assertEquals(7.0f, ledger.feelingToward(id), EPS);
-        assertTrue(ledger.harm(id, 51));                    // −1 → 6
-        assertEquals(6.0f, ledger.feelingToward(id), EPS);
-    }
-
-    @Test
-    void admireRaisesFeelingDebouncedAndClamped() {
-        FeelingLedger ledger = new FeelingLedger();
-        UUID id = UUID.randomUUID();
-        assertTrue(ledger.admire(id, 0.2f, 50));            // 5 → 5.2
-        assertFalse(ledger.admire(id, 0.2f, 50), "same event tick is debounced");
-        assertEquals(5.2f, ledger.feelingToward(id), EPS);
-        assertTrue(ledger.admire(id, 0.5f, 51));            // 5.2 → 5.7
-        assertEquals(5.7f, ledger.feelingToward(id), EPS);
+        assertTrue(ledger.witness(id, 0.5f, 50));            // admiration: 5 → 5.5
+        assertFalse(ledger.witness(id, 0.5f, 50), "same event tick is debounced");
+        assertEquals(5.5f, ledger.feelingToward(id), EPS);
+        assertTrue(ledger.witness(id, -2.0f, 51));           // resentment: 5.5 → 3.5
+        assertEquals(3.5f, ledger.feelingToward(id), EPS);
+        ledger.set(id, 0.0f);
+        assertFalse(ledger.witness(id, -1.0f, 60), "already at the floor → no change");
+        assertEquals(0.0f, ledger.feelingToward(id), EPS);
         ledger.set(id, 10.0f);
-        assertFalse(ledger.admire(id, 0.5f, 60), "already at the ceiling → no change");
+        assertFalse(ledger.witness(id, 0.5f, 70), "already at the ceiling → no change");
         assertEquals(10.0f, ledger.feelingToward(id), EPS);
     }
 
     @Test
-    void admireGrantsNoCrouchHeadroom() {
-        // Admiration uses the plain adjusted() path, so (unlike a direct attack-loss) it must not
-        // re-open crouch budget — an attacker can't farm a crouch bonus by being admired.
+    void witnessGrantsNoCrouchHeadroom() {
+        // witness() uses the plain adjusted() path, so (unlike a direct attack-loss) even a negative
+        // delta must NOT re-open crouch budget — an attacker can't farm crouch headroom.
         FeelingLedger ledger = new FeelingLedger();
         UUID id = UUID.randomUUID();
-        ledger.admire(id, 0.5f, 10);
+        ledger.witness(id, -2.0f, 10);
         FeelingRecord r = ledger.recordFor(id);
         assertEquals(FeelingRecord.CROUCH_CAP_BASE, r.crouchCap(), EPS);
         assertEquals(0.0f, r.crouchBudgetUsed(), EPS);

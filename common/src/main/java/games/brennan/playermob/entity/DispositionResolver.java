@@ -54,17 +54,18 @@ public final class DispositionResolver {
     private static final double[] INNER_AT_NEUTRAL = {10.0, 5.0, 1.5};
 
     /**
-     * Witnessed-attack admiration. A mob seeing attacker A hit victim V comes to like A
-     * when its feeling toward V is at or below {@code fightFlight − }{@link #WITNESS_APPROVE_MARGIN}:
-     * the more aggressive the mob, the higher the victim it'll tolerate being attacked.
+     * Witnessed-attack reaction. A mob seeing attacker A hit victim V forms one continuous signed
+     * feeling toward A — positive (admiration) when it approves of the violence, negative (resentment)
+     * when A harmed someone it loves. {@code WITNESS_APPROVE_MARGIN} sets the approve threshold
+     * ({@code feelingTowardVictim ≤ fightFlight − }this); {@link #witnessedAttackDelta} gives the magnitude.
      */
     static final int WITNESS_APPROVE_MARGIN = 3;
-    /** Floor admiration an approving witness grants the attacker per witnessed attack. */
-    static final float ADMIRE_BASE = 0.5F;
-    /** Extra admiration per point the victim's feeling sits below neutral (more disliked → bigger bump). */
-    static final float ADMIRE_PER_POINT = 0.1F;
-    /** Ceiling on a single admiration bump (reached when the witness outright hates the victim). */
-    static final float ADMIRE_MAX = 0.7F;
+    /** Weight on {@code (fightFlight − feelingTowardVictim)} in the witnessed-attack delta. */
+    static final float WITNESS_LIKE_SCALE = 0.3F;
+    /** Per-fightFlight damping in the witnessed-attack delta. */
+    static final float WITNESS_AGGRESSION_SCALE = 0.1F;
+    /** Cap on the positive (admiration) witnessed-attack delta. */
+    static final float WITNESS_MAX = 2.0F;
 
     /** Outcome of being hit — feeling mutation is done by the entity, not here. */
     public enum HurtResponse { RETALIATE, FLEE }
@@ -141,27 +142,30 @@ public final class DispositionResolver {
     }
 
     /**
-     * Whether an aggressive mob, witnessing attacker A hit victim V, comes to <em>like</em> A.
-     * True iff its feeling toward V is at or below {@code fightFlight − }{@link #WITNESS_APPROVE_MARGIN}
-     * <b>and</b> below {@link #FEELING_LOVE}. The second clause keeps approval disjoint from the
-     * harm-a-loved-one event (which owns feeling ≥ 7), so the two never both fire for one attack —
-     * at fight/flight 10 it caps approval at feeling 6. At fight/flight ≤ 3 the threshold is ≤ 0,
-     * so a timid mob effectively never admires violence.
+     * The signed feeling a mob forms toward attacker A on witnessing A hit victim V — positive
+     * admiration, negative resentment, or {@code 0} (indifferent). Two bands are active; between them
+     * the mob doesn't react:
+     * <ul>
+     *   <li><b>Approve</b> — {@code feelingTowardVictim ≤ fightFlight − }{@link #WITNESS_APPROVE_MARGIN}
+     *       and {@code <} {@link #FEELING_LOVE}: it likes A for the violence (positive).</li>
+     *   <li><b>Resent</b> — {@code feelingTowardVictim ≥ }{@link #FEELING_LOVE}: A harmed someone it
+     *       loves (negative).</li>
+     * </ul>
+     * In either band the magnitude is {@code WITNESS_LIKE_SCALE·(fightFlight − feelingTowardVictim) −
+     * WITNESS_AGGRESSION_SCALE·fightFlight}, capped above at {@link #WITNESS_MAX}: admiration grows with
+     * fight/flight and with disliking V; resentment deepens the more it loves V and the calmer it is.
      */
-    public static boolean approvesWitnessedAttack(int fightFlight, float feelingTowardVictim) {
-        return feelingTowardVictim <= fightFlight - WITNESS_APPROVE_MARGIN
-            && feelingTowardVictim < FEELING_LOVE;
-    }
-
-    /**
-     * The small, positive feeling an approving witness grants the attacker — an {@link #ADMIRE_BASE}
-     * floor that grows by {@link #ADMIRE_PER_POINT} for each point the victim's feeling sits below
-     * neutral (the more the mob dislikes the victim, the more it admires the attacker), capped at
-     * {@link #ADMIRE_MAX}. Assumes the caller has confirmed {@link #approvesWitnessedAttack}.
-     */
-    public static float admireBonus(float feelingTowardVictim) {
-        float dislike = Math.max(0.0F, DispositionTraits.DEFAULT - feelingTowardVictim);
-        return Math.min(ADMIRE_MAX, ADMIRE_BASE + ADMIRE_PER_POINT * dislike);
+    public static float witnessedAttackDelta(int fightFlight, float feelingTowardVictim) {
+        boolean resent = feelingTowardVictim >= FEELING_LOVE;
+        boolean approve = feelingTowardVictim < FEELING_LOVE
+            && feelingTowardVictim <= fightFlight - WITNESS_APPROVE_MARGIN;
+        if (!resent && !approve) {
+            return 0.0F;
+        }
+        float delta = Math.min(WITNESS_MAX,
+            WITNESS_LIKE_SCALE * (fightFlight - feelingTowardVictim)
+                - WITNESS_AGGRESSION_SCALE * fightFlight);
+        return Math.abs(delta) < 1e-4F ? 0.0F : delta;
     }
 
     static double clamp(double value, double lo, double hi) {

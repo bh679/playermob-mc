@@ -2,14 +2,12 @@ package games.brennan.playermob.entity;
 
 import org.junit.jupiter.api.Test;
 
-import static games.brennan.playermob.entity.DispositionResolver.admireBonus;
-import static games.brennan.playermob.entity.DispositionResolver.approvesWitnessedAttack;
 import static games.brennan.playermob.entity.DispositionResolver.innerRadius;
 import static games.brennan.playermob.entity.DispositionResolver.onHurt;
 import static games.brennan.playermob.entity.DispositionResolver.outerRadius;
 import static games.brennan.playermob.entity.DispositionResolver.resolve;
+import static games.brennan.playermob.entity.DispositionResolver.witnessedAttackDelta;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -116,60 +114,46 @@ class DispositionResolverTest {
         assertEquals(DispositionResolver.HurtResponse.FLEE, onHurt(4));
     }
 
-    // ---- witnessed-attack admiration ----
+    // ---- witnessed-attack reaction (signed continuous delta) ----
 
     @Test
-    void maxAggressionAdmiresUnlessVictimIsAFavourite() {
-        // Fight/flight 10: likes the attacker unless it really likes the victim (feeling 7+).
-        assertTrue(approvesWitnessedAttack(10, 0));
-        assertTrue(approvesWitnessedAttack(10, 5));
-        assertTrue(approvesWitnessedAttack(10, 6));
-        assertFalse(approvesWitnessedAttack(10, 7), "feeling 7 is the favourite (harm) band");
-        assertFalse(approvesWitnessedAttack(10, 8));
-        assertFalse(approvesWitnessedAttack(10, 10));
+    void witnessApproveBandScalesWithAggressionAndDislike() {
+        // Positive admiration, reproducing cells of the design table.
+        assertEquals(2.0f, witnessedAttackDelta(10, 0), EPS);   // hate + max aggression → the cap
+        assertEquals(0.5f, witnessedAttackDelta(10, 5), EPS);   // neutral victim, max aggression
+        assertEquals(0.6f, witnessedAttackDelta(3, 0), EPS);    // just over the approve threshold
+        assertEquals(0.3f, witnessedAttackDelta(6, 3), EPS);
+        assertEquals(0.2f, witnessedAttackDelta(10, 6), EPS);
     }
 
     @Test
-    void lowAggressionAdmiresOnlyForDislikedVictims() {
-        // Fight/flight 6: likes it only if it dislikes the victim (feeling 1–3).
-        assertTrue(approvesWitnessedAttack(6, 1));
-        assertTrue(approvesWitnessedAttack(6, 3));
-        assertFalse(approvesWitnessedAttack(6, 4));
-        assertFalse(approvesWitnessedAttack(6, 5));
+    void witnessNeutralBandIsNoReaction() {
+        // Below the approve threshold and below the love line → exactly 0.
+        assertEquals(0.0f, witnessedAttackDelta(0, 0), EPS);
+        assertEquals(0.0f, witnessedAttackDelta(2, 0), EPS);    // fightFlight − 3 < 0
+        assertEquals(0.0f, witnessedAttackDelta(8, 6), EPS);    // feeling 6 needs fight/flight >= 9
+        assertEquals(0.0f, witnessedAttackDelta(5, 5), EPS);
+        assertEquals(0.0f, witnessedAttackDelta(9, 6), EPS);    // exactly on the threshold → 0 magnitude
     }
 
     @Test
-    void timidMobsNeverAdmireViolence() {
-        // Threshold = fightFlight − 3. Fight/flight ≤ 2 can never approve (feeling floors at 0);
-        // fight/flight 3 approves only for an utterly-hated victim (feeling 0), nothing higher.
-        for (float feeling = 0; feeling <= 10; feeling++) {
-            assertFalse(approvesWitnessedAttack(2, feeling), "ff=2 never approves");
-            assertFalse(approvesWitnessedAttack(0, feeling), "ff=0 never approves");
-        }
-        assertTrue(approvesWitnessedAttack(3, 0), "ff=3 admires only its most-hated victim");
-        assertFalse(approvesWitnessedAttack(3, 1), "ff=3 won't approve above feeling 0");
+    void witnessResentBandDeepensWithLoveAndCalm() {
+        // feeling >= 7 (love band) is always negative, regardless of the approve threshold.
+        assertEquals(-3.0f, witnessedAttackDelta(0, 10), EPS);  // beloved victim, calm witness
+        assertEquals(-1.0f, witnessedAttackDelta(10, 10), EPS); // aggressive witness minds less
+        assertEquals(-2.0f, witnessedAttackDelta(5, 10), EPS);
+        assertEquals(-0.1f, witnessedAttackDelta(10, 7), EPS);
+        assertEquals(-2.1f, witnessedAttackDelta(0, 7), EPS);
     }
 
     @Test
-    void approvalNeverOverlapsTheHarmBand() {
-        // The harm-a-loved-one event owns feeling >= FEELING_LOVE; approval must stay out of it
-        // at every fight/flight, so a single witnessed attack is only ever harm OR admire.
+    void witnessNeverExceedsTheCap() {
         for (int ff = 0; ff <= 10; ff++) {
-            for (float feeling = DispositionResolver.FEELING_LOVE; feeling <= 10; feeling++) {
-                assertFalse(approvesWitnessedAttack(ff, feeling),
-                    "approval leaked into the harm band: ff=" + ff + " feeling=" + feeling);
+            for (float feeling = 0; feeling <= 10; feeling++) {
+                assertTrue(witnessedAttackDelta(ff, feeling) <= 2.0f + EPS,
+                    "delta exceeded the cap at ff=" + ff + " feeling=" + feeling);
             }
         }
-    }
-
-    @Test
-    void admireBonusFloorsAtBaseAndScalesWithDislike() {
-        assertEquals(0.5f, admireBonus(6), EPS); // mildly likes victim → floor
-        assertEquals(0.5f, admireBonus(5), EPS); // neutral → floor
-        assertEquals(0.6f, admireBonus(4), EPS);
-        assertEquals(0.7f, admireBonus(3), EPS); // base 0.5 + 0.2 reaches the cap
-        assertEquals(0.7f, admireBonus(2), EPS); // capped
-        assertEquals(0.7f, admireBonus(0), EPS); // capped (hates victim)
     }
 
     // ---- totality ----
