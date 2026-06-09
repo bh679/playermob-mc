@@ -47,7 +47,7 @@ import java.util.EnumSet;
  * may not fire — the safety net is {@link PlayerMobEntity#die} which
  * always closes the open container.</p>
  */
-public final class RaidContainersGoal extends Goal {
+public final class RaidContainersGoal extends Goal implements DescribableGoal {
 
     private static final int OPEN_PAUSE_TICKS = 20;       // 1.0s after opening before first swap consideration
     private static final int CLOSE_PAUSE_TICKS = 10;      // 0.5s to "finish closing" before leaving
@@ -88,6 +88,22 @@ public final class RaidContainersGoal extends Goal {
         this.moveSpeed = moveSpeed;
         this.scanRadius = scanRadius;
         setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
+    }
+
+    @Override
+    public String objective() {
+        return "Raiding chest";
+    }
+
+    @Override
+    public String subObjective() {
+        return switch (phase) {
+            case PATHING -> "approaching";
+            case OPENING -> "opening";
+            case LOOTING -> "looting";
+            case CLOSING -> "closing";
+            default -> null;
+        };
     }
 
     @Override

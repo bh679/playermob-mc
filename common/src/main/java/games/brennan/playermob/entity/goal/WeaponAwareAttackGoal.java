@@ -35,7 +35,7 @@ import java.util.EnumSet;
  * the selector trying to run. Composing them inside one Goal keeps selector
  * state stable.</p>
  */
-public final class WeaponAwareAttackGoal extends Goal {
+public final class WeaponAwareAttackGoal extends Goal implements DescribableGoal {
 
     private final PlayerMobEntity mob;
     private final PlayerMobCrossbowAttackGoal crossbow;
@@ -62,6 +62,18 @@ public final class WeaponAwareAttackGoal extends Goal {
         // We claim every flag any delegate might need so the selector reserves
         // them for us. Inner-goal flags are irrelevant — they're not selector-managed.
         setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK, Flag.JUMP));
+    }
+
+    @Override
+    public String objective() {
+        return "Fighting";
+    }
+
+    @Override
+    public String subObjective() {
+        String mode = active == crossbow ? "crossbow" : active == bow ? "bow" : "melee";
+        LivingEntity target = mob.getTarget();
+        return target != null ? mode + " → " + target.getName().getString() : mode;
     }
 
     @Override

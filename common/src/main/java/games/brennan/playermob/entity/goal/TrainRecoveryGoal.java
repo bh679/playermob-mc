@@ -52,7 +52,7 @@ import java.util.List;
  * passes) on Fabric/Forge and on NeoForge without Dungeon Train, so the goal
  * never fires there.</p>
  */
-public final class TrainRecoveryGoal extends Goal {
+public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
 
     /** How far to look for a carriage to re-board. A fall keeps the mob near its train. */
     private static final double SCAN_RADIUS = 28.0;
@@ -151,6 +151,22 @@ public final class TrainRecoveryGoal extends Goal {
         // Recovery still jumps when it needs to (jump-stacking, hopping aboard) via the
         // JumpControl directly, which doesn't require owning the flag.
         setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
+    }
+
+    @Override
+    public String objective() {
+        return "Returning to train";
+    }
+
+    @Override
+    public String subObjective() {
+        return switch (phase) {
+            case APPROACH -> "approaching";
+            case BRIDGE -> "bridging";
+            case GATHER -> "gathering blocks";
+            case CRAFT -> "crafting";
+            default -> null;
+        };
     }
 
     @Override

@@ -41,7 +41,7 @@ import java.util.List;
  * Reuses the entity's existing recently-explored cooldown maps, so it adds no
  * new save state.</p>
  */
-public final class HarvestCropsGoal extends Goal {
+public final class HarvestCropsGoal extends Goal implements DescribableGoal {
 
     private static final int HARVEST_WINDUP_TICKS = 10;   // 0.5s swing before the break lands
     private static final int PATH_TIMEOUT_TICKS = 100;     // 5s to reach the crop
@@ -65,6 +65,20 @@ public final class HarvestCropsGoal extends Goal {
         this.moveSpeed = moveSpeed;
         this.scanRadius = scanRadius;
         setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
+    }
+
+    @Override
+    public String objective() {
+        return "Harvesting crops";
+    }
+
+    @Override
+    public String subObjective() {
+        return switch (phase) {
+            case PATHING -> "approaching";
+            case HARVESTING -> "harvesting";
+            default -> null;
+        };
     }
 
     @Override

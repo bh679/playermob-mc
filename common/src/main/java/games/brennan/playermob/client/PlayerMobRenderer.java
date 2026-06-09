@@ -4,6 +4,8 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
 import net.minecraft.client.model.HumanoidModel;
 import net.minecraft.client.model.PlayerModel;
 import net.minecraft.client.model.geom.ModelLayers;
@@ -13,6 +15,9 @@ import net.minecraft.client.renderer.entity.HumanoidMobRenderer;
 import net.minecraft.client.renderer.entity.layers.HumanoidArmorLayer;
 import net.minecraft.client.renderer.entity.layers.ItemInHandLayer;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.entity.EntityAttachment;
+import net.minecraft.world.phys.Vec3;
+import org.joml.Matrix4f;
 
 /**
  * Renders a {@link PlayerMobEntity} using the vanilla {@link PlayerModel} —
@@ -79,6 +84,12 @@ public final class PlayerMobRenderer
     /** Shadow disc radius below the entity, matches the player's 0.5. */
     private static final float SHADOW_RADIUS = 0.5F;
 
+    /**
+     * Max distance (squared) at which the Creative-only objective readout draws —
+     * keeps a scene full of PlayerMobs from filling the screen with floating text.
+     */
+    private static final double MAX_READOUT_DISTANCE_SQR = 24.0 * 24.0;
+
     public PlayerMobRenderer(EntityRendererProvider.Context ctx) {
         super(ctx,
               new PlayerModel<>(ctx.bakeLayer(ModelLayers.PLAYER), /* slim */ false),
@@ -110,6 +121,65 @@ public final class PlayerMobRenderer
                        PoseStack poseStack, MultiBufferSource buffer, int packedLight) {
         this.getModel().crouching = entity.isCrouching();
         super.render(entity, entityYaw, partialTick, poseStack, buffer, packedLight);
+        renderObjectiveReadout(entity, partialTick, poseStack, buffer, packedLight);
+    }
+
+    /**
+     * Draws the mob's current objective(s) as billboarded text just under where
+     * its name tag sits — Creative only. Ambient mobs show the single top
+     * objective; the mob under the player's crosshair shows the full goal stack.
+     * The goal state is computed server-side and synced
+     * ({@link PlayerMobEntity#getObjectivesReadout()}); this only formats it.
+     */
+    private void renderObjectiveReadout(PlayerMobEntity entity, float partialTick,
+                                        PoseStack poseStack, MultiBufferSource buffer,
+                                        int packedLight) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || !mc.player.isCreative()) {
+            return;
+        }
+        if (this.entityRenderDispatcher.distanceToSqr(entity) > MAX_READOUT_DISTANCE_SQR) {
+            return;
+        }
+        String readout = entity.getObjectivesReadout();
+        if (readout == null || readout.isEmpty()) {
+            return;
+        }
+
+        boolean focused = this.entityRenderDispatcher.crosshairPickEntity == entity;
+        String[] lines = readout.split("\n");
+        int count = focused ? lines.length : 1;
+
+        Vec3 anchor = entity.getAttachments()
+            .getNullable(EntityAttachment.NAME_TAG, 0, entity.getViewYRot(partialTick));
+        if (anchor == null) {
+            return;
+        }
+
+        Font font = this.getFont();
+        int bgColor = (int) (mc.options.getBackgroundOpacity(0.25F) * 255.0F) << 24;
+
+        poseStack.pushPose();
+        // The billboard transform vanilla uses for name tags: anchor above the
+        // head, face the camera, scale down to text size (Y flipped = upright).
+        poseStack.translate(anchor.x, anchor.y + 0.5, anchor.z);
+        poseStack.mulPose(this.entityRenderDispatcher.cameraOrientation());
+        poseStack.scale(0.025F, -0.025F, 0.025F);
+        Matrix4f matrix = poseStack.last().pose();
+
+        for (int i = 0; i < count; i++) {
+            String line = lines[i];
+            float x = -font.width(line) / 2.0F;
+            float y = (i + 1) * (font.lineHeight + 1);  // sit a row below the name
+            int color = i == 0 ? 0xFFFFFFFF : 0xFFBFBFBF;
+            // Faint see-through pass (with background plate) + solid front pass —
+            // the same two-pass look as a vanilla name tag.
+            font.drawInBatch(line, x, y, 0x20FFFFFF, false, matrix, buffer,
+                Font.DisplayMode.SEE_THROUGH, bgColor, packedLight);
+            font.drawInBatch(line, x, y, color, false, matrix, buffer,
+                Font.DisplayMode.NORMAL, 0, packedLight);
+        }
+        poseStack.popPose();
     }
 
     @Override

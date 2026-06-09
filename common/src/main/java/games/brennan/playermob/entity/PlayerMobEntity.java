@@ -165,6 +165,16 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private static final EntityDataAccessor<Boolean> DATA_SKIN_SLIM =
         SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.BOOLEAN);
 
+    /**
+     * Newline-joined readout of the goals currently running in {@link #goalSelector}
+     * ("Objective — phase" per line, highest priority first, or "Idle"). Built
+     * server-side by {@link ObjectiveReadout} and synced so the client can draw it
+     * under the mob's name and in the right-click menu (Creative only). Network-only
+     * — never written to save NBT, so it adds no save-format change.
+     */
+    private static final EntityDataAccessor<String> DATA_OBJECTIVES =
+        SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.STRING);
+
     // ---- Constants --------------------------------------------------------
 
     /**
@@ -380,6 +390,17 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         builder.define(DATA_SKIN_INDEX, 0);
         builder.define(DATA_SKIN_TEXTURE_URL, "");
         builder.define(DATA_SKIN_SLIM, false);
+        builder.define(DATA_OBJECTIVES, "");
+    }
+
+    /**
+     * The current objective readout — one line per running goal ("Objective —
+     * phase"), highest priority first, or "Idle". Refreshed server-side in
+     * {@link #customServerAiStep()} and synced; the client renderer and the
+     * right-click menu read it to show what the mob is doing (Creative only).
+     */
+    public String getObjectivesReadout() {
+        return this.entityData.get(DATA_OBJECTIVES);
     }
 
     @Override
@@ -489,6 +510,18 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             // Off a train, opening is handled by PlayerMobDoorGoal; this reflex adds the
             // close-when-stuck half — an open door can block the perpendicular path.
             recoverFromStuckDoor();
+        }
+
+        // Refresh the Creative-only objective readout (synced to clients for the
+        // under-name visualisation + right-click menu). Throttled — goal/phase
+        // transitions are infrequent, so a quarter-second lag is imperceptible —
+        // and written only on change, so it costs a tracking packet only when the
+        // text actually changes.
+        if (this.tickCount % 5 == 0) {
+            String readout = ObjectiveReadout.of(this.goalSelector);
+            if (!readout.equals(this.entityData.get(DATA_OBJECTIVES))) {
+                this.entityData.set(DATA_OBJECTIVES, readout);
+            }
         }
     }
 

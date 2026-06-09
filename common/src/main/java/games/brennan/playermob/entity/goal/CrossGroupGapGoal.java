@@ -41,7 +41,7 @@ import java.util.EnumSet;
  * {@link TrainConfinement#nextGroupTarget} is {@code null} and this goal never engages,
  * so behaviour is unchanged.</p>
  */
-public final class CrossGroupGapGoal extends Goal {
+public final class CrossGroupGapGoal extends Goal implements DescribableGoal {
 
     /** ~2.5 blocks: close enough to the next group's room centre to count as "arrived". */
     private static final double REACH_DISTANCE_SQR = 6.25;
@@ -87,6 +87,16 @@ public final class CrossGroupGapGoal extends Goal {
         this.mob = mob;
         this.moveSpeed = moveSpeed;
         setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
+    }
+
+    @Override
+    public String objective() {
+        return "Crossing gap";
+    }
+
+    @Override
+    public String subObjective() {
+        return launched ? "leaping" : "approaching edge";
     }
 
     @Override

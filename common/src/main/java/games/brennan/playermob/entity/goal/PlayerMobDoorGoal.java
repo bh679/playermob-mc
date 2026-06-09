@@ -32,7 +32,7 @@ import net.minecraft.world.entity.ai.goal.OpenDoorGoal;
  * and {@code DoorInteractGoal.setOpen} no-ops on anything that isn't a
  * {@link net.minecraft.world.level.block.DoorBlock}.</p>
  */
-public final class PlayerMobDoorGoal extends DoorInteractGoal {
+public final class PlayerMobDoorGoal extends DoorInteractGoal implements DescribableGoal {
 
     /**
      * Ticks a closer keeps the goal alive after opening, as a fallback close
@@ -52,6 +52,11 @@ public final class PlayerMobDoorGoal extends DoorInteractGoal {
     public PlayerMobDoorGoal(PlayerMobEntity mob) {
         super(mob);
         this.playerMob = mob;
+    }
+
+    @Override
+    public String objective() {
+        return "Using door";
     }
 
     /**
