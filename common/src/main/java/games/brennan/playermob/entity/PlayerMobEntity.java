@@ -1130,6 +1130,41 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         return FeelingLedger.decode(this.entityData.get(DATA_FEELINGS));
     }
 
+    /**
+     * Apply a Creative trait-editor button (see {@link TraitEditButtons}) and
+     * re-sync the result to watching clients so the open menu updates next frame.
+     * Called server-side from {@code PlayerMobMenu.clickMenuButton}; values are
+     * clamped to {@code [0, 10]} by {@link DispositionTraits}. Editing marks the
+     * trait explicit, so it persists through the existing {@code traits.save} NBT
+     * path with no migration.
+     *
+     * @return {@code true} if {@code buttonId} mapped to a trait edit.
+     */
+    public boolean applyTraitEditButton(int buttonId) {
+        boolean handled = TraitEditButtons.apply(buttonId, traits);
+        if (handled) {
+            pushDispositionToClient();
+        }
+        return handled;
+    }
+
+    /**
+     * Apply a Creative relationship-feeling editor button (see
+     * {@link FeelingEditButtons}) and re-sync. Server-side; the feeling is clamped
+     * to {@code [0, 10]} by {@link FeelingLedger}, and persists through the existing
+     * {@code feelings.save} NBT path. The relationship stays in the roster even at
+     * neutral (Phase B keeps every met individual).
+     *
+     * @return {@code true} if {@code buttonId} mapped to a feeling edit.
+     */
+    public boolean applyFeelingEditButton(int buttonId) {
+        boolean handled = FeelingEditButtons.apply(buttonId, feelings);
+        if (handled) {
+            pushDispositionToClient();
+        }
+        return handled;
+    }
+
     /** True if the main hand holds a recognised weapon (drives the provoked fight/flee choice). */
     public boolean isArmed() {
         return isWeapon(getMainHandItem());

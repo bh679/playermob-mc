@@ -71,6 +71,20 @@ public final class FeelingLedger {
     }
 
     /**
+     * Every relationship's UUID — the same set {@link #encode()} syncs (Phase B
+     * persists everyone the mob has met) — sorted ascending. A stable,
+     * value-independent order shared with the client's decoded view, so the menu's
+     * per-relationship editor can address a row by index through a single button id
+     * (see {@code FeelingEditButtons}). Editing a feeling changes its value but not
+     * this order, so a row stays put while it is clicked.
+     */
+    public List<UUID> uuidsSorted() {
+        List<UUID> ids = new ArrayList<>(feelings.keySet());
+        ids.sort(null); // UUID is Comparable — natural (ascending) order
+        return ids;
+    }
+
+    /**
      * Note that the mob has met (seen) {@code id} — adds a neutral entry if it has
      * none yet. Returns {@code true} only when a new entry was created (so the
      * caller can sync the roster).
