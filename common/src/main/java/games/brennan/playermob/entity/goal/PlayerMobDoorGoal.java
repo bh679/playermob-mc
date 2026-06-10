@@ -1,8 +1,11 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.entity.DoorObstruction;
 import games.brennan.playermob.entity.PlayerMobEntity;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.ai.goal.DoorInteractGoal;
 import net.minecraft.world.entity.ai.goal.OpenDoorGoal;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * Walk up to a closed wooden door on the path, open it, and — depending on this
@@ -32,7 +35,7 @@ import net.minecraft.world.entity.ai.goal.OpenDoorGoal;
  * and {@code DoorInteractGoal.setOpen} no-ops on anything that isn't a
  * {@link net.minecraft.world.level.block.DoorBlock}.</p>
  */
-public final class PlayerMobDoorGoal extends DoorInteractGoal {
+public final class PlayerMobDoorGoal extends DoorInteractGoal implements DescribableGoal {
 
     /**
      * Ticks a closer keeps the goal alive after opening, as a fallback close
@@ -54,6 +57,11 @@ public final class PlayerMobDoorGoal extends DoorInteractGoal {
         this.playerMob = mob;
     }
 
+    @Override
+    public String objective() {
+        return "Using door";
+    }
+
     /**
      * Suppressed while the mob is holding doors closed after a stuck-recovery close, so this goal
      * can't immediately reopen the very door the recovery just shut to clear a blocked perpendicular
@@ -68,7 +76,7 @@ public final class PlayerMobDoorGoal extends DoorInteractGoal {
     @Override
     public void start() {
         this.forgetTime = CLOSE_DELAY_TICKS;
-        this.setOpen(true);
+        operateDeliberately(true);
     }
 
     @Override
@@ -96,7 +104,25 @@ public final class PlayerMobDoorGoal extends DoorInteractGoal {
     @Override
     public void stop() {
         if (this.playerMob.closesDoors()) {
-            this.setOpen(false);
+            operateDeliberately(false);
         }
+    }
+
+    /**
+     * Hand the open/close to the entity's deliberate door-operation window — face the door, swing,
+     * then operate, briefly interrupting whatever the mob was doing — instead of flipping the door
+     * instantly. Acts on the captured {@code doorPos} (the door this goal latched), so a later goal
+     * re-detection can't redirect the deferred action to a different door. No-op if the base goal
+     * hasn't resolved a door.
+     */
+    private void operateDeliberately(boolean open) {
+        if (!this.hasDoor) {
+            return;
+        }
+        BlockPos pos = this.doorPos;
+        Vec3 eye = this.playerMob.getEyePosition();
+        this.playerMob.beginDoorOperation(
+            pos.getX() + 0.5 - eye.x, pos.getY() + 0.5 - eye.y, pos.getZ() + 0.5 - eye.z,
+            () -> DoorObstruction.setOpen(this.playerMob, this.playerMob.level(), pos, open));
     }
 }

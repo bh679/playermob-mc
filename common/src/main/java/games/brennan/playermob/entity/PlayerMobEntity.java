@@ -3,8 +3,10 @@ package games.brennan.playermob.entity;
 import games.brennan.playermob.PlayerMobRegistry;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.goal.AdvanceCarriageGoal;
+import games.brennan.playermob.entity.goal.BlockArrowsGoal;
 import games.brennan.playermob.entity.goal.CollectFloorItemsGoal;
 import games.brennan.playermob.entity.goal.CrossGroupGapGoal;
+import games.brennan.playermob.entity.goal.DoorOperationGoal;
 import games.brennan.playermob.entity.goal.EatFoodGoal;
 import games.brennan.playermob.entity.goal.FleeFromCategoryGoal;
 import games.brennan.playermob.entity.goal.FriendlyGreetGoal;
@@ -20,6 +22,7 @@ import games.brennan.playermob.skin.PlayerMobSkin;
 import games.brennan.playermob.skin.PlayerMobSkinRegistry;
 import games.brennan.playermob.skin.SkinModel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.particles.ItemParticleOption;
 import net.minecraft.core.particles.ParticleTypes;
@@ -159,11 +162,21 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.STRING);
 
     /**
-     * Slim-arms flag (true = 3-pixel arms, like the Alex model). v2 always
-     * renders wide regardless; the flag is plumbed for v3 model-swap support.
+     * Slim-arms flag (true = 3-pixel arms, like the Alex model). Synced to the
+     * client, where the renderer swaps to the slim body model when set.
      */
     private static final EntityDataAccessor<Boolean> DATA_SKIN_SLIM =
         SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.BOOLEAN);
+
+    /**
+     * Newline-joined readout of the goals currently running in {@link #goalSelector}
+     * ("Objective — phase" per line, highest priority first, or "Idle"). Built
+     * server-side by {@link ObjectiveReadout} and synced so the client can draw it
+     * under the mob's name and in the right-click menu (Creative only). Network-only
+     * — never written to save NBT, so it adds no save-format change.
+     */
+    private static final EntityDataAccessor<String> DATA_OBJECTIVES =
+        SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.STRING);
 
     // ---- Constants --------------------------------------------------------
 
@@ -316,6 +329,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      */
     private boolean crossingGap;
 
+    /**
+     * True only while {@link FleeFromCategoryGoal} is running this mob away from a Shy
+     * threat (set on the goal's start, cleared on stop). While set, the arrow-blocking
+     * reflex ({@link BlockArrowsGoal}) stands down — a fleeing mob shouldn't stop to face
+     * and raise its shield, which fights the retreat. Transient server-only AI state.
+     */
+    private boolean fleeing;
+
     /** How long door-opening is suppressed after a stuck-recovery close, so the mob can cross. ~2 s. */
     private static final int DOOR_CLOSE_HOLD_TICKS = 40;
     /** Half-width of the cube scanned around the mob for an open door to close when stuck (off-train). */
@@ -336,6 +357,22 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * by both door openers via {@link #isHoldingDoorsClosed()}. Transient (never saved).
      */
     private int doorCloseHoldTicks;
+
+    /** Length of a deliberate door-operation window: face, operate ~midway, brief hold. ~0.5 s. */
+    private static final int DOOR_OP_TICKS = 10;
+    /** Ticks-remaining at which the open/close fires — a few ticks in, so the mob faces *then* operates. */
+    private static final int DOOR_OP_REACH_TICKS = 6;
+
+    /** Ticks left in the current deliberate door operation (0 ⇒ not operating). Transient AI state. */
+    private int doorOpTicks;
+    /** Whether to drive the look toward the door this op (false ⇒ the caller drives its own gaze, e.g. an iron control). */
+    private boolean doorOpFacing;
+    /** Eye-relative offset to the door, re-applied each tick so the look tracks a moving carriage (like the iron-control gaze). */
+    private double doorOpDx;
+    private double doorOpDy;
+    private double doorOpDz;
+    /** The deferred open/close, run once at the reach tick; {@code null} when the caller performs the action itself. */
+    private Runnable doorOpAction;
 
     public PlayerMobEntity(EntityType<? extends PlayerMobEntity> type, Level level) {
         super(type, level);
@@ -380,6 +417,17 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         builder.define(DATA_SKIN_INDEX, 0);
         builder.define(DATA_SKIN_TEXTURE_URL, "");
         builder.define(DATA_SKIN_SLIM, false);
+        builder.define(DATA_OBJECTIVES, "");
+    }
+
+    /**
+     * The current objective readout — one line per running goal ("Objective —
+     * phase"), highest priority first, or "Idle". Refreshed server-side in
+     * {@link #customServerAiStep()} and synced; the client renderer and the
+     * right-click menu read it to show what the mob is doing (Creative only).
+     */
+    public String getObjectivesReadout() {
+        return this.entityData.get(DATA_OBJECTIVES);
     }
 
     @Override
@@ -396,8 +444,18 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         this.goalSelector.addGoal(1, new SkepticalWatchGoal(this, /* watchRange */ 10.0, /* closeRange */ 4.0));
         this.goalSelector.addGoal(1, new FriendlyGreetGoal(this, /* range */ 10.0, /* approachSpeed */ 0.9));
         // Open (and, for "tidy" mobs, close) wooden doors on the path. Declares
-        // no flags, so it runs alongside whatever movement goal owns the walk.
+        // no flags, so it runs alongside whatever movement goal owns the walk — it
+        // only *triggers* the deliberate operation below.
         this.goalSelector.addGoal(1, new PlayerMobDoorGoal(this));
+        // Holds MOVE+LOOK while a door is being operated, so opening/closing it interrupts
+        // combat/movement (the mob stops, faces the door, operates it, then resumes) instead of
+        // flipping the door silently mid-stride. Above the priority-2 attack goal by design.
+        this.goalSelector.addGoal(1, new DoorOperationGoal(this));
+        // Raise a held shield to deflect an incoming arrow. Declares no flags (like
+        // the door goal) so a sword-and-board mob keeps meleeing via the priority-2
+        // attack goal and blocks between swings rather than freezing. No-op without a
+        // shield in hand.
+        this.goalSelector.addGoal(1, new BlockArrowsGoal(this));
         this.goalSelector.addGoal(2, new WeaponAwareAttackGoal(this, 1.0, 8.0f));
         // EatFoodGoal added BEFORE the raid goals at the same priority so
         // its canUse() is evaluated first — a low-HP mob with food prefers
@@ -474,6 +532,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (doorCloseHoldTicks > 0) {
             doorCloseHoldTicks--;
         }
+        // Advance any in-progress deliberate door operation (face the door, then open/close it).
+        // After super.customServerAiStep() ticked the goals, so this look wins — like the iron gaze.
+        tickDoorOperation();
 
         if (TrainConfinement.isConfined(this)) {
             // Remember we're aboard, so TrainRecoveryGoal can tell "fell off" from
@@ -490,23 +551,50 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             // close-when-stuck half — an open door can block the perpendicular path.
             recoverFromStuckDoor();
         }
+
+        // Refresh the Creative-only objective readout (synced to clients for the
+        // under-name visualisation + right-click menu). Throttled — goal/phase
+        // transitions are infrequent, so a quarter-second lag is imperceptible —
+        // and written only on change, so it costs a tracking packet only when the
+        // text actually changes.
+        if (this.tickCount % 5 == 0) {
+            String readout = ObjectiveReadout.of(this.goalSelector);
+            if (!readout.equals(this.entityData.get(DATA_OBJECTIVES))) {
+                this.entityData.set(DATA_OBJECTIVES, readout);
+            }
+        }
     }
 
     /**
      * Off-train door recovery: when the mob has been wedged for a while ({@link DoorStuckMonitor})
-     * while actively pathing, close the nearest open, hand-closable door and arm the hold so it
-     * isn't reopened before the mob can cross. An open door's panel swings across the perpendicular
-     * edge of its cell, which vanilla pathing treats as passable — so a mob whose route turns at the
-     * doorway jams against it, and closing clears the way. On a train the Dungeon-Train reflex does
-     * the same job in the carriage's coordinate space, so this branch never runs while confined.
+     * while actively pathing, close the open hand-closable door that's actually blocking the way it
+     * is going ({@link DoorObstruction}) and arm the hold so it isn't reopened before the mob can
+     * cross. An open door's panel swings across the perpendicular edge of its cell, which vanilla
+     * pathing treats as passable — so a mob whose route turns at the doorway jams against it, and
+     * closing clears the way. Opening a closed door on the path is {@link PlayerMobDoorGoal}'s job;
+     * this half only clears the perpendicular jam. On a train the Dungeon-Train reflex does the
+     * whole job (open or close) in the carriage's coordinate space, so this branch never runs while
+     * confined.
      */
     private void recoverFromStuckDoor() {
         if (!(level() instanceof ServerLevel serverLevel)) {
             return;
         }
+        // Track the heading every tick (world frame off a train) so it's latched before the mob
+        // stalls against a panel — measured the same way as the stuck signal below.
+        Direction.Axis travelAxis = DoorObstruction.travelAxis(this, getX(), getZ());
         boolean tryingToMove = !getNavigation().isDone();
-        if (offTrainDoorStuck.tick(getX(), getZ(), tryingToMove)
-                && DoorRecovery.closeBlockingOpenDoor(this, serverLevel, blockPosition(), DOOR_RECOVERY_REACH)) {
+        if (!offTrainDoorStuck.tick(getX(), getZ(), tryingToMove) || travelAxis == null) {
+            return;
+        }
+        DoorObstruction.Obstruction blocking = DoorObstruction.nearestObstructing(
+            serverLevel, blockPosition(), DOOR_RECOVERY_REACH, travelAxis, DoorObstruction.OPEN_HAND_DOOR);
+        if (blocking != null) {
+            BlockPos pos = blocking.pos();
+            Vec3 eye = getEyePosition();
+            beginDoorOperation(
+                pos.getX() + 0.5 - eye.x, pos.getY() + 0.5 - eye.y, pos.getZ() + 0.5 - eye.z,
+                () -> DoorObstruction.setOpen(this, serverLevel, pos, false));
             holdDoorsClosed();
         }
     }
@@ -573,6 +661,20 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     }
 
     /**
+     * Set by {@link FleeFromCategoryGoal} while the mob is fleeing a Shy threat. While
+     * {@code true}, {@link BlockArrowsGoal} won't raise the shield — blocking (which faces
+     * the threat and stalls) fights the retreat. See {@link #fleeing}.
+     */
+    public void setFleeing(boolean fleeing) {
+        this.fleeing = fleeing;
+    }
+
+    /** True while actively fleeing a Shy threat (see {@link #fleeing}). */
+    public boolean isFleeing() {
+        return this.fleeing;
+    }
+
+    /**
      * Auto-equip the best tool the mob owns for breaking {@code state} (highest
      * {@link ItemStack#getDestroySpeed}), swapping it into the main hand and
      * stashing the displaced item. Returns {@code true} if a swap happened — so the
@@ -636,6 +738,12 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
                                         MobSpawnType reason,
                                         SpawnGroupData data) {
         setSkinIndex(world.getRandom().nextInt(SKIN_COUNT));
+        // Bundled defaults: roll the arm model independently of the name, ~50/50.
+        // Vanilla DefaultPlayerSkin ships every default name in both wide and slim
+        // and picks (name × model) uniformly by UUID hash, so there's no canonical
+        // per-name model — we mirror that coin-flip. A URL skin (below) overrides
+        // this with its own authored model.
+        setSkinSlim(world.getRandom().nextBoolean());
         if (world.getRandom().nextFloat() < URL_SKIN_CHANCE) {
             PlayerMobSkinRegistry.pickRandom(world.getRandom()).ifPresent(skin -> {
                 setSkinTextureUrl(skin.textureUrl());
@@ -742,6 +850,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     }
 
     /**
+     * True if this mob is holding a shield it could raise (either hand). Gates the
+     * arrow-blocking reflex ({@code BlockArrowsGoal}) so a shieldless mob is a no-op.
+     */
+    public boolean hasShieldReady() {
+        return getOffhandItem().is(Items.SHIELD) || getMainHandItem().is(Items.SHIELD);
+    }
+
+    /**
      * Crouch gesture for the Friendly greeting and Shy hiding. The
      * {@code PlayerModel} renders the sneak pose from {@link #isCrouching()}
      * (i.e. {@link #getPose()} {@code == CROUCHING}), not the sneak flag — so we
@@ -759,8 +875,17 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * its shield up must square up to the threat for the block to count.
      */
     public void faceBodyToward(LivingEntity target) {
-        double dx = target.getX() - getX();
-        double dz = target.getZ() - getZ();
+        faceBodyToward(target.getX(), target.getZ());
+    }
+
+    /**
+     * Snap the body (and head) to face a horizontal point. Used by
+     * {@code BlockArrowsGoal} to square up to an incoming arrow's position so the
+     * shield block registers (same facing requirement as {@link #faceBodyToward(LivingEntity)}).
+     */
+    public void faceBodyToward(double targetX, double targetZ) {
+        double dx = targetX - getX();
+        double dz = targetZ - getZ();
         float yaw = (float) (Mth.atan2(dz, dx) * (180.0 / Math.PI)) - 90.0F;
         setYRot(yaw);
         setYBodyRot(yaw);
@@ -873,7 +998,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
 
     /**
      * True if the assigned URL skin was authored for the slim-arms model.
-     * v2 always renders wide regardless — see renderer for details.
+     * The client renderer swaps to the slim body model when this is set.
      */
     public boolean isSkinSlim() {
         return this.entityData.get(DATA_SKIN_SLIM);
@@ -910,6 +1035,83 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      */
     public boolean isHoldingDoorsClosed() {
         return this.doorCloseHoldTicks > 0;
+    }
+
+    /**
+     * Begin a deliberate door operation: for {@link #DOOR_OP_TICKS} the mob faces the door — via the
+     * eye-relative offset, re-applied each tick so it tracks a moving carriage — and, through
+     * {@link DoorOperationGoal} claiming MOVE+LOOK at priority 1, stops fighting/walking; partway in
+     * (at {@link #DOOR_OP_REACH_TICKS}) it swings and runs {@code action} (the actual open/close).
+     * A no-op while already operating a door or recovering onto a train, so it can't re-fire every
+     * tick. See {@link #tickDoorOperation()}.
+     *
+     * @param dx the door centre's X offset from the mob's eyes (world axes, == sub-level axes on a
+     *           rigid carriage); re-applied each tick as the look target
+     * @param dy the door centre's Y offset from the mob's eyes
+     * @param dz the door centre's Z offset from the mob's eyes
+     * @param action the deferred open/close (e.g. {@link DoorObstruction#setOpen})
+     */
+    public void beginDoorOperation(double dx, double dy, double dz, Runnable action) {
+        if (!armDoorOperation()) {
+            return;
+        }
+        this.doorOpFacing = true;
+        this.doorOpDx = dx;
+        this.doorOpDy = dy;
+        this.doorOpDz = dz;
+        this.doorOpAction = action;
+    }
+
+    /**
+     * Arm only the interrupt window — no look override, no deferred action — for a door operation
+     * that already drives its own look and action (the Dungeon-Train iron-door control, which faces
+     * and punches the button via its own gaze). This just makes that operation pause combat too.
+     */
+    public void interruptForDoorOperation() {
+        if (!armDoorOperation()) {
+            return;
+        }
+        this.doorOpFacing = false;
+        this.doorOpAction = null;
+    }
+
+    /** Start a fresh door-operation window unless one is already running (or the mob is recovering). */
+    private boolean armDoorOperation() {
+        if (isOperatingDoor() || this.recovering) {
+            return false;
+        }
+        this.doorOpTicks = DOOR_OP_TICKS;
+        return true;
+    }
+
+    /** Whether the mob is mid deliberate door-operation — the condition {@link DoorOperationGoal} runs on. */
+    public boolean isOperatingDoor() {
+        return this.doorOpTicks > 0;
+    }
+
+    /**
+     * Advance the door-operation window one tick: keep facing the door (when this op drives the
+     * look), and at the reach tick swing the arm and run the deferred open/close once. Called from
+     * {@link #customServerAiStep()} after the goal selector, so the look wins over whatever goal
+     * otherwise owns it (mirrors the iron-control gaze).
+     */
+    private void tickDoorOperation() {
+        if (this.doorOpTicks <= 0) {
+            return;
+        }
+        if (this.doorOpFacing) {
+            getLookControl().setLookAt(getX() + this.doorOpDx, getEyeY() + this.doorOpDy, getZ() + this.doorOpDz);
+        }
+        if (this.doorOpTicks == DOOR_OP_REACH_TICKS) {
+            if (this.doorOpFacing) {
+                swing(InteractionHand.MAIN_HAND);
+            }
+            if (this.doorOpAction != null) {
+                this.doorOpAction.run();
+                this.doorOpAction = null;
+            }
+        }
+        this.doorOpTicks--;
     }
 
     // ---- InventoryCarrier ------------------------------------------------
@@ -1562,6 +1764,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         super.addAdditionalSaveData(tag);
         personalities.save(tag);
         tag.putInt(TAG_SKIN_INDEX, getSkinIndex());
+        // Persist the arm model for bundled mobs too (previously URL-only). Additive:
+        // a save without this key reads back false ⇒ wide (the old bundled-mob look).
+        tag.putBoolean(TAG_SKIN_SLIM, isSkinSlim());
         tag.putBoolean(TAG_CLOSES_DOORS, this.closesDoors);
         // Train march direction — additive. Only written once latched (!= 0) so a
         // mob that never boarded a train round-trips no key (matches the URL-skin
@@ -1575,7 +1780,6 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         String url = getSkinTextureUrl();
         if (!url.isEmpty()) {
             tag.putString(TAG_SKIN_TEXTURE_URL, url);
-            tag.putBoolean(TAG_SKIN_SLIM, isSkinSlim());
         }
         // Inventory persistence — InventoryCarrier helper handles slot encoding.
         // registryAccess() is a HolderLookup.Provider on Entity in 1.21.1+.
@@ -1607,6 +1811,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // Per-category personalities; missing tags keep category defaults.
         personalities.load(tag);
         setSkinIndex(tag.getInt(TAG_SKIN_INDEX));
+        // Missing key (pre-per-mob-slim saves) ⇒ false ⇒ wide: getBoolean returns
+        // false for an absent key, so old bundled mobs keep their wide look. A URL
+        // mob's SkinSlim is its authored model (written unconditionally on save).
+        setSkinSlim(tag.getBoolean(TAG_SKIN_SLIM));
         // Missing key (pre-door-feature saves) ⇒ false ⇒ leave-open. Additive.
         this.closesDoors = tag.getBoolean(TAG_CLOSES_DOORS);
         // Missing key ⇒ 0 ⇒ unlatched ⇒ re-derived on the next train boarding. Additive.
@@ -1616,7 +1824,6 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // vanilla path keyed off SkinIndex. New v2 mobs round-trip the URL.
         if (tag.contains(TAG_SKIN_TEXTURE_URL, Tag.TAG_STRING)) {
             setSkinTextureUrl(tag.getString(TAG_SKIN_TEXTURE_URL));
-            setSkinSlim(tag.getBoolean(TAG_SKIN_SLIM));
         }
         readInventoryFromTag(tag, this.registryAccess());
 

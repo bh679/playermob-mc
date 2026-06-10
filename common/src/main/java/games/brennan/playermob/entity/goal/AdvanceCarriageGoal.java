@@ -41,7 +41,7 @@ import java.util.EnumSet;
  * and on NeoForge without Dungeon Train) {@link TrainConfinement#isConfined} is
  * false and this goal never engages, so behaviour is unchanged.</p>
  */
-public final class AdvanceCarriageGoal extends Goal {
+public final class AdvanceCarriageGoal extends Goal implements DescribableGoal {
 
     /** ~2.5 blocks: close enough to the next room's centre to count as "entered". */
     private static final double REACH_DISTANCE_SQR = 6.25;
@@ -63,6 +63,16 @@ public final class AdvanceCarriageGoal extends Goal {
         this.mob = mob;
         this.moveSpeed = moveSpeed;
         setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
+    }
+
+    @Override
+    public String objective() {
+        return "Exploring train";
+    }
+
+    @Override
+    public String subObjective() {
+        return "next carriage";
     }
 
     @Override
