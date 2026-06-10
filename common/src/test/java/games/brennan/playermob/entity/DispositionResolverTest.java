@@ -131,13 +131,13 @@ class DispositionResolverTest {
 
     @Test
     void witnessApproveBandScalesWithAggressionAndDislike() {
-        // Positive admiration, reproducing cells of the design table (Like 0.4, cap 3).
-        assertEquals(3.0f, witnessedAttackDelta(10, 0), EPS);   // hate + max aggression → the cap
-        assertEquals(1.0f, witnessedAttackDelta(10, 5), EPS);   // neutral victim, max aggression
-        assertEquals(0.9f, witnessedAttackDelta(3, 0), EPS);    // just over the approve threshold
-        assertEquals(0.6f, witnessedAttackDelta(6, 3), EPS);
-        assertEquals(0.6f, witnessedAttackDelta(10, 6), EPS);
-        assertEquals(0.3f, witnessedAttackDelta(9, 6), EPS);    // threshold cell — now a small positive
+        // Positive admiration, reproducing cells of the design table (Like 0.5, cap 4).
+        assertEquals(4.0f, witnessedAttackDelta(10, 0), EPS);   // hate + max aggression → the cap
+        assertEquals(1.5f, witnessedAttackDelta(10, 5), EPS);   // neutral victim, max aggression
+        assertEquals(1.2f, witnessedAttackDelta(3, 0), EPS);    // just over the approve threshold
+        assertEquals(0.9f, witnessedAttackDelta(6, 3), EPS);
+        assertEquals(1.0f, witnessedAttackDelta(10, 6), EPS);
+        assertEquals(0.6f, witnessedAttackDelta(9, 6), EPS);    // threshold cell
     }
 
     @Test
@@ -153,21 +153,23 @@ class DispositionResolverTest {
     void witnessResentBandDeepensWithLoveAndCalm() {
         // feeling >= 7 (love band): harming a loved one turns the mob against the attacker,
         // deeper the more it loves V and the calmer it is.
-        assertEquals(-4.0f, witnessedAttackDelta(0, 10), EPS);  // beloved victim, calm witness
+        assertEquals(-5.0f, witnessedAttackDelta(0, 10), EPS);  // beloved victim, calm witness
         assertEquals(-1.0f, witnessedAttackDelta(10, 10), EPS); // aggressive witness minds less
-        assertEquals(-2.5f, witnessedAttackDelta(5, 10), EPS);
-        assertEquals(-2.8f, witnessedAttackDelta(0, 7), EPS);
-        assertEquals(-0.2f, witnessedAttackDelta(10, 8), EPS);
-        // Edge: at the very bottom of the love band (feeling 7) a max-aggression witness tips
-        // slightly positive (+0.2) — so pro-violence it mildly approves even here.
-        assertEquals(0.2f, witnessedAttackDelta(10, 7), EPS);
+        assertEquals(-3.0f, witnessedAttackDelta(5, 10), EPS);
+        assertEquals(-3.5f, witnessedAttackDelta(0, 7), EPS);
+        assertEquals(-0.5f, witnessedAttackDelta(10, 9), EPS);
+        // Edge: near the bottom of the love band a very aggressive witness tips POSITIVE
+        // (feeling 7 / fight-flight 10 = +0.5; feeling 8 / 10 = 0) — so pro-violence it mildly
+        // approves even here. Clamping the resent band to <= 0 is a parked option.
+        assertEquals(0.5f, witnessedAttackDelta(10, 7), EPS);
+        assertEquals(0.0f, witnessedAttackDelta(10, 8), EPS);
     }
 
     @Test
     void witnessNeverExceedsTheCap() {
         for (int ff = 0; ff <= 10; ff++) {
             for (float feeling = 0; feeling <= 10; feeling++) {
-                assertTrue(witnessedAttackDelta(ff, feeling) <= 3.0f + EPS,
+                assertTrue(witnessedAttackDelta(ff, feeling) <= 4.0f + EPS,
                     "delta exceeded the cap at ff=" + ff + " feeling=" + feeling);
             }
         }
