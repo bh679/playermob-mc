@@ -6,12 +6,16 @@ import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.ai.goal.Goal;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BarrelBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.ChestBlockEntity;
 import net.minecraft.world.level.block.entity.ShulkerBoxBlockEntity;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.EnumSet;
 
@@ -288,6 +292,7 @@ public final class RaidContainersGoal extends Goal implements DescribableGoal {
     private BlockPos findClosestContainer() {
         BlockPos mobPos = mob.blockPosition();
         Level level = mob.level();
+        Vec3 eye = mob.getEyePosition();
         long now = mob.tickCount;
         BlockPos closest = null;
         double closestDistSq = Double.MAX_VALUE;
@@ -302,14 +307,37 @@ public final class RaidContainersGoal extends Goal implements DescribableGoal {
                     if (mob.isBlockExplored(cursor, now)) continue;
                     if (!TrainConfinement.allowsTarget(mob, cursor)) continue;
                     double distSq = mobPos.distSqr(cursor);
-                    if (distSq < closestDistSq) {
-                        closestDistSq = distSq;
-                        closest = cursor.immutable();
-                    }
+                    if (distSq >= closestDistSq) continue;
+                    BlockPos candidate = cursor.immutable();
+                    // Only raid chests the mob can actually see — a solid block between
+                    // the mob's eyes and the chest hides it. LOS is the most expensive
+                    // filter, so it runs last and only for a new nearest candidate.
+                    if (!hasClearLineOfSight(level, eye, candidate)) continue;
+                    closestDistSq = distSq;
+                    closest = candidate;
                 }
             }
         }
         return closest;
+    }
+
+    /**
+     * True when a straight line from {@code eye} to the centre of {@code pos} reaches
+     * it without passing through another block's collision shape — i.e. the mob can see
+     * the chest rather than sensing it through a wall. Mirrors the line-of-sight test in
+     * {@code DungeonTrainEnvironment#hasLineOfSight}: a solid block strictly in front of
+     * the chest blocks it, while the chest's own block (or a hit at/beyond the chest
+     * centre, e.g. the ray grazing its near face) counts as visible. Uses
+     * {@code COLLIDER}, so glass/ice occlude — matching that precedent and vanilla mobs,
+     * which can't see through glass either.
+     */
+    private boolean hasClearLineOfSight(Level level, Vec3 eye, BlockPos pos) {
+        Vec3 center = Vec3.atCenterOf(pos);
+        BlockHitResult hit = level.clip(new ClipContext(
+            eye, center, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mob));
+        return hit.getType() == HitResult.Type.MISS
+            || hit.getBlockPos().equals(pos)
+            || hit.getLocation().distanceToSqr(eye) + 1.0e-4 >= center.distanceToSqr(eye);
     }
 
     private static boolean isLootableContainer(BlockEntity be) {
