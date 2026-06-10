@@ -129,14 +129,17 @@ public final class DoorObstruction {
     }
 
     /**
-     * Toggle a hand-openable door open↔closed — which swaps the axis its panel blocks, so a
-     * door that was obstructing the mob's travel axis no longer is. No-op on a non-door.
+     * Set a hand-openable door at {@code pos} to {@code open} — the act that clears the blocked
+     * axis (the door blocks the perpendicular axis in the other state). Idempotent and re-reads
+     * the door state, so it's safe to defer to a later tick (the deliberate door-operation window
+     * fires it a few ticks after the obstruction was assessed). No-op if the block isn't a door.
      *
      * @param actor the mob credited with the interaction (passed to {@link DoorBlock#setOpen})
      */
-    public static void toggle(Entity actor, Level level, BlockState state, BlockPos pos) {
-        if (state.getBlock() instanceof DoorBlock door) {
-            door.setOpen(actor, level, state, pos, !door.isOpen(state));
+    public static void setOpen(Entity actor, Level level, BlockPos pos, boolean open) {
+        BlockState state = level.getBlockState(pos);
+        if (state.getBlock() instanceof DoorBlock door && door.isOpen(state) != open) {
+            door.setOpen(actor, level, state, pos, open);
         }
     }
 

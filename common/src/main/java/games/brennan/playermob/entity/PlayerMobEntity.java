@@ -6,6 +6,7 @@ import games.brennan.playermob.entity.goal.AdvanceCarriageGoal;
 import games.brennan.playermob.entity.goal.BlockArrowsGoal;
 import games.brennan.playermob.entity.goal.CollectFloorItemsGoal;
 import games.brennan.playermob.entity.goal.CrossGroupGapGoal;
+import games.brennan.playermob.entity.goal.DoorOperationGoal;
 import games.brennan.playermob.entity.goal.EatFoodGoal;
 import games.brennan.playermob.entity.goal.FleeFromCategoryGoal;
 import games.brennan.playermob.entity.goal.FriendlyGreetGoal;
@@ -357,6 +358,22 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      */
     private int doorCloseHoldTicks;
 
+    /** Length of a deliberate door-operation window: face, operate ~midway, brief hold. ~0.5 s. */
+    private static final int DOOR_OP_TICKS = 10;
+    /** Ticks-remaining at which the open/close fires — a few ticks in, so the mob faces *then* operates. */
+    private static final int DOOR_OP_REACH_TICKS = 6;
+
+    /** Ticks left in the current deliberate door operation (0 ⇒ not operating). Transient AI state. */
+    private int doorOpTicks;
+    /** Whether to drive the look toward the door this op (false ⇒ the caller drives its own gaze, e.g. an iron control). */
+    private boolean doorOpFacing;
+    /** Eye-relative offset to the door, re-applied each tick so the look tracks a moving carriage (like the iron-control gaze). */
+    private double doorOpDx;
+    private double doorOpDy;
+    private double doorOpDz;
+    /** The deferred open/close, run once at the reach tick; {@code null} when the caller performs the action itself. */
+    private Runnable doorOpAction;
+
     public PlayerMobEntity(EntityType<? extends PlayerMobEntity> type, Level level) {
         super(type, level);
         // Preserve combat-kill XP parity. Monster's constructor sets xpReward=5;
@@ -427,8 +444,13 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         this.goalSelector.addGoal(1, new SkepticalWatchGoal(this, /* watchRange */ 10.0, /* closeRange */ 4.0));
         this.goalSelector.addGoal(1, new FriendlyGreetGoal(this, /* range */ 10.0, /* approachSpeed */ 0.9));
         // Open (and, for "tidy" mobs, close) wooden doors on the path. Declares
-        // no flags, so it runs alongside whatever movement goal owns the walk.
+        // no flags, so it runs alongside whatever movement goal owns the walk — it
+        // only *triggers* the deliberate operation below.
         this.goalSelector.addGoal(1, new PlayerMobDoorGoal(this));
+        // Holds MOVE+LOOK while a door is being operated, so opening/closing it interrupts
+        // combat/movement (the mob stops, faces the door, operates it, then resumes) instead of
+        // flipping the door silently mid-stride. Above the priority-2 attack goal by design.
+        this.goalSelector.addGoal(1, new DoorOperationGoal(this));
         // Raise a held shield to deflect an incoming arrow. Declares no flags (like
         // the door goal) so a sword-and-board mob keeps meleeing via the priority-2
         // attack goal and blocks between swings rather than freezing. No-op without a
@@ -510,6 +532,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (doorCloseHoldTicks > 0) {
             doorCloseHoldTicks--;
         }
+        // Advance any in-progress deliberate door operation (face the door, then open/close it).
+        // After super.customServerAiStep() ticked the goals, so this look wins — like the iron gaze.
+        tickDoorOperation();
 
         if (TrainConfinement.isConfined(this)) {
             // Remember we're aboard, so TrainRecoveryGoal can tell "fell off" from
@@ -565,7 +590,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         DoorObstruction.Obstruction blocking = DoorObstruction.nearestObstructing(
             serverLevel, blockPosition(), DOOR_RECOVERY_REACH, travelAxis, DoorObstruction.OPEN_HAND_DOOR);
         if (blocking != null) {
-            DoorObstruction.toggle(this, serverLevel, blocking.state(), blocking.pos());
+            BlockPos pos = blocking.pos();
+            Vec3 eye = getEyePosition();
+            beginDoorOperation(
+                pos.getX() + 0.5 - eye.x, pos.getY() + 0.5 - eye.y, pos.getZ() + 0.5 - eye.z,
+                () -> DoorObstruction.setOpen(this, serverLevel, pos, false));
             holdDoorsClosed();
         }
     }
@@ -1000,6 +1029,83 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      */
     public boolean isHoldingDoorsClosed() {
         return this.doorCloseHoldTicks > 0;
+    }
+
+    /**
+     * Begin a deliberate door operation: for {@link #DOOR_OP_TICKS} the mob faces the door — via the
+     * eye-relative offset, re-applied each tick so it tracks a moving carriage — and, through
+     * {@link DoorOperationGoal} claiming MOVE+LOOK at priority 1, stops fighting/walking; partway in
+     * (at {@link #DOOR_OP_REACH_TICKS}) it swings and runs {@code action} (the actual open/close).
+     * A no-op while already operating a door or recovering onto a train, so it can't re-fire every
+     * tick. See {@link #tickDoorOperation()}.
+     *
+     * @param dx the door centre's X offset from the mob's eyes (world axes, == sub-level axes on a
+     *           rigid carriage); re-applied each tick as the look target
+     * @param dy the door centre's Y offset from the mob's eyes
+     * @param dz the door centre's Z offset from the mob's eyes
+     * @param action the deferred open/close (e.g. {@link DoorObstruction#setOpen})
+     */
+    public void beginDoorOperation(double dx, double dy, double dz, Runnable action) {
+        if (!armDoorOperation()) {
+            return;
+        }
+        this.doorOpFacing = true;
+        this.doorOpDx = dx;
+        this.doorOpDy = dy;
+        this.doorOpDz = dz;
+        this.doorOpAction = action;
+    }
+
+    /**
+     * Arm only the interrupt window — no look override, no deferred action — for a door operation
+     * that already drives its own look and action (the Dungeon-Train iron-door control, which faces
+     * and punches the button via its own gaze). This just makes that operation pause combat too.
+     */
+    public void interruptForDoorOperation() {
+        if (!armDoorOperation()) {
+            return;
+        }
+        this.doorOpFacing = false;
+        this.doorOpAction = null;
+    }
+
+    /** Start a fresh door-operation window unless one is already running (or the mob is recovering). */
+    private boolean armDoorOperation() {
+        if (isOperatingDoor() || this.recovering) {
+            return false;
+        }
+        this.doorOpTicks = DOOR_OP_TICKS;
+        return true;
+    }
+
+    /** Whether the mob is mid deliberate door-operation — the condition {@link DoorOperationGoal} runs on. */
+    public boolean isOperatingDoor() {
+        return this.doorOpTicks > 0;
+    }
+
+    /**
+     * Advance the door-operation window one tick: keep facing the door (when this op drives the
+     * look), and at the reach tick swing the arm and run the deferred open/close once. Called from
+     * {@link #customServerAiStep()} after the goal selector, so the look wins over whatever goal
+     * otherwise owns it (mirrors the iron-control gaze).
+     */
+    private void tickDoorOperation() {
+        if (this.doorOpTicks <= 0) {
+            return;
+        }
+        if (this.doorOpFacing) {
+            getLookControl().setLookAt(getX() + this.doorOpDx, getEyeY() + this.doorOpDy, getZ() + this.doorOpDz);
+        }
+        if (this.doorOpTicks == DOOR_OP_REACH_TICKS) {
+            if (this.doorOpFacing) {
+                swing(InteractionHand.MAIN_HAND);
+            }
+            if (this.doorOpAction != null) {
+                this.doorOpAction.run();
+                this.doorOpAction = null;
+            }
+        }
+        this.doorOpTicks--;
     }
 
     // ---- InventoryCarrier ------------------------------------------------

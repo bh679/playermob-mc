@@ -14,6 +14,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.ButtonBlock;
+import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.LeverBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
@@ -461,7 +462,18 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
             long posLong = hand.pos().asLong();
             boolean coolingSameDoor = cooldown != null && cooldown[0] == posLong && cooldown[1] > 0;
             if (!coolingSameDoor) {
-                DoorObstruction.toggle(self, level, hand.state(), hand.pos());
+                BlockPos doorPos = hand.pos();
+                boolean desiredOpen = !hand.state().getValue(DoorBlock.OPEN);
+                // Defer the open/close into a deliberate window: the mob faces the door, swings, then
+                // operates it, interrupting combat/movement (DoorOperationGoal) rather than flipping it
+                // silently. The eye→door offset is taken in the carriage's sub-level frame, which equals
+                // the world-frame offset (rotation is locked to identity), so it's the right look target.
+                Vector3d subEye = c.ship().worldToShip(new Vector3d(self.getX(), self.getEyeY(), self.getZ()));
+                playerMob.beginDoorOperation(
+                    doorPos.getX() + 0.5 - subEye.x,
+                    doorPos.getY() + 0.5 - subEye.y,
+                    doorPos.getZ() + 0.5 - subEye.z,
+                    () -> DoorObstruction.setOpen(self, level, doorPos, desiredOpen));
                 DOOR_COOLDOWN.put(self, new long[]{posLong, DOOR_TOGGLE_COOLDOWN});
             }
             return;
@@ -475,8 +487,8 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         }
         DoorObstruction.Obstruction iron =
             DoorObstruction.nearestObstructing(level, subPos, DOOR_REACH, travelAxis, DoorObstruction.CLOSED_IRON_DOOR);
-        if (iron != null) {
-            operateControlNear(playerMob, level, c, iron.pos());
+        if (iron != null && operateControlNear(playerMob, level, c, iron.pos())) {
+            playerMob.interruptForDoorOperation(); // pause combat/movement for the control press too
         }
     }
 
