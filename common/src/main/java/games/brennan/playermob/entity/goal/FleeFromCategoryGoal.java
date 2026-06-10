@@ -50,7 +50,12 @@ public final class FleeFromCategoryGoal extends Goal implements DescribableGoal 
     private static final int RESUME_COOLDOWN_TICKS = 60;     // ~3s back-to-tasks before re-triggering
     private static final int RETREAT_RADIUS = 16;
     private static final int RETREAT_VERTICAL = 7;
-    private static final int LEAP_SETTLE_TICKS = 3;          // stand at the gap edge this long → hop (clean carry read)
+    // Cross-gap escape approach (mirrors CrossGroupGapGoal): walk to the gap edge, settle for a
+    // clean carry read, then hop. Vanilla nav can't cross the gap, so it stops at the near edge and
+    // reports done — that "done at the edge" is the launch cue, NOT wherever the flee retreat ended.
+    private static final int LEAP_SETTLE_TICKS = 3;            // consecutive ticks "nav done at the edge" → launch
+    private static final int LEAP_REPATH_INTERVAL = 10;        // re-issue the approach moveTo every 0.5s
+    private static final int LEAP_APPROACH_TIMEOUT_TICKS = 100; // give up the hop after 5s → flee normally
 
     private enum Phase { FLEE, HIDE, LEAP }
 
@@ -65,8 +70,10 @@ public final class FleeFromCategoryGoal extends Goal implements DescribableGoal 
     private LivingEntity threat;
     private int hideTicksLeft;
     private int cooldownTicks;
-    private int leapDir;          // latched away-from-threat step direction for the current leap
-    private int leapSettleTicks;  // ticks settled at the edge before launch
+    private int leapDir;             // latched away-from-threat step direction for the current leap
+    private int leapTicks;           // ticks since the hop began — approach timeout backstop
+    private int leapSettleTicks;     // consecutive ticks "nav done at the edge"
+    private int leapRepathCooldown;  // re-issue the approach moveTo when this reaches 0
 
     public FleeFromCategoryGoal(PlayerMobEntity mob, float fleeDistance,
                                 double walkSpeed, double sprintSpeed) {
@@ -115,10 +122,12 @@ public final class FleeFromCategoryGoal extends Goal implements DescribableGoal 
     @Override
     public boolean canContinueToUse() {
         if (phase == Phase.LEAP) {
-            // Committed to the cross-gap hop: see it through (a bounded window) even as the mob
-            // opens distance from the threat or a target appears — never abandon it mid-air.
+            // Committed to the cross-gap escape: see it through even as the mob opens distance from
+            // the threat or a target appears. Airborne → never abandon it mid-air (flight timeout);
+            // still approaching the edge → keep going (the approach timeout in tickLeap falls back
+            // to normal fleeing).
             if (!mob.isAlive() || mob.isDeadOrDying()) return false;
-            return leap.flightTicks() <= GapLeap.FLIGHT_TIMEOUT_TICKS;
+            return !leap.isLaunched() || leap.flightTicks() <= GapLeap.FLIGHT_TIMEOUT_TICKS;
         }
         if (threat == null || !threat.isAlive()) return false;
         if (mob.personalityToward(threat) != Personality.SHY) return false;
@@ -213,32 +222,56 @@ public final class FleeFromCategoryGoal extends Goal implements DescribableGoal 
         }
         phase = Phase.LEAP;
         leapDir = chosen.dir();
+        leapTicks = 0;
         leapSettleTicks = 0;
+        leapRepathCooldown = LEAP_REPATH_INTERVAL;
         leap.reset();
         mob.setCrouching(false);
-        mob.getNavigation().stop();
+        // Start walking to the gap edge immediately. Vanilla nav can't cross the gap, so it stops
+        // at the near edge — tickLeap settles there and launches the hop from the edge (not from
+        // wherever the flee retreat happened to end).
+        Vec3 target = TrainConfinement.nextGroupTarget(mob, leapDir);
+        if (target != null) {
+            mob.getNavigation().moveTo(target.x, target.y, target.z, sprintSpeed);
+        }
         return true;
     }
 
-    /** Settle for a clean carry read, launch toward the away group, then fly until landed. */
+    /**
+     * Walk to the gap edge toward the away group, settle for a clean carry read, launch the shared
+     * ballistic hop, then fly until landed. Mirrors {@link CrossGroupGapGoal}'s approach so the
+     * escape uses the exact same tuned crossing as the forward-explore leap — crucially, it launches
+     * from the gap edge (nav done) rather than from wherever the flee retreat stopped.
+     */
     private void tickLeap() {
-        if (!leap.isLaunched()) {
-            // Stand still at the edge so the measured displacement is pure train carry.
-            mob.getNavigation().stop();
-            leap.trackCarry(mob);
-            if (++leapSettleTicks < LEAP_SETTLE_TICKS) {
-                return;
+        if (leap.isLaunched()) {
+            if (leap.tickFlight(mob)) {
+                endLeap(); // landed (or timed out) on the far group — resume fleeing/hiding here
             }
-            Vec3 target = TrainConfinement.nextGroupTarget(mob, leapDir);
-            if (target == null) {
-                endLeap(); // lost the adjacent group while settling — flee the normal way
-                return;
-            }
-            leap.launch(mob, target);
             return;
         }
-        if (leap.tickFlight(mob)) {
-            endLeap(); // landed (or timed out) on the far group — resume fleeing/hiding from here
+        if (++leapTicks > LEAP_APPROACH_TIMEOUT_TICKS) {
+            endLeap(); // couldn't reach the edge in time — fall back to normal fleeing
+            return;
+        }
+        Vec3 target = TrainConfinement.nextGroupTarget(mob, leapDir);
+        if (target == null) {
+            endLeap(); // lost the adjacent group — flee the normal way
+            return;
+        }
+        leap.trackCarry(mob);
+        mob.getLookControl().setLookAt(target.x, target.y, target.z);
+        if (mob.getNavigation().isDone()) {
+            // As close to the gap as vanilla can walk (and the carry reading is clean) → hop.
+            if (++leapSettleTicks >= LEAP_SETTLE_TICKS) {
+                leap.launch(mob, target);
+            }
+            return;
+        }
+        leapSettleTicks = 0;
+        if (--leapRepathCooldown <= 0) {
+            leapRepathCooldown = LEAP_REPATH_INTERVAL;
+            mob.getNavigation().moveTo(target.x, target.y, target.z, sprintSpeed);
         }
     }
 
@@ -248,7 +281,9 @@ public final class FleeFromCategoryGoal extends Goal implements DescribableGoal 
         mob.setCrossingGap(false);
         leap.reset();
         leapDir = 0;
+        leapTicks = 0;
         leapSettleTicks = 0;
+        leapRepathCooldown = 0;
         phase = Phase.FLEE;
     }
 
@@ -263,7 +298,9 @@ public final class FleeFromCategoryGoal extends Goal implements DescribableGoal 
         this.phase = Phase.FLEE;
         this.hideTicksLeft = 0;
         this.leapDir = 0;
+        this.leapTicks = 0;
         this.leapSettleTicks = 0;
+        this.leapRepathCooldown = 0;
         this.cooldownTicks = RESUME_COOLDOWN_TICKS;
     }
 
