@@ -90,7 +90,7 @@ public final class PlayerReincarnation {
             return tag;
         }
 
-        applySkin(ghost, player, level);
+        applySkin(ghost, player);
         applyGear(ghost, player);
 
         CompoundTag snapshot = new CompoundTag();
@@ -99,19 +99,25 @@ public final class PlayerReincarnation {
         // entity already wrote the trait keys, so this is the single authoritative
         // write of FightFlight/Friendliness.
         record.toTraits().save(snapshot);
+        // A spawn egg's ENTITY_DATA must name its entity type, or ItemStack encoding
+        // throws "Missing id for entity" the moment the egg is saved in an inventory.
+        snapshot.putString("id", PlayerMobRegistry.PLAYER_MOB_ID.toString());
 
         ghost.discard();
         return snapshot;
     }
 
-    /** The dead player's own Minecraft skin, or a random bundled mob skin if unavailable. */
-    private static void applySkin(PlayerMobEntity ghost, ServerPlayer player, ServerLevel level) {
+    /** The dead player's own Minecraft skin, or a deterministic bundled skin if unavailable. */
+    private static void applySkin(PlayerMobEntity ghost, ServerPlayer player) {
         Optional<ProfileSkins.Skin> skin = ProfileSkins.extract(player.getGameProfile());
         if (skin.isPresent()) {
             ghost.setSkinTextureUrl(skin.get().url());
             ghost.setSkinSlim(skin.get().slim());
         } else {
-            ghost.setSkinIndex(level.getRandom().nextInt(PlayerMobEntity.SKIN_COUNT));
+            // No signed skin (offline / cracked / dev launcher): pick a bundled skin
+            // deterministically from the UUID, so a given player always reincarnates
+            // with the same face instead of a different one each death.
+            ghost.setSkinIndex(Math.floorMod(player.getUUID().hashCode(), PlayerMobEntity.SKIN_COUNT));
         }
     }
 
