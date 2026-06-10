@@ -160,6 +160,24 @@ public class PlayerMobMenu extends AbstractContainerMenu {
         return mob != null && mob.isAlive() && mob.distanceToSqr(player) <= 64.0;
     }
 
+    /**
+     * Handle the Creative disposition-editor +/- buttons, sent over the vanilla
+     * container-button channel ({@code MultiPlayerGameMode.handleInventoryButtonClick}
+     * → here on the server). Server-authoritative: only a Creative player editing a
+     * live mob may change disposition. Ids {@code 0..3} map to trait adjustments
+     * ({@link games.brennan.playermob.entity.TraitEditButtons}); higher ids map to
+     * per-relationship feeling adjustments
+     * ({@link games.brennan.playermob.entity.FeelingEditButtons}). All clamped; no
+     * custom packets.
+     */
+    @Override
+    public boolean clickMenuButton(Player player, int id) {
+        if (mob == null || !player.isCreative()) {
+            return false;
+        }
+        return mob.applyTraitEditButton(id) || mob.applyFeelingEditButton(id);
+    }
+
     @Override
     public ItemStack quickMoveStack(Player player, int index) {
         ItemStack result = ItemStack.EMPTY;
