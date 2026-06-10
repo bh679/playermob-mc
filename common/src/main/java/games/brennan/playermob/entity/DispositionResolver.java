@@ -16,8 +16,9 @@ package games.brennan.playermob.entity;
  *     <ul>
  *       <li>feeling ≤ {@link #FEELING_HATE} ("hate") → fight/flee within {@link #HATE_RANGE},
  *           overriding nature regardless of friendliness;</li>
- *       <li>else friendliness ≥ {@link #FRIEND_GREET} → greet (the gift sub-step,
- *           gated on feeling ≥ {@link #FEELING_LOVE}, is decided by the goal);</li>
+ *       <li>else feeling ≥ {@link #FEELING_LOVE} ("love") → greet, overriding nature regardless of
+ *           friendliness (the gift sub-step is decided by the goal) — the mirror of the hate rule;</li>
+ *       <li>else friendliness ≥ {@link #FRIEND_GREET} → greet;</li>
  *       <li>else (low friendliness) a two-ring <b>personal-space bubble</b>: fight/flee
  *           inside {@link #innerRadius}, skeptical WATCH inside {@link #outerRadius},
  *           ignore beyond.</li>
@@ -123,8 +124,13 @@ public final class DispositionResolver {
                         ? (fightFlight >= FF_FIGHT ? Reaction.FIGHT : Reaction.FLEE)
                         : Reaction.IGNORE;
                 }
+                if (feeling >= FEELING_LOVE) {
+                    // Love overrides nature: never attack a loved one — greet it instead, at any
+                    // friendliness (the gift sub-step is decided by the goal). Mirror of the hate rule.
+                    return Reaction.GREET;
+                }
                 if (friendliness >= FRIEND_GREET) {
-                    return Reaction.GREET; // gift sub-step (feeling >= FEELING_LOVE) decided by the goal
+                    return Reaction.GREET;
                 }
                 if (distance <= innerRadius(friendliness, feeling)) {
                     return fightFlight >= FF_FIGHT ? Reaction.FIGHT : Reaction.FLEE;

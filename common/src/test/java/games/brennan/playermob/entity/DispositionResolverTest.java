@@ -106,6 +106,19 @@ class DispositionResolverTest {
             DispositionResolver.MAX_RANGE + 1));                                     // beyond hate range
     }
 
+    // ---- players: love overrides nature for any friendliness ----
+
+    @Test
+    void loveOverridesNature() {
+        // A territorial/aggressive mob (low friendliness) GREETS a player it loves (feeling >= 7)
+        // at any distance, instead of attacking it in its personal-space bubble — mirrors hate.
+        assertEquals(Reaction.GREET, resolve(9, 1, 7, TargetCategory.PLAYERS, 1));   // 9/1, loved, point-blank
+        assertEquals(Reaction.GREET, resolve(9, 1, 10, TargetCategory.PLAYERS, 1));
+        assertEquals(Reaction.GREET, resolve(10, 0, 8, TargetCategory.PLAYERS, 2));
+        // feeling 6 is below love → still the territorial bubble (a fighter attacks up close).
+        assertEquals(Reaction.FIGHT, resolve(9, 1, 6, TargetCategory.PLAYERS, 1));
+    }
+
     // ---- onHurt ----
 
     @Test
