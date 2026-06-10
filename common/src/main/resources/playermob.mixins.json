@@ -6,7 +6,8 @@
   "mixins": [
     "MobTargetSelectorAccessor",
     "PlayerDeathMixin",
-    "RaiderTargetsPlayerMobMixin"
+    "RaiderTargetsPlayerMobMixin",
+    "LivingHurtWitnessMixin"
   ],
   "client": [],
   "server": [],

@@ -16,8 +16,9 @@ package games.brennan.playermob.entity;
  *     <ul>
  *       <li>feeling ≤ {@link #FEELING_HATE} ("hate") → fight/flee within {@link #HATE_RANGE},
  *           overriding nature regardless of friendliness;</li>
- *       <li>else friendliness ≥ {@link #FRIEND_GREET} → greet (the gift sub-step,
- *           gated on feeling ≥ {@link #FEELING_LOVE}, is decided by the goal);</li>
+ *       <li>else feeling ≥ {@link #FEELING_LOVE} ("love") → greet, overriding nature regardless of
+ *           friendliness (the gift sub-step is decided by the goal) — the mirror of the hate rule;</li>
+ *       <li>else friendliness ≥ {@link #FRIEND_GREET} → greet;</li>
  *       <li>else (low friendliness) a two-ring <b>personal-space bubble</b>: fight/flee
  *           inside {@link #innerRadius}, skeptical WATCH inside {@link #outerRadius},
  *           ignore beyond.</li>
@@ -52,6 +53,20 @@ public final class DispositionResolver {
     private static final double[] OUTER_AT_NEUTRAL = {15.0, 8.5, 7.0, 6.0, 5.5};
     /** Inner (fight-or-flight) radius at neutral feeling, indexed by friendliness 0..2. */
     private static final double[] INNER_AT_NEUTRAL = {10.0, 5.0, 1.5};
+
+    /**
+     * Witnessed-attack reaction. A mob seeing attacker A hit victim V forms one continuous signed
+     * feeling toward A — positive (admiration) when it approves of the violence, negative (resentment)
+     * when A harmed someone it loves. {@code WITNESS_APPROVE_MARGIN} sets the approve threshold
+     * ({@code feelingTowardVictim ≤ fightFlight − }this); {@link #witnessedAttackDelta} gives the magnitude.
+     */
+    static final int WITNESS_APPROVE_MARGIN = 3;
+    /** Weight on {@code (fightFlight − feelingTowardVictim)} in the witnessed-attack delta. */
+    static final float WITNESS_LIKE_SCALE = 0.4F;
+    /** Per-fightFlight damping in the witnessed-attack delta. */
+    static final float WITNESS_AGGRESSION_SCALE = 0.1F;
+    /** Cap on the positive (admiration) witnessed-attack delta. */
+    static final float WITNESS_MAX = 3.0F;
 
     /** Outcome of being hit — feeling mutation is done by the entity, not here. */
     public enum HurtResponse { RETALIATE, FLEE }
@@ -109,8 +124,13 @@ public final class DispositionResolver {
                         ? (fightFlight >= FF_FIGHT ? Reaction.FIGHT : Reaction.FLEE)
                         : Reaction.IGNORE;
                 }
+                if (feeling >= FEELING_LOVE) {
+                    // Love overrides nature: never attack a loved one — greet it instead, at any
+                    // friendliness (the gift sub-step is decided by the goal). Mirror of the hate rule.
+                    return Reaction.GREET;
+                }
                 if (friendliness >= FRIEND_GREET) {
-                    return Reaction.GREET; // gift sub-step (feeling >= FEELING_LOVE) decided by the goal
+                    return Reaction.GREET;
                 }
                 if (distance <= innerRadius(friendliness, feeling)) {
                     return fightFlight >= FF_FIGHT ? Reaction.FIGHT : Reaction.FLEE;
@@ -125,6 +145,33 @@ public final class DispositionResolver {
     /** Immediate response to taking a hit: stand and fight, or break off and flee. */
     public static HurtResponse onHurt(int fightFlight) {
         return fightFlight >= FF_FIGHT ? HurtResponse.RETALIATE : HurtResponse.FLEE;
+    }
+
+    /**
+     * The signed feeling a mob forms toward attacker A on witnessing A hit victim V — positive
+     * admiration, negative resentment, or {@code 0} (indifferent). Two bands are active; between them
+     * the mob doesn't react:
+     * <ul>
+     *   <li><b>Approve</b> — {@code feelingTowardVictim ≤ fightFlight − }{@link #WITNESS_APPROVE_MARGIN}
+     *       and {@code <} {@link #FEELING_LOVE}: it likes A for the violence (positive).</li>
+     *   <li><b>Resent</b> — {@code feelingTowardVictim ≥ }{@link #FEELING_LOVE}: A harmed someone it
+     *       loves (negative).</li>
+     * </ul>
+     * In either band the magnitude is {@code WITNESS_LIKE_SCALE·(fightFlight − feelingTowardVictim) −
+     * WITNESS_AGGRESSION_SCALE·fightFlight}, capped above at {@link #WITNESS_MAX}: admiration grows with
+     * fight/flight and with disliking V; resentment deepens the more it loves V and the calmer it is.
+     */
+    public static float witnessedAttackDelta(int fightFlight, float feelingTowardVictim) {
+        boolean resent = feelingTowardVictim >= FEELING_LOVE;
+        boolean approve = feelingTowardVictim < FEELING_LOVE
+            && feelingTowardVictim <= fightFlight - WITNESS_APPROVE_MARGIN;
+        if (!resent && !approve) {
+            return 0.0F;
+        }
+        float delta = Math.min(WITNESS_MAX,
+            WITNESS_LIKE_SCALE * (fightFlight - feelingTowardVictim)
+                - WITNESS_AGGRESSION_SCALE * fightFlight);
+        return Math.abs(delta) < 1e-4F ? 0.0F : delta;
     }
 
     // ---- "Can I win?" assessment (Phase C: the mid fight/flight band) ------

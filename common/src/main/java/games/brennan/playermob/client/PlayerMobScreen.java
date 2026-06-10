@@ -225,7 +225,7 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
         PlayerFaceRenderer.draw(g, resolveFaceTexture(id), x, y, FACE_SIZE, true, false);
         String name = nameCache.computeIfAbsent(id, this::computeName);
         g.drawString(this.font, Component.literal(trim(name)), x + FACE_SIZE + 3, y, VALUE_COLOR, false);
-        String value = String.valueOf(Math.round(feeling));
+        String value = String.format(java.util.Locale.ROOT, "%.1f", feeling);
         int vx = x + BAR_WIDTH - this.font.width(value);
         g.drawString(this.font, Component.literal(value), vx, y, feelingColor(feeling), false);
     }

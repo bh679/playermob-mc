@@ -48,9 +48,6 @@ public final class FeelingLedger {
     /** Cap on persisted/encoded entries; lowest-{@link FeelingRecord#magnitude()} pruned first. */
     static final int MAX_ENTRIES = 32;
 
-    /** Feeling penalty when the mob witnesses someone harm an individual it loves. */
-    static final float HARM_PENALTY = 1.0F;
-
     private final Map<UUID, FeelingRecord> feelings = new HashMap<>();
 
     /** The mob's feeling toward {@code id}, or {@link #DEFAULT} if it has none yet. */
@@ -132,16 +129,18 @@ public final class FeelingLedger {
     }
 
     /**
-     * Lower the feeling toward {@code id} for harming someone the mob loves, at game
-     * tick {@code eventTick} (debounced per-individual). Returns {@code true} if
-     * feeling changed.
+     * Apply a witnessed-attack reaction toward {@code id} (the attacker): shift its feeling by the
+     * signed {@code delta} (positive = admiration for violence it approves of, negative = resentment
+     * for harming someone it loves) at game tick {@code eventTick} (debounced per-individual). Uses
+     * the plain {@link FeelingRecord#adjusted} path so it grants no crouch headroom. Returns
+     * {@code true} if feeling changed.
      */
-    public boolean harm(UUID id, int eventTick) {
+    public boolean witness(UUID id, float delta, int eventTick) {
         FeelingRecord before = recordFor(id);
         if (eventTick <= before.lastWitnessTick()) {
             return false;
         }
-        FeelingRecord credited = before.adjusted(-HARM_PENALTY);
+        FeelingRecord credited = before.adjusted(delta);
         put(id, credited.withWitnessTick(eventTick));
         return credited.feeling() != before.feeling();
     }
