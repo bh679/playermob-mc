@@ -21,6 +21,7 @@ import games.brennan.playermob.skin.PlayerMobSkin;
 import games.brennan.playermob.skin.PlayerMobSkinRegistry;
 import games.brennan.playermob.skin.SkinModel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.particles.ItemParticleOption;
 import net.minecraft.core.particles.ParticleTypes;
@@ -541,19 +542,30 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
 
     /**
      * Off-train door recovery: when the mob has been wedged for a while ({@link DoorStuckMonitor})
-     * while actively pathing, close the nearest open, hand-closable door and arm the hold so it
-     * isn't reopened before the mob can cross. An open door's panel swings across the perpendicular
-     * edge of its cell, which vanilla pathing treats as passable — so a mob whose route turns at the
-     * doorway jams against it, and closing clears the way. On a train the Dungeon-Train reflex does
-     * the same job in the carriage's coordinate space, so this branch never runs while confined.
+     * while actively pathing, close the open hand-closable door that's actually blocking the way it
+     * is going ({@link DoorObstruction}) and arm the hold so it isn't reopened before the mob can
+     * cross. An open door's panel swings across the perpendicular edge of its cell, which vanilla
+     * pathing treats as passable — so a mob whose route turns at the doorway jams against it, and
+     * closing clears the way. Opening a closed door on the path is {@link PlayerMobDoorGoal}'s job;
+     * this half only clears the perpendicular jam. On a train the Dungeon-Train reflex does the
+     * whole job (open or close) in the carriage's coordinate space, so this branch never runs while
+     * confined.
      */
     private void recoverFromStuckDoor() {
         if (!(level() instanceof ServerLevel serverLevel)) {
             return;
         }
+        // Track the heading every tick (world frame off a train) so it's latched before the mob
+        // stalls against a panel — measured the same way as the stuck signal below.
+        Direction.Axis travelAxis = DoorObstruction.travelAxis(this, getX(), getZ());
         boolean tryingToMove = !getNavigation().isDone();
-        if (offTrainDoorStuck.tick(getX(), getZ(), tryingToMove)
-                && DoorRecovery.closeBlockingOpenDoor(this, serverLevel, blockPosition(), DOOR_RECOVERY_REACH)) {
+        if (!offTrainDoorStuck.tick(getX(), getZ(), tryingToMove) || travelAxis == null) {
+            return;
+        }
+        DoorObstruction.Obstruction blocking = DoorObstruction.nearestObstructing(
+            serverLevel, blockPosition(), DOOR_RECOVERY_REACH, travelAxis, DoorObstruction.OPEN_HAND_DOOR);
+        if (blocking != null) {
+            DoorObstruction.toggle(this, serverLevel, blocking.state(), blocking.pos());
             holdDoorsClosed();
         }
     }

@@ -1,8 +1,8 @@
 package games.brennan.playermob.entity;
 
 /**
- * Frame-agnostic "is the mob wedged in place?" detector that drives the
- * close-a-blocking-door recovery (see {@code DoorRecovery} and
+ * Frame-agnostic "is the mob wedged in place?" detector that gates the off-train
+ * close-a-blocking-door recovery (see {@code DoorObstruction} and
  * {@code PlayerMobEntity.recoverFromStuckDoor}).
  *
  * <p>Fed the mob's position once per tick, it reports {@code true} on the single
