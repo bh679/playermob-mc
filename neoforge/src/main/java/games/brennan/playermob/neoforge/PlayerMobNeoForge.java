@@ -6,6 +6,7 @@ import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.Archetype;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.menu.PlayerMobMenu;
+import games.brennan.playermob.player.ReincarnateCommand;
 import games.brennan.playermob.skin.PlayerMobSkinReloadListener;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
@@ -25,6 +26,7 @@ import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.common.extensions.IMenuTypeExtension;
 import net.neoforged.neoforge.event.AddReloadListenerEvent;
 import net.neoforged.neoforge.event.BuildCreativeModeTabContentsEvent;
+import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.entity.EntityAttributeCreationEvent;
 import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredItem;
@@ -82,8 +84,9 @@ public final class PlayerMobNeoForge {
         modBus.addListener(PlayerMobNeoForge::onBuildCreativeTab);
         modBus.addListener(PlayerMobNeoForge::onCommonSetup);
 
-        // Reload listeners live on the game bus, not the mod bus.
+        // Reload listeners + commands live on the game bus, not the mod bus.
         NeoForge.EVENT_BUS.addListener(PlayerMobNeoForge::onAddReloadListeners);
+        NeoForge.EVENT_BUS.addListener(PlayerMobNeoForge::onRegisterCommands);
 
         if (FMLEnvironment.dist == Dist.CLIENT) {
             games.brennan.playermob.neoforge.client.PlayerMobNeoForgeClient.register(modBus);
@@ -96,6 +99,10 @@ public final class PlayerMobNeoForge {
      */
     private static void onAddReloadListeners(AddReloadListenerEvent event) {
         event.addListener(new PlayerMobSkinReloadListener());
+    }
+
+    private static void onRegisterCommands(RegisterCommandsEvent event) {
+        ReincarnateCommand.register(event.getDispatcher());
     }
 
     private static void onEntityAttributeCreation(EntityAttributeCreationEvent event) {

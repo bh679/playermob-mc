@@ -18,6 +18,8 @@ import games.brennan.playermob.entity.goal.RaidContainersGoal;
 import games.brennan.playermob.entity.goal.SkepticalWatchGoal;
 import games.brennan.playermob.entity.goal.TrainRecoveryGoal;
 import games.brennan.playermob.entity.goal.WeaponAwareAttackGoal;
+import games.brennan.playermob.player.PlayerLifeRecord;
+import games.brennan.playermob.player.PlayerLifeStore;
 import games.brennan.playermob.skin.PlayerMobSkin;
 import games.brennan.playermob.skin.PlayerMobSkinRegistry;
 import games.brennan.playermob.skin.SkinModel;
@@ -333,6 +335,16 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * persistence rather than a synched DataTracker entry.</p>
      */
     private boolean closesDoors;
+
+    /**
+     * Whether this mob's skin came from loaded NBT (a reincarnation egg's snapshot,
+     * or a {@code /summon} carrying a {@code Skin*} tag) rather than being rolled at
+     * spawn. The skin analogue of {@link DispositionTraits}'s explicit-set tracking:
+     * when {@code true}, {@link #finalizeSpawn} keeps the loaded skin instead of
+     * re-rolling over it. Set in {@link #readAdditionalSaveData} only when a skin key
+     * is actually present, so a trait-only egg still rolls a random skin.
+     */
+    private boolean skinExplicit;
 
     /**
      * Server tick of the last moment this mob stood on a train carriage, or a
@@ -668,11 +680,20 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             Boolean was = crouchHeld.get(id);
             if (greetCrouch && (was == null || !was)) {
                 changed |= feelings.crouch(id);
+                // Credit the real player's lifetime kindness for the greeting gesture.
+                if (e instanceof ServerPlayer sp) {
+                    PlayerLifeStore.record(sp, PlayerLifeRecord.Signal.CROUCH, 0);
+                }
             }
 
             // Travel-together — same train, advancing carriages, not in combat with them.
             if (onTrain && getTarget() != e && TrainConfinement.allowsTarget(this, e)) {
-                changed |= feelings.travel(id, carriage);
+                if (feelings.travel(id, carriage)) {
+                    changed = true;
+                    if (e instanceof ServerPlayer sp) {
+                        PlayerLifeStore.record(sp, PlayerLifeRecord.Signal.TRAVEL, 0);
+                    }
+                }
             }
             // Witnessed attacks are no longer polled here — they're credited at the moment damage
             // lands (LivingHurtWitnessMixin -> WitnessedAttacks -> witnessAttack), so admiration
@@ -708,7 +729,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
                 || TargetCategory.classify(defender) != TargetCategory.PLAYERS) {
             return false;
         }
-        return feelings.defend(defender.getUUID(), myAttacker.getLastHurtByMobTimestamp());
+        boolean defended = feelings.defend(defender.getUUID(), myAttacker.getLastHurtByMobTimestamp());
+        if (defended && defender instanceof ServerPlayer sp) {
+            PlayerLifeStore.record(sp, PlayerLifeRecord.Signal.DEFEND, 0);
+        }
+        return defended;
     }
 
     /**
@@ -725,6 +750,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             feelings.feelingToward(victim.getUUID()));
         if (delta != 0.0F
                 && feelings.witness(attacker.getUUID(), delta, victim.getLastHurtByMobTimestamp())) {
+            // A real player harming someone this mob loves (negative delta) feeds their
+            // lifetime cruelty — the reincarnation-tracking heir to the old harm poll.
+            if (delta < 0.0F && attacker instanceof ServerPlayer sp) {
+                PlayerLifeStore.record(sp, PlayerLifeRecord.Signal.HARM, 0);
+            }
             pushDispositionToClient();
         }
     }
@@ -883,12 +913,17 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
                                         DifficultyInstance difficulty,
                                         MobSpawnType reason,
                                         SpawnGroupData data) {
-        setSkinIndex(world.getRandom().nextInt(SKIN_COUNT));
-        if (world.getRandom().nextFloat() < URL_SKIN_CHANCE) {
-            PlayerMobSkinRegistry.pickRandom(world.getRandom()).ifPresent(skin -> {
-                setSkinTextureUrl(skin.textureUrl());
-                setSkinSlim(skin.model() == SkinModel.SLIM);
-            });
+        // Keep a skin already loaded from NBT (a reincarnation egg's snapshot, or a
+        // /summon with a Skin* tag). A spawn egg merges its entity_data BEFORE
+        // finalizeSpawn, so without this guard the roll would clobber that skin.
+        if (!skinExplicit) {
+            setSkinIndex(world.getRandom().nextInt(SKIN_COUNT));
+            if (world.getRandom().nextFloat() < URL_SKIN_CHANCE) {
+                PlayerMobSkinRegistry.pickRandom(world.getRandom()).ifPresent(skin -> {
+                    setSkinTextureUrl(skin.textureUrl());
+                    setSkinSlim(skin.model() == SkinModel.SLIM);
+                });
+            }
         }
         // Roll any trait not pinned by a spawn egg's entity_data or /summon NBT
         // (an archetype egg / partial summon leaves the rest to chance).
@@ -1856,7 +1891,12 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private void creditGift(LivingEntity gifter, ItemStack gift) {
         double giftScore = EquipmentEvaluator.score(gift);
         double currentScore = EquipmentEvaluator.score(getItemBySlot(getEquipmentSlotForItem(gift)));
-        feelings.adjust(gifter.getUUID(), FeelingRecord.giftDelta(giftScore, currentScore));
+        float delta = FeelingRecord.giftDelta(giftScore, currentScore);
+        feelings.adjust(gifter.getUUID(), delta);
+        // Credit the real player's lifetime kindness by the gift's worth.
+        if (gifter instanceof ServerPlayer sp) {
+            PlayerLifeStore.record(sp, PlayerLifeRecord.Signal.GIFT, delta);
+        }
         pushDispositionToClient();
     }
 
@@ -2274,7 +2314,12 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         traits.load(tag);
         feelings.load(tag);
         pushDispositionToClient();
-        setSkinIndex(tag.getInt(TAG_SKIN_INDEX));
+        // Only mark the skin explicit when a key is really present — a trait-only
+        // egg (archetype) carries no Skin* keys and must still roll a skin at spawn.
+        if (tag.contains(TAG_SKIN_INDEX, Tag.TAG_ANY_NUMERIC)) {
+            setSkinIndex(tag.getInt(TAG_SKIN_INDEX));
+            skinExplicit = true;
+        }
         // Missing key (pre-door-feature saves) ⇒ false ⇒ leave-open. Additive.
         this.closesDoors = tag.getBoolean(TAG_CLOSES_DOORS);
         // Missing key ⇒ 0 ⇒ unlatched ⇒ re-derived on the next train boarding. Additive.
@@ -2285,6 +2330,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (tag.contains(TAG_SKIN_TEXTURE_URL, Tag.TAG_STRING)) {
             setSkinTextureUrl(tag.getString(TAG_SKIN_TEXTURE_URL));
             setSkinSlim(tag.getBoolean(TAG_SKIN_SLIM));
+            skinExplicit = true;
         }
         readInventoryFromTag(tag, this.registryAccess());
 
@@ -2370,6 +2416,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
                 if (category == TargetCategory.PLAYERS) {
                     // recordAttack (not adjust): a ≥1-feeling loss re-opens crouch headroom.
                     feelings.recordAttack(attacker.getUUID(), -amount * DMG_TO_FEELING);
+                    // Credit the real player's lifetime aggression by the damage dealt.
+                    if (attacker instanceof ServerPlayer sp) {
+                        PlayerLifeStore.record(sp, PlayerLifeRecord.Signal.ATTACK, amount);
+                    }
                     pushDispositionToClient();
                 }
                 // Immediate response: fighters retaliate (keep the HurtByTargetGoal
@@ -2428,6 +2478,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     @Override
     public void die(DamageSource source) {
         closeOpenedContainer();
+        // Credit the real player who killed this mob with their lifetime aggression.
+        if (getKillCredit() instanceof ServerPlayer sp) {
+            PlayerLifeStore.record(sp, PlayerLifeRecord.Signal.KILL, 1);
+        }
         // Capture the death message BEFORE super.die(): super calls
         // CombatTracker.recheckStatus(), which clears the combat entries, so
         // the attacker-aware message ("… was slain by Zombie") is only

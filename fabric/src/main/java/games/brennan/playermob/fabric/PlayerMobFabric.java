@@ -5,7 +5,9 @@ import games.brennan.playermob.PlayerMobRegistry;
 import games.brennan.playermob.entity.Archetype;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.menu.PlayerMobMenu;
+import games.brennan.playermob.player.ReincarnateCommand;
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.itemgroup.v1.ItemGroupEvents;
 import net.fabricmc.fabric.api.object.builder.v1.entity.FabricDefaultAttributeRegistry;
 import net.fabricmc.fabric.api.resource.ResourceManagerHelper;
@@ -92,6 +94,10 @@ public final class PlayerMobFabric implements ModInitializer {
         ResourceManagerHelper.get(PackType.SERVER_DATA)
             .registerReloadListener(
                 new games.brennan.playermob.fabric.SkinReloadListenerWrapper(skinListenerId));
+
+        // The /playermob command — reincarnation egg retrieval + live trait readout.
+        CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
+            ReincarnateCommand.register(dispatcher));
 
         PlayerMob.init();
     }
