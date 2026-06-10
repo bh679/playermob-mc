@@ -2,6 +2,7 @@ package games.brennan.playermob.compat;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -62,6 +63,26 @@ public final class TrainConfinement {
         return !env.isOnTrain(self) || env.sameTrain(self, pos);
     }
 
+    /**
+     * The carriage nearest {@code self} within {@code radius}, or {@code null} if
+     * none is loaded in range (always {@code null} without a train mod). Used by
+     * the recovery AI to find where to re-board after a fall; see
+     * {@link TrainEnvironment#nearestCarriage}.
+     */
+    public static TrainEnvironment.ReboardTarget nearestCarriage(Entity self, double radius) {
+        return environment.nearestCarriage(self, radius);
+    }
+
+    /**
+     * A world-space deck point the mob can board right now (an opening with floor under
+     * it), or {@code null} if the carriage is walled where the mob is — in which case
+     * recovery waits beside the moving train for an open carriage. Always {@code null}
+     * without a train mod; see {@link TrainEnvironment#boardingSpot}.
+     */
+    public static Vec3 boardingSpot(Entity self, AABB carriageBox) {
+        return environment.boardingSpot(self, carriageBox);
+    }
+
     // ---- Carriage exploration (behaviour #3) -----------------------------
 
     /** Re-export of {@link TrainEnvironment#NO_CARRIAGE} for AI-side callers. */
@@ -82,6 +103,17 @@ public final class TrainConfinement {
      */
     public static Vec3 nextCarriageTarget(Entity self, int dir) {
         return environment.nextCarriageTarget(self, dir);
+    }
+
+    /**
+     * World-space waypoint at the centre of the nearest room of the adjacent
+     * same-train group in step direction {@code dir}, or {@code null} if not on a
+     * train or there is no further group that way. Always {@code null} without a
+     * train mod. Used by {@code CrossGroupGapGoal} to aim the cross-gap leap once
+     * {@link #nextCarriageTarget} runs out of rooms in the current group.
+     */
+    public static Vec3 nextGroupTarget(Entity self, int dir) {
+        return environment.nextGroupTarget(self, dir);
     }
 
     /**

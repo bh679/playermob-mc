@@ -22,6 +22,7 @@ import net.minecraft.world.inventory.Slot;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -32,16 +33,17 @@ import java.util.UUID;
  * whole thing reads like a normal Minecraft container. Armor/off-hand empty
  * icons are supplied by the menu's slot backgrounds.
  *
- * <p>A right-hand <b>disposition panel</b> shows the mob's two personal traits
+ * <p>A middle <b>disposition panel</b> shows the mob's two personal traits
  * (Fight/Flight, Friendliness) and a <b>Relationships</b> list — one row per
- * individual the mob has a feeling toward, each with that target's face, name,
- * and feeling (0–10, hate→love). All read live from the entity's synced
- * disposition fields, so values update while the menu is open. Each trait — and
- * each relationship row — has {@code [-]}/{@code [+]} buttons that edit it in
- * Creative over the vanilla container-button channel (see
- * {@link PlayerMobMenu#clickMenuButton}); the server clamps and re-syncs, so the
- * panel reflects the edit next frame. Relationship rows are ordered by UUID
- * (stable) so a row stays put while you adjust it.</p>
+ * individual the mob has met, each with that target's face, name, and feeling
+ * (0–10, hate→love). All read live from the entity's synced disposition fields,
+ * so values update while the menu is open. Each trait — and each relationship
+ * row — has {@code [-]}/{@code [+]} buttons that edit it in Creative over the
+ * vanilla container-button channel (see {@link PlayerMobMenu#clickMenuButton});
+ * the server clamps and re-syncs, so the panel reflects the edit next frame.
+ * Relationship rows are ordered by UUID (stable) so a row stays put while you
+ * adjust it. A right-hand <b>objectives column</b> shows the mob's live goal
+ * stack.</p>
  *
  * <p>{@link Environment} {@code CLIENT}-only — stripped from dedicated server
  * jars at load time, same pattern as {@code PlayerMobRenderer}. Registered per
@@ -58,7 +60,7 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     private static final int SLOT_SHADOW = 0xFF373737; // top/left inner edge
     private static final int SLOT_HILIGHT = 0xFFFFFFFF; // bottom/right inner edge
 
-    // Disposition panel layout (relative to the window origin).
+    // ---- Disposition (feelings) panel — immediately right of the slots ----
     private static final int INVENTORY_WIDTH = 176;   // the original window's content width
     private static final int PANEL_X = INVENTORY_WIDTH + 4;
     private static final int PANEL_TOP = 8;
@@ -71,6 +73,8 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     private static final int LABEL_COLOR = 0x404040;
     private static final int VALUE_COLOR = 0x202020;
     private static final int MUTED_COLOR = 0x808080;
+    // Wide enough for the bars + the right-aligned edit buttons before the objectives divider.
+    private static final int DISPOSITION_WIDTH = 136;
 
     // Vertical offsets of each panel element from the panel top (topPos + PANEL_TOP).
     // Shared by the renderer (labels/bars) and init() (edit buttons) so they stay aligned.
@@ -92,6 +96,13 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     private static final int REL_BTN_SIZE = 10;
     private static final int REL_BTN_GAP = 1;
 
+    // ---- Creative objectives column — right of the disposition panel ----
+    private static final int OBJECTIVES_X = INVENTORY_WIDTH + DISPOSITION_WIDTH;
+    private static final int OBJECTIVES_GUTTER = 124; // width reserved for the objectives column
+    private static final int OBJECTIVES_HEADER_COLOR = 0x404040;
+    private static final int OBJECTIVES_TEXT_COLOR = 0x404040;
+    private static final int OBJECTIVES_SUB_COLOR = 0x707070;
+
     /** Names are stable for a session — resolve once per UUID. */
     private final Map<UUID, String> nameCache = new HashMap<>();
 
@@ -102,7 +113,8 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
 
     public PlayerMobScreen(PlayerMobMenu menu, Inventory playerInv, Component title) {
         super(menu, playerInv, title);
-        this.imageWidth = 316; // 176 inventory + ~140 disposition panel (incl. edit buttons)
+        // 176 inventory + disposition panel + objectives column.
+        this.imageWidth = INVENTORY_WIDTH + DISPOSITION_WIDTH + OBJECTIVES_GUTTER;
         this.imageHeight = 186;
         // Recompute since the field initialiser used the default height.
         this.inventoryLabelY = this.imageHeight - 94;
@@ -131,9 +143,8 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
      * Rebuild the per-relationship feeling buttons from the mob's current synced
      * feelings, in the same stable UUID order the panel renders and the server maps.
      * Called from {@link #init()} and from {@link #containerTick()} when the
-     * relationship set changes (an edit to neutral dropping a row, or a new feeling
-     * forming while the menu is open). Mere value edits leave the order unchanged,
-     * so they don't trigger a rebuild.
+     * relationship set changes (a new individual met while the menu is open). Mere
+     * value edits leave the UUID order unchanged, so they don't trigger a rebuild.
      */
     private void rebuildRelationshipButtons() {
         for (Button b : relationshipButtons) {
@@ -165,8 +176,8 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
 
     /**
      * Keep the relationship buttons aligned with the live list. Cheap: only rebuilds
-     * when the stable UUID order actually changes (membership/order), which editing a
-     * feeling value does not.
+     * when the stable UUID order actually changes (a new individual met), which
+     * editing a feeling value does not.
      */
     @Override
     protected void containerTick() {
@@ -179,9 +190,8 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
 
     /**
      * The mob's relationships in the stable order shared with the server's
-     * {@code FeelingLedger.nonDefaultUuidsSorted()} — the synced (non-default) set,
-     * sorted by UUID. So row index ↔ button id resolves to the same individual on
-     * both sides.
+     * {@code FeelingLedger.uuidsSorted()} — the synced (all met) set, sorted by
+     * UUID. So row index ↔ button id resolves to the same individual on both sides.
      */
     private static List<UUID> stableFeelingOrder(PlayerMobEntity mob) {
         List<UUID> ids = new ArrayList<>(mob.getSyncedFeelings().keySet());
@@ -206,14 +216,14 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
             .bounds(plusX(), y, BUTTON_SIZE, BUTTON_SIZE).build());
     }
 
-    /** Send a trait edit over the vanilla container-button channel; the server clamps + re-syncs. */
+    /** Send a disposition edit over the vanilla container-button channel; the server clamps + re-syncs. */
     private void sendButton(int id) {
         if (this.minecraft != null && this.minecraft.gameMode != null) {
             this.minecraft.gameMode.handleInventoryButtonClick(this.menu.containerId, id);
         }
     }
 
-    // Edit-cluster geometry (right-aligned to the bar). Depends on leftPos, set by init().
+    // Trait edit-cluster geometry (right-aligned to the bar). Depends on leftPos, set by init().
     private int clusterLeft() {
         return this.leftPos + PANEL_X + BAR_WIDTH - CLUSTER_W;
     }
@@ -237,6 +247,47 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
         this.renderTooltip(guiGraphics, mouseX, mouseY);
     }
 
+    /**
+     * Draws the Creative objectives column to the right of the inventory: the
+     * mob's live goal stack ("Objective" then an indented phase), read from the
+     * synced {@link PlayerMobEntity#getObjectivesReadout()}. Refreshes each frame
+     * as the mob's goals change. Drawn in {@code renderLabels} so it's in the
+     * window-local coordinate space (origin at the top-left of the panel).
+     */
+    @Override
+    protected void renderLabels(GuiGraphics guiGraphics, int mouseX, int mouseY) {
+        super.renderLabels(guiGraphics, mouseX, mouseY);
+
+        PlayerMobEntity mob = this.menu.getMob();
+        if (mob == null) {
+            return; // client fallback before the entity resolved — no live state
+        }
+
+        int gx = OBJECTIVES_X + 7;
+        guiGraphics.drawString(this.font, "Objectives", gx, 6, OBJECTIVES_HEADER_COLOR, false);
+
+        String readout = mob.getObjectivesReadout();
+        if (readout == null || readout.isEmpty()) {
+            readout = "Idle";
+        }
+
+        int y = 20;
+        for (String entry : readout.split("\n")) {
+            int sep = entry.indexOf(" — ");
+            if (sep >= 0) {
+                guiGraphics.drawString(this.font, entry.substring(0, sep),
+                    gx, y, OBJECTIVES_TEXT_COLOR, false);
+                y += this.font.lineHeight + 1;
+                guiGraphics.drawString(this.font, "  " + entry.substring(sep + 3),
+                    gx, y, OBJECTIVES_SUB_COLOR, false);
+                y += this.font.lineHeight + 3;
+            } else {
+                guiGraphics.drawString(this.font, entry, gx, y, OBJECTIVES_TEXT_COLOR, false);
+                y += this.font.lineHeight + 3;
+            }
+        }
+    }
+
     @Override
     protected void renderBg(GuiGraphics guiGraphics, float partialTick, int mouseX, int mouseY) {
         int x = this.leftPos;
@@ -257,6 +308,11 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
         for (Slot slot : this.menu.slots) {
             drawSlotRecess(guiGraphics, x + slot.x, y + slot.y);
         }
+
+        // Bevelled divider between the disposition panel and the objectives column.
+        int dividerX = x + OBJECTIVES_X;
+        guiGraphics.fill(dividerX - 1, y + 4, dividerX, y + this.imageHeight - 4, PANEL_SHADOW);
+        guiGraphics.fill(dividerX, y + 4, dividerX + 1, y + this.imageHeight - 4, PANEL_HILIGHT);
     }
 
     /** Draws an 18×18 recessed cell whose 16×16 interior sits at ({@code sx},{@code sy}). */
@@ -327,7 +383,7 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
         PlayerFaceRenderer.draw(g, resolveFaceTexture(id), x, y, FACE_SIZE, true, false);
         String name = nameCache.computeIfAbsent(id, this::computeName);
         g.drawString(this.font, Component.literal(trim(name)), x + FACE_SIZE + 3, y, VALUE_COLOR, false);
-        String value = String.valueOf(Math.round(feeling));
+        String value = String.format(Locale.ROOT, "%.1f", feeling);
         int vx = relMinusX() - 2 - this.font.width(value); // just left of the [-] button
         g.drawString(this.font, Component.literal(value), vx, y, feelingColor(feeling), false);
     }
@@ -383,7 +439,7 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     /** Truncate a name to fit the relationship row's name column (face … value [-] [+]). */
     private String trim(String name) {
         int maxWidth = BAR_WIDTH - (FACE_SIZE + 3)
-            - (2 * REL_BTN_SIZE + REL_BTN_GAP) - this.font.width("10") - 4;
+            - (2 * REL_BTN_SIZE + REL_BTN_GAP) - this.font.width("10.0") - 4;
         if (this.font.width(name) <= maxWidth) {
             return name;
         }

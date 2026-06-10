@@ -26,7 +26,7 @@ import java.util.List;
  *
  * <p>Honours {@code mobGriefing} gamerule + combat-preemption priority.</p>
  */
-public final class RaidArmorStandsGoal extends Goal {
+public final class RaidArmorStandsGoal extends Goal implements DescribableGoal {
 
     private static final int APPROACH_PAUSE_TICKS = 20;    // 1s once in reach before first swap
     private static final int MIN_SWAP_DELAY_TICKS = 6;     // 0.3s minimum per swap (matches RaidContainersGoal)
@@ -58,6 +58,20 @@ public final class RaidArmorStandsGoal extends Goal {
         this.moveSpeed = moveSpeed;
         this.scanRadius = scanRadius;
         setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
+    }
+
+    @Override
+    public String objective() {
+        return "Raiding armor stand";
+    }
+
+    @Override
+    public String subObjective() {
+        return switch (phase) {
+            case PATHING, APPROACHING -> "approaching";
+            case LOOTING -> "looting";
+            default -> null;
+        };
     }
 
     @Override

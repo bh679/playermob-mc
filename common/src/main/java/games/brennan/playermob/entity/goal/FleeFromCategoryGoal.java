@@ -29,7 +29,7 @@ import java.util.EnumSet;
  * Crouching is cosmetic (see {@link PlayerMobEntity#setCrouching}); the mob
  * keeps full flee speed.</p>
  */
-public final class FleeFromCategoryGoal extends Goal {
+public final class FleeFromCategoryGoal extends Goal implements DescribableGoal {
 
     private static final double DETECT_RANGE_BONUS = 6.0;     // notice the threat a bit beyond flee range
     private static final double RETURN_TO_FLEE_MARGIN = 2.0;  // while hiding, re-flee if threat gets within (fleeDistance - margin)
@@ -65,6 +65,19 @@ public final class FleeFromCategoryGoal extends Goal {
     }
 
     @Override
+    public String objective() {
+        return "Fleeing";
+    }
+
+    @Override
+    public String subObjective() {
+        return switch (phase) {
+            case FLEE -> "running";
+            case HIDE -> "hiding";
+        };
+    }
+
+    @Override
     public boolean canUse() {
         if (cooldownTicks > 0) {
             cooldownTicks--;
@@ -96,6 +109,7 @@ public final class FleeFromCategoryGoal extends Goal {
     public void start() {
         this.phase = Phase.FLEE;
         this.hideTicksLeft = 0;
+        mob.setFleeing(true); // suppress the shield-block reflex while running away
     }
 
     @Override
@@ -143,6 +157,7 @@ public final class FleeFromCategoryGoal extends Goal {
     public void stop() {
         mob.setCrouching(false);
         mob.getNavigation().stop();
+        mob.setFleeing(false);
         this.threat = null;
         this.phase = Phase.FLEE;
         this.hideTicksLeft = 0;

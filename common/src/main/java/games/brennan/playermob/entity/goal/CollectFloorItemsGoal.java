@@ -30,7 +30,7 @@ import java.util.List;
  * <p>Combat preempts (registered below {@link WeaponAwareAttackGoal}); honours
  * the {@code mobGriefing} gamerule, matching the other raid goals.</p>
  */
-public final class CollectFloorItemsGoal extends Goal {
+public final class CollectFloorItemsGoal extends Goal implements DescribableGoal {
 
     private static final int PATH_TIMEOUT_TICKS = 100;    // 5s to reach an item before giving up
     private static final int POST_VISIT_COOLDOWN = 10;    // 0.5s after a pickup before rescanning
@@ -53,6 +53,16 @@ public final class CollectFloorItemsGoal extends Goal {
         this.moveSpeed = moveSpeed;
         this.scanRadius = scanRadius;
         setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
+    }
+
+    @Override
+    public String objective() {
+        return "Collecting items";
+    }
+
+    @Override
+    public String subObjective() {
+        return phase == Phase.PATHING ? "approaching" : null;
     }
 
     @Override

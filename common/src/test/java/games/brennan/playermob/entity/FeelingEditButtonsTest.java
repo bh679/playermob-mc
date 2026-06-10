@@ -66,7 +66,7 @@ class FeelingEditButtonsTest {
     void appliesToTheRowInStableOrder() {
         FeelingLedger ledger = ledgerOf(3.0F, 7.0F, 8.0F);
         // Stable order is U1, U2, U3 (UUID ascending).
-        assertEquals(List.of(U1, U2, U3), ledger.nonDefaultUuidsSorted());
+        assertEquals(List.of(U1, U2, U3), ledger.uuidsSorted());
 
         assertTrue(FeelingEditButtons.apply(FeelingEditButtons.idFor(0, true), ledger));  // U1 +1
         assertTrue(FeelingEditButtons.apply(FeelingEditButtons.idFor(1, false), ledger)); // U2 -1
@@ -106,13 +106,14 @@ class FeelingEditButtonsTest {
     }
 
     @Test
-    void neutralEntriesAreExcludedFromOrder() {
-        // U2 at exactly neutral (default) must not appear in the editable order.
+    void neutralEntriesAreIncludedInOrder() {
+        // Phase B persists everyone the mob has *met*, so a neutral (default) entry
+        // is still an editable relationship row — unlike Phase A, which dropped it.
         FeelingLedger ledger = ledgerOf(3.0F, FeelingLedger.DEFAULT, 8.0F);
-        assertEquals(List.of(U1, U3), ledger.nonDefaultUuidsSorted());
-        // So row 1 now addresses U3, not U2.
-        assertTrue(FeelingEditButtons.apply(FeelingEditButtons.idFor(1, false), ledger)); // U3 -1
-        assertEquals(7.0F, ledger.feelingToward(U3));
-        assertEquals(FeelingLedger.DEFAULT, ledger.feelingToward(U2));
+        assertEquals(List.of(U1, U2, U3), ledger.uuidsSorted());
+        // Row 1 addresses the neutral U2; editing it moves U2's feeling.
+        assertTrue(FeelingEditButtons.apply(FeelingEditButtons.idFor(1, false), ledger)); // U2 -1
+        assertEquals(4.0F, ledger.feelingToward(U2));
+        assertEquals(8.0F, ledger.feelingToward(U3));
     }
 }

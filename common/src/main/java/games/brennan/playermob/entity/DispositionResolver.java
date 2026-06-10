@@ -16,8 +16,9 @@ package games.brennan.playermob.entity;
  *     <ul>
  *       <li>feeling ≤ {@link #FEELING_HATE} ("hate") → fight/flee within {@link #HATE_RANGE},
  *           overriding nature regardless of friendliness;</li>
- *       <li>else friendliness ≥ {@link #FRIEND_GREET} → greet (the gift sub-step,
- *           gated on feeling ≥ {@link #FEELING_LOVE}, is decided by the goal);</li>
+ *       <li>else feeling ≥ {@link #FEELING_LOVE} ("love") → greet, overriding nature regardless of
+ *           friendliness (the gift sub-step is decided by the goal) — the mirror of the hate rule;</li>
+ *       <li>else friendliness ≥ {@link #FRIEND_GREET} → greet;</li>
  *       <li>else (low friendliness) a two-ring <b>personal-space bubble</b>: fight/flee
  *           inside {@link #innerRadius}, skeptical WATCH inside {@link #outerRadius},
  *           ignore beyond.</li>
@@ -52,6 +53,20 @@ public final class DispositionResolver {
     private static final double[] OUTER_AT_NEUTRAL = {15.0, 8.5, 7.0, 6.0, 5.5};
     /** Inner (fight-or-flight) radius at neutral feeling, indexed by friendliness 0..2. */
     private static final double[] INNER_AT_NEUTRAL = {10.0, 5.0, 1.5};
+
+    /**
+     * Witnessed-attack reaction. A mob seeing attacker A hit victim V forms one continuous signed
+     * feeling toward A — positive (admiration) when it approves of the violence, negative (resentment)
+     * when A harmed someone it loves. {@code WITNESS_APPROVE_MARGIN} sets the approve threshold
+     * ({@code feelingTowardVictim ≤ fightFlight − }this); {@link #witnessedAttackDelta} gives the magnitude.
+     */
+    static final int WITNESS_APPROVE_MARGIN = 3;
+    /** Weight on {@code (fightFlight − feelingTowardVictim)} in the witnessed-attack delta. */
+    static final float WITNESS_LIKE_SCALE = 0.4F;
+    /** Per-fightFlight damping in the witnessed-attack delta. */
+    static final float WITNESS_AGGRESSION_SCALE = 0.1F;
+    /** Cap on the positive (admiration) witnessed-attack delta. */
+    static final float WITNESS_MAX = 3.0F;
 
     /** Outcome of being hit — feeling mutation is done by the entity, not here. */
     public enum HurtResponse { RETALIATE, FLEE }
@@ -109,8 +124,13 @@ public final class DispositionResolver {
                         ? (fightFlight >= FF_FIGHT ? Reaction.FIGHT : Reaction.FLEE)
                         : Reaction.IGNORE;
                 }
+                if (feeling >= FEELING_LOVE) {
+                    // Love overrides nature: never attack a loved one — greet it instead, at any
+                    // friendliness (the gift sub-step is decided by the goal). Mirror of the hate rule.
+                    return Reaction.GREET;
+                }
                 if (friendliness >= FRIEND_GREET) {
-                    return Reaction.GREET; // gift sub-step (feeling >= FEELING_LOVE) decided by the goal
+                    return Reaction.GREET;
                 }
                 if (distance <= innerRadius(friendliness, feeling)) {
                     return fightFlight >= FF_FIGHT ? Reaction.FIGHT : Reaction.FLEE;
@@ -125,6 +145,127 @@ public final class DispositionResolver {
     /** Immediate response to taking a hit: stand and fight, or break off and flee. */
     public static HurtResponse onHurt(int fightFlight) {
         return fightFlight >= FF_FIGHT ? HurtResponse.RETALIATE : HurtResponse.FLEE;
+    }
+
+    /**
+     * The signed feeling a mob forms toward attacker A on witnessing A hit victim V — positive
+     * admiration, negative resentment, or {@code 0} (indifferent). Two bands are active; between them
+     * the mob doesn't react:
+     * <ul>
+     *   <li><b>Approve</b> — {@code feelingTowardVictim ≤ fightFlight − }{@link #WITNESS_APPROVE_MARGIN}
+     *       and {@code <} {@link #FEELING_LOVE}: it likes A for the violence (positive).</li>
+     *   <li><b>Resent</b> — {@code feelingTowardVictim ≥ }{@link #FEELING_LOVE}: A harmed someone it
+     *       loves (negative).</li>
+     * </ul>
+     * In either band the magnitude is {@code WITNESS_LIKE_SCALE·(fightFlight − feelingTowardVictim) −
+     * WITNESS_AGGRESSION_SCALE·fightFlight}, capped above at {@link #WITNESS_MAX}: admiration grows with
+     * fight/flight and with disliking V; resentment deepens the more it loves V and the calmer it is.
+     */
+    public static float witnessedAttackDelta(int fightFlight, float feelingTowardVictim) {
+        boolean resent = feelingTowardVictim >= FEELING_LOVE;
+        boolean approve = feelingTowardVictim < FEELING_LOVE
+            && feelingTowardVictim <= fightFlight - WITNESS_APPROVE_MARGIN;
+        if (!resent && !approve) {
+            return 0.0F;
+        }
+        float delta = Math.min(WITNESS_MAX,
+            WITNESS_LIKE_SCALE * (fightFlight - feelingTowardVictim)
+                - WITNESS_AGGRESSION_SCALE * fightFlight);
+        return Math.abs(delta) < 1e-4F ? 0.0F : delta;
+    }
+
+    // ---- "Can I win?" assessment (Phase C: the mid fight/flight band) ------
+    //
+    // The hard cut at FF_FIGHT (5) holds at the extremes, but the middle of the
+    // fight/flight range (MID_BAND_LO..MID_BAND_HI) no longer decides fight-vs-flee
+    // by trait alone: it weighs the mob's combat power against the target's, so a
+    // middling mob fights a weaker foe and flees a stronger one. These methods are
+    // pure (primitives only); the entity computes the two power estimates and the
+    // existing resolve()/onHurt(int) above are left untouched.
+
+    /** Lower end (inclusive) of the band where fight-vs-flee is decided by power. */
+    static final int MID_BAND_LO = 4;
+    /** Upper end (inclusive) of that band; at/above {@code MID_BAND_HI + 1} the mob always fights. */
+    static final int MID_BAND_HI = 6;
+    /** Power contributed per point of weapon {@link EquipmentEvaluator#score}. */
+    static final double POWER_WEIGHT_WEAPON = 1.5;
+    /** Power contributed per point of armour value. */
+    static final double POWER_WEIGHT_ARMOR = 1.0;
+    /** How much the required self/target power ratio eases per point of fight/flight past the pivot. */
+    static final double RATIO_PER_FF = 0.1;
+
+    /**
+     * A crude combat-power estimate: effective {@code health} plus weighted weapon
+     * and armour scores. {@code weaponScore} is an {@link EquipmentEvaluator#score}
+     * of the held weapon; {@code armorScore} is the entity's armour value. Higher
+     * means a better fighter. Tunable via the weight constants.
+     */
+    public static double combatPower(float health, double weaponScore, double armorScore) {
+        return health + weaponScore * POWER_WEIGHT_WEAPON + armorScore * POWER_WEIGHT_ARMOR;
+    }
+
+    /**
+     * The self/target power ratio a mid-band mob needs before it commits to a
+     * fight, easing around the {@link #FF_FIGHT} pivot: a braver mob (ff 6) fights
+     * even when slightly outmatched (0.9×), a more timid one (ff 4) needs an edge
+     * (1.1×).
+     */
+    static double requiredRatio(int fightFlight) {
+        return 1.0 + (FF_FIGHT - fightFlight) * RATIO_PER_FF;
+    }
+
+    /** True if {@code selfPower} clears the {@link #requiredRatio} bar against {@code targetPower}. */
+    public static boolean canWin(int fightFlight, double selfPower, double targetPower) {
+        return selfPower >= targetPower * requiredRatio(fightFlight);
+    }
+
+    /** The fight/flight band whose fight-vs-flee choice is decided by power rather than the hard cut. */
+    static boolean isMidBand(int fightFlight) {
+        return fightFlight >= MID_BAND_LO && fightFlight <= MID_BAND_HI;
+    }
+
+    /**
+     * Refine a proactive {@link #resolve} verdict with the "can I win?" check.
+     * Only a mid-band ({@link #isMidBand}) {@link Reaction#FIGHT} or {@link
+     * Reaction#FLEE} is reconsidered — it flips to fight or flee per {@link
+     * #canWin}. Outside the band the extremes are unconditional and the base
+     * verdict already matches, so it (and every non-combat reaction) passes through
+     * unchanged. Pure: the entity supplies the two power estimates.
+     */
+    public static Reaction applyWinAssessment(Reaction base, int fightFlight,
+                                              double selfPower, double targetPower) {
+        if ((base == Reaction.FIGHT || base == Reaction.FLEE) && isMidBand(fightFlight)) {
+            return canWin(fightFlight, selfPower, targetPower) ? Reaction.FIGHT : Reaction.FLEE;
+        }
+        return base;
+    }
+
+    /**
+     * Power-aware variant of {@link #onHurt(int)}: a mid-band mob retaliates only
+     * if it reckons it can win, otherwise it breaks off and flees. Outside the band
+     * it delegates to the hard-cut {@link #onHurt(int)} (brave always retaliates,
+     * timid always flees).
+     */
+    public static HurtResponse onHurt(int fightFlight, double selfPower, double targetPower) {
+        if (isMidBand(fightFlight)) {
+            return canWin(fightFlight, selfPower, targetPower)
+                ? HurtResponse.RETALIATE : HurtResponse.FLEE;
+        }
+        return onHurt(fightFlight);
+    }
+
+    /** A defender bails only if the foe's power exceeds the mob's by more than this factor. */
+    static final double DEFEND_HOPELESS_RATIO = 2.0;
+
+    /**
+     * Whether a mob should wade in to defend a loved one against {@code foe} — true
+     * unless the fight is hopeless (foe power more than {@link #DEFEND_HOPELESS_RATIO}×
+     * the mob's). Deliberately <em>independent of fight/flight</em>: love and loyalty
+     * drive defending, so even a timid mob joins for a friend unless badly outmatched.
+     * (Contrast {@link #canWin}, which governs the mob's own fights.)
+     */
+    public static boolean defendIsWorthwhile(double selfPower, double foePower) {
+        return selfPower * DEFEND_HOPELESS_RATIO >= foePower;
     }
 
     static double clamp(double value, double lo, double hi) {

@@ -96,7 +96,11 @@ public class PlayerMobMenu extends AbstractContainerMenu {
             new SimpleContainer(EQUIPMENT_COUNT), new SimpleContainer(BACKPACK_COUNT));
     }
 
-    /** The mob being edited — client-resolved via {@link #fromEntityId}; null on the client fallback. */
+    /**
+     * The mob being edited. {@code null} only on the client fallback path (when
+     * {@link #fromEntityId} couldn't resolve the entity yet) — callers that read
+     * live state, like the screen's objectives column, must null-check.
+     */
     public PlayerMobEntity getMob() {
         return mob;
     }

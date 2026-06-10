@@ -11,8 +11,8 @@ import java.util.UUID;
  *
  * <p>The vanilla container-button channel carries only a single {@code int}, so a
  * relationship is addressed by its <b>row index</b> in a stable, value-independent
- * order — {@link FeelingLedger#nonDefaultUuidsSorted()} (the same non-default set
- * the client sees via the synced field, sorted by UUID). The client encodes
+ * order — {@link FeelingLedger#uuidsSorted()} (the same met-individual set the
+ * client sees via the synced field, sorted by UUID). The client encodes
  * {@code idFor(row, up)} on each button and the server decodes the row back to the
  * same UUID. Because both sides use the <em>current</em> sorted order, the button
  * beside a row always edits the individual shown there, and editing a value never
@@ -67,7 +67,7 @@ public final class FeelingEditButtons {
         if (!isFeelingButton(id)) {
             return false;
         }
-        List<UUID> order = ledger.nonDefaultUuidsSorted();
+        List<UUID> order = ledger.uuidsSorted();
         int row = rowOf(id);
         if (row < 0 || row >= order.size()) {
             return false;
