@@ -738,6 +738,12 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
                                         MobSpawnType reason,
                                         SpawnGroupData data) {
         setSkinIndex(world.getRandom().nextInt(SKIN_COUNT));
+        // Bundled defaults: roll the arm model independently of the name, ~50/50.
+        // Vanilla DefaultPlayerSkin ships every default name in both wide and slim
+        // and picks (name × model) uniformly by UUID hash, so there's no canonical
+        // per-name model — we mirror that coin-flip. A URL skin (below) overrides
+        // this with its own authored model.
+        setSkinSlim(world.getRandom().nextBoolean());
         if (world.getRandom().nextFloat() < URL_SKIN_CHANCE) {
             PlayerMobSkinRegistry.pickRandom(world.getRandom()).ifPresent(skin -> {
                 setSkinTextureUrl(skin.textureUrl());
@@ -1758,6 +1764,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         super.addAdditionalSaveData(tag);
         personalities.save(tag);
         tag.putInt(TAG_SKIN_INDEX, getSkinIndex());
+        // Persist the arm model for bundled mobs too (previously URL-only). Additive:
+        // a save without this key reads back false ⇒ wide (the old bundled-mob look).
+        tag.putBoolean(TAG_SKIN_SLIM, isSkinSlim());
         tag.putBoolean(TAG_CLOSES_DOORS, this.closesDoors);
         // Train march direction — additive. Only written once latched (!= 0) so a
         // mob that never boarded a train round-trips no key (matches the URL-skin
@@ -1771,7 +1780,6 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         String url = getSkinTextureUrl();
         if (!url.isEmpty()) {
             tag.putString(TAG_SKIN_TEXTURE_URL, url);
-            tag.putBoolean(TAG_SKIN_SLIM, isSkinSlim());
         }
         // Inventory persistence — InventoryCarrier helper handles slot encoding.
         // registryAccess() is a HolderLookup.Provider on Entity in 1.21.1+.
@@ -1803,6 +1811,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // Per-category personalities; missing tags keep category defaults.
         personalities.load(tag);
         setSkinIndex(tag.getInt(TAG_SKIN_INDEX));
+        // Missing key (pre-per-mob-slim saves) ⇒ false ⇒ wide: getBoolean returns
+        // false for an absent key, so old bundled mobs keep their wide look. A URL
+        // mob's SkinSlim is its authored model (written unconditionally on save).
+        setSkinSlim(tag.getBoolean(TAG_SKIN_SLIM));
         // Missing key (pre-door-feature saves) ⇒ false ⇒ leave-open. Additive.
         this.closesDoors = tag.getBoolean(TAG_CLOSES_DOORS);
         // Missing key ⇒ 0 ⇒ unlatched ⇒ re-derived on the next train boarding. Additive.
@@ -1812,7 +1824,6 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // vanilla path keyed off SkinIndex. New v2 mobs round-trip the URL.
         if (tag.contains(TAG_SKIN_TEXTURE_URL, Tag.TAG_STRING)) {
             setSkinTextureUrl(tag.getString(TAG_SKIN_TEXTURE_URL));
-            setSkinSlim(tag.getBoolean(TAG_SKIN_SLIM));
         }
         readInventoryFromTag(tag, this.registryAccess());
 
