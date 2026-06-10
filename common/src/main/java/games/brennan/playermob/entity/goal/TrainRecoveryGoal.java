@@ -161,6 +161,9 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
 
     @Override
     public String subObjective() {
+        if (phase == Phase.APPROACH && onTracks()) {
+            return "leaving tracks";   // on the rails/bed → top priority is getting off the side
+        }
         return switch (phase) {
             case APPROACH -> "approaching";
             case BRIDGE -> "bridging";
@@ -386,8 +389,8 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         // so this is robust no matter how wide the bed is or where on it the mob stands. (Stepping
         // out from the mob with a small cap missed the far edge of a full-width bed: a mob near the
         // centre never reached a genuinely off-bed column and parked on the rails — issue #49.)
-        int northOff = offBedColumn(mx, box, -1);            // first off-bed column past the −Z face
-        int southOff = offBedColumn(mx, box, +1);            // …and past the +Z face
+        int northOff = offBedColumn(box, -1);                // column just past the −Z face (off the footprint)
+        int southOff = offBedColumn(box, +1);                // …and just past the +Z face
         boolean nWalk = stepFooting(mx, box.minY, northOff, footY);
         boolean sWalk = stepFooting(mx, box.minY, southOff, footY);
         int offZ;
@@ -430,8 +433,9 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
     private void placeOffBedStep(AABB box, int stepZ) {
         BlockPos foot = mob.blockPosition();
         int placeZ = foot.getZ() + stepZ;
-        if (surfaceIsTrack(foot.getX(), box.minY, placeZ)) {
-            return;                              // next cell still bed — not at the edge yet; keep walking
+        double placeCenterZ = placeZ + 0.5;
+        if (placeCenterZ >= box.minZ && placeCenterZ <= box.maxZ) {
+            return;                              // next cell still inside the track footprint — keep walking
         }
         int slot = bridgeBlockSlot();
         if (slot < 0 || phaseTicks % PLACE_INTERVAL_TICKS != 0) {
@@ -450,18 +454,13 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
     }
 
     /**
-     * The first genuinely off-bed column just past the carriage's near ({@code dir<0}) or far
-     * ({@code dir>0}) Z face. The bed spans the carriage width, so a column one past the face is
-     * normally already off it; the bounded loop only keeps going if the parent-level bed happens to
-     * extend past the carriage box. Computed from the box (not by capped stepping from the mob) so a
-     * mob anywhere on a full-width bed gets a target that is actually off the rails.
+     * The column just outside the carriage's Z footprint on the near ({@code dir<0}) or far
+     * ({@code dir>0}) side. Position-based to match {@link #onTracks()}: a mob standing here has its
+     * Z outside the track span, i.e. off the tracks. The track is the carriage width, so one cell
+     * past the face is off it regardless of what the bed is built from.
      */
-    private int offBedColumn(int x, AABB box, int dir) {
-        int z = dir < 0 ? Mth.floor(box.minZ) - 1 : Mth.ceil(box.maxZ);
-        for (int i = 0; i < OFF_TRACK_MAX_STEPS && surfaceIsTrack(x, box.minY, z); i++) {
-            z += dir;
-        }
-        return z;
+    private int offBedColumn(AABB box, int dir) {
+        return dir < 0 ? Mth.floor(box.minZ) - 1 : Mth.ceil(box.maxZ);
     }
 
     /** True if off-bed column {@code (x,z)} has footing the mob can step to without bridging (≤1 up, ≤3 down). */
@@ -995,8 +994,20 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         return false;
     }
 
-    /** True if the mob is currently standing on (or in) the track rails/bed — see {@link #onTracks}. */
+    /**
+     * True if the mob is over the track. <b>Position-based, not block-type:</b> the track is
+     * X-axis aligned and exactly as wide in Z as the carriage that rides it (and runs the whole
+     * line along X), so a mob whose feet sit within that Z-span is on the bed regardless of what
+     * block it's painted with — plain stone brick, a stone-brick variant, cobblestone slab, etc.
+     * (A block-type check missed those and left the mob "approaching" on the rails — #49.)
+     * "Getting off the side" then simply means moving the mob's Z outside the carriage's Z-span.
+     */
     private boolean onTracks() {
+        if (target != null) {
+            AABB box = target.worldBox();
+            return mob.getZ() >= box.minZ && mob.getZ() <= box.maxZ;
+        }
+        // Fallback only when no carriage is resolved (goal inactive): literal track block underfoot.
         Level level = mob.level();
         BlockPos feet = mob.blockPosition();
         return BlockSourcePolicy.isProtectedTrackBlock(level.getBlockState(feet.below()))
