@@ -59,7 +59,28 @@ public final class PlayerMobSkinTextures {
      */
     private static final ConcurrentHashMap<String, GameProfile> PROFILES = new ConcurrentHashMap<>();
 
+    /**
+     * Cached real-player {@link GameProfile}s per {@code uuid;name} spec, for the
+     * reincarnation skin path. Keyed so two mobs reincarnating the same player share
+     * one profile (and one vanilla skin-cache entry).
+     */
+    private static final ConcurrentHashMap<String, GameProfile> PLAYER_PROFILES = new ConcurrentHashMap<>();
+
     private PlayerMobSkinTextures() {}
+
+    /**
+     * Resolve a real player's skin (texture + model) through vanilla
+     * {@link net.minecraft.client.resources.SkinManager} — the same path the client
+     * uses to render that player. Yields the player's actual skin in production, or
+     * their UUID-derived {@link DefaultPlayerSkin} offline/in dev (the very skin the
+     * player themselves renders with), so a reincarnated PlayerMob always matches.
+     * Never returns {@code null} — {@code getInsecureSkin} falls back internally.
+     */
+    public static PlayerSkin playerSkin(UUID uuid, String name) {
+        GameProfile profile = PLAYER_PROFILES.computeIfAbsent(uuid + ";" + name,
+            key -> new GameProfile(uuid, (name == null || name.isEmpty()) ? "PlayerMob" : name));
+        return Minecraft.getInstance().getSkinManager().getInsecureSkin(profile);
+    }
 
     /**
      * Resolve a texture URL to a renderable ResourceLocation. Never returns

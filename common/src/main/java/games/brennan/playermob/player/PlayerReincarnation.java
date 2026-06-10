@@ -17,7 +17,6 @@ import org.slf4j.Logger;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -107,18 +106,15 @@ public final class PlayerReincarnation {
         return snapshot;
     }
 
-    /** The dead player's own Minecraft skin, or a deterministic bundled skin if unavailable. */
+    /**
+     * Tag the mob as a reincarnation of this player. The renderer resolves the skin
+     * from this identity through vanilla {@code SkinManager} — the player's real skin
+     * in production, their UUID-derived default skin offline/in dev — so the mob always
+     * matches how the player is rendered, and stays current if they reskin.
+     */
     private static void applySkin(PlayerMobEntity ghost, ServerPlayer player) {
-        Optional<ProfileSkins.Skin> skin = ProfileSkins.extract(player.getGameProfile());
-        if (skin.isPresent()) {
-            ghost.setSkinTextureUrl(skin.get().url());
-            ghost.setSkinSlim(skin.get().slim());
-        } else {
-            // No signed skin (offline / cracked / dev launcher): pick a bundled skin
-            // deterministically from the UUID, so a given player always reincarnates
-            // with the same face instead of a different one each death.
-            ghost.setSkinIndex(Math.floorMod(player.getUUID().hashCode(), PlayerMobEntity.SKIN_COUNT));
-        }
+        ghost.setSkinTextureUrl(
+            SourceProfileSkin.encode(player.getUUID(), player.getGameProfile().getName()));
     }
 
     /**
