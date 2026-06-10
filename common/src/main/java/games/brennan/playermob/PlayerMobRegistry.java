@@ -113,6 +113,9 @@ public final class PlayerMobRegistry {
      */
     public static CompoundTag archetypeEggData(Archetype archetype) {
         CompoundTag tag = new CompoundTag();
+        // entity_data must name its entity type, or encoding the egg ItemStack throws
+        // "Missing id for entity" the moment it is saved in a player inventory.
+        tag.putString("id", PLAYER_MOB_ID.toString());
         tag.putInt(DispositionTraits.TAG_FIGHT_FLIGHT, archetype.fightFlight);
         tag.putInt(DispositionTraits.TAG_FRIENDLINESS, archetype.friendliness);
         return tag;
