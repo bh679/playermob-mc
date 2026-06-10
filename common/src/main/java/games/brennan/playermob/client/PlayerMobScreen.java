@@ -1,5 +1,6 @@
 package games.brennan.playermob.client;
 
+import games.brennan.playermob.entity.FeelingEditButtons;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.entity.TraitEditButtons;
 import games.brennan.playermob.menu.PlayerMobMenu;
@@ -19,7 +20,6 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.Slot;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,10 +36,12 @@ import java.util.UUID;
  * (Fight/Flight, Friendliness) and a <b>Relationships</b> list — one row per
  * individual the mob has a feeling toward, each with that target's face, name,
  * and feeling (0–10, hate→love). All read live from the entity's synced
- * disposition fields, so values update while the menu is open. Each trait has
- * {@code [-]}/{@code [+]} buttons that edit it in Creative over the vanilla
- * container-button channel (see {@link PlayerMobMenu#clickMenuButton}); the
- * server clamps and re-syncs, so the panel reflects the edit next frame.</p>
+ * disposition fields, so values update while the menu is open. Each trait — and
+ * each relationship row — has {@code [-]}/{@code [+]} buttons that edit it in
+ * Creative over the vanilla container-button channel (see
+ * {@link PlayerMobMenu#clickMenuButton}); the server clamps and re-syncs, so the
+ * panel reflects the edit next frame. Relationship rows are ordered by UUID
+ * (stable) so a row stays put while you adjust it.</p>
  *
  * <p>{@link Environment} {@code CLIENT}-only — stripped from dedicated server
  * jars at load time, same pattern as {@code PlayerMobRenderer}. Registered per
@@ -60,10 +62,12 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     private static final int INVENTORY_WIDTH = 176;   // the original window's content width
     private static final int PANEL_X = INVENTORY_WIDTH + 4;
     private static final int PANEL_TOP = 8;
-    private static final int BAR_WIDTH = 108;
+    private static final int BAR_WIDTH = 124;
     private static final int FACE_SIZE = 8;
-    private static final int ROW_HEIGHT = 12;
-    private static final int MAX_RELATIONSHIP_ROWS = 8;
+    private static final int ROW_HEIGHT = 13;
+    // Editable relationship rows shown; shared with FeelingEditButtons so the row
+    // index ↔ button id mapping covers exactly the rows that have buttons.
+    private static final int MAX_RELATIONSHIP_ROWS = FeelingEditButtons.MAX_ROWS;
     private static final int LABEL_COLOR = 0x404040;
     private static final int VALUE_COLOR = 0x202020;
     private static final int MUTED_COLOR = 0x808080;
@@ -84,22 +88,32 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     private static final int VALUE_FIELD_W = 14; // room for the value drawn between the buttons
     private static final int CLUSTER_W = BUTTON_SIZE * 2 + BUTTON_GAP * 2 + VALUE_FIELD_W;
 
+    // Per-relationship feeling edit buttons: [-] [+] at the right of each row.
+    private static final int REL_BTN_SIZE = 10;
+    private static final int REL_BTN_GAP = 1;
+
     /** Names are stable for a session — resolve once per UUID. */
     private final Map<UUID, String> nameCache = new HashMap<>();
 
+    /** Per-relationship feeling edit buttons, rebuilt when the relationship set changes. */
+    private final List<Button> relationshipButtons = new ArrayList<>();
+    /** Stable UUID order the relationship buttons were last built for (change ⇒ rebuild). */
+    private List<UUID> relationshipOrder = List.of();
+
     public PlayerMobScreen(PlayerMobMenu menu, Inventory playerInv, Component title) {
         super(menu, playerInv, title);
-        this.imageWidth = 300; // 176 inventory + ~124 disposition panel (incl. edit buttons)
+        this.imageWidth = 316; // 176 inventory + ~140 disposition panel (incl. edit buttons)
         this.imageHeight = 186;
         // Recompute since the field initialiser used the default height.
         this.inventoryLabelY = this.imageHeight - 94;
     }
 
     /**
-     * Add the Creative trait-edit buttons. Runs after {@code super.init()} has
-     * set {@code leftPos}/{@code topPos}, so button bounds resolve to absolute
-     * screen coordinates. Skipped on the client fallback (no resolved mob — the
-     * panel renders "(no data)" instead).
+     * Add the Creative disposition-edit buttons (two trait pairs + one pair per
+     * relationship row). Runs after {@code super.init()} has set
+     * {@code leftPos}/{@code topPos}, so button bounds resolve to absolute screen
+     * coordinates. Skipped on the client fallback (no resolved mob — the panel
+     * renders "(no data)" instead).
      */
     @Override
     protected void init() {
@@ -110,6 +124,77 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
         int top = this.topPos + PANEL_TOP;
         addTraitButtons(top + FF_LABEL_DY, TraitEditButtons.FIGHT_FLIGHT_DOWN, TraitEditButtons.FIGHT_FLIGHT_UP);
         addTraitButtons(top + FRIEND_LABEL_DY, TraitEditButtons.FRIENDLINESS_DOWN, TraitEditButtons.FRIENDLINESS_UP);
+        rebuildRelationshipButtons();
+    }
+
+    /**
+     * Rebuild the per-relationship feeling buttons from the mob's current synced
+     * feelings, in the same stable UUID order the panel renders and the server maps.
+     * Called from {@link #init()} and from {@link #containerTick()} when the
+     * relationship set changes (an edit to neutral dropping a row, or a new feeling
+     * forming while the menu is open). Mere value edits leave the order unchanged,
+     * so they don't trigger a rebuild.
+     */
+    private void rebuildRelationshipButtons() {
+        for (Button b : relationshipButtons) {
+            this.removeWidget(b);
+        }
+        relationshipButtons.clear();
+        PlayerMobEntity mob = this.menu.getMob();
+        if (mob == null) {
+            relationshipOrder = List.of();
+            return;
+        }
+        relationshipOrder = stableFeelingOrder(mob);
+        int rowsTop = this.topPos + PANEL_TOP + REL_ROWS_DY;
+        int shown = Math.min(MAX_RELATIONSHIP_ROWS, relationshipOrder.size());
+        for (int i = 0; i < shown; i++) {
+            int by = rowsTop + i * ROW_HEIGHT; // align button top with the row's face/text
+            final int row = i;
+            addRelationshipButton(relMinusX(), by, FeelingEditButtons.idFor(row, false), "-");
+            addRelationshipButton(relPlusX(), by, FeelingEditButtons.idFor(row, true), "+");
+        }
+    }
+
+    private void addRelationshipButton(int x, int y, int id, String glyph) {
+        Button b = Button.builder(Component.literal(glyph), btn -> sendButton(id))
+            .bounds(x, y, REL_BTN_SIZE, REL_BTN_SIZE).build();
+        relationshipButtons.add(b);
+        this.addRenderableWidget(b);
+    }
+
+    /**
+     * Keep the relationship buttons aligned with the live list. Cheap: only rebuilds
+     * when the stable UUID order actually changes (membership/order), which editing a
+     * feeling value does not.
+     */
+    @Override
+    protected void containerTick() {
+        super.containerTick();
+        PlayerMobEntity mob = this.menu.getMob();
+        if (mob != null && !stableFeelingOrder(mob).equals(relationshipOrder)) {
+            rebuildRelationshipButtons();
+        }
+    }
+
+    /**
+     * The mob's relationships in the stable order shared with the server's
+     * {@code FeelingLedger.nonDefaultUuidsSorted()} — the synced (non-default) set,
+     * sorted by UUID. So row index ↔ button id resolves to the same individual on
+     * both sides.
+     */
+    private static List<UUID> stableFeelingOrder(PlayerMobEntity mob) {
+        List<UUID> ids = new ArrayList<>(mob.getSyncedFeelings().keySet());
+        ids.sort(null); // UUID is Comparable — ascending, matches the server
+        return ids;
+    }
+
+    private int relMinusX() {
+        return this.leftPos + PANEL_X + BAR_WIDTH - 2 * REL_BTN_SIZE - REL_BTN_GAP;
+    }
+
+    private int relPlusX() {
+        return this.leftPos + PANEL_X + BAR_WIDTH - REL_BTN_SIZE;
     }
 
     /** A {@code [-] [+]} button pair for one trait, on its label line. */
@@ -208,16 +293,17 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
             g.drawString(this.font, Component.literal("none yet"), x, y, MUTED_COLOR, false);
             return;
         }
-        List<Map.Entry<UUID, Float>> rows = new ArrayList<>(feelings.entrySet());
-        rows.sort(Comparator.comparingDouble((Map.Entry<UUID, Float> e) -> e.getValue()).reversed());
-
-        int shown = Math.min(MAX_RELATIONSHIP_ROWS, rows.size());
+        // Same stable UUID order as the edit buttons and the server mapping, so each
+        // row's [-]/[+] edits the individual shown on that row.
+        List<UUID> order = stableFeelingOrder(mob);
+        int shown = Math.min(MAX_RELATIONSHIP_ROWS, order.size());
         for (int i = 0; i < shown; i++) {
-            drawRelationshipRow(g, x, y, rows.get(i).getKey(), rows.get(i).getValue());
+            UUID id = order.get(i);
+            drawRelationshipRow(g, x, y, id, feelings.get(id));
             y += ROW_HEIGHT;
         }
-        if (rows.size() > shown) {
-            g.drawString(this.font, Component.literal("+" + (rows.size() - shown) + " more"),
+        if (order.size() > shown) {
+            g.drawString(this.font, Component.literal("+" + (order.size() - shown) + " more"),
                 x, y, MUTED_COLOR, false);
         }
     }
@@ -242,7 +328,7 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
         String name = nameCache.computeIfAbsent(id, this::computeName);
         g.drawString(this.font, Component.literal(trim(name)), x + FACE_SIZE + 3, y, VALUE_COLOR, false);
         String value = String.valueOf(Math.round(feeling));
-        int vx = x + BAR_WIDTH - this.font.width(value);
+        int vx = relMinusX() - 2 - this.font.width(value); // just left of the [-] button
         g.drawString(this.font, Component.literal(value), vx, y, feelingColor(feeling), false);
     }
 
@@ -294,9 +380,10 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
 
     // ---- helpers ----------------------------------------------------------
 
-    /** Truncate a name to fit the relationship row's name column. */
+    /** Truncate a name to fit the relationship row's name column (face … value [-] [+]). */
     private String trim(String name) {
-        int maxWidth = BAR_WIDTH - (FACE_SIZE + 3) - this.font.width("10") - 2;
+        int maxWidth = BAR_WIDTH - (FACE_SIZE + 3)
+            - (2 * REL_BTN_SIZE + REL_BTN_GAP) - this.font.width("10") - 4;
         if (this.font.width(name) <= maxWidth) {
             return name;
         }

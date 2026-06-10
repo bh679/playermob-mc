@@ -157,18 +157,21 @@ public class PlayerMobMenu extends AbstractContainerMenu {
     }
 
     /**
-     * Handle the Creative trait-editor +/- buttons, sent over the vanilla
+     * Handle the Creative disposition-editor +/- buttons, sent over the vanilla
      * container-button channel ({@code MultiPlayerGameMode.handleInventoryButtonClick}
-     * → here on the server). Server-authoritative: only a Creative player editing
-     * a live mob may change traits; {@link games.brennan.playermob.entity.TraitEditButtons}
-     * ids map to clamped adjustments. No custom packets.
+     * → here on the server). Server-authoritative: only a Creative player editing a
+     * live mob may change disposition. Ids {@code 0..3} map to trait adjustments
+     * ({@link games.brennan.playermob.entity.TraitEditButtons}); higher ids map to
+     * per-relationship feeling adjustments
+     * ({@link games.brennan.playermob.entity.FeelingEditButtons}). All clamped; no
+     * custom packets.
      */
     @Override
     public boolean clickMenuButton(Player player, int id) {
         if (mob == null || !player.isCreative()) {
             return false;
         }
-        return mob.applyTraitEditButton(id);
+        return mob.applyTraitEditButton(id) || mob.applyFeelingEditButton(id);
     }
 
     @Override

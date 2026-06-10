@@ -4,7 +4,9 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -58,6 +60,24 @@ public final class FeelingLedger {
 
     public int size() {
         return feelings.size();
+    }
+
+    /**
+     * The UUIDs of all non-default entries (the same set {@link #encode()} syncs),
+     * sorted ascending. A stable, value-independent order shared with the client's
+     * decoded view, so the menu's per-relationship editor can address a row by index
+     * through a single button id (see {@code FeelingEditButtons}). Editing a feeling
+     * changes its value but not this order, so a row stays put while it is clicked.
+     */
+    public List<UUID> nonDefaultUuidsSorted() {
+        List<UUID> ids = new ArrayList<>();
+        for (Map.Entry<UUID, Float> e : feelings.entrySet()) {
+            if (e.getValue() != DEFAULT) {
+                ids.add(e.getKey());
+            }
+        }
+        ids.sort(null); // UUID is Comparable — natural (ascending) order
+        return ids;
     }
 
     /**

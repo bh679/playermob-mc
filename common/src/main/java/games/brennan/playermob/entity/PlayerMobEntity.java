@@ -624,6 +624,23 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         return handled;
     }
 
+    /**
+     * Apply a Creative relationship-feeling editor button (see
+     * {@link FeelingEditButtons}) and re-sync. Server-side; the feeling is clamped
+     * to {@code [0, 10]} by {@link FeelingLedger}, and persists through the existing
+     * {@code feelings.save} NBT path. Editing a feeling to exactly neutral drops it
+     * from the synced list (it round-trips to the default).
+     *
+     * @return {@code true} if {@code buttonId} mapped to a feeling edit.
+     */
+    public boolean applyFeelingEditButton(int buttonId) {
+        boolean handled = FeelingEditButtons.apply(buttonId, feelings);
+        if (handled) {
+            pushDispositionToClient();
+        }
+        return handled;
+    }
+
     /** True if the main hand holds a recognised weapon (drives the provoked fight/flee choice). */
     public boolean isArmed() {
         return isWeapon(getMainHandItem());
