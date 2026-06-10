@@ -37,10 +37,11 @@ import java.util.UUID;
  * (Fight/Flight, Friendliness) and a <b>Relationships</b> list — one row per
  * individual the mob has met, each with that target's face, name, and feeling
  * (0–10, hate→love). All read live from the entity's synced disposition fields,
- * so values update while the menu is open. Each trait — and each relationship
- * row — has {@code [-]}/{@code [+]} buttons that edit it in Creative over the
- * vanilla container-button channel (see {@link PlayerMobMenu#clickMenuButton});
- * the server clamps and re-syncs, so the panel reflects the edit next frame.
+ * so values update while the menu is open. An <b>Edit</b> toggle in the panel
+ * header reveals the per-trait and per-relationship {@code [-]}/{@code [+]}
+ * buttons (hidden by default) that edit values in Creative over the vanilla
+ * container-button channel (see {@link PlayerMobMenu#clickMenuButton}); the
+ * server clamps and re-syncs, so the panel reflects the edit next frame.
  * Relationship rows are ordered by UUID (stable) so a row stays put while you
  * adjust it. A right-hand <b>objectives column</b> shows the mob's live goal
  * stack.</p>
@@ -92,6 +93,10 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     private static final int VALUE_FIELD_W = 14; // room for the value drawn between the buttons
     private static final int CLUSTER_W = BUTTON_SIZE * 2 + BUTTON_GAP * 2 + VALUE_FIELD_W;
 
+    // "Edit"/"Done" toggle (top-right of the panel header) that reveals/hides every edit arrow.
+    private static final int EDIT_TOGGLE_W = 30;
+    private static final int EDIT_TOGGLE_H = 12;
+
     // Per-relationship feeling edit buttons: [-] [+] at the right of each row.
     private static final int REL_BTN_SIZE = 10;
     private static final int REL_BTN_GAP = 1;
@@ -111,6 +116,17 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     /** Stable UUID order the relationship buttons were last built for (change ⇒ rebuild). */
     private List<UUID> relationshipOrder = List.of();
 
+    /**
+     * When {@code false} (default) the per-trait and per-relationship {@code [-]}/{@code [+]} edit
+     * arrows are hidden behind {@link #editToggle}; the disposition display (labels, values, bars,
+     * relationship rows, objectives) stays visible regardless.
+     */
+    private boolean editMode = false;
+    /** Persistent header toggle that flips {@link #editMode}; relabels "Edit" ⇄ "Done". */
+    private Button editToggle;
+    /** The four trait {@code [-]}/{@code [+]} arrows (two per trait), hidden unless {@link #editMode}. */
+    private final List<Button> traitButtons = new ArrayList<>();
+
     public PlayerMobScreen(PlayerMobMenu menu, Inventory playerInv, Component title) {
         super(menu, playerInv, title);
         // 176 inventory + disposition panel + objectives column.
@@ -121,10 +137,10 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     }
 
     /**
-     * Add the Creative disposition-edit buttons (two trait pairs + one pair per
-     * relationship row). Runs after {@code super.init()} has set
-     * {@code leftPos}/{@code topPos}, so button bounds resolve to absolute screen
-     * coordinates. Skipped on the client fallback (no resolved mob — the panel
+     * Add the Creative disposition-edit buttons: the persistent {@code Edit} toggle plus
+     * the (initially hidden) two trait pairs and one pair per relationship row. Runs after
+     * {@code super.init()} has set {@code leftPos}/{@code topPos}, so button bounds resolve to
+     * absolute screen coordinates. Skipped on the client fallback (no resolved mob — the panel
      * renders "(no data)" instead).
      */
     @Override
@@ -134,9 +150,48 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
             return;
         }
         int top = this.topPos + PANEL_TOP;
+        addEditToggle(top);
+        traitButtons.clear();
         addTraitButtons(top + FF_LABEL_DY, TraitEditButtons.FIGHT_FLIGHT_DOWN, TraitEditButtons.FIGHT_FLIGHT_UP);
         addTraitButtons(top + FRIEND_LABEL_DY, TraitEditButtons.FRIENDLINESS_DOWN, TraitEditButtons.FRIENDLINESS_UP);
         rebuildRelationshipButtons();
+    }
+
+    /**
+     * Add the persistent header {@link #editToggle}, right-aligned to the bar's right edge on the
+     * "Traits" line. Always visible (the menu only opens in Creative); pressing it flips
+     * {@link #editMode}. Re-created on every {@link #init()} (incl. resize), so its label is seeded
+     * from the current {@code editMode} to survive a re-init.
+     */
+    private void addEditToggle(int top) {
+        int x = this.leftPos + PANEL_X + BAR_WIDTH - EDIT_TOGGLE_W;
+        int y = top + TRAITS_HEADER_DY - 2; // centre the 12px button on the header text
+        editToggle = Button.builder(editLabel(), b -> toggleEditMode())
+            .bounds(x, y, EDIT_TOGGLE_W, EDIT_TOGGLE_H).build();
+        addRenderableWidget(editToggle);
+    }
+
+    private Component editLabel() {
+        return Component.literal(editMode ? "Done" : "Edit");
+    }
+
+    /** Flip edit mode: relabel the toggle and show/hide every trait + relationship edit arrow. */
+    private void toggleEditMode() {
+        editMode = !editMode;
+        if (editToggle != null) {
+            editToggle.setMessage(editLabel());
+        }
+        applyEditVisibility();
+    }
+
+    /** Apply {@link #editMode} to the visibility of every edit arrow (trait + relationship). */
+    private void applyEditVisibility() {
+        for (Button b : traitButtons) {
+            b.visible = editMode;
+        }
+        for (Button b : relationshipButtons) {
+            b.visible = editMode;
+        }
     }
 
     /**
@@ -170,6 +225,7 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     private void addRelationshipButton(int x, int y, int id, String glyph) {
         Button b = Button.builder(Component.literal(glyph), btn -> sendButton(id))
             .bounds(x, y, REL_BTN_SIZE, REL_BTN_SIZE).build();
+        b.visible = editMode; // hidden until the Edit toggle is on (also covers the containerTick rebuild)
         relationshipButtons.add(b);
         this.addRenderableWidget(b);
     }
@@ -207,13 +263,19 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
         return this.leftPos + PANEL_X + BAR_WIDTH - REL_BTN_SIZE;
     }
 
-    /** A {@code [-] [+]} button pair for one trait, on its label line. */
+    /** A {@code [-] [+]} button pair for one trait, on its label line. Hidden unless {@link #editMode}. */
     private void addTraitButtons(int labelY, int downId, int upId) {
         int y = labelY - 2; // centre the 12px button on the ~8px label text
-        addRenderableWidget(Button.builder(Component.literal("-"), b -> sendButton(downId))
-            .bounds(minusX(), y, BUTTON_SIZE, BUTTON_SIZE).build());
-        addRenderableWidget(Button.builder(Component.literal("+"), b -> sendButton(upId))
-            .bounds(plusX(), y, BUTTON_SIZE, BUTTON_SIZE).build());
+        addTraitArrow(minusX(), y, downId, "-");
+        addTraitArrow(plusX(), y, upId, "+");
+    }
+
+    private void addTraitArrow(int x, int y, int id, String glyph) {
+        Button b = Button.builder(Component.literal(glyph), btn -> sendButton(id))
+            .bounds(x, y, BUTTON_SIZE, BUTTON_SIZE).build();
+        b.visible = editMode;
+        traitButtons.add(b);
+        addRenderableWidget(b);
     }
 
     /** Send a disposition edit over the vanilla container-button channel; the server clamps + re-syncs. */
