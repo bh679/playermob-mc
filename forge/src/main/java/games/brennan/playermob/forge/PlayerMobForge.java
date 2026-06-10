@@ -5,6 +5,7 @@ import games.brennan.playermob.PlayerMobRegistry;
 import games.brennan.playermob.entity.Archetype;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.menu.PlayerMobMenu;
+import games.brennan.playermob.player.ReincarnateCommand;
 import games.brennan.playermob.skin.PlayerMobSkinReloadListener;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
@@ -19,6 +20,7 @@ import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.common.extensions.IForgeMenuType;
 import net.minecraftforge.event.AddReloadListenerEvent;
 import net.minecraftforge.event.BuildCreativeModeTabContentsEvent;
+import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.event.entity.EntityAttributeCreationEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.common.Mod;
@@ -79,8 +81,9 @@ public final class PlayerMobForge {
         modBus.addListener(PlayerMobForge::onBuildCreativeTab);
         modBus.addListener(PlayerMobForge::onCommonSetup);
 
-        // Reload listeners live on the game bus, not the mod bus.
+        // Reload listeners + commands live on the game bus, not the mod bus.
         MinecraftForge.EVENT_BUS.addListener(PlayerMobForge::onAddReloadListeners);
+        MinecraftForge.EVENT_BUS.addListener(PlayerMobForge::onRegisterCommands);
 
         if (FMLEnvironment.dist == Dist.CLIENT) {
             games.brennan.playermob.forge.client.PlayerMobForgeClient.register(modBus);
@@ -93,6 +96,10 @@ public final class PlayerMobForge {
      */
     private static void onAddReloadListeners(AddReloadListenerEvent event) {
         event.addListener(new PlayerMobSkinReloadListener());
+    }
+
+    private static void onRegisterCommands(RegisterCommandsEvent event) {
+        ReincarnateCommand.register(event.getDispatcher());
     }
 
     private static void onEntityAttributeCreation(EntityAttributeCreationEvent event) {
