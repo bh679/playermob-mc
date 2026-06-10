@@ -382,8 +382,12 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         int mx = mob.blockPosition().getX();
         int mz = mob.blockPosition().getZ();
         int footY = mob.blockPosition().getY();
-        int northOff = firstOffBedZ(mx, box.minY, mz, -1);   // nearest off-bed column to the north (−Z)
-        int southOff = firstOffBedZ(mx, box.minY, mz, +1);   // …and to the south (+Z)
+        // Off-bed columns sit just past the carriage's Z faces — the bed spans the carriage width,
+        // so this is robust no matter how wide the bed is or where on it the mob stands. (Stepping
+        // out from the mob with a small cap missed the far edge of a full-width bed: a mob near the
+        // centre never reached a genuinely off-bed column and parked on the rails — issue #49.)
+        int northOff = offBedColumn(mx, box, -1);            // first off-bed column past the −Z face
+        int southOff = offBedColumn(mx, box, +1);            // …and past the +Z face
         boolean nWalk = stepFooting(mx, box.minY, northOff, footY);
         boolean sWalk = stepFooting(mx, box.minY, southOff, footY);
         int offZ;
@@ -445,13 +449,19 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         }
     }
 
-    /** First column off the bed stepping from {@code (x,z)} in Z direction {@code dir} (capped at {@link #OFF_TRACK_MAX_STEPS}). */
-    private int firstOffBedZ(int x, double deckMinY, int z, int dir) {
-        int off = z + dir;
-        for (int i = 1; i < OFF_TRACK_MAX_STEPS && surfaceIsTrack(x, deckMinY, off); i++) {
-            off += dir;
+    /**
+     * The first genuinely off-bed column just past the carriage's near ({@code dir<0}) or far
+     * ({@code dir>0}) Z face. The bed spans the carriage width, so a column one past the face is
+     * normally already off it; the bounded loop only keeps going if the parent-level bed happens to
+     * extend past the carriage box. Computed from the box (not by capped stepping from the mob) so a
+     * mob anywhere on a full-width bed gets a target that is actually off the rails.
+     */
+    private int offBedColumn(int x, AABB box, int dir) {
+        int z = dir < 0 ? Mth.floor(box.minZ) - 1 : Mth.ceil(box.maxZ);
+        for (int i = 0; i < OFF_TRACK_MAX_STEPS && surfaceIsTrack(x, box.minY, z); i++) {
+            z += dir;
         }
-        return off;
+        return z;
     }
 
     /** True if off-bed column {@code (x,z)} has footing the mob can step to without bridging (≤1 up, ≤3 down). */
