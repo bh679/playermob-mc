@@ -6,6 +6,7 @@ import static games.brennan.playermob.entity.DispositionResolver.innerRadius;
 import static games.brennan.playermob.entity.DispositionResolver.onHurt;
 import static games.brennan.playermob.entity.DispositionResolver.outerRadius;
 import static games.brennan.playermob.entity.DispositionResolver.resolve;
+import static games.brennan.playermob.entity.DispositionResolver.witnessedAttackDelta;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -105,12 +106,71 @@ class DispositionResolverTest {
             DispositionResolver.MAX_RANGE + 1));                                     // beyond hate range
     }
 
+    // ---- players: love overrides nature for any friendliness ----
+
+    @Test
+    void loveOverridesNature() {
+        // A territorial/aggressive mob (low friendliness) GREETS a player it loves (feeling >= 7)
+        // at any distance, instead of attacking it in its personal-space bubble — mirrors hate.
+        assertEquals(Reaction.GREET, resolve(9, 1, 7, TargetCategory.PLAYERS, 1));   // 9/1, loved, point-blank
+        assertEquals(Reaction.GREET, resolve(9, 1, 10, TargetCategory.PLAYERS, 1));
+        assertEquals(Reaction.GREET, resolve(10, 0, 8, TargetCategory.PLAYERS, 2));
+        // feeling 6 is below love → still the territorial bubble (a fighter attacks up close).
+        assertEquals(Reaction.FIGHT, resolve(9, 1, 6, TargetCategory.PLAYERS, 1));
+    }
+
     // ---- onHurt ----
 
     @Test
     void onHurtThresholdAtFive() {
         assertEquals(DispositionResolver.HurtResponse.RETALIATE, onHurt(5));
         assertEquals(DispositionResolver.HurtResponse.FLEE, onHurt(4));
+    }
+
+    // ---- witnessed-attack reaction (signed continuous delta) ----
+
+    @Test
+    void witnessApproveBandScalesWithAggressionAndDislike() {
+        // Positive admiration, reproducing cells of the design table (Like 0.4, cap 3).
+        assertEquals(3.0f, witnessedAttackDelta(10, 0), EPS);   // hate + max aggression → the cap
+        assertEquals(1.0f, witnessedAttackDelta(10, 5), EPS);   // neutral victim, max aggression
+        assertEquals(0.9f, witnessedAttackDelta(3, 0), EPS);    // just over the approve threshold
+        assertEquals(0.6f, witnessedAttackDelta(6, 3), EPS);
+        assertEquals(0.6f, witnessedAttackDelta(10, 6), EPS);
+        assertEquals(0.3f, witnessedAttackDelta(9, 6), EPS);    // threshold cell — now a small positive
+    }
+
+    @Test
+    void witnessNeutralBandIsNoReaction() {
+        // Below the approve threshold and below the love line → exactly 0.
+        assertEquals(0.0f, witnessedAttackDelta(0, 0), EPS);
+        assertEquals(0.0f, witnessedAttackDelta(2, 0), EPS);    // fightFlight − 3 < 0
+        assertEquals(0.0f, witnessedAttackDelta(8, 6), EPS);    // feeling 6 needs fight/flight >= 9
+        assertEquals(0.0f, witnessedAttackDelta(5, 5), EPS);
+    }
+
+    @Test
+    void witnessResentBandDeepensWithLoveAndCalm() {
+        // feeling >= 7 (love band): harming a loved one turns the mob against the attacker,
+        // deeper the more it loves V and the calmer it is.
+        assertEquals(-4.0f, witnessedAttackDelta(0, 10), EPS);  // beloved victim, calm witness
+        assertEquals(-1.0f, witnessedAttackDelta(10, 10), EPS); // aggressive witness minds less
+        assertEquals(-2.5f, witnessedAttackDelta(5, 10), EPS);
+        assertEquals(-2.8f, witnessedAttackDelta(0, 7), EPS);
+        assertEquals(-0.2f, witnessedAttackDelta(10, 8), EPS);
+        // Edge: at the very bottom of the love band (feeling 7) a max-aggression witness tips
+        // slightly positive (+0.2) — so pro-violence it mildly approves even here.
+        assertEquals(0.2f, witnessedAttackDelta(10, 7), EPS);
+    }
+
+    @Test
+    void witnessNeverExceedsTheCap() {
+        for (int ff = 0; ff <= 10; ff++) {
+            for (float feeling = 0; feeling <= 10; feeling++) {
+                assertTrue(witnessedAttackDelta(ff, feeling) <= 3.0f + EPS,
+                    "delta exceeded the cap at ff=" + ff + " feeling=" + feeling);
+            }
+        }
     }
 
     // ---- totality ----
