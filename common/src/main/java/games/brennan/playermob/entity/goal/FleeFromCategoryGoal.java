@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.Personality;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.world.entity.LivingEntity;
@@ -7,7 +8,9 @@ import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.ai.util.DefaultRandomPos;
 import net.minecraft.world.phys.Vec3;
 
+import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.List;
 
 /**
  * The <b>Shy</b> behaviour, as a flee → hide loop toward any entity the mob is
@@ -23,6 +26,13 @@ import java.util.EnumSet;
  *       before returning to its tasks. If the threat closes back in during the
  *       watch, it bolts again.</li>
  * </ol>
+ *
+ * <p>On a Dungeon Train, a mob cornered at a carriage-group boundary — vanilla pathing
+ * can't cross the inter-group gap (separate Sable sub-levels), so the retreat stalls at
+ * the edge — instead bolts across the gap to the group on the side <em>away from the
+ * threat</em> using the shared ballistic {@link GapLeap} (the same hop {@link CrossGroupGapGoal}
+ * uses to explore forward). Off a train this never triggers
+ * ({@link TrainConfinement#isConfined} is false), so behaviour is unchanged. See issue #64.</p>
  *
  * <p>Registered at priority 1 and deliberately does <em>not</em> gate on
  * {@code target == null}, so a provoked-shy mob flees instead of fighting.
@@ -40,19 +50,23 @@ public final class FleeFromCategoryGoal extends Goal implements DescribableGoal 
     private static final int RESUME_COOLDOWN_TICKS = 60;     // ~3s back-to-tasks before re-triggering
     private static final int RETREAT_RADIUS = 16;
     private static final int RETREAT_VERTICAL = 7;
+    private static final int LEAP_SETTLE_TICKS = 3;          // stand at the gap edge this long → hop (clean carry read)
 
-    private enum Phase { FLEE, HIDE }
+    private enum Phase { FLEE, HIDE, LEAP }
 
     private final PlayerMobEntity mob;
     private final double fleeDistance;
     private final double detectRange;
     private final double walkSpeed;
     private final double sprintSpeed;
+    private final GapLeap leap = new GapLeap(); // shared cross-gap hop, used when cornered on a train
 
     private Phase phase = Phase.FLEE;
     private LivingEntity threat;
     private int hideTicksLeft;
     private int cooldownTicks;
+    private int leapDir;          // latched away-from-threat step direction for the current leap
+    private int leapSettleTicks;  // ticks settled at the edge before launch
 
     public FleeFromCategoryGoal(PlayerMobEntity mob, float fleeDistance,
                                 double walkSpeed, double sprintSpeed) {
@@ -74,6 +88,7 @@ public final class FleeFromCategoryGoal extends Goal implements DescribableGoal 
         return switch (phase) {
             case FLEE -> "running";
             case HIDE -> "hiding";
+            case LEAP -> "leaping the gap";
         };
     }
 
@@ -99,6 +114,12 @@ public final class FleeFromCategoryGoal extends Goal implements DescribableGoal 
 
     @Override
     public boolean canContinueToUse() {
+        if (phase == Phase.LEAP) {
+            // Committed to the cross-gap hop: see it through (a bounded window) even as the mob
+            // opens distance from the threat or a target appears — never abandon it mid-air.
+            if (!mob.isAlive() || mob.isDeadOrDying()) return false;
+            return leap.flightTicks() <= GapLeap.FLIGHT_TIMEOUT_TICKS;
+        }
         if (threat == null || !threat.isAlive()) return false;
         if (mob.personalityToward(threat) != Personality.SHY) return false;
         if (mob.distanceTo(threat) > detectRange + 4.0) return false;
@@ -114,6 +135,10 @@ public final class FleeFromCategoryGoal extends Goal implements DescribableGoal 
 
     @Override
     public void tick() {
+        if (phase == Phase.LEAP) {
+            tickLeap(); // mid-hop: no threat-relative steering, GapLeap drives the arc
+            return;
+        }
         if (threat == null) return;
         mob.getLookControl().setLookAt(threat, 30.0F, 30.0F); // keep eyes on the threat
         double dist = mob.distanceTo(threat);
@@ -129,7 +154,12 @@ public final class FleeFromCategoryGoal extends Goal implements DescribableGoal 
                         + mob.getRandom().nextInt(HIDE_MAX_TICKS - HIDE_MIN_TICKS + 1);
                     mob.setCrouching(true);
                 } else if (mob.getNavigation().isDone()) {
-                    fleeAway();
+                    // Reached as far as vanilla nav can retreat. On a train, if that's a
+                    // group boundary with a group on the away side, leap the gap; otherwise
+                    // pick another retreat point as usual.
+                    if (!beginLeapIfCornered()) {
+                        fleeAway();
+                    }
                 }
             }
             case HIDE -> {
@@ -141,6 +171,7 @@ public final class FleeFromCategoryGoal extends Goal implements DescribableGoal 
                     mob.setCrouching(false);
                 }
             }
+            case LEAP -> { } // handled above (early return)
         }
     }
 
@@ -153,19 +184,117 @@ public final class FleeFromCategoryGoal extends Goal implements DescribableGoal 
         }
     }
 
+    /**
+     * On a Dungeon Train, if the mob is cornered at a carriage-group boundary with a group on the
+     * side away from the threat, begin a cross-gap leap toward it and return {@code true}. Off a
+     * train ({@link TrainConfinement#isConfined} false) or not cornered at an away-side boundary,
+     * returns {@code false} so the caller retreats the normal way — keeping off-train behaviour
+     * unchanged.
+     */
+    private boolean beginLeapIfCornered() {
+        if (threat == null || !TrainConfinement.isConfined(mob)) {
+            return false;
+        }
+        List<BoundaryLeap> candidates = new ArrayList<>(2);
+        for (int d = -1; d <= 1; d += 2) {
+            // A real gap this way (no room left to retreat within the group)...
+            if (TrainConfinement.nextCarriageTarget(mob, d) != null) {
+                continue;
+            }
+            // ...with a group on the far side to land on.
+            Vec3 group = TrainConfinement.nextGroupTarget(mob, d);
+            if (group != null) {
+                candidates.add(new BoundaryLeap(d, group.x));
+            }
+        }
+        BoundaryLeap chosen = chooseAwayLeap(mob.getX(), threat.getX(), candidates);
+        if (chosen == null) {
+            return false; // no boundary leap leads away from the threat
+        }
+        phase = Phase.LEAP;
+        leapDir = chosen.dir();
+        leapSettleTicks = 0;
+        leap.reset();
+        mob.setCrouching(false);
+        mob.getNavigation().stop();
+        return true;
+    }
+
+    /** Settle for a clean carry read, launch toward the away group, then fly until landed. */
+    private void tickLeap() {
+        if (!leap.isLaunched()) {
+            // Stand still at the edge so the measured displacement is pure train carry.
+            mob.getNavigation().stop();
+            leap.trackCarry(mob);
+            if (++leapSettleTicks < LEAP_SETTLE_TICKS) {
+                return;
+            }
+            Vec3 target = TrainConfinement.nextGroupTarget(mob, leapDir);
+            if (target == null) {
+                endLeap(); // lost the adjacent group while settling — flee the normal way
+                return;
+            }
+            leap.launch(mob, target);
+            return;
+        }
+        if (leap.tickFlight(mob)) {
+            endLeap(); // landed (or timed out) on the far group — resume fleeing/hiding from here
+        }
+    }
+
+    /** Clear the hop and return to the FLEE phase (which re-evaluates: hide on the far side, or
+     *  bolt again if the threat is still close). Also clears the crossing-gap latch. */
+    private void endLeap() {
+        mob.setCrossingGap(false);
+        leap.reset();
+        leapDir = 0;
+        leapSettleTicks = 0;
+        phase = Phase.FLEE;
+    }
+
     @Override
     public void stop() {
         mob.setCrouching(false);
         mob.getNavigation().stop();
         mob.setFleeing(false);
+        mob.setCrossingGap(false); // clear in case we stopped mid-leap
+        leap.reset();
         this.threat = null;
         this.phase = Phase.FLEE;
         this.hideTicksLeft = 0;
+        this.leapDir = 0;
+        this.leapSettleTicks = 0;
         this.cooldownTicks = RESUME_COOLDOWN_TICKS;
     }
 
     @Override
     public boolean requiresUpdateEveryTick() {
         return true;
+    }
+
+    /** A candidate boundary leap: the step direction and the world-X of the group it would land on. */
+    record BoundaryLeap(int dir, double landingX) {}
+
+    /**
+     * Of the candidate boundary leaps, the one that carries the mob <em>away</em> from the threat
+     * along the train's world-X axis: the group whose landing is farthest from the threat, and
+     * never nearer than the mob already is (so a leap toward the threat is rejected). Returns
+     * {@code null} if no candidate leads away. Pure function of its inputs — unit-tested.
+     *
+     * <p>Dungeon Train runs along world-X (its carriage index is monotonic in world-X), so
+     * "away from the threat" reduces to maximising {@code |landingX − threatX|}. A perpendicular
+     * threat ({@code threatX ≈ mobX}) makes any boundary leap count as "away".</p>
+     */
+    static BoundaryLeap chooseAwayLeap(double mobX, double threatX, List<BoundaryLeap> candidates) {
+        BoundaryLeap best = null;
+        double bestDist = Math.abs(mobX - threatX); // must beat standing still — never leap toward the threat
+        for (BoundaryLeap c : candidates) {
+            double dist = Math.abs(c.landingX() - threatX);
+            if (dist > bestDist) {
+                best = c;
+                bestDist = dist;
+            }
+        }
+        return best;
     }
 }
