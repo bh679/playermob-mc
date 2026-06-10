@@ -3,7 +3,10 @@ package games.brennan.playermob.entity;
 import games.brennan.playermob.PlayerMobRegistry;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.goal.AdvanceCarriageGoal;
+import games.brennan.playermob.entity.goal.BlockArrowsGoal;
 import games.brennan.playermob.entity.goal.CollectFloorItemsGoal;
+import games.brennan.playermob.entity.goal.CrossGroupGapGoal;
+import games.brennan.playermob.entity.goal.DefendLovedOneGoal;
 import games.brennan.playermob.entity.goal.EatFoodGoal;
 import games.brennan.playermob.entity.goal.FleeFromCategoryGoal;
 import games.brennan.playermob.entity.goal.FriendlyGreetGoal;
@@ -13,6 +16,7 @@ import games.brennan.playermob.entity.goal.PlayerMobDoorGoal;
 import games.brennan.playermob.entity.goal.RaidArmorStandsGoal;
 import games.brennan.playermob.entity.goal.RaidContainersGoal;
 import games.brennan.playermob.entity.goal.SkepticalWatchGoal;
+import games.brennan.playermob.entity.goal.TrainRecoveryGoal;
 import games.brennan.playermob.entity.goal.WeaponAwareAttackGoal;
 import games.brennan.playermob.skin.PlayerMobSkin;
 import games.brennan.playermob.skin.PlayerMobSkinRegistry;
@@ -159,8 +163,8 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.STRING);
 
     /**
-     * Slim-arms flag (true = 3-pixel arms, like the Alex model). v2 always
-     * renders wide regardless; the flag is plumbed for v3 model-swap support.
+     * Slim-arms flag (true = 3-pixel arms, like the Alex model). Synced to the
+     * client, where the renderer swaps to the slim body model when set.
      */
     private static final EntityDataAccessor<Boolean> DATA_SKIN_SLIM =
         SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.BOOLEAN);
@@ -175,6 +179,16 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
 
     /** Encoded feeling ledger ({@code "uuid=feeling;…"}) for the client menu UI. */
     private static final EntityDataAccessor<String> DATA_FEELINGS =
+        SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.STRING);
+
+    /**
+     * Newline-joined readout of the goals currently running in {@link #goalSelector}
+     * ("Objective — phase" per line, highest priority first, or "Idle"). Built
+     * server-side by {@link ObjectiveReadout} and synced so the client can draw it
+     * under the mob's name and in the right-click menu (Creative only). Network-only
+     * — never written to save NBT, so it adds no save-format change.
+     */
+    private static final EntityDataAccessor<String> DATA_OBJECTIVES =
         SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.STRING);
 
     // ---- Constants --------------------------------------------------------
@@ -235,6 +249,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * the mob, so a crouch only greets the mob it's aimed at — a 90° frontal arc.
      */
     private static final float CROUCH_LOOK_CONE_DEGREES = 45.0F;
+
+    /**
+     * How long after leaving a Dungeon Train a PlayerMob still counts as "fell
+     * off" and will try to climb back on — see {@link TrainRecoveryGoal}. 200
+     * ticks (10s) is generous enough to start recovery after a fall, tight enough
+     * that a mob doesn't board a train it merely brushed past long ago.
+     */
+    public static final int RECOVERY_WINDOW_TICKS = 200;
 
     /**
      * Chest {@code triggerEvent} ID for "viewer count changed" — drives the
@@ -313,6 +335,24 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private boolean closesDoors;
 
     /**
+     * Server tick of the last moment this mob stood on a train carriage, or a
+     * large negative sentinel if it never has. Drives {@link #ticksSinceOnTrain}
+     * so {@link TrainRecoveryGoal} fires only for a mob that actually fell off a
+     * train. Transient (not saved) — a reloaded mob just isn't "recovering" until
+     * it rides again.
+     */
+    private int lastOnTrainTick = -100_000;
+
+    /**
+     * True only while {@link TrainRecoveryGoal} is actively climbing this mob back
+     * onto a train (set on the goal's start, cleared on stop). Off the train, recovery
+     * is the mob's <em>sole</em> focus — this flag suppresses combat (target
+     * acquisition + held targets) so it never breaks off to chase a mob mid-recovery.
+     * Transient server-only AI state.
+     */
+    private boolean recovering;
+
+    /**
      * Fixed march direction while exploring a Dungeon Train: {@code -1} toward
      * decreasing carriage index, {@code +1} toward increasing, {@code 0} = not yet
      * latched. Set once, the first server tick the mob is found on a train, from
@@ -328,6 +368,44 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * traversal) must revisit re-latching on a genuine disembark/re-board.</p>
      */
     private int trainExploreDir;
+
+    /**
+     * True only while {@link CrossGroupGapGoal} is carrying the mob across the gap
+     * between two carriage groups. Transient AI state (never saved): a leap is short and
+     * always restarts from scratch, so it has no meaning across a reload. While set, the
+     * hostile-targeting goal declines new targets, so a passing mob can't preempt the
+     * leap and abandon the PlayerMob mid-gap.
+     */
+    private boolean crossingGap;
+
+    /**
+     * True only while {@link FleeFromCategoryGoal} is running this mob away from a Shy
+     * threat (set on the goal's start, cleared on stop). While set, the arrow-blocking
+     * reflex ({@link BlockArrowsGoal}) stands down — a fleeing mob shouldn't stop to face
+     * and raise its shield, which fights the retreat. Transient server-only AI state.
+     */
+    private boolean fleeing;
+
+    /** How long door-opening is suppressed after a stuck-recovery close, so the mob can cross. ~2 s. */
+    private static final int DOOR_CLOSE_HOLD_TICKS = 40;
+    /** Half-width of the cube scanned around the mob for an open door to close when stuck (off-train). */
+    private static final int DOOR_RECOVERY_REACH = 2;
+
+    /**
+     * Off-train detector for the "close a door that's blocking me" recovery. The on-train
+     * (Dungeon Train) reflex keeps its own per-mob detectors, so this one only runs off a
+     * train. Transient AI state (never saved): a stuck run restarts cleanly across a reload.
+     * See {@link #recoverFromStuckDoor()} and {@link DoorStuckMonitor}.
+     */
+    private final DoorStuckMonitor offTrainDoorStuck = new DoorStuckMonitor();
+
+    /**
+     * Ticks left during which this mob opens no doors, so a door the stuck-recovery just closed
+     * isn't reopened before the mob can cross the perpendicular path the open swing was blocking.
+     * Set by {@link #holdDoorsClosed()} (on or off a train), decremented each server tick, and read
+     * by both door openers via {@link #isHoldingDoorsClosed()}. Transient (never saved).
+     */
+    private int doorCloseHoldTicks;
 
     public PlayerMobEntity(EntityType<? extends PlayerMobEntity> type, Level level) {
         super(type, level);
@@ -346,6 +424,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (this.getNavigation() instanceof GroundPathNavigation groundNav) {
             groundNav.setCanOpenDoors(true);
         }
+        // Let the path cross water (float on the surface) instead of treating it as a
+        // wall — so a mob recovering back onto a train can swim toward it / to the
+        // nearest shore. FloatGoal (priority 0) keeps it from sinking.
+        this.getNavigation().setCanFloat(true);
     }
 
     /**
@@ -371,11 +453,26 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         builder.define(DATA_FIGHT_FLIGHT, DispositionTraits.DEFAULT);
         builder.define(DATA_FRIENDLINESS, DispositionTraits.DEFAULT);
         builder.define(DATA_FEELINGS, "");
+        builder.define(DATA_OBJECTIVES, "");
+    }
+
+    /**
+     * The current objective readout — one line per running goal ("Objective —
+     * phase"), highest priority first, or "Idle". Refreshed server-side in
+     * {@link #customServerAiStep()} and synced; the client renderer and the
+     * right-click menu read it to show what the mob is doing (Creative only).
+     */
+    public String getObjectivesReadout() {
+        return this.entityData.get(DATA_OBJECTIVES);
     }
 
     @Override
     protected void registerGoals() {
         this.goalSelector.addGoal(0, new FloatGoal(this));
+        // Fell off a Dungeon Train carriage? Getting back on preempts everything
+        // but swimming — added before the other priority-1 goals so its canUse is
+        // evaluated first. No-op without a train mod (nearestCarriage → null).
+        this.goalSelector.addGoal(1, new TrainRecoveryGoal(this, /* speed */ 1.0));
         // Social goals (flee / watch / greet) — priority 1 so they preempt
         // raiding/strolling when their reaction applies. Each self-gates on the
         // live reaction; Skeptical/Friendly also gate on "no target" so they yield to combat.
@@ -389,6 +486,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // Open (and, for "tidy" mobs, close) wooden doors on the path. Declares
         // no flags, so it runs alongside whatever movement goal owns the walk.
         this.goalSelector.addGoal(1, new PlayerMobDoorGoal(this));
+        // Raise a held shield to deflect an incoming arrow. Declares no flags (like
+        // the door goal) so a sword-and-board mob keeps meleeing via the priority-2
+        // attack goal and blocks between swings rather than freezing. No-op without a
+        // shield in hand.
+        this.goalSelector.addGoal(1, new BlockArrowsGoal(this));
         this.goalSelector.addGoal(2, new WeaponAwareAttackGoal(this, 1.0, 8.0f));
         // EatFoodGoal added BEFORE the raid goals at the same priority so
         // its canUse() is evaluated first — a low-HP mob with food prefers
@@ -407,18 +509,29 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // No-op off a train (the seam reports "not confined"). Below harvest so
         // "fully explore" includes farming; above idle stroll.
         this.goalSelector.addGoal(7, new AdvanceCarriageGoal(this, /* speed */ 0.9));
+        // When the next room is across a group gap (AdvanceCarriageGoal stops), leap the
+        // gap to the adjacent group and keep marching. Same priority/flags as the advance
+        // goal; mutually exclusive because it only fires when the within-group target is
+        // null. No-op off a train.
+        this.goalSelector.addGoal(7, new CrossGroupGapGoal(this, /* speed */ 0.9));
         this.goalSelector.addGoal(8, new WaterAvoidingRandomStrollGoal(this, 0.6));
         this.goalSelector.addGoal(9, new LookAtPlayerGoal(this, LivingEntity.class, 8.0F));
         this.goalSelector.addGoal(10, new RandomLookAroundGoal(this));
 
         this.targetSelector.addGoal(1, new HurtByTargetGoal(this));
+        // Defend an individual it loves: registered right after HurtByTargetGoal at
+        // the same priority, so self-defence wins the TARGET-flag tie but defending
+        // a friend still outranks proactively hunting a random hostile (priority 2).
+        this.targetSelector.addGoal(1, new DefendLovedOneGoal(this, DispositionResolver.MAX_RANGE));
         this.targetSelector.addGoal(2, new NearestAttackableTargetGoal<>(
             this,
             LivingEntity.class,
             10,
             true,
             false,
-            candidate -> reactionToward(candidate) == Reaction.FIGHT
+            candidate -> !recovering
+                && !this.crossingGap
+                && reactionToward(candidate) == Reaction.FIGHT
                 && TrainConfinement.allowsTarget(this, candidate)));
         // Hunt food animals only while hungry, and below the hostile-targeting
         // goal (2) so defending against a zombie always beats chasing a cow.
@@ -447,18 +560,63 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     protected void customServerAiStep() {
         super.customServerAiStep();
         LivingEntity target = getTarget();
-        if (target != null && (isIgnoredPlayer(target) || !TrainConfinement.allowsTarget(this, target))) {
-            setTarget(null);
+        if (target != null
+                && (recovering || isIgnoredPlayer(target) || !TrainConfinement.allowsTarget(this, target))) {
+            setTarget(null);   // recovering back onto a train preempts all combat
         }
         latchTrainExploreDirection();
 
+        // Tick down the door-close hold (armed by stuck-recovery, on or off a train) so a door it
+        // just closed isn't reopened until the mob has had time to cross the now-clear path.
+        if (doorCloseHoldTicks > 0) {
+            doorCloseHoldTicks--;
+        }
+
         if (TrainConfinement.isConfined(this)) {
-            // Open any door we're up against. Vanilla's DoorInteractGoal opens doors by
-            // inspecting nav path nodes + collision, which doesn't fire on a moving Sable
-            // carriage — so the train seam reaches for the door block directly (in the
-            // carriage's own coordinate space), every tick, regardless of which goal owns
-            // movement.
+            // Remember we're aboard, so TrainRecoveryGoal can tell "fell off" from
+            // "never boarded" (see ticksSinceOnTrain / RECOVERY_WINDOW_TICKS).
+            lastOnTrainTick = tickCount;
+            // Open any door we're up against — and, when wedged, close one whose open swing is
+            // blocking us. Vanilla's DoorInteractGoal opens doors by inspecting nav path nodes +
+            // collision, which doesn't fire on a moving Sable carriage — so the train seam reaches
+            // for the door block directly (in the carriage's own coordinate space), every tick,
+            // regardless of which goal owns movement.
             TrainConfinement.openBlockingDoor(this);
+        } else {
+            // Off a train, opening is handled by PlayerMobDoorGoal; this reflex adds the
+            // close-when-stuck half — an open door can block the perpendicular path.
+            recoverFromStuckDoor();
+        }
+
+        // Refresh the Creative-only objective readout (synced to clients for the
+        // under-name visualisation + right-click menu). Throttled — goal/phase
+        // transitions are infrequent, so a quarter-second lag is imperceptible —
+        // and written only on change, so it costs a tracking packet only when the
+        // text actually changes.
+        if (this.tickCount % 5 == 0) {
+            String readout = ObjectiveReadout.of(this.goalSelector, this.targetSelector);
+            if (!readout.equals(this.entityData.get(DATA_OBJECTIVES))) {
+                this.entityData.set(DATA_OBJECTIVES, readout);
+            }
+        }
+    }
+
+    /**
+     * Off-train door recovery: when the mob has been wedged for a while ({@link DoorStuckMonitor})
+     * while actively pathing, close the nearest open, hand-closable door and arm the hold so it
+     * isn't reopened before the mob can cross. An open door's panel swings across the perpendicular
+     * edge of its cell, which vanilla pathing treats as passable — so a mob whose route turns at the
+     * doorway jams against it, and closing clears the way. On a train the Dungeon-Train reflex does
+     * the same job in the carriage's coordinate space, so this branch never runs while confined.
+     */
+    private void recoverFromStuckDoor() {
+        if (!(level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        boolean tryingToMove = !getNavigation().isDone();
+        if (offTrainDoorStuck.tick(getX(), getZ(), tryingToMove)
+                && DoorRecovery.closeBlockingOpenDoor(this, serverLevel, blockPosition(), DOOR_RECOVERY_REACH)) {
+            holdDoorsClosed();
         }
 
         tickFeelingEvents();
@@ -617,6 +775,85 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     }
 
     /**
+     * Ticks since this mob was last on a train carriage (large when it never has).
+     * {@link TrainRecoveryGoal} compares it against {@link #RECOVERY_WINDOW_TICKS}
+     * so recovery fires only for a mob that recently fell off a train.
+     */
+    public int ticksSinceOnTrain() {
+        return tickCount - lastOnTrainTick;
+    }
+
+    /**
+     * Marks whether {@link TrainRecoveryGoal} is actively recovering this mob (set on
+     * its start, cleared on its stop). While {@code true}, combat is suppressed so
+     * getting back aboard is the mob's only focus (see {@link #recovering}).
+     */
+    public void setRecovering(boolean recovering) {
+        this.recovering = recovering;
+    }
+
+    /** True while actively climbing back onto a train (see {@link #recovering}). */
+    public boolean isRecovering() {
+        return this.recovering;
+    }
+
+    /**
+     * Set by {@link CrossGroupGapGoal} for the duration of a cross-gap leap. While
+     * {@code true}, the mob declines new combat targets so the leap can't be preempted.
+     * See {@link #crossingGap}.
+     */
+    public void setCrossingGap(boolean crossingGap) {
+        this.crossingGap = crossingGap;
+    }
+
+    /**
+     * Set by {@link FleeFromCategoryGoal} while the mob is fleeing a Shy threat. While
+     * {@code true}, {@link BlockArrowsGoal} won't raise the shield — blocking (which faces
+     * the threat and stalls) fights the retreat. See {@link #fleeing}.
+     */
+    public void setFleeing(boolean fleeing) {
+        this.fleeing = fleeing;
+    }
+
+    /** True while actively fleeing a Shy threat (see {@link #fleeing}). */
+    public boolean isFleeing() {
+        return this.fleeing;
+    }
+
+    /**
+     * Auto-equip the best tool the mob owns for breaking {@code state} (highest
+     * {@link ItemStack#getDestroySpeed}), swapping it into the main hand and
+     * stashing the displaced item. Returns {@code true} if a swap happened — so the
+     * caller can add a short "reach for the tool" pause. No-op (returns {@code false})
+     * when the main hand is already the fastest, or nothing beats an empty hand.
+     */
+    public boolean equipBetterToolFor(BlockState state) {
+        float bestSpeed = getMainHandItem().getDestroySpeed(state);
+        int bestSlot = -1;
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            ItemStack candidate = inventory.getItem(i);
+            if (candidate.isEmpty()) continue;
+            float speed = candidate.getDestroySpeed(state);
+            if (speed > bestSpeed) {
+                bestSpeed = speed;
+                bestSlot = i;
+            }
+        }
+        if (bestSlot < 0) {
+            return false;
+        }
+        ItemStack tool = inventory.getItem(bestSlot).copy();
+        ItemStack previous = getMainHandItem();
+        inventory.setItem(bestSlot, ItemStack.EMPTY);
+        setItemSlot(EquipmentSlot.MAINHAND, tool);
+        if (!previous.isEmpty()) {
+            ItemStack leftover = EquipmentEvaluator.addToContainer(inventory, previous);
+            if (!leftover.isEmpty()) spawnAtLocation(leftover);
+        }
+        return true;
+    }
+
+    /**
      * Players in Creative or Spectator mode are ignored by all AI — the mob
      * treats them as not present. {@link TargetCategory#classify} returns
      * {@code null} for them (covering proactive targeting and the social goals);
@@ -698,6 +935,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * The mob's computed {@link Reaction} toward a live entity — never null
      * ({@link Reaction#IGNORE} for an uncategorised / creative / spectator
      * target). Feelings are only consulted for players and other PlayerMobs.
+     *
+     * <p>For a mid fight/flight mob ({@link DispositionResolver#isMidBand}) a
+     * proactive FIGHT/FLEE is refined by a "can I win?" power comparison
+     * ({@link DispositionResolver#applyWinAssessment}) — it fights weaker foes and
+     * flees stronger ones. This gates <em>acquisition</em> only; once a target is
+     * locked, vanilla retention keeps the fight going (the power-aware break-off
+     * lives in {@link #hurt}). The power estimate is computed only after we know
+     * it's a mid-band engage decision, so the common cases stay free.</p>
      */
     public Reaction reactionToward(LivingEntity entity) {
         TargetCategory category = TargetCategory.classify(entity);
@@ -707,8 +952,137 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         float feeling = category == TargetCategory.PLAYERS
             ? feelings.feelingToward(entity.getUUID())
             : FeelingLedger.DEFAULT;
-        return DispositionResolver.resolve(
-            traits.fightFlight(), traits.friendliness(), feeling, category, distanceTo(entity));
+        int ff = traits.fightFlight();
+        Reaction base = DispositionResolver.resolve(
+            ff, traits.friendliness(), feeling, category, distanceTo(entity));
+        if ((base == Reaction.FIGHT || base == Reaction.FLEE) && DispositionResolver.isMidBand(ff)) {
+            return DispositionResolver.applyWinAssessment(base, ff, selfCombatPower(), combatPowerOf(entity));
+        }
+        return base;
+    }
+
+    // ---- Combat-power assessment ("can I win?") ---------------------------
+
+    /** Cached {@link #combatPowerOf}{@code (this)}, recomputed at most once per tick. */
+    private double selfCombatPowerCache;
+    /** The {@code tickCount} the cache was filled on; {@code -1} = stale/unset. */
+    private int selfCombatPowerTick = -1;
+
+    /**
+     * The mob's own combat power for the current tick. {@link #reactionToward}
+     * runs per-candidate across several scan sites, so the mob's own power — the
+     * same value for every candidate this tick — is computed once and reused.
+     * Transient: never saved or synced.
+     */
+    private double selfCombatPower() {
+        if (selfCombatPowerTick != tickCount) {
+            selfCombatPowerCache = combatPowerOf(this);
+            selfCombatPowerTick = tickCount;
+        }
+        return selfCombatPowerCache;
+    }
+
+    /**
+     * A combat-power estimate for any living entity from its health, held weapon
+     * ({@link EquipmentEvaluator#score}) and armour value. Used to decide whether a
+     * mid fight/flight mob fights or flees a given foe.
+     */
+    private static double combatPowerOf(LivingEntity entity) {
+        double weaponScore = EquipmentEvaluator.score(entity.getMainHandItem());
+        return DispositionResolver.combatPower(entity.getHealth(), weaponScore, entity.getArmorValue());
+    }
+
+    // ---- Defend-loved-ones support (DefendLovedOneGoal) -------------------
+
+    /**
+     * The last categorisable entity to attack this mob, and the tick it happened —
+     * a defender's signal for "who hurt my friend". Kept separately from the vanilla
+     * {@code lastHurtByMob} because a fleeing mob clears that (so its own retaliation
+     * goal stands down), which would otherwise erase the very record a defender reads.
+     * Session memory: not saved, not synced.
+     */
+    private LivingEntity lastAttacker;
+    private int lastAttackerTick = -10000;
+
+    /** The last categorisable attacker (survives the flee-driven {@code lastHurtByMob} reset), or null. */
+    public LivingEntity getLastAttacker() {
+        return lastAttacker;
+    }
+
+    /** Tick of the last categorisable attack, in this entity's own {@code tickCount} frame. */
+    public int getLastAttackerTick() {
+        return lastAttackerTick;
+    }
+
+    /**
+     * Find an individual this mob loves ({@code feeling >= }{@link
+     * DispositionResolver#FEELING_LOVE}) that was recently attacked, paired with its
+     * attacker, for {@link DefendLovedOneGoal} to target. Scans within {@code range}
+     * and returns {@code {defended, foe}} for the <em>nearest</em> qualifying loved
+     * one, or {@code null} if none. A loved one qualifies only when its
+     * {@code getLastHurtByMob()} is a valid, recent, reachable foe — alive, not this
+     * mob or the loved one, categorisable (so creative/spectator attackers are
+     * skipped), train-allowed, within range, and last hit no more than
+     * {@code recencyTicks} ago (measured in the loved one's own {@code tickCount}
+     * frame, the same frame its hurt-timestamp is recorded in). Only players and
+     * other PlayerMobs ever reach the love threshold, so {@code defended} is always
+     * player-shaped.
+     */
+    public LivingEntity[] findLovedOneAndFoe(double range, int recencyTicks) {
+        AABB box = getBoundingBox().inflate(range);
+        double rangeSq = range * range;
+        LivingEntity bestDefended = null;
+        LivingEntity bestFoe = null;
+        double closestSq = rangeSq;
+        for (LivingEntity loved : level().getEntitiesOfClass(LivingEntity.class, box)) {
+            if (loved == this || !loved.isAlive()) continue;
+            if (feelingToward(loved) < DispositionResolver.FEELING_LOVE) continue;
+            double lovedSq = distanceToSqr(loved);
+            if (lovedSq >= closestSq) continue; // farther than a match we already have
+            // A PlayerMob victim clears its vanilla lastHurtByMob when it flees, so read
+            // its surviving attacker memory; real players don't flee-clear, so use theirs.
+            LivingEntity foe;
+            int hurtTick;
+            if (loved instanceof PlayerMobEntity pm) {
+                foe = pm.getLastAttacker();
+                hurtTick = pm.getLastAttackerTick();
+            } else {
+                foe = loved.getLastHurtByMob();
+                hurtTick = loved.getLastHurtByMobTimestamp();
+            }
+            if (loved.tickCount - hurtTick > recencyTicks) continue;
+            if (!isDefensibleFoe(foe, loved, rangeSq)) continue;
+            closestSq = lovedSq;
+            bestDefended = loved;
+            bestFoe = foe;
+        }
+        return bestDefended == null ? null : new LivingEntity[] { bestDefended, bestFoe };
+    }
+
+    /** Whether {@code foe} is a valid target to defend {@code loved} from. */
+    private boolean isDefensibleFoe(LivingEntity foe, LivingEntity loved, double rangeSq) {
+        return foe != null
+            && foe != this
+            && foe != loved
+            && foe.isAlive()
+            && TargetCategory.classify(foe) != null      // skips creative/spectator + uncategorised
+            && TrainConfinement.allowsTarget(this, foe)
+            && distanceToSqr(foe) <= rangeSq;
+    }
+
+    /**
+     * Whether this mob will wade into a fight against {@code foe} to defend a loved
+     * one — the gate for {@link DefendLovedOneGoal}. Defending overrides the mob's
+     * lower-priority stance toward the foe (it will charge a player it would otherwise
+     * GREET / WATCH / IGNORE, and drops raiding / strolling to do so — setting the
+     * target makes those goals yield) but <b>never overrides {@link Reaction#FLEE}</b>:
+     * a mob whose nature is to flee that foe keeps fleeing rather than being forced to
+     * fight. Capped by {@link DispositionResolver#defendIsWorthwhile} so even a fearless
+     * mob won't throw itself at a hopelessly stronger foe.
+     */
+    public boolean wouldEngageFoe(LivingEntity foe) {
+        return reactionToward(foe) != Reaction.FLEE
+            && DispositionResolver.defendIsWorthwhile(selfCombatPower(), combatPowerOf(foe));
     }
 
     /**
@@ -803,6 +1177,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     }
 
     /**
+     * True if this mob is holding a shield it could raise (either hand). Gates the
+     * arrow-blocking reflex ({@code BlockArrowsGoal}) so a shieldless mob is a no-op.
+     */
+    public boolean hasShieldReady() {
+        return getOffhandItem().is(Items.SHIELD) || getMainHandItem().is(Items.SHIELD);
+    }
+
+    /**
      * Crouch gesture for the Friendly greeting and Shy hiding. The
      * {@code PlayerModel} renders the sneak pose from {@link #isCrouching()}
      * (i.e. {@link #getPose()} {@code == CROUCHING}), not the sneak flag — so we
@@ -820,30 +1202,180 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * its shield up must square up to the threat for the block to count.
      */
     public void faceBodyToward(LivingEntity target) {
-        double dx = target.getX() - getX();
-        double dz = target.getZ() - getZ();
+        faceBodyToward(target.getX(), target.getZ());
+    }
+
+    /**
+     * Snap the body (and head) to face a horizontal point. Used by
+     * {@code BlockArrowsGoal} to square up to an incoming arrow's position so the
+     * shield block registers (same facing requirement as {@link #faceBodyToward(LivingEntity)}).
+     */
+    public void faceBodyToward(double targetX, double targetZ) {
+        double dx = targetX - getX();
+        double dz = targetZ - getZ();
         float yaw = (float) (Mth.atan2(dz, dx) * (180.0 / Math.PI)) - 90.0F;
         setYRot(yaw);
         setYBodyRot(yaw);
         setYHeadRot(yaw);
     }
 
+    /** Food carried beyond this item count is "excess" the mob will give away. */
+    private static final int FOOD_KEEP_COUNT = 20;
+
     /**
-     * Friendly "gift": toss an item arcing toward {@code target} from eye height
-     * like a player's Q-drop. Prefers a looted backpack item; offers a small
-     * default gift if the backpack is empty so the gesture always lands.
+     * Choose a gift for {@code recipient} from <em>what the mob is actually
+     * carrying</em>, its value scaled by how loved they are ({@link GiftPolicy}).
+     * Tries the richest rung the feeling+friendliness allows and cascades down
+     * ({@link GiftPolicy#cascadeFrom}):
+     * <ul>
+     *   <li><b>UPGRADE</b> — a backpack gear piece that upgrades the recipient
+     *       (player-shaped recipients only, so an animal is never handed armour);</li>
+     *   <li><b>SPARE</b> — gear the mob already holds an equal/better duplicate of;</li>
+     *   <li><b>SURPLUS</b> — excess food (kept above {@value #FOOD_KEEP_COUNT}) or a spare block stack.</li>
+     * </ul>
+     * Returns the chosen stack <em>already removed</em> from the backpack, or
+     * {@link ItemStack#EMPTY} if the pack has nothing to give at any rung (the
+     * caller then fetches a nearby item, or mints a token as a last resort). Gear is
+     * only ever sourced from the backpack, so the mob never disarms itself.
      */
-    public boolean giveItemTo(LivingEntity target) {
-        ItemStack gift = ItemStack.EMPTY;
-        for (int i = 0; i < inventory.getContainerSize(); i++) {
-            if (!inventory.getItem(i).isEmpty()) {
-                gift = inventory.removeItemNoUpdate(i);
-                break;
+    public ItemStack selectGiftFromInventory(LivingEntity recipient) {
+        GiftPolicy.GiftTier top = GiftPolicy.tierFor(feelingToward(recipient), friendliness());
+        boolean playerShaped = recipient instanceof Player || recipient instanceof PlayerMobEntity;
+        for (GiftPolicy.GiftTier rung : GiftPolicy.cascadeFrom(top)) {
+            ItemStack gift = switch (rung) {
+                case UPGRADE -> playerShaped ? takeBestGearUpgradeFor(recipient) : ItemStack.EMPTY;
+                case SPARE -> takeSpareGear();
+                case SURPLUS -> takeSurplus();
+            };
+            if (!gift.isEmpty()) {
+                return gift;
             }
         }
-        if (gift.isEmpty()) {
-            gift = defaultGift();
+        return ItemStack.EMPTY;
+    }
+
+    /**
+     * Find and remove the single backpack equipment piece that best upgrades
+     * {@code recipient}'s gear — the highest-{@link EquipmentEvaluator#score} stack
+     * for which {@link EquipmentEvaluator#shouldReplace} beats what the recipient
+     * already wears/holds in that slot — or {@link ItemStack#EMPTY} if the backpack
+     * holds no upgrade. {@code getEquipmentSlotForItem} is item-driven (same slot
+     * for any humanoid), so it's read off the mob. Read-only scan, then one removal.
+     */
+    private ItemStack takeBestGearUpgradeFor(LivingEntity recipient) {
+        int bestSlot = -1;
+        double bestScore = Double.NEGATIVE_INFINITY;
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            ItemStack candidate = inventory.getItem(i);
+            if (candidate.isEmpty()) continue;
+            EquipmentSlot slot = getEquipmentSlotForItem(candidate);
+            if (!EquipmentEvaluator.shouldReplace(candidate, recipient.getItemBySlot(slot))) continue;
+            double s = EquipmentEvaluator.score(candidate);
+            if (s > bestScore) {
+                bestScore = s;
+                bestSlot = i;
+            }
         }
+        return bestSlot < 0 ? ItemStack.EMPTY : inventory.removeItemNoUpdate(bestSlot);
+    }
+
+    /**
+     * Find and remove the best backpack equipment piece the mob already holds an
+     * equal-or-better of in its slot — redundant kit it can give away for free. A
+     * piece that would <em>upgrade</em> the mob (better than what's equipped, or
+     * filling an empty slot it wants) is kept, so this never disarms the mob.
+     */
+    private ItemStack takeSpareGear() {
+        int bestSlot = -1;
+        double bestScore = Double.NEGATIVE_INFINITY;
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            ItemStack candidate = inventory.getItem(i);
+            if (candidate.isEmpty()) continue;
+            if (!EquipmentEvaluator.shouldReplace(candidate, ItemStack.EMPTY)) continue; // not recognised gear
+            EquipmentSlot slot = getEquipmentSlotForItem(candidate);
+            ItemStack equipped = getItemBySlot(slot);
+            if (equipped.isEmpty()) continue;                                   // empty slot → mob wants it
+            if (EquipmentEvaluator.shouldReplace(candidate, equipped)) continue; // upgrade for mob → keep
+            double s = EquipmentEvaluator.score(candidate);
+            if (s > bestScore) {
+                bestScore = s;
+                bestSlot = i;
+            }
+        }
+        return bestSlot < 0 ? ItemStack.EMPTY : inventory.removeItemNoUpdate(bestSlot);
+    }
+
+    /**
+     * A surplus gift: excess food (the lowest-nutrition stack, only when carrying
+     * more than {@value #FOOD_KEEP_COUNT} food items — giving just the amount over
+     * the buffer), else a spare building-block stack. {@link ItemStack#EMPTY} if it
+     * has neither.
+     */
+    private ItemStack takeSurplus() {
+        int foodCount = carriedFoodCount();
+        if (foodCount > FOOD_KEEP_COUNT) {
+            int slot = lowestNutritionFoodSlot();
+            if (slot >= 0) {
+                int give = Math.min(inventory.getItem(slot).getCount(), foodCount - FOOD_KEEP_COUNT);
+                return inventory.removeItem(slot, give);
+            }
+        }
+        int blockSlot = ItemPickupPolicy.smallestBuildingBlockSlot(inventory);
+        return blockSlot < 0 ? ItemStack.EMPTY : inventory.removeItemNoUpdate(blockSlot);
+    }
+
+    /** Total food items carried (count, not nutrition) — drives the surplus-food gift. */
+    private int carriedFoodCount() {
+        int total = 0;
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            ItemStack stack = inventory.getItem(i);
+            if (!stack.isEmpty() && stack.get(DataComponents.FOOD) != null) {
+                total += stack.getCount();
+            }
+        }
+        return total;
+    }
+
+    /** Backpack slot of the lowest-nutrition food (give the cheap food, keep the good), or -1. */
+    private int lowestNutritionFoodSlot() {
+        int slot = -1;
+        int lowest = Integer.MAX_VALUE;
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            ItemStack stack = inventory.getItem(i);
+            if (stack.isEmpty()) continue;
+            FoodProperties food = stack.get(DataComponents.FOOD);
+            if (food != null && food.nutrition() < lowest) {
+                lowest = food.nutrition();
+                slot = i;
+            }
+        }
+        return slot;
+    }
+
+    /**
+     * Nearest alive, pickup-ready, train-allowed dropped item within {@code radius}
+     * — what the greet goal walks to and gives when its pack has nothing to offer.
+     * Reuses the {@code CollectFloorItemsGoal} scan shape, minus the self-interest
+     * filter: any item will do as a gift.
+     */
+    public ItemEntity findGiftableNearbyItem(double radius) {
+        AABB box = getBoundingBox().inflate(radius);
+        ItemEntity closest = null;
+        double closestSq = radius * radius;
+        for (ItemEntity item : level().getEntitiesOfClass(ItemEntity.class, box,
+                e -> e.isAlive() && !e.isRemoved() && !e.hasPickUpDelay()
+                    && TrainConfinement.allowsTarget(this, e))) {
+            double d = distanceToSqr(item);
+            if (d < closestSq) {
+                closestSq = d;
+                closest = item;
+            }
+        }
+        return closest;
+    }
+
+    /** Toss {@code gift} arcing toward {@code target} from eye height, like a player's Q-drop. */
+    public void tossGift(LivingEntity target, ItemStack gift) {
         double fromX = getX();
         double fromY = getEyeY() - 0.1;
         double fromZ = getZ();
@@ -860,18 +1392,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // independent of the thrower, so this doesn't change re-collection timing.
         thrown.setThrower(this);
         level().addFreshEntity(thrown);
-        return true;
     }
 
-    /** A small, friendly token gift for when the backpack has nothing looted yet. */
-    private ItemStack defaultGift() {
-        return switch (getRandom().nextInt(5)) {
-            case 0 -> new ItemStack(Items.POPPY);
-            case 1 -> new ItemStack(Items.DANDELION);
-            case 2 -> new ItemStack(Items.BREAD);
-            case 3 -> new ItemStack(Items.APPLE);
-            default -> new ItemStack(Items.COOKIE);
-        };
+    /** A flower — the last-resort gift when the pack is empty and nothing's nearby to fetch. */
+    public ItemStack trinketGift() {
+        return new ItemStack(getRandom().nextBoolean() ? Items.POPPY : Items.DANDELION);
     }
 
     /** Whether world-griefing (and thus chest raiding) is permitted here. */
@@ -938,7 +1463,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
 
     /**
      * True if the assigned URL skin was authored for the slim-arms model.
-     * v2 always renders wide regardless — see renderer for details.
+     * The client renderer swaps to the slim body model when this is set.
      */
     public boolean isSkinSlim() {
         return this.entityData.get(DATA_SKIN_SLIM);
@@ -957,6 +1482,24 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      */
     public boolean closesDoors() {
         return this.closesDoors;
+    }
+
+    /**
+     * Arm the door-close hold: for {@link #DOOR_CLOSE_HOLD_TICKS} this mob opens no doors, so a
+     * door the stuck-recovery just closed (to clear an open swing blocking its path) isn't reopened
+     * before it can cross. Called by the stuck-recovery on and off a train.
+     */
+    public void holdDoorsClosed() {
+        this.doorCloseHoldTicks = DOOR_CLOSE_HOLD_TICKS;
+    }
+
+    /**
+     * Whether door-opening is currently suppressed for this mob (see {@link #holdDoorsClosed()}).
+     * Consulted by {@link PlayerMobDoorGoal} and the Dungeon-Train door reflex so neither reopens a
+     * door the stuck-recovery just closed.
+     */
+    public boolean isHoldingDoorsClosed() {
+        return this.doorCloseHoldTicks > 0;
     }
 
     // ---- InventoryCarrier ------------------------------------------------
@@ -1782,6 +2325,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             }
             TargetCategory category = TargetCategory.classify(attacker);
             if (category != null) {
+                // Remember the attacker independently of the vanilla lastHurtByMob the
+                // flee branch below clears — this is what a defender reads to learn who
+                // hurt a loved one, even when that loved one flees and wipes its own.
+                this.lastAttacker = attacker;
+                this.lastAttackerTick = tickCount;
                 // A player/PlayerMob hit cools the feeling toward them, ∝ damage
                 // (a solid blow can flip neutral straight into "hate").
                 if (category == TargetCategory.PLAYERS) {
@@ -1790,8 +2338,13 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
                     pushDispositionToClient();
                 }
                 // Immediate response: fighters retaliate (keep the HurtByTargetGoal
-                // target); flighty mobs drop it so FleeFromCategoryGoal takes over.
-                if (DispositionResolver.onHurt(traits.fightFlight()) == DispositionResolver.HurtResponse.FLEE) {
+                // target); flighty mobs drop it so FleeFromCategoryGoal takes over. A
+                // mid fight/flight mob weighs whether it can win this exchange before
+                // standing its ground — this is also the break-off path for a fight
+                // the proactive acquisition started but is now losing.
+                DispositionResolver.HurtResponse response = DispositionResolver.onHurt(
+                    traits.fightFlight(), selfCombatPower(), combatPowerOf(attacker));
+                if (response == DispositionResolver.HurtResponse.FLEE) {
                     setTarget(null);
                     setLastHurtByMob(null);
                 }

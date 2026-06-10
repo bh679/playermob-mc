@@ -177,8 +177,15 @@ public record FeelingRecord(float feeling, float crouchBudgetUsed, float crouchC
     }
 
     static float clamp(float value) {
-        if (value < MIN) return MIN;
-        if (value > MAX) return MAX;
-        return value;
+        // Snap to 1/1000 before clamping. Feelings accumulate in 0.1f steps, and float
+        // drift lands an intended 7.0 at 6.999998 — a hair under the love threshold, so
+        // a mob built up to "7" never counts as loved (defend/gift gates silently fail).
+        // This is the single chokepoint for every feeling read/write/load, so rounding
+        // here keeps the threshold comparisons (>= FEELING_LOVE 7, gift tiers 8/9,
+        // hate <= 3) honest without distorting the 0.1-grid the events move on.
+        float snapped = Math.round(value * 1000.0F) / 1000.0F;
+        if (snapped < MIN) return MIN;
+        if (snapped > MAX) return MAX;
+        return snapped;
     }
 }
