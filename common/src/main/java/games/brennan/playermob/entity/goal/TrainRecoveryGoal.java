@@ -131,6 +131,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
     private double lastApproachY = -1.0e9;        // mob Y last APPROACH tick (height-gain = progress)
     private int approachStuckTicks = 0;
     private int missTicks = 0;                     // consecutive ticks the carriage was out of range
+    private boolean wasOnTracks = false;           // last tick's onTracks(); resets approach trackers on transition
 
     /** Re-resolved every evaluation/tick — the carriage moves. */
     private TrainEnvironment.ReboardTarget target;
@@ -160,6 +161,9 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
 
     @Override
     public String subObjective() {
+        if (phase == Phase.APPROACH && onTracks()) {
+            return "leaving tracks";   // on the rails/bed → top priority is getting off the side
+        }
         return switch (phase) {
             case APPROACH -> "approaching";
             case BRIDGE -> "bridging";
@@ -230,6 +234,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         lastApproachY = -1.0e9;
         approachStuckTicks = 0;
         missTicks = 0;
+        wasOnTracks = false;
         gatherTargetPos = null;
         pillarColumn = null;
         mob.setRecovering(true);   // off the train, re-boarding is the mob's sole focus (no combat)
@@ -261,9 +266,13 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         if (target == null) return;
         totalTicks++;
         phaseTicks++;
-        // Top priority in EVERY phase: if we can already board from here (high enough + an
-        // opening in reach), just do it — don't tower or gather when a hop will do.
-        if (tryBoardNow(target.worldBox())) {
+        // Top priority once OFF the tracks: if we can already board from here (high enough + an
+        // opening in reach), just do it — don't tower or gather when a hop will do. Never board
+        // while standing on the rails/bed: the bed is static and the carriage is moving, so a leap
+        // from the bed can't land the mob aboard — it stages one block off the line first (see
+        // tickApproach / placeOffBedStep). Gating here also skips the per-tick carriage scan while
+        // on the bed, and lets the onTracks() handoff below run instead of being pre-empted.
+        if (!onTracks() && tryBoardNow(target.worldBox())) {
             return;
         }
         // Never settle on the rails/bed — the mob can't board the moving carriage from the
@@ -289,12 +298,26 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
 
     private void tickApproach() {
         AABB box = target.worldBox();
+        boolean on = onTracks();
+        if (on != wasOnTracks) {       // crossed the bed boundary → reset the approach progress trackers
+            lastApproachDist = Double.MAX_VALUE;
+            lastApproachY = -1.0e9;
+            approachStuckTicks = 0;
+            wasOnTracks = on;
+        }
+        // #1 PRIORITY while on the rails/bed: get off the SIDE of the tracks. Nothing else — tower,
+        // gather, wait, board — runs until the mob is beside the line, because it can't board the
+        // moving carriage from the static bed. Only once off does the normal approach/tower resume.
+        if (on) {
+            tickGetOffTracks(box);
+            return;
+        }
         clearClimbObstruction(box);   // clear foliage in the way as it walks up to the spot
-        // Already up at deck height and right beside the carriage (fell onto a tree / high
-        // ground), and NOT on the tracks? Don't climb back DOWN to the ground launch spot to
-        // gather — hold here and let an opening slide into reach; tryBoardNow (top of tick)
-        // leaps the moment one does. (≤2.5 keeps us inside boarding reach so a hop can land.)
-        if (!onTracks() && mob.getY() >= box.minY - 1.0 && horizontalDistToBox(box) <= 2.5) {
+        // Already up at deck height and right beside the carriage (fell onto a tree / high ground)?
+        // Don't climb back DOWN to the ground launch spot to gather — hold here and let an opening
+        // slide into reach; tryBoardNow (top of tick) leaps the moment one does. (≤2.5 keeps us
+        // inside boarding reach so a hop can land.)
+        if (mob.getY() >= box.minY - 1.0 && horizontalDistToBox(box) <= 2.5) {
             waitForOpening(box);
             return;
         }
@@ -320,7 +343,8 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         }
         lastApproachDist = distToSpot;
         lastApproachY = mob.getY();
-        // At the (re-assessed) best spot, or can't get closer → commit. Gather first if short.
+        // At the (re-assessed) best spot, or can't get closer → commit (we're already off the
+        // line; on-tracks is handled by the early tickGetOffTracks return above). Gather first if short.
         if (distToSpot <= 1.6 || approachStuckTicks > APPROACH_STUCK_LIMIT) {
             commitFromApproach();
         }
@@ -341,6 +365,108 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
             phase = Phase.GATHER;
             gatherTargetPos = null;
         }
+    }
+
+    /**
+     * #1 priority while standing on the rails/bed: leave the tracks by the nearest workable SIDE.
+     * The mob can't board the moving carriage from the static bed, so before any tower/gather/board
+     * it beelines straight off the side of the line. The train runs along world-X, so "off the
+     * side" is a step in Z; the bed spans the carriage width, so the first off-bed column on a side
+     * is just past that carriage face.
+     *
+     * <p>It evaluates both sides and prefers the one it can simply step onto (footing within a
+     * 1-up/3-down step) — so a track cut along a cliff exits onto the ground, not into the drop.
+     * If only one side is walkable it takes that; if both (flat terrain) or neither (elevated on
+     * both sides) it takes the nearer. On a ground-level line it just walks off; wedged at the edge
+     * over a drop, {@link #placeOffBedStep} lays one step block to cross. Stepping off flips
+     * {@link #onTracks()} false, and the normal off-track APPROACH→tower→board resumes next tick.</p>
+     */
+    private void tickGetOffTracks(AABB box) {
+        int mx = mob.blockPosition().getX();
+        int mz = mob.blockPosition().getZ();
+        int footY = mob.blockPosition().getY();
+        // Off-bed columns sit just past the carriage's Z faces — the bed spans the carriage width,
+        // so this is robust no matter how wide the bed is or where on it the mob stands. (Stepping
+        // out from the mob with a small cap missed the far edge of a full-width bed: a mob near the
+        // centre never reached a genuinely off-bed column and parked on the rails — issue #49.)
+        int northOff = offBedColumn(box, -1);                // column just past the −Z face (off the footprint)
+        int southOff = offBedColumn(box, +1);                // …and just past the +Z face
+        boolean nWalk = stepFooting(mx, box.minY, northOff, footY);
+        boolean sWalk = stepFooting(mx, box.minY, southOff, footY);
+        int offZ;
+        if (nWalk != sWalk) {
+            offZ = nWalk ? northOff : southOff;               // exactly one side is a clean step-off → take it
+        } else {
+            boolean nearNorth = Math.abs(mob.getZ() - box.minZ) <= Math.abs(mob.getZ() - box.maxZ);
+            offZ = nearNorth ? northOff : southOff;           // both or neither → nearer side
+        }
+        int stepZ = offZ <= mz ? -1 : 1;
+        double targetY = groundSurfaceY(mx, box.minY, offZ);
+        if (phaseTicks % PATH_REISSUE_TICKS == 0 || mob.getNavigation().isDone()) {
+            mob.getNavigation().moveTo(mx + 0.5, targetY, offZ + 0.5, moveSpeed);
+            mob.getLookControl().setLookAt(mx + 0.5, targetY, offZ + 0.5);
+        }
+        // Progress = closing the perpendicular gap to the off-side column.
+        double dist = Math.abs(mob.getZ() - (offZ + 0.5));
+        if (dist < lastApproachDist - 0.05) {
+            approachStuckTicks = 0;
+            markProgress();
+        } else {
+            approachStuckTicks++;
+        }
+        lastApproachDist = dist;
+        // Wedged at the bed edge (a drop beside an elevated line) → lay a step block to cross.
+        if (approachStuckTicks > APPROACH_STUCK_LIMIT) {
+            placeOffBedStep(box, stepZ);
+        }
+    }
+
+    /**
+     * Lay a single step-off block so the mob can leave the bed when the chosen side is a drop/void
+     * (an elevated track has air beside it, which vanilla nav won't path into). Places one block in
+     * the off-bed cell one step in {@code stepZ}, level with the bed surface, so the mob steps
+     * across onto it. Acts only when that next cell is actually off the bed — if it's still bed (the
+     * mob hasn't reached the edge) it keeps walking. Reuses the {@code mobGriefing}-gated,
+     * carriage-/track-protected {@link #tryPlaceBridgeBlock}; with no placeable block it can't bridge
+     * a void, so it leaves it to the stall backstop (best-effort).
+     */
+    private void placeOffBedStep(AABB box, int stepZ) {
+        BlockPos foot = mob.blockPosition();
+        int placeZ = foot.getZ() + stepZ;
+        double placeCenterZ = placeZ + 0.5;
+        if (placeCenterZ >= box.minZ && placeCenterZ <= box.maxZ) {
+            return;                              // next cell still inside the track footprint — keep walking
+        }
+        int slot = bridgeBlockSlot();
+        if (slot < 0 || phaseTicks % PLACE_INTERVAL_TICKS != 0) {
+            return;                              // no block to bridge a void, or pacing placement
+        }
+        // One below the mob's feet, so the block's top is level with the bed surface for a flat step.
+        BlockPos step = new BlockPos(foot.getX(), foot.getY() - 1, placeZ);
+        lookAt(step);
+        if (tryPlaceBridgeBlock(step, slot)) {
+            placementsUsed++;
+            approachStuckTicks = 0;
+            markProgress();
+            // Nudge onto the new step (off the bed); next tick onTracks() flips false.
+            mob.getNavigation().moveTo(step.getX() + 0.5, step.getY() + 1.0, step.getZ() + 0.5, moveSpeed);
+        }
+    }
+
+    /**
+     * The column just outside the carriage's Z footprint on the near ({@code dir<0}) or far
+     * ({@code dir>0}) side. Position-based to match {@link #onTracks()}: a mob standing here has its
+     * Z outside the track span, i.e. off the tracks. The track is the carriage width, so one cell
+     * past the face is off it regardless of what the bed is built from.
+     */
+    private int offBedColumn(AABB box, int dir) {
+        return dir < 0 ? Mth.floor(box.minZ) - 1 : Mth.ceil(box.maxZ);
+    }
+
+    /** True if off-bed column {@code (x,z)} has footing the mob can step to without bridging (≤1 up, ≤3 down). */
+    private boolean stepFooting(int x, double deckMinY, int z, int footY) {
+        double y = offBedFootingY(x, deckMinY, z);
+        return y != Double.NEGATIVE_INFINITY && y <= footY + 1.0 && y >= footY - 3.0;
     }
 
     // ---- BRIDGE -----------------------------------------------------------
@@ -858,15 +984,30 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         for (int y = top; y >= top - GROUND_SCAN_DEPTH; y--) {
             c.set(ix, y, iz);
             BlockState s = level.getBlockState(c);
-            if (s.isCollisionShapeFullBlock(level, c)) {
+            // First block with real footing — full blocks, slabs and stairs all count. Rails / air
+            // / plants have no collision, so they're skipped down to the surface beneath them
+            // (isCollisionShapeFullBlock would wrongly skip a slab/stairs track piece too).
+            if (!s.getCollisionShape(level, c).isEmpty()) {
                 return BlockSourcePolicy.isProtectedTrackBlock(s);
             }
         }
         return false;
     }
 
-    /** True if the mob is currently standing on (or in) the track rails/bed — see {@link #onTracks}. */
+    /**
+     * True if the mob is over the track. <b>Position-based, not block-type:</b> the track is
+     * X-axis aligned and exactly as wide in Z as the carriage that rides it (and runs the whole
+     * line along X), so a mob whose feet sit within that Z-span is on the bed regardless of what
+     * block it's painted with — plain stone brick, a stone-brick variant, cobblestone slab, etc.
+     * (A block-type check missed those and left the mob "approaching" on the rails — #49.)
+     * "Getting off the side" then simply means moving the mob's Z outside the carriage's Z-span.
+     */
     private boolean onTracks() {
+        if (target != null) {
+            AABB box = target.worldBox();
+            return mob.getZ() >= box.minZ && mob.getZ() <= box.maxZ;
+        }
+        // Fallback only when no carriage is resolved (goal inactive): literal track block underfoot.
         Level level = mob.level();
         BlockPos feet = mob.blockPosition();
         return BlockSourcePolicy.isProtectedTrackBlock(level.getBlockState(feet.below()))
@@ -880,17 +1021,28 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      * (a void / long drop), so nav just steers horizontally rather than into the abyss.
      */
     private double groundSurfaceY(double x, double deckMinY, double z) {
-        if (!(mob.level() instanceof ServerLevel level)) return deckMinY - 1.0;
-        int ix = Mth.floor(x), iz = Mth.floor(z);
+        double y = offBedFootingY(Mth.floor(x), deckMinY, Mth.floor(z));
+        return y == Double.NEGATIVE_INFINITY ? mob.getY() : y;
+    }
+
+    /**
+     * Standable surface Y (top of the first block with a non-empty collision shape — full block,
+     * slab or stairs; rails/air/plants are skipped) at column {@code (x, z)}, scanning down from the
+     * deck floor, or {@link Double#NEGATIVE_INFINITY} if none within {@link #GROUND_SCAN_DEPTH}
+     * (a void / long drop). The explicit void sentinel lets callers tell "no footing" from a real
+     * surface that happens to be at the mob's Y.
+     */
+    private double offBedFootingY(int x, double deckMinY, int z) {
+        if (!(mob.level() instanceof ServerLevel level)) return Double.NEGATIVE_INFINITY;
         int top = Mth.floor(deckMinY);
         BlockPos.MutableBlockPos c = new BlockPos.MutableBlockPos();
         for (int y = top; y >= top - GROUND_SCAN_DEPTH; y--) {
-            c.set(ix, y, iz);
-            if (level.getBlockState(c).isCollisionShapeFullBlock(level, c)) {
-                return y + 1.0;                 // stand on top of the first solid block
+            c.set(x, y, z);
+            if (!level.getBlockState(c).getCollisionShape(level, c).isEmpty()) {
+                return y + 1.0;                 // stand on top of the first standable block
             }
         }
-        return mob.getY();
+        return Double.NEGATIVE_INFINITY;
     }
 
     /** Horizontal distance from the mob to the nearest point of {@code box}. */
