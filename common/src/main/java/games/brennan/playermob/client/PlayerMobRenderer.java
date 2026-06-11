@@ -39,8 +39,11 @@ import java.util.Optional;
  * player skins). When the entity has no URL — legacy 0.2.0 mobs in saved
  * worlds, or new mobs spawned while {@code PlayerMobSkinRegistry} is empty —
  * the renderer falls back to one of the 9 bundled vanilla default skins
- * ({@link #SKIN_NAMES}) shipped at
- * {@code assets/minecraft/textures/entity/player/wide/<name>.png}. We don't
+ * ({@link #SKIN_NAMES}), rendered from
+ * {@code assets/minecraft/textures/entity/player/{wide,slim}/<name>.png} — the
+ * {@code wide/} or {@code slim/} variant chosen per-mob from
+ * {@link PlayerMobEntity#isSkinSlim()} (vanilla ships both for every default
+ * name). We don't
  * ship any PNG bytes ourselves; we either point at vanilla's resources or
  * stream from Mojang's CDN via vanilla's {@code SkinManager} pipeline (so
  * the on-disk skin cache is shared with vanilla).</p>
@@ -67,7 +70,9 @@ import java.util.Optional;
  * before {@code super.render(...)}. Render layers read {@code getModel()}
  * each frame, so the armor / held-item layers follow the swap. Armor itself
  * stays the wide armor model — matching how vanilla draws armor on
- * slim-armed players.</p>
+ * slim-armed players. The bundled-default texture folder ({@code slim/} vs
+ * {@code wide/}) follows the same {@code isSkinSlim()} flag, so model and
+ * texture always agree.</p>
  *
  * <p>{@link Environment} {@code CLIENT}-only — stripped from dedicated
  * server jars at load time. Server-side code that needs the skin count
@@ -88,11 +93,15 @@ public final class PlayerMobRenderer
     };
 
     /**
-     * Cached ResourceLocations — one per default skin. Built once at class
-     * load (no per-frame allocation). Pointers into the vanilla resource
-     * pack; no PNG bytes are shipped in the PlayerMob jar.
+     * Cached ResourceLocations — one per default skin, in each arm-model folder.
+     * Built once at class load (no per-frame allocation). Pointers into the
+     * vanilla resource pack; no PNG bytes are shipped in the PlayerMob jar.
+     * {@code getTextureLocation} reads the wide or slim table per-mob from
+     * {@link PlayerMobEntity#isSkinSlim()} — the same flag that drives the body
+     * model swap. Vanilla ships both variants for every default name.
      */
-    private static final ResourceLocation[] SKIN_TEXTURES = buildSkinTextures();
+    private static final ResourceLocation[] SKIN_TEXTURES_WIDE = buildSkinTextures("wide");
+    private static final ResourceLocation[] SKIN_TEXTURES_SLIM = buildSkinTextures("slim");
 
     /** Shadow disc radius below the entity, matches the player's 0.5. */
     private static final float SHADOW_RADIUS = 0.5F;
@@ -303,11 +312,19 @@ public final class PlayerMobRenderer
         if (!url.isEmpty()) {
             return PlayerMobSkinTextures.lookup(url, entity.isSkinSlim());
         }
+        // No URL ⇒ legacy 0.2.0 mob, or registry-empty new mob. Render the
+        // bundled vanilla default keyed off SkinIndex (v1 behaviour), from the
+        // slim/ or wide/ folder matching this mob's arm model — both ship in
+        // vanilla for every default name, and the body model already follows
+        // the same isSkinSlim() flag (see render()).
+        ResourceLocation[] table = entity.isSkinSlim() ? SKIN_TEXTURES_SLIM : SKIN_TEXTURES_WIDE;
         int idx = entity.getSkinIndex();
-        if (idx < 0 || idx >= SKIN_TEXTURES.length) {
-            return SKIN_TEXTURES[0];
+        if (idx < 0 || idx >= table.length) {
+            // Defensive: should never happen — clamp on the entity already
+            // guards. Falls back to skin 0 (alex) if it does.
+            return table[0];
         }
-        return SKIN_TEXTURES[idx];
+        return table[idx];
     }
 
     /**
@@ -324,7 +341,11 @@ public final class PlayerMobRenderer
         return entity.isSkinSlim();
     }
 
-    private static ResourceLocation[] buildSkinTextures() {
+    /**
+     * Builds the per-skin texture table for one arm-model folder ({@code "wide"}
+     * or {@code "slim"}). Both folders ship every default name in the vanilla jar.
+     */
+    private static ResourceLocation[] buildSkinTextures(String folder) {
         if (SKIN_NAMES.length != PlayerMobEntity.SKIN_COUNT) {
             throw new IllegalStateException(
                 "SKIN_NAMES.length (" + SKIN_NAMES.length
@@ -335,7 +356,7 @@ public final class PlayerMobRenderer
         for (int i = 0; i < SKIN_NAMES.length; i++) {
             arr[i] = ResourceLocation.fromNamespaceAndPath(
                 "minecraft",
-                "textures/entity/player/wide/" + SKIN_NAMES[i] + ".png");
+                "textures/entity/player/" + folder + "/" + SKIN_NAMES[i] + ".png");
         }
         return arr;
     }
