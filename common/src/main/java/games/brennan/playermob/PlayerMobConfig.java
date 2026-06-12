@@ -48,6 +48,14 @@ public final class PlayerMobConfig {
     }
 
     /**
+     * Toggle the DT-spawn debug log at runtime (e.g. from {@code /playermob debug spawnlog}). A session
+     * override — not written back to the file, which stays the startup default.
+     */
+    public static void setDebugSpawnLog(boolean enabled) {
+        debugSpawnLog = enabled;
+    }
+
+    /**
      * Load {@code <configDir>/playermob.properties} into the static fields, writing a commented
      * default file first if none exists. Never throws — any failure logs and keeps the defaults.
      */

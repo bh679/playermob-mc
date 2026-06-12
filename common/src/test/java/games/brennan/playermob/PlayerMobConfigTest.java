@@ -48,4 +48,16 @@ class PlayerMobConfigTest {
         assertEquals(PlayerMobConfig.DEFAULT_ECHO_FRIEND_CHANCE, v.echoFriendChance(), 1e-6);
         assertFalse(v.debugSpawnLog()); // "yes" is neither true nor false -> default (false)
     }
+
+    @Test
+    void setDebugSpawnLogTogglesAtRuntime() {
+        try {
+            PlayerMobConfig.setDebugSpawnLog(true);
+            assertTrue(PlayerMobConfig.debugSpawnLog());
+            PlayerMobConfig.setDebugSpawnLog(false);
+            assertFalse(PlayerMobConfig.debugSpawnLog());
+        } finally {
+            PlayerMobConfig.setDebugSpawnLog(PlayerMobConfig.DEFAULT_DEBUG_SPAWN_LOG); // don't leak into other tests
+        }
+    }
 }

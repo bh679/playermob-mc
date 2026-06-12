@@ -4,6 +4,7 @@ import com.mojang.authlib.GameProfile;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.entity.DispositionTraits;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -25,6 +26,8 @@ import java.util.Collection;
  *       stamped with that player's last completed life.</li>
  *   <li>{@code /playermob life <player>} — read the in-progress life tally and the
  *       traits it would currently distil to (verify tracking without dying).</li>
+ *   <li>{@code /playermob debug spawnlog [on|off]} — toggle (or report) the colour-coded
+ *       Dungeon-Train auto-spawn chat log for this session.</li>
  * </ul>
  */
 public final class ReincarnateCommand {
@@ -40,7 +43,29 @@ public final class ReincarnateCommand {
                         .executes(ReincarnateCommand::reincarnate)))
                 .then(Commands.literal("life")
                     .then(Commands.argument("player", GameProfileArgument.gameProfile())
-                        .executes(ReincarnateCommand::life))));
+                        .executes(ReincarnateCommand::life)))
+                .then(Commands.literal("debug")
+                    .then(Commands.literal("spawnlog")
+                        .executes(ReincarnateCommand::querySpawnLog)
+                        .then(Commands.literal("on").executes(ctx -> setSpawnLog(ctx, true)))
+                        .then(Commands.literal("off").executes(ctx -> setSpawnLog(ctx, false))))));
+    }
+
+    /** {@code /playermob debug spawnlog} — report whether the DT-spawn debug log is on. */
+    private static int querySpawnLog(CommandContext<CommandSourceStack> ctx) {
+        boolean on = PlayerMobConfig.debugSpawnLog();
+        ctx.getSource().sendSuccess(
+            () -> Component.literal("PlayerMob DT-spawn debug log is " + (on ? "ON" : "OFF") + "."), false);
+        return 1;
+    }
+
+    /** {@code /playermob debug spawnlog on|off} — flip the DT-spawn debug log for this session. */
+    private static int setSpawnLog(CommandContext<CommandSourceStack> ctx, boolean enabled) {
+        PlayerMobConfig.setDebugSpawnLog(enabled);
+        ctx.getSource().sendSuccess(
+            () -> Component.literal("PlayerMob DT-spawn debug log " + (enabled ? "enabled" : "disabled")
+                + " for this session."), false);
+        return 1;
     }
 
     private static int reincarnate(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
