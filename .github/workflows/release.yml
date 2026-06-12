@@ -17,6 +17,11 @@ on:
         required: false
         type: boolean
         default: false
+      changelog:
+        description: "Release notes (Markdown) for the GitHub release body + Modrinth/CurseForge changelog. Blank = auto-generated notes only."
+        required: false
+        type: string
+        default: ""
 
 jobs:
   release:
@@ -109,6 +114,9 @@ jobs:
         with:
           name: PlayerMob ${{ env.RELEASE_TAG }}
           tag_name: ${{ env.RELEASE_TAG }}
+          # Hand-written notes (when provided) head the body; generate_release_notes appends the
+          # auto commit/PR list beneath them. Blank changelog ⇒ auto notes only (prior behaviour).
+          body: ${{ inputs.changelog }}
           generate_release_notes: true
           files: release-artifacts/*.jar
           fail_on_unmatched_files: true
@@ -156,6 +164,7 @@ jobs:
           name: PlayerMob ${{ env.RELEASE_TAG }} (Fabric)
           version: ${{ env.RELEASE_TAG }}+fabric
           version-type: ${{ steps.release_type.outputs.type }}
+          changelog: ${{ inputs.changelog }}
           loaders: fabric
           game-versions: 1.21.1
           java: 21
@@ -176,6 +185,7 @@ jobs:
           name: PlayerMob ${{ env.RELEASE_TAG }} (Forge)
           version: ${{ env.RELEASE_TAG }}+forge
           version-type: ${{ steps.release_type.outputs.type }}
+          changelog: ${{ inputs.changelog }}
           loaders: forge
           game-versions: 1.21.1
           java: 21
@@ -196,6 +206,7 @@ jobs:
           name: PlayerMob ${{ env.RELEASE_TAG }} (NeoForge)
           version: ${{ env.RELEASE_TAG }}+neoforge
           version-type: ${{ steps.release_type.outputs.type }}
+          changelog: ${{ inputs.changelog }}
           loaders: neoforge
           game-versions: 1.21.1
           java: 21
