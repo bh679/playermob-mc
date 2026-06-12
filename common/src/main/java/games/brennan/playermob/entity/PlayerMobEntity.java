@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity;
 
+import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.PlayerMobRegistry;
 import games.brennan.playermob.compat.PlayerMobSocialHooks;
 import games.brennan.playermob.compat.TrainConfinement;
@@ -394,14 +395,6 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * {@link #maybeSpawnFriendPair}).
      */
     private static final float DT_PAIR_CHANCE = 0.10F;
-
-    /**
-     * Chance, per Dungeon-Train echo spawn that has logged friends, to also bring back a friend-echo
-     * of one of them (see {@link #spawnFriendEcho}). Higher than {@link #DT_PAIR_CHANCE} because it's
-     * already gated behind the echo roll and the dead player having had a loved one — still the mod's
-     * one-named-constant-per-probability style.
-     */
-    private static final float ECHO_FRIEND_CHANCE = 0.50F;
 
     /**
      * UUID of the Dungeon-Train spawn companion this mob was paired with as max friends, or
@@ -1016,7 +1009,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         GlobalLifeStore.DeathRecord echo = reason == MobSpawnType.EVENT && !skinExplicit
             ? PlayerReincarnation.maybeReincarnateOnSpawn(this, world) : null;
         rollSpawnDefaults(world.getRandom(), echo != null);
-        maybeSpawnFriendPair(world, reason, echo);
+        boolean companion = maybeSpawnFriendPair(world, reason, echo);
+        if (reason == MobSpawnType.EVENT) {
+            DtSpawnDebug.report(world.getLevel(), this, echo != null, companion);
+        }
         return super.finalizeSpawn(world, difficulty, reason, data);
     }
 
@@ -1063,8 +1059,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      *
      * <ul>
      *   <li><b>Echo with logged friends</b> ({@code echo != null}, non-empty {@code friendSnapshots}):
-     *       with probability {@link #ECHO_FRIEND_CHANCE}, bring back a {@linkplain #spawnFriendEcho
-     *       friend-echo} of someone who actually loved this life — rebuilt with their last-seen gear.</li>
+     *       with probability {@link PlayerMobConfig#echoFriendChance()}, bring back a {@linkplain
+     *       #spawnFriendEcho friend-echo} of someone who actually loved this life — rebuilt with their
+     *       last-seen gear.</li>
      *   <li><b>Anything else</b> (a fresh non-echo mob): with probability {@link #DT_PAIR_CHANCE}, a
      *       {@linkplain #spawnRandomFriend simple random buddy}. An echo whose life had no logged
      *       friend spawns alone.</li>
@@ -1074,35 +1071,41 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * <em>not</em> invoke {@link #finalizeSpawn} — so it neither re-rolls a pair nor recurses, and a
      * spawn yields exactly a duo, never a chain. Egg / {@code /summon} spawns aren't {@code EVENT},
      * so this is a no-op for them.</p>
+     *
+     * @return whether a companion (friend or friend-echo) actually spawned — used by the
+     *     {@link DtSpawnDebug} readout to colour the spawn message.
      */
-    private void maybeSpawnFriendPair(ServerLevelAccessor world, MobSpawnType reason,
-                                      GlobalLifeStore.DeathRecord echo) {
+    private boolean maybeSpawnFriendPair(ServerLevelAccessor world, MobSpawnType reason,
+                                         GlobalLifeStore.DeathRecord echo) {
         if (reason != MobSpawnType.EVENT) {
-            return;                                   // only natural Dungeon-Train spawns pair up
+            return false;                             // only natural Dungeon-Train spawns pair up
         }
         RandomSource random = world.getRandom();
         if (echo != null) {
             List<CompoundTag> friends = echo.friendSnapshots();
-            if (friends.isEmpty() || random.nextFloat() >= ECHO_FRIEND_CHANCE) {
-                return;                               // no one loved this life, or the roll missed
+            if (friends.isEmpty() || random.nextFloat() >= PlayerMobConfig.echoFriendChance()) {
+                return false;                         // no one loved this life, or the roll missed
             }
-            spawnFriendEcho(world, friends.get(random.nextInt(friends.size())));
-        } else if (random.nextFloat() < DT_PAIR_CHANCE) {
-            spawnRandomFriend(world);
+            return spawnFriendEcho(world, friends.get(random.nextInt(friends.size())));
         }
+        if (random.nextFloat() < DT_PAIR_CHANCE) {
+            return spawnRandomFriend(world);
+        }
+        return false;
     }
 
-    /** Spawn a fresh random max-friends buddy beside this mob (the non-echo pair). */
-    private void spawnRandomFriend(ServerLevelAccessor world) {
+    /** Spawn a fresh random max-friends buddy beside this mob (the non-echo pair); {@code true} if one spawned. */
+    private boolean spawnRandomFriend(ServerLevelAccessor world) {
         ServerLevel level = world.getLevel();
         PlayerMobEntity friend = PlayerMobRegistry.PLAYER_MOB.create(level);
         if (friend == null) {
-            return;
+            return false;
         }
         placeCompanion(friend);
         friend.rollSpawnDefaults(world.getRandom(), false);
         linkAsFriends(friend);
         level.addFreshEntity(friend);
+        return true;
     }
 
     /**
@@ -1111,12 +1114,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * seen (skin/identity, gear, traits), and it's titled "Echo of &lt;label&gt;" from the snapshot's
      * {@link GlobalLifeStore#FRIEND_LABEL_KEY}. Like {@link #spawnRandomFriend} it skips
      * {@code finalizeSpawn}, so the friend-echo never rolls its own echo or friend.
+     *
+     * @return {@code true} once the friend-echo is added to the world.
      */
-    private void spawnFriendEcho(ServerLevelAccessor world, CompoundTag friendSnapshot) {
+    private boolean spawnFriendEcho(ServerLevelAccessor world, CompoundTag friendSnapshot) {
         ServerLevel level = world.getLevel();
         PlayerMobEntity friend = PlayerMobRegistry.PLAYER_MOB.create(level);
         if (friend == null) {
-            return;
+            return false;
         }
         placeCompanion(friend);
         friend.readAdditionalSaveData(friendSnapshot.copy());
@@ -1125,6 +1130,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         friend.setCustomNameVisible(true);
         linkAsFriends(friend);
         level.addFreshEntity(friend);
+        return true;
     }
 
     /**
