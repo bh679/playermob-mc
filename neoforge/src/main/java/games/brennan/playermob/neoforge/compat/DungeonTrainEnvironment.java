@@ -3,17 +3,24 @@ package games.brennan.playermob.neoforge.compat;
 import games.brennan.dungeontrain.ship.ManagedShip;
 import games.brennan.dungeontrain.ship.Shipyards;
 import games.brennan.dungeontrain.train.Trains;
+import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.compat.TrainEnvironment;
+import games.brennan.playermob.entity.BlockSourcePolicy;
 import games.brennan.playermob.entity.DoorObstruction;
+import games.brennan.playermob.entity.DoorStuckMonitor;
+import games.brennan.playermob.entity.MiningMath;
 import games.brennan.playermob.entity.PlayerMobEntity;
+import games.brennan.playermob.entity.TrainDigPolicy;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.block.ButtonBlock;
 import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.LeverBlock;
@@ -660,6 +667,189 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         }
         int dir = mob.getTrainExploreDir();
         return dir != 0 && nextCarriageTarget(self, dir) == null;
+    }
+
+    // ---- Dig through a blocked carriage (pass through ice/dirt/mud/moss/log fill) ----
+
+    /** Swing the arm roughly this often (ticks) while mining, so it reads as repeated digging. */
+    private static final int DIG_SWING_INTERVAL = 4;
+
+    /**
+     * Keep a dig episode alive this long (ticks) after the way ahead clears, so the mob can step
+     * into the next slice of a thick fill before the episode ends rather than re-waiting the full
+     * stuck window per block. ~1s.
+     */
+    private static final int EPISODE_CLEAR_GRACE = 20;
+
+    /**
+     * Per-mob dig progress: a stuck detector (fed the carriage's sub-level coords so the
+     * carry-along drift is stripped out), whether a stuck-triggered episode is active, and the
+     * current target block + break timing. Server-thread only; weak keys so entries vanish with the
+     * mob, exactly like {@link #CONTROL_GAZE}/{@link #DOOR_COOLDOWN}.
+     */
+    private static final class DigState {
+        final DoorStuckMonitor stuck = new DoorStuckMonitor();
+        boolean episode;        // true once stuck-triggered, until the way ahead stays clear
+        int clearTicks;         // consecutive ticks with nothing diggable ahead (mob stepping through)
+        BlockPos target;        // sub-level block being mined, or null
+        int breakTicks;         // ticks spent on the current target
+        int breakTotal;         // ticks the current target needs (0 = not sized yet)
+        boolean swappedTool;    // best tool already equipped for the current target
+    }
+
+    private static final Map<Entity, DigState> DIG_STATE = new WeakHashMap<>();
+
+    /**
+     * Per-tick reflex: if the mob is stuck against soft fill (ice/dirt/mud/moss/log) packing the
+     * carriage directly ahead of its march, mine it — auto-swapping to the best tool it owns and
+     * pacing a realistic, hardness-scaled break — so it can pass through. Returns {@code true}
+     * while digging. The carriage's blocks live in its sub-level coordinate space (not at the mob's
+     * world position), so this reads/destroys through {@link ManagedShip#worldToShip}, the same way
+     * {@link #openBlockingDoor} reaches a door — which is why it's a reflex, not a goal.
+     */
+    @Override
+    public boolean digObstructingBlock(Entity self) {
+        if (!(self.level() instanceof ServerLevel level) || !(self instanceof PlayerMobEntity mob)) {
+            return false;
+        }
+        // Feature + world-mutation gates, matching the recovery/raid goals.
+        if (!PlayerMobConfig.trainDigThrough()
+                || !level.getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)) {
+            endDig(level, mob);
+            return false;
+        }
+        Trains.Carriage c = carriageAt(self);
+        int dir = mob.getTrainExploreDir();
+        // Off a train, no latched heading, or at the forward group boundary (the wall ahead is the
+        // inter-group gap door — crossing it is CrossGroupGapGoal's job) ⇒ never dig.
+        if (c == null || dir == 0 || atForwardBoundary(self)) {
+            endDig(level, mob);
+            return false;
+        }
+        ManagedShip ship = c.ship();
+        DigState st = DIG_STATE.computeIfAbsent(self, k -> new DigState());
+
+        // "Only when stuck": progress is measured in the carriage's own frame (the train carries the
+        // mob's world position forward even while it's wedged), so feed the monitor the sub-level x/z.
+        // The mob is "trying to move" whenever it isn't busy fighting — a confined mob always wants to
+        // march on. The fill-ahead check below is the real safety, so an eager stuck reading is benign.
+        Vector3d sub = ship.worldToShip(new Vector3d(self.getX(), self.getY(), self.getZ()));
+        if (st.stuck.tick(sub.x, sub.z, mob.getTarget() == null)) {
+            st.episode = true;
+        }
+        if (!st.episode) {
+            endDig(level, mob);
+            return false;
+        }
+
+        // The diggable fill block directly ahead along the march axis (foot cell first, then head —
+        // a 2-high passage). None ⇒ the immediate slice is clear.
+        BlockPos targetSub = diggableAhead(ship, level, mob, dir);
+        if (targetSub == null) {
+            // For a thick fill the mob now steps forward into the next slice, so hold the episode
+            // briefly rather than re-waiting the full stuck window per block; only once the way has
+            // stayed clear (the mob walked out the far side) is the dig genuinely done.
+            mob.setDigging(false);
+            clearCrack(level, mob, st.target);
+            st.target = null;
+            if (++st.clearTicks >= EPISODE_CLEAR_GRACE) {
+                endDig(level, mob);
+            }
+            return false;
+        }
+        st.clearTicks = 0;
+
+        BlockState state = level.getBlockState(targetSub);
+        if (!targetSub.equals(st.target)) {            // a new block to mine — reset the break
+            clearCrack(level, mob, st.target);
+            st.target = targetSub;
+            st.breakTicks = 0;
+            st.breakTotal = 0;
+            st.swappedTool = false;
+        }
+        if (!st.swappedTool) {
+            mob.equipBetterToolFor(state);             // auto-swap to the best tool the mob carries
+            st.swappedTool = true;
+        }
+        if (st.breakTotal == 0) {
+            st.breakTotal = MiningMath.breakTicks(state, level, targetSub, mob.getMainHandItem());
+        }
+
+        mob.setDigging(true);
+        // Look forward at the wall (post-selector, so this look wins, like applyControlGaze): the
+        // block is one step ahead along world-X (== sub-level X — carriage rotation is identity).
+        mob.getLookControl().setLookAt(self.getX() + dir, self.getEyeY() - 0.2, self.getZ());
+        if (st.breakTicks % DIG_SWING_INTERVAL == 0) {
+            mob.swing(InteractionHand.MAIN_HAND);
+        }
+        st.breakTicks++;
+        level.destroyBlockProgress(mob.getId(), targetSub,
+            Math.min(9, (int) (st.breakTicks / (double) st.breakTotal * 10.0)));   // cracking overlay
+        if (st.breakTicks >= st.breakTotal) {
+            // Break sound at the mob's WORLD position — reliable feedback even though the block's own
+            // break particles fire at its (far-offset) sub-level coords and may not be visible.
+            level.playSound(null, self.blockPosition(), state.getSoundType().getBreakSound(),
+                SoundSource.BLOCKS, 1.0F, 0.85F + mob.getRandom().nextFloat() * 0.1F);
+            level.destroyBlock(targetSub, /* dropBlock */ true, mob);   // vanilla break: drops on the floor
+            clearCrack(level, mob, targetSub);
+            st.target = null;
+            st.breakTicks = 0;
+            st.breakTotal = 0;
+            st.swappedTool = false;
+            // Stay in the episode: next tick re-scans the next column of fill, or clears.
+        }
+        return true;
+    }
+
+    /**
+     * The sub-level position of the diggable fill block directly ahead of {@code mob} along its
+     * march axis (foot cell first, then head — a 2-high passage), or {@code null} if the way ahead
+     * is clear / not soft fill. Reads through {@link ManagedShip#worldToShip}: the carriage's blocks
+     * live in the sub-level space, not at the mob's world position. Requires real collision so a
+     * passable decoration (e.g. moss carpet) is never treated as a wall, and excludes the protected
+     * stone-brick bed / rails.
+     */
+    private static BlockPos diggableAhead(ManagedShip ship, ServerLevel level, PlayerMobEntity mob, int dir) {
+        double wx = Mth.floor(mob.getX()) + dir + 0.5;
+        double wz = Mth.floor(mob.getZ()) + 0.5;
+        int footY = Mth.floor(mob.getY());
+        for (int dy = 0; dy <= 1; dy++) {                       // foot then head
+            Vector3d s = ship.worldToShip(new Vector3d(wx, footY + dy + 0.5, wz));
+            BlockPos subPos = BlockPos.containing(s.x, s.y, s.z);
+            BlockState state = level.getBlockState(subPos);
+            if (state.getCollisionShape(level, subPos).isEmpty()) {
+                continue;                                       // passable — not actually blocking
+            }
+            if (BlockSourcePolicy.isProtectedTrackBlock(state)) {
+                continue;                                       // never the bed/rails
+            }
+            if (TrainDigPolicy.isDiggableObstruction(state)) {
+                return subPos;
+            }
+        }
+        return null;
+    }
+
+    /** Clear the cracking overlay for {@code pos} (if any) on {@code mob}'s break channel. */
+    private static void clearCrack(ServerLevel level, PlayerMobEntity mob, BlockPos pos) {
+        if (pos != null) {
+            level.destroyBlockProgress(mob.getId(), pos, -1);
+        }
+    }
+
+    /** Stop any in-progress dig: clear the overlay, drop the target + episode, and lower the flag. */
+    private static void endDig(ServerLevel level, PlayerMobEntity mob) {
+        DigState st = DIG_STATE.get(mob);
+        if (st != null) {
+            clearCrack(level, mob, st.target);
+            st.episode = false;
+            st.clearTicks = 0;
+            st.target = null;
+            st.breakTicks = 0;
+            st.breakTotal = 0;
+            st.swappedTool = false;
+        }
+        mob.setDigging(false);
     }
 
     // ---- Resolution ------------------------------------------------------

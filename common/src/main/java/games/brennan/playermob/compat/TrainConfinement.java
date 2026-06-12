@@ -135,6 +135,16 @@ public final class TrainConfinement {
     }
 
     /**
+     * If {@code self} is on a train and stuck against soft fill (ice/dirt/mud/moss/log) blocking
+     * its march, mine that block to pass — returning {@code true} while doing so. No-op (returns
+     * {@code false}) off a train / without a train mod; see
+     * {@link TrainEnvironment#digObstructingBlock}.
+     */
+    public static boolean digObstructingBlock(Entity self) {
+        return environment.digObstructingBlock(self);
+    }
+
+    /**
      * The fixed march direction for a mob that boarded at {@code carriageIndex}:
      * march toward carriage 0 and continue past it. Negative side marches up
      * ({@code +1}); the centre and positive side march down ({@code -1}). Chosen

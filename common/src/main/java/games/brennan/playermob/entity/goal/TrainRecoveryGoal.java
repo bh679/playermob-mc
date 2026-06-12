@@ -5,6 +5,7 @@ import games.brennan.playermob.compat.TrainEnvironment;
 import games.brennan.playermob.entity.BlockSourcePolicy;
 import games.brennan.playermob.entity.EquipmentEvaluator;
 import games.brennan.playermob.entity.ItemPickupPolicy;
+import games.brennan.playermob.entity.MiningMath;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -107,9 +108,6 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
     private static final int GATHER_SCAN_RADIUS = 8;
     private static final double GATHER_REACH_SQR = 9.0;     // 3 blocks
     private static final int GATHER_PATH_TIMEOUT = 80;       // 4s to reach a gather block
-    /** Realistic break-time bounds; the actual duration scales with hardness ÷ tool speed. */
-    private static final int MIN_BREAK_TICKS = 5;
-    private static final int MAX_BREAK_TICKS = 120;
     /** "Reach for the tool" pause after an auto tool-swap: 0.1–1.0s. */
     private static final int TOOL_SWAP_MIN_TICKS = 2;
     private static final int TOOL_SWAP_MAX_TICKS = 20;
@@ -826,12 +824,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
 
     /** Realistic break duration for {@code state} with the mob's current main-hand tool. */
     private int breakTicksFor(BlockState state) {
-        float hardness = state.getDestroySpeed(mob.level(), gatherTargetPos);
-        if (hardness <= 0.0f) return MIN_BREAK_TICKS;   // instabreak-ish
-        float toolSpeed = Math.max(1.0f, mob.getMainHandItem().getDestroySpeed(state));
-        // Vanilla mining time ≈ hardness × 30 ÷ tool speed ticks for a harvestable block.
-        int ticks = Math.round(hardness * 30.0f / toolSpeed);
-        return Mth.clamp(ticks, MIN_BREAK_TICKS, MAX_BREAK_TICKS);
+        return MiningMath.breakTicks(state, mob.level(), gatherTargetPos, mob.getMainHandItem());
     }
 
     /**

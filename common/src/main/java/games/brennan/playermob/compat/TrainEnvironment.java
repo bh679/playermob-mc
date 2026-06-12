@@ -141,6 +141,19 @@ public interface TrainEnvironment {
     default void openBlockingDoor(Entity self) {}
 
     /**
+     * If {@code self} is on a train, stuck, and a soft fill block (ice/dirt/mud/moss/log)
+     * directly blocks its forward march, mine that block to clear the way and return
+     * {@code true} (still mid-dig, or just broke one). A no-op default returning {@code false}
+     * (off-train environments never dig); the Dungeon-Train impl resolves the carriage's
+     * sub-level coordinate space — the blocks don't sit at the mob's world position — and paces
+     * a realistic, tool-scaled break, exactly as {@link #openBlockingDoor} reaches for a door there.
+     *
+     * <p>Run as a per-tick reflex (after the goal selector), not a goal, for the same reason
+     * doors are: an ordinary block-breaking goal can't see the moving sub-level's blocks.</p>
+     */
+    default boolean digObstructingBlock(Entity self) { return false; }
+
+    /**
      * A world-space deck point on the carriage the mob can actually board <em>right
      * now</em> — an opening it can step/hop into (a flatbed section, or a gap in the
      * wall at least the mob's height) with solid floor beneath — or {@code null} when

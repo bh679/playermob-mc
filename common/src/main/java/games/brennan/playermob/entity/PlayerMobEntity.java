@@ -9,6 +9,7 @@ import games.brennan.playermob.entity.goal.BlockArrowsGoal;
 import games.brennan.playermob.entity.goal.CollectFloorItemsGoal;
 import games.brennan.playermob.entity.goal.CrossGroupGapGoal;
 import games.brennan.playermob.entity.goal.DefendLovedOneGoal;
+import games.brennan.playermob.entity.goal.DigThroughGoal;
 import games.brennan.playermob.entity.goal.DoorOperationGoal;
 import games.brennan.playermob.entity.goal.EatFoodGoal;
 import games.brennan.playermob.entity.goal.FleeFromCategoryGoal;
@@ -374,6 +375,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private boolean recovering;
 
     /**
+     * True only while the Dungeon-Train dig-through reflex is actively mining a fill block that's
+     * blocking this mob's march (set/cleared each tick by
+     * {@code DungeonTrainEnvironment#digObstructingBlock}). Read by {@link DigThroughGoal} to
+     * surface "Digging through" in the Creative readout. Transient server-only AI state.
+     */
+    private boolean digging;
+
+    /**
      * Fixed march direction while exploring a Dungeon Train: {@code -1} toward
      * decreasing carriage index, {@code +1} toward increasing, {@code 0} = not yet
      * latched. Set once, the first server tick the mob is found on a train, from
@@ -550,6 +559,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // attack goal and blocks between swings rather than freezing. No-op without a
         // shield in hand.
         this.goalSelector.addGoal(1, new BlockArrowsGoal(this));
+        // Surfaces "Digging through" in the Creative readout while the Dungeon-Train dig reflex
+        // mines fill blocking the march. No flags (like PlayerMobDoorGoal) so it never evicts the
+        // advance goal — the mob keeps stepping into the gap as the wall clears. No-op off a train.
+        this.goalSelector.addGoal(1, new DigThroughGoal(this));
         this.goalSelector.addGoal(2, new WeaponAwareAttackGoal(this, 1.0, 8.0f));
         // Follow the one it loves (a player or another PlayerMob): priority 2 so it
         // deprioritises every own-task (raid 3, harvest 6, train-advance 7, stroll 8) to tag
@@ -651,7 +664,13 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             // for the door block directly (in the carriage's own coordinate space), every tick,
             // regardless of which goal owns movement.
             TrainConfinement.openBlockingDoor(this);
+            // ...and, when wedged against soft fill (ice/dirt/mud/moss/logs) packing a carriage,
+            // mine it to clear the march. Like the door reflex it reaches into the carriage's
+            // sub-level block space (the fill doesn't sit at the mob's world position), so it can't
+            // be an ordinary block-breaking goal. No-op without Dungeon Train.
+            TrainConfinement.digObstructingBlock(this);
         } else {
+            setDigging(false);   // off a train ⇒ never mid-dig (the reflex that clears it doesn't run here)
             // Off a train, opening is handled by PlayerMobDoorGoal; this reflex adds the
             // close-when-stuck half — an open door can block the perpendicular path.
             recoverFromStuckDoor();
@@ -921,6 +940,20 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     /** True while actively climbing back onto a train (see {@link #recovering}). */
     public boolean isRecovering() {
         return this.recovering;
+    }
+
+    /**
+     * Marks whether the Dungeon-Train dig-through reflex is currently mining a blocking fill block
+     * (set/cleared per tick by {@code DungeonTrainEnvironment#digObstructingBlock}). Drives
+     * {@link DigThroughGoal}'s readout. See {@link #digging}.
+     */
+    public void setDigging(boolean digging) {
+        this.digging = digging;
+    }
+
+    /** True while actively mining through a blocked Dungeon-Train carriage (see {@link #digging}). */
+    public boolean isDigging() {
+        return this.digging;
     }
 
     /**

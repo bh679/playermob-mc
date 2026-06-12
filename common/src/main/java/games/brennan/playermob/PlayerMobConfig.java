@@ -26,14 +26,18 @@ public final class PlayerMobConfig {
 
     private static final String KEY_ECHO_FRIEND_CHANCE = "echoFriendChance";
     private static final String KEY_DEBUG_SPAWN_LOG = "debugSpawnLog";
+    private static final String KEY_TRAIN_DIG_THROUGH = "trainDigThrough";
 
     /** Default chance a Dungeon-Train echo with logged friends also brings back a friend-echo. */
     public static final float DEFAULT_ECHO_FRIEND_CHANCE = 0.40F;
     /** Debug spawn logging ships off — when on it broadcasts a chat line on every DT auto-spawn. */
     public static final boolean DEFAULT_DEBUG_SPAWN_LOG = false;
+    /** PlayerMobs dig through fill (ice/dirt/mud/moss/logs) blocking a Dungeon-Train carriage; on by default. */
+    public static final boolean DEFAULT_TRAIN_DIG_THROUGH = true;
 
     private static volatile float echoFriendChance = DEFAULT_ECHO_FRIEND_CHANCE;
     private static volatile boolean debugSpawnLog = DEFAULT_DEBUG_SPAWN_LOG;
+    private static volatile boolean trainDigThrough = DEFAULT_TRAIN_DIG_THROUGH;
 
     private PlayerMobConfig() {}
 
@@ -45,6 +49,15 @@ public final class PlayerMobConfig {
     /** When true, every DT auto-spawn logs + broadcasts a colour-coded chat message (see {@code DtSpawnDebug}). */
     public static boolean debugSpawnLog() {
         return debugSpawnLog;
+    }
+
+    /**
+     * When true (default), a PlayerMob riding a Dungeon Train mines soft fill blocking its march —
+     * ice, dirt, mud, moss, logs — once it's stuck against it, to pass through a packed carriage.
+     * See {@code DungeonTrainEnvironment#digObstructingBlock}.
+     */
+    public static boolean trainDigThrough() {
+        return trainDigThrough;
     }
 
     /**
@@ -72,20 +85,23 @@ public final class PlayerMobConfig {
             Values v = parse(props);
             echoFriendChance = v.echoFriendChance();
             debugSpawnLog = v.debugSpawnLog();
-            LOGGER.info("[{}] config: {}={}, {}={}", PlayerMob.MOD_ID,
-                KEY_ECHO_FRIEND_CHANCE, echoFriendChance, KEY_DEBUG_SPAWN_LOG, debugSpawnLog);
+            trainDigThrough = v.trainDigThrough();
+            LOGGER.info("[{}] config: {}={}, {}={}, {}={}", PlayerMob.MOD_ID,
+                KEY_ECHO_FRIEND_CHANCE, echoFriendChance, KEY_DEBUG_SPAWN_LOG, debugSpawnLog,
+                KEY_TRAIN_DIG_THROUGH, trainDigThrough);
         } catch (IOException | RuntimeException e) {
             LOGGER.warn("[{}] failed to load {}; using defaults", PlayerMob.MOD_ID, FILE, e);
         }
     }
 
     /** Parsed, validated values — split out (pure, no I/O) so the parsing rules are unit-tested. */
-    record Values(float echoFriendChance, boolean debugSpawnLog) {}
+    record Values(float echoFriendChance, boolean debugSpawnLog, boolean trainDigThrough) {}
 
     static Values parse(Properties props) {
         return new Values(
             clamp01(parseFloat(props.getProperty(KEY_ECHO_FRIEND_CHANCE), DEFAULT_ECHO_FRIEND_CHANCE)),
-            parseBool(props.getProperty(KEY_DEBUG_SPAWN_LOG), DEFAULT_DEBUG_SPAWN_LOG));
+            parseBool(props.getProperty(KEY_DEBUG_SPAWN_LOG), DEFAULT_DEBUG_SPAWN_LOG),
+            parseBool(props.getProperty(KEY_TRAIN_DIG_THROUGH), DEFAULT_TRAIN_DIG_THROUGH));
     }
 
     private static float parseFloat(String raw, float fallback) {
@@ -129,8 +145,12 @@ public final class PlayerMobConfig {
             + "# debugSpawnLog: when true, broadcasts a colour-coded chat message (and logs a line)\n"
             + "#   on every Dungeon-Train PlayerMob auto-spawn — yellow=friend, purple=echo,\n"
             + "#   green=echo+friend. Default false.\n"
+            + "# trainDigThrough: when true, a PlayerMob riding a Dungeon Train mines soft fill\n"
+            + "#   (ice, dirt, mud, moss, logs) blocking its march once it's stuck against it, to\n"
+            + "#   pass through a packed carriage. Default true.\n"
             + KEY_ECHO_FRIEND_CHANCE + "=" + DEFAULT_ECHO_FRIEND_CHANCE + "\n"
-            + KEY_DEBUG_SPAWN_LOG + "=" + DEFAULT_DEBUG_SPAWN_LOG + "\n";
+            + KEY_DEBUG_SPAWN_LOG + "=" + DEFAULT_DEBUG_SPAWN_LOG + "\n"
+            + KEY_TRAIN_DIG_THROUGH + "=" + DEFAULT_TRAIN_DIG_THROUGH + "\n";
         Files.writeString(file, body);
     }
 }
