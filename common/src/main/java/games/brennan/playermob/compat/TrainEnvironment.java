@@ -87,6 +87,16 @@ public interface TrainEnvironment {
     int carriageIndex(Entity self);
 
     /**
+     * The carriage (room) {@code pIdx} of a mob that may have just been spawned at a
+     * carriage's <em>sub-level</em> coordinates rather than its world position — the case
+     * for a Dungeon-Train-spawned mob inside {@code finalizeSpawn}, before it is grounded
+     * and tracked at world coords. Implementations try the world-space {@link #carriageIndex}
+     * first and fall back to a sub-level lookup; {@link #NO_CARRIAGE} if neither resolves.
+     * Used to choose a depth-appropriate reincarnation echo. A no-op default off-train.
+     */
+    default int spawnCarriageIndex(Entity self) { return NO_CARRIAGE; }
+
+    /**
      * A current world-space waypoint at the centre of the next carriage room in
      * step direction {@code dir} ({@code -1} toward decreasing index, {@code +1}
      * toward increasing) <em>within the same carriage group</em>, or {@code null}

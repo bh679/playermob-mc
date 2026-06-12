@@ -1,6 +1,7 @@
 package games.brennan.playermob.neoforge.compat;
 
 import games.brennan.dungeontrain.ship.ManagedShip;
+import games.brennan.dungeontrain.ship.Shipyards;
 import games.brennan.dungeontrain.train.Trains;
 import games.brennan.playermob.compat.TrainEnvironment;
 import games.brennan.playermob.entity.DoorObstruction;
@@ -333,6 +334,32 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
     public int carriageIndex(Entity self) {
         Trains.Carriage c = carriageAt(self);
         return c == null ? NO_CARRIAGE : roomPidx(c, self.getX());
+    }
+
+    @Override
+    public int spawnCarriageIndex(Entity self) {
+        if (!(self.level() instanceof ServerLevel level)) {
+            return NO_CARRIAGE;
+        }
+        // A mob already riding sits at world coords — the normal world-AABB path resolves it.
+        int worldIdx = carriageIndex(self);
+        if (worldIdx != NO_CARRIAGE) {
+            return worldIdx;
+        }
+        // A just-spawned mob (Dungeon Train moveTo's it before finalizeSpawn) sits at the
+        // carriage's sub-level / shipyard coordinates, not its world position. Resolve the
+        // owning ship there and read its group's base pIdx — precise enough for a wide depth
+        // band, and it avoids re-deriving room geometry in sub-level space.
+        ManagedShip ship = Shipyards.of(level).findAt(self.blockPosition());
+        if (ship == null) {
+            return NO_CARRIAGE;
+        }
+        for (Trains.Carriage c : Trains.allCarriages(level)) {
+            if (ship.equals(c.ship())) {
+                return c.provider().getPIdx();
+            }
+        }
+        return NO_CARRIAGE;
     }
 
     @Override

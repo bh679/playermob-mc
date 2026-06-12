@@ -22,6 +22,7 @@ import games.brennan.playermob.entity.goal.TrainRecoveryGoal;
 import games.brennan.playermob.entity.goal.WeaponAwareAttackGoal;
 import games.brennan.playermob.player.PlayerLifeRecord;
 import games.brennan.playermob.player.PlayerLifeStore;
+import games.brennan.playermob.player.PlayerReincarnation;
 import games.brennan.playermob.skin.PlayerMobSkin;
 import games.brennan.playermob.skin.PlayerMobSkinRegistry;
 import games.brennan.playermob.skin.SkinModel;
@@ -955,6 +956,13 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
                                         DifficultyInstance difficulty,
                                         MobSpawnType reason,
                                         SpawnGroupData data) {
+        // Dungeon Train spawns PlayerMobs via finalizeSpawn(..., EVENT, ...); give those
+        // a chance to embody a stored past life instead of a fresh random mob. Applying the
+        // snapshot here (before the rolls) pins skin + traits explicit, so the rolls below
+        // skip — same path as the reincarnation egg. Skipped when a skin is already loaded
+        // (egg / Skin* summon), so it never clobbers an explicit identity.
+        boolean reincarnated = reason == MobSpawnType.EVENT && !skinExplicit
+            && PlayerReincarnation.maybeReincarnateOnSpawn(this, world);
         // Keep a skin already loaded from NBT (a reincarnation egg's snapshot, or a
         // /summon with a Skin* tag). A spawn egg merges its entity_data BEFORE
         // finalizeSpawn, so without this guard the roll would clobber that skin.
@@ -977,8 +985,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // (an archetype egg / partial summon leaves the rest to chance).
         traits.rollIfUnset(world.getRandom());
         pushDispositionToClient();
-        // Roll the door-closing personality (~50% close behind, ~50% leave open).
-        this.closesDoors = world.getRandom().nextBoolean();
+        // Roll the door-closing personality (~50% close behind, ~50% leave open),
+        // unless a reincarnation already restored it from the past life's snapshot.
+        if (!reincarnated) {
+            this.closesDoors = world.getRandom().nextBoolean();
+        }
         return super.finalizeSpawn(world, difficulty, reason, data);
     }
 

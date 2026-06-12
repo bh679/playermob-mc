@@ -19,17 +19,19 @@ import java.util.UUID;
  * {@link DimensionDataStorage} — so it lives entirely in common code and behaves
  * identically on Fabric, Forge, and NeoForge with no per-loader plumbing.
  *
- * <p>Holds two maps:</p>
- * <ul>
- *   <li>{@code current} — each player's in-progress life tally
- *       ({@link PlayerLifeRecord}), credited as they act toward PlayerMobs.</li>
- *   <li>{@code lastLife} — the snapshot NBT of each player's most recently
- *       completed life (traits + gear + skin), built on death and consumed by the
- *       reincarnation command. Per-life scope: completing a life clears that
- *       player's {@code current} tally.</li>
- * </ul>
+ * <p>Holds each player's in-progress life tally {@code current}
+ * ({@link PlayerLifeRecord}), credited as they act toward PlayerMobs. This tally is
+ * world-scoped: it reflects conduct in the world it was earned in, and is reset when
+ * a life completes.</p>
  *
- * <p>Writes a new save file {@code world/data/playermob_lives.dat} — additive and
+ * <p>The <em>completed</em> last-life snapshots used to live here too, but now belong
+ * to {@link GlobalLifeStore} so they follow a player across worlds. The only remnant
+ * here is a transient {@code legacyLastLife} map: snapshots written by older builds
+ * are loaded so {@link GlobalLifeStore} can import them once (see
+ * {@link #drainLegacyLastLives}), and are written back on save only until that import
+ * runs — so a one-time migration can't be lost to an autosave.</p>
+ *
+ * <p>Writes a save file {@code world/data/playermob_lives.dat} — additive and
  * non-breaking (worlds without it simply start empty).</p>
  */
 public final class PlayerLifeStore extends SavedData {
@@ -43,8 +45,10 @@ public final class PlayerLifeStore extends SavedData {
     private static final String TAG_SNAPSHOT = "Snapshot";
 
     private final Map<UUID, PlayerLifeRecord> current = new HashMap<>();
-    private final Map<UUID, CompoundTag> lastLife = new HashMap<>();
-    private final Map<UUID, String> lastName = new HashMap<>();
+    // Legacy per-world last-life snapshots from builds before GlobalLifeStore existed.
+    // Retained only until the global store imports them via drainLegacyLastLives().
+    private final Map<UUID, CompoundTag> legacyLastLife = new HashMap<>();
+    private final Map<UUID, String> legacyLastName = new HashMap<>();
 
     public PlayerLifeStore() {}
 
@@ -63,20 +67,6 @@ public final class PlayerLifeStore extends SavedData {
         return current.getOrDefault(id, PlayerLifeRecord.EMPTY);
     }
 
-    /** A defensive copy of the player's last-life snapshot NBT, or {@code null} if none. */
-    public CompoundTag lastLife(UUID id) {
-        CompoundTag tag = lastLife.get(id);
-        return tag == null ? null : tag.copy();
-    }
-
-    public String lastName(UUID id) {
-        return lastName.get(id);
-    }
-
-    public boolean hasLastLife(UUID id) {
-        return lastLife.containsKey(id);
-    }
-
     // ---- writes -----------------------------------------------------------
 
     /**
@@ -93,11 +83,30 @@ public final class PlayerLifeStore extends SavedData {
         setDirty();
     }
 
-    /** Store a completed life's snapshot and reset the live tally (per-life scope). */
-    public void completeLife(UUID id, String name, CompoundTag snapshot) {
-        lastLife.put(id, snapshot.copy());
-        lastName.put(id, name);
-        current.remove(id);
+    /**
+     * Reset the player's in-progress tally — called when a life completes. The
+     * completed snapshot itself is stored in {@link GlobalLifeStore}, not here.
+     */
+    public void resetCurrent(UUID id) {
+        if (current.remove(id) != null) {
+            setDirty();
+        }
+    }
+
+    /**
+     * Move any legacy per-world last-life snapshots into {@code lifeOut}/{@code nameOut}
+     * and forget them here, so they stop being written and never re-import. The one-time
+     * bridge from the old world-scoped storage to {@link GlobalLifeStore}; a no-op once
+     * drained (and on worlds that never had legacy data).
+     */
+    public void drainLegacyLastLives(Map<UUID, CompoundTag> lifeOut, Map<UUID, String> nameOut) {
+        if (legacyLastLife.isEmpty()) {
+            return;
+        }
+        lifeOut.putAll(legacyLastLife);
+        nameOut.putAll(legacyLastName);
+        legacyLastLife.clear();
+        legacyLastName.clear();
         setDirty();
     }
 
@@ -117,18 +126,22 @@ public final class PlayerLifeStore extends SavedData {
         }
         tag.put(TAG_CURRENT, currentList);
 
-        ListTag lastList = new ListTag();
-        for (Map.Entry<UUID, CompoundTag> e : lastLife.entrySet()) {
-            CompoundTag entry = new CompoundTag();
-            entry.putUUID(TAG_UUID, e.getKey());
-            String name = lastName.get(e.getKey());
-            if (name != null) {
-                entry.putString(TAG_NAME, name);
+        // Retain un-migrated legacy snapshots so a pre-update world keeps them until the
+        // global store imports them; drops away once drainLegacyLastLives() has run.
+        if (!legacyLastLife.isEmpty()) {
+            ListTag lastList = new ListTag();
+            for (Map.Entry<UUID, CompoundTag> e : legacyLastLife.entrySet()) {
+                CompoundTag entry = new CompoundTag();
+                entry.putUUID(TAG_UUID, e.getKey());
+                String name = legacyLastName.get(e.getKey());
+                if (name != null) {
+                    entry.putString(TAG_NAME, name);
+                }
+                entry.put(TAG_SNAPSHOT, e.getValue().copy());
+                lastList.add(entry);
             }
-            entry.put(TAG_SNAPSHOT, e.getValue().copy());
-            lastList.add(entry);
+            tag.put(TAG_LAST, lastList);
         }
-        tag.put(TAG_LAST, lastList);
         return tag;
     }
 
@@ -143,14 +156,16 @@ public final class PlayerLifeStore extends SavedData {
             }
         }
 
+        // Legacy last-life snapshots from older builds — loaded only so GlobalLifeStore
+        // can import them once; current builds write these in the global file instead.
         ListTag lastList = tag.getList(TAG_LAST, Tag.TAG_COMPOUND);
         for (int i = 0; i < lastList.size(); i++) {
             CompoundTag entry = lastList.getCompound(i);
             if (entry.hasUUID(TAG_UUID)) {
                 UUID id = entry.getUUID(TAG_UUID);
-                store.lastLife.put(id, entry.getCompound(TAG_SNAPSHOT));
+                store.legacyLastLife.put(id, entry.getCompound(TAG_SNAPSHOT));
                 if (entry.contains(TAG_NAME, Tag.TAG_STRING)) {
-                    store.lastName.put(id, entry.getString(TAG_NAME));
+                    store.legacyLastName.put(id, entry.getString(TAG_NAME));
                 }
             }
         }
