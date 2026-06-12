@@ -2027,6 +2027,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // Credit the real player's lifetime kindness by the gift's worth.
         if (gifter instanceof ServerPlayer sp) {
             PlayerLifeStore.record(sp, PlayerLifeRecord.Signal.GIFT, delta);
+            // Announce a player→mob gift so an optional mod (e.g. Dungeon Train's befriended
+            // advancement) can credit it by subscribing to PlayerMobSocialHooks — no mixin
+            // into the pickup path required. No-op when nothing is installed.
+            PlayerMobSocialHooks.onPlayerGift(sp, getUUID());
         }
         pushDispositionToClient();
     }

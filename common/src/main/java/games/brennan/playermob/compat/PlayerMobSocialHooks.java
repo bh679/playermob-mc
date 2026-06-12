@@ -5,37 +5,38 @@ import net.minecraft.server.level.ServerPlayer;
 import java.util.UUID;
 
 /**
- * Optional-mod integration seam for social interactions a PlayerMob initiates toward a
- * player. Today it carries one signal — a PlayerMob gave a player a gift — used by
- * Dungeon Train's "befriended" advancement.
+ * Optional-mod integration seam for gift exchanges between a PlayerMob and a player —
+ * both directions, used by Dungeon Train's "befriended" advancements.
  *
  * <p>Mirrors the {@link TrainConfinement#install} backfill pattern: the observer defaults
  * to a no-op and is replaced exactly once, at boot, by a consuming mod. PlayerMob
- * <em>owns and announces</em> the event (it fires {@link #onMobGift} from its own gift
- * action); consumers subscribe here rather than mixing into PlayerMob internals — so the
+ * <em>owns and announces</em> these events (it fires them from its own gift / pickup
+ * actions); consumers subscribe here rather than mixing into PlayerMob internals — so the
  * integration doesn't break when PlayerMob's gift implementation changes. When no consumer
- * is present (every loader without such a mod) the call is a zero-cost no-op.</p>
+ * is installed (every loader without such a mod) the calls are zero-cost no-ops.</p>
  *
- * <p>Server-thread only: fired from the gift action, which runs server-side.</p>
+ * <p>Server-thread only: fired from the gift/pickup actions, which run server-side.</p>
  */
 public final class PlayerMobSocialHooks {
 
-    /** Notified when a PlayerMob successfully tosses a gift to a player. */
-    @FunctionalInterface
+    /**
+     * A consumer of PlayerMob gift events. Both methods default to no-ops, so an observer
+     * can implement only the direction it cares about.
+     */
     public interface GiftObserver {
-        /**
-         * @param recipient the player the gift was thrown to
-         * @param mobId     the UUID of the PlayerMob that gave it
-         */
-        void onMobGift(ServerPlayer recipient, UUID mobId);
+        /** A PlayerMob ({@code mobId}) gave a gift to {@code recipient}. */
+        default void onMobGift(ServerPlayer recipient, UUID mobId) {}
+
+        /** {@code giver} gave a gift to a PlayerMob ({@code mobId}). */
+        default void onPlayerGift(ServerPlayer giver, UUID mobId) {}
     }
 
-    private static volatile GiftObserver observer = (recipient, mobId) -> {};
+    private static volatile GiftObserver observer = new GiftObserver() {};
 
     private PlayerMobSocialHooks() {}
 
     /**
-     * Install the active gift observer. Called once during loader boot by a consuming mod
+     * Install the active observer. Called once during loader boot by a consuming mod
      * (e.g. from inside its {@code ModList.isLoaded("playermob")} guard); never called on
      * runs without such a mod, so the holder stays the no-op default.
      */
@@ -43,12 +44,13 @@ public final class PlayerMobSocialHooks {
         observer = newObserver;
     }
 
-    /**
-     * Announce that {@code mobId} gave {@code recipient} a gift. A no-op without an
-     * installed observer. Called from {@code PlayerMobEntity.tossGift} when the target is a
-     * player.
-     */
+    /** Announce that {@code mobId} gave {@code recipient} a gift. Fired from {@code PlayerMobEntity.tossGift}. */
     public static void onMobGift(ServerPlayer recipient, UUID mobId) {
         observer.onMobGift(recipient, mobId);
+    }
+
+    /** Announce that {@code giver} gave a gift to {@code mobId}. Fired when a PlayerMob accepts a player's tossed item. */
+    public static void onPlayerGift(ServerPlayer giver, UUID mobId) {
+        observer.onPlayerGift(giver, mobId);
     }
 }
