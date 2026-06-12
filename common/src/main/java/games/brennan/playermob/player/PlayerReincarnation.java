@@ -3,6 +3,7 @@ package games.brennan.playermob.player;
 import com.mojang.logging.LogUtils;
 import games.brennan.playermob.PlayerMobRegistry;
 import games.brennan.playermob.compat.TrainConfinement;
+import games.brennan.playermob.entity.DispositionResolver;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
@@ -19,6 +20,7 @@ import net.minecraft.world.level.ServerLevelAccessor;
 import org.slf4j.Logger;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
@@ -52,6 +54,16 @@ public final class PlayerReincarnation {
         EquipmentSlot.MAINHAND, EquipmentSlot.OFFHAND
     };
 
+    /**
+     * Radius, in blocks, scanned around a dying player for the loved-one PlayerMobs whose snapshots
+     * become friend-echoes (see {@link #captureFriendSnapshots}). Generous enough to span a few
+     * Dungeon-Train carriages, since loving mobs travel with the player; only loaded mobs are seen.
+     */
+    private static final double FRIEND_SCAN_RADIUS = 64.0;
+
+    /** Most loved-one snapshots kept per death — bounds {@code lives.dat} growth (most-loved first). */
+    private static final int FRIEND_SNAPSHOT_CAP = 4;
+
     private PlayerReincarnation() {}
 
     /**
@@ -70,8 +82,11 @@ public final class PlayerReincarnation {
             store.resetCurrent(player.getUUID());
             // Record the carriage they died in so Dungeon-Train echoes can match depth.
             int carriage = TrainConfinement.carriageIndex(player);
+            // Snapshot the PlayerMobs that loved this player so an echo of them can later return
+            // alongside a friend-echo of one of those loved ones (with its last-seen gear).
+            List<CompoundTag> friends = captureFriendSnapshots(level, player);
             GlobalLifeStore global = GlobalLifeStore.get(level.getServer());
-            global.append(player.getUUID(), player.getGameProfile().getName(), carriage, snapshot);
+            global.append(player.getUUID(), player.getGameProfile().getName(), carriage, snapshot, friends);
             // A new life begins on respawn — all past lives are available to meet again.
             global.resetSession(player.getUUID());
         } catch (RuntimeException e) {
@@ -99,7 +114,9 @@ public final class PlayerReincarnation {
 
     /**
      * With probability {@link #REINCARNATION_SPAWN_CHANCE}, turn a freshly-created
-     * Dungeon-Train PlayerMob into a stored past life; returns {@code true} if it did.
+     * Dungeon-Train PlayerMob into a stored past life; returns the embodied
+     * {@link GlobalLifeStore.DeathRecord} (whose {@code friendSnapshots} the caller may replay as a
+     * friend-echo), or {@code null} if it stayed a fresh mob.
      * Called from {@link PlayerMobEntity#finalizeSpawn} for {@code EVENT} spawns,
      * <em>before</em> the default skin/trait rolls — applying the snapshot via
      * {@code readAdditionalSaveData} pins the skin and traits explicit so those rolls
@@ -108,13 +125,13 @@ public final class PlayerReincarnation {
      * <p>The life is drawn from the global death log by {@link GlobalLifeStore#pickEchoFor}:
      * deaths within {@link GlobalLifeStore#CARRIAGE_RADIUS} carriages of the spawn that the
      * nearest player hasn't met this life, weighted toward newer deaths. No eligible life
-     * (empty band / all met / unresolved carriage) returns {@code false} so the spawn falls
+     * (empty band / all met / unresolved carriage) returns {@code null} so the spawn falls
      * back to a normal random PlayerMob. Never throws into the spawn flow.</p>
      */
-    public static boolean maybeReincarnateOnSpawn(PlayerMobEntity mob, ServerLevelAccessor world) {
+    public static GlobalLifeStore.DeathRecord maybeReincarnateOnSpawn(PlayerMobEntity mob, ServerLevelAccessor world) {
         try {
             if (world.getRandom().nextFloat() >= REINCARNATION_SPAWN_CHANCE) {
-                return false;
+                return null;
             }
             ServerLevel level = world.getLevel();
             int spawnCarriage = TrainConfinement.spawnCarriageIndex(mob);
@@ -124,7 +141,7 @@ public final class PlayerReincarnation {
             GlobalLifeStore store = GlobalLifeStore.get(level.getServer());
             GlobalLifeStore.DeathRecord echo = store.pickEchoFor(owner, spawnCarriage, world.getRandom());
             if (echo == null) {
-                return false;
+                return null;
             }
             mob.readAdditionalSaveData(echo.snapshot().copy());
             // Name the echo after the past life so it reads as a returning soul — and,
@@ -134,10 +151,10 @@ public final class PlayerReincarnation {
             // wins. Mirrors the reincarnation egg's "Echo of X" label.
             mob.setCustomName(Component.literal("Echo of " + echo.name()));
             mob.setCustomNameVisible(true);
-            return true;
+            return echo;
         } catch (RuntimeException e) {
             LOGGER.error("[playermob] failed to apply a reincarnation on spawn", e);
-            return false;
+            return null;
         }
     }
 
@@ -224,5 +241,80 @@ public final class PlayerReincarnation {
             backpack.setItem(slot++, stack);
         }
         return slot;
+    }
+
+    // ---- friend capture (loved-one snapshots for friend-echoes) -----------
+
+    /**
+     * Snapshot the PlayerMobs that loved {@code player} at death — those within
+     * {@link #FRIEND_SCAN_RADIUS} whose feeling is {@link DispositionResolver#FEELING_LOVE} or more —
+     * keeping the {@link #FRIEND_SNAPSHOT_CAP} most-loved. Each snapshot is the mob's own
+     * {@code addAdditionalSaveData} (skin/identity, gear, traits, feelings), the same form
+     * {@link #buildSnapshot} captures, plus a {@code FriendLabel} for its friend-echo's title. Only
+     * loaded mobs are visible; a loved one elsewhere on the train simply isn't logged this death.
+     */
+    private static List<CompoundTag> captureFriendSnapshots(ServerLevel level, ServerPlayer player) {
+        List<PlayerMobEntity> lovers = new ArrayList<>();
+        List<Float> feelings = new ArrayList<>();
+        for (PlayerMobEntity mob : level.getEntitiesOfClass(
+                PlayerMobEntity.class, player.getBoundingBox().inflate(FRIEND_SCAN_RADIUS))) {
+            float feeling = mob.feelingToward(player);
+            if (feeling >= DispositionResolver.FEELING_LOVE) {
+                lovers.add(mob);
+                feelings.add(feeling);
+            }
+        }
+        if (lovers.isEmpty()) {
+            return List.of();
+        }
+        float[] scores = new float[feelings.size()];
+        for (int i = 0; i < scores.length; i++) {
+            scores[i] = feelings.get(i);
+        }
+        List<CompoundTag> out = new ArrayList<>();
+        for (int idx : topIndices(scores, FRIEND_SNAPSHOT_CAP)) {
+            out.add(snapshotFriend(lovers.get(idx)));
+        }
+        return out;
+    }
+
+    /** Serialise one loved-one mob into a friend snapshot: its full state plus its friend-echo label. */
+    private static CompoundTag snapshotFriend(PlayerMobEntity mob) {
+        CompoundTag tag = new CompoundTag();
+        mob.addAdditionalSaveData(tag);
+        // Egg/ItemStack encoding needs an "id"; harmless for the direct create()+readAdditionalSaveData path.
+        tag.putString("id", PlayerMobRegistry.PLAYER_MOB_ID.toString());
+        tag.putString(GlobalLifeStore.FRIEND_LABEL_KEY, friendLabel(mob));
+        return tag;
+    }
+
+    /**
+     * The name a loved one's friend-echo is titled with. A friend that is itself an echo carries its
+     * source player's name in its skin ref — use that, so the result reads "Echo of &lt;player&gt;"
+     * rather than "Echo of Echo of …"; otherwise fall back to the mob's display name.
+     */
+    private static String friendLabel(PlayerMobEntity mob) {
+        return SourceProfileSkin.decode(mob.getSkinTextureUrl())
+            .map(SourceProfileSkin.Ref::name)
+            .filter(name -> !name.isBlank())
+            .orElse(mob.getName().getString());
+    }
+
+    /**
+     * Indices of the (up to) {@code cap} highest values in {@code scores}, highest first; ties keep
+     * ascending index order. Pure (no world) so the most-loved selection is unit-tested directly.
+     */
+    static int[] topIndices(float[] scores, int cap) {
+        Integer[] order = new Integer[scores.length];
+        for (int i = 0; i < order.length; i++) {
+            order[i] = i;
+        }
+        Arrays.sort(order, (a, b) -> Float.compare(scores[b], scores[a])); // highest first, stable on ties
+        int k = Math.min(cap, scores.length);
+        int[] out = new int[k];
+        for (int i = 0; i < k; i++) {
+            out[i] = order[i];
+        }
+        return out;
     }
 }

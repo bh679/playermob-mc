@@ -22,6 +22,7 @@ import net.neoforged.fml.ModList;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.neoforged.fml.loading.FMLEnvironment;
+import net.neoforged.fml.loading.FMLPaths;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.common.extensions.IMenuTypeExtension;
 import net.neoforged.neoforge.event.AddReloadListenerEvent;
@@ -36,7 +37,7 @@ import net.neoforged.neoforge.registries.DeferredRegister;
  * NeoForge loader entrypoint. Registers the entity type, the random spawn egg,
  * the five player-facing archetype eggs (in a static block),
  * attributes, and creative-tab placement via DeferredRegister + the matching
- * event-bus listeners, then hands off to {@link PlayerMob#init()} once
+ * event-bus listeners, then hands off to {@link PlayerMob#init} once
  * registration completes (FMLCommonSetupEvent).
  *
  * <p>Egg colours / {@code entity_data} are built by {@link PlayerMobRegistry};
@@ -140,7 +141,7 @@ public final class PlayerMobNeoForge {
         if (ModList.get().isLoaded("dungeontrain")) {
             installDungeonTrain();
         }
-        PlayerMob.init();
+        PlayerMob.init(FMLPaths.CONFIGDIR.get());
     }
 
     /**

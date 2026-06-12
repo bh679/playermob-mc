@@ -26,6 +26,7 @@ import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.fml.loading.FMLEnvironment;
+import net.minecraftforge.fml.loading.FMLPaths;
 import net.minecraftforge.registries.DeferredRegister;
 import net.minecraftforge.registries.RegistryObject;
 
@@ -126,6 +127,6 @@ public final class PlayerMobForge {
                     (id, inv, player) -> new PlayerMobMenu(id, inv, mob),
                     Component.translatable("container.playermob.player_mob")),
                 buf -> buf.writeVarInt(mob.getId()));
-        PlayerMob.init();
+        PlayerMob.init(FMLPaths.CONFIGDIR.get());
     }
 }

@@ -3,6 +3,8 @@ package games.brennan.playermob;
 import com.mojang.logging.LogUtils;
 import org.slf4j.Logger;
 
+import java.nio.file.Path;
+
 /**
  * Common-side post-registration hook. Loader-specific entries
  * ({@code PlayerMobFabric}, {@code PlayerMobForge}, {@code PlayerMobNeoForge})
@@ -29,11 +31,14 @@ public final class PlayerMob {
      * {@link PlayerMobRegistry#PLAYER_MOB_SPAWN_EGG}. Any common-side wiring
      * that depends on the registered types belongs here.
      *
-     * <p>Currently a no-op beyond logging — registration lives per-loader (see
-     * {@link PlayerMobRegistry} for the rationale). Add wiring here if a
-     * future feature needs common code to fire on every loader boot.</p>
+     * <p>Loads {@link PlayerMobConfig} from {@code configDir} (the only common wiring so far),
+     * then logs — registration lives per-loader (see {@link PlayerMobRegistry} for the rationale).</p>
+     *
+     * @param configDir the loader's config directory (Fabric {@code getConfigDir()},
+     *     Forge/NeoForge {@code FMLPaths.CONFIGDIR}); {@code playermob.properties} is read from it.
      */
-    public static void init() {
+    public static void init(Path configDir) {
+        PlayerMobConfig.load(configDir);
         LOGGER.info("[{}] common init — entity={}, spawn egg={}",
                     MOD_ID,
                     PlayerMobRegistry.PLAYER_MOB,

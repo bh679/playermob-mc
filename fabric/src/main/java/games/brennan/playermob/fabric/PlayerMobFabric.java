@@ -12,6 +12,7 @@ import net.fabricmc.fabric.api.itemgroup.v1.ItemGroupEvents;
 import net.fabricmc.fabric.api.object.builder.v1.entity.FabricDefaultAttributeRegistry;
 import net.fabricmc.fabric.api.resource.ResourceManagerHelper;
 import net.fabricmc.fabric.api.screenhandler.v1.ExtendedScreenHandlerType;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.codec.ByteBufCodecs;
@@ -24,7 +25,7 @@ import net.minecraft.world.item.CreativeModeTabs;
  * Fabric loader entrypoint. Registers the entity type, the random spawn egg
  * plus the five player-facing personality archetype eggs, default attributes,
  * and creative-tab placement using Fabric-native APIs, then defers to
- * {@link PlayerMob#init()} for shared post-registration logic.
+ * {@link PlayerMob#init} for shared post-registration logic.
  *
  * <p>Egg colours, the {@code entity_data} payload, and the {@code SpawnEggItem}
  * construction all live in {@link PlayerMobRegistry} so the three loaders share
@@ -99,6 +100,6 @@ public final class PlayerMobFabric implements ModInitializer {
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
             ReincarnateCommand.register(dispatcher));
 
-        PlayerMob.init();
+        PlayerMob.init(FabricLoader.getInstance().getConfigDir());
     }
 }
