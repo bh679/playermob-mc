@@ -803,19 +803,27 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
 
     /**
      * The sub-level position of the diggable fill block directly ahead of {@code mob} along its
-     * march axis (foot cell first, then head — a 2-high passage), or {@code null} if the way ahead
-     * is clear / not soft fill. Reads through {@link ManagedShip#worldToShip}: the carriage's blocks
-     * live in the sub-level space, not at the mob's world position. Requires real collision so a
-     * passable decoration (e.g. moss carpet) is never treated as a wall, and excludes the protected
-     * stone-brick bed / rails.
+     * march axis (leg cell first, then head — a 2-high passage), or {@code null} if the way ahead
+     * is clear / not soft fill. Reads in the carriage's sub-level frame ({@link ManagedShip#worldToShip}):
+     * the blocks live there, not at the mob's world position, and Dungeon Train locks carriage
+     * rotation to identity, so world ±X equals sub ±X.
+     *
+     * <p><b>Never the bottom layer.</b> The scan starts at the <em>leg</em> row — the block whose
+     * bottom sits at the walking surface, taken as {@code round(feetY)} so a hair of collision sink
+     * or a half-height (slab) floor can't drop it onto the floor block — and only goes up from there.
+     * Nothing at or below the floor (deck) is ever a target, so a packed carriage's bottom layer is
+     * never mined out from under the train (themed DT floors can themselves be dirt/moss/slab fill).
+     * Also requires real collision so passable decoration (e.g. moss carpet) isn't treated as a wall,
+     * and excludes the protected stone-brick bed / rails.</p>
      */
     private static BlockPos diggableAhead(ManagedShip ship, ServerLevel level, PlayerMobEntity mob, int dir) {
-        double wx = Mth.floor(mob.getX()) + dir + 0.5;
-        double wz = Mth.floor(mob.getZ()) + 0.5;
-        int footY = Mth.floor(mob.getY());
-        for (int dy = 0; dy <= 1; dy++) {                       // foot then head
-            Vector3d s = ship.worldToShip(new Vector3d(wx, footY + dy + 0.5, wz));
-            BlockPos subPos = BlockPos.containing(s.x, s.y, s.z);
+        Vector3d feet = ship.worldToShip(new Vector3d(mob.getX(), mob.getY(), mob.getZ()));
+        int aheadX = Mth.floor(feet.x) + dir;
+        int subZ = Mth.floor(feet.z);
+        // Leg row, rounded so it's always the block ABOVE the floor — never the floor/deck itself.
+        int legY = Mth.floor(feet.y + 0.5);
+        for (int dy = 0; dy <= 1; dy++) {                       // legs then head — a 2-high passage
+            BlockPos subPos = new BlockPos(aheadX, legY + dy, subZ);
             BlockState state = level.getBlockState(subPos);
             if (state.getCollisionShape(level, subPos).isEmpty()) {
                 continue;                                       // passable — not actually blocking
