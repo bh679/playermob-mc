@@ -1,6 +1,7 @@
 package games.brennan.playermob.entity;
 
 import games.brennan.playermob.PlayerMobRegistry;
+import games.brennan.playermob.compat.PlayerMobSocialHooks;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.goal.AdvanceCarriageGoal;
 import games.brennan.playermob.entity.goal.BlockArrowsGoal;
@@ -1509,6 +1510,12 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // independent of the thrower, so this doesn't change re-collection timing.
         thrown.setThrower(this);
         level().addFreshEntity(thrown);
+        // Announce a gift to a player so an optional mod (e.g. Dungeon Train's befriended
+        // advancement) can credit it by subscribing to PlayerMobSocialHooks — no mixin into
+        // this method required. No-op when nothing is installed.
+        if (target instanceof ServerPlayer recipient) {
+            PlayerMobSocialHooks.onMobGift(recipient, getUUID());
+        }
     }
 
     /** A flower — the last-resort gift when the pack is empty and nothing's nearby to fetch. */
@@ -2020,6 +2027,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // Credit the real player's lifetime kindness by the gift's worth.
         if (gifter instanceof ServerPlayer sp) {
             PlayerLifeStore.record(sp, PlayerLifeRecord.Signal.GIFT, delta);
+            // Announce a player→mob gift so an optional mod (e.g. Dungeon Train's befriended
+            // advancement) can credit it by subscribing to PlayerMobSocialHooks — no mixin
+            // into the pickup path required. No-op when nothing is installed.
+            PlayerMobSocialHooks.onPlayerGift(sp, getUUID());
         }
         pushDispositionToClient();
     }
