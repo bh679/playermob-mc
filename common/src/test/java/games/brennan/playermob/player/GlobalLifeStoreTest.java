@@ -68,6 +68,28 @@ class GlobalLifeStoreTest {
     }
 
     @Test
+    void writeReadRoundTripPreservesFriendSnapshots() {
+        CompoundTag alice = snap("alice");
+        alice.putString(GlobalLifeStore.FRIEND_LABEL_KEY, "Alice");
+        CompoundTag bob = snap("bob");
+        bob.putString(GlobalLifeStore.FRIEND_LABEL_KEY, "Bob");
+        DeathRecord hosted = new DeathRecord(1, uuid(1), "P1", 0, snap("host"), List.of(alice, bob));
+        DeathRecord lonely = new DeathRecord(2, uuid(2), "P2", 3, snap("solo")); // 5-arg ctor -> no friends
+
+        CompoundTag tag = new CompoundTag();
+        GlobalLifeStore.write(tag, List.of(hosted, lonely), 3L);
+        List<DeathRecord> back = new ArrayList<>();
+        GlobalLifeStore.read(tag, back);
+
+        List<CompoundTag> friends = back.get(0).friendSnapshots();
+        assertEquals(2, friends.size());
+        assertEquals("Alice", friends.get(0).getString(GlobalLifeStore.FRIEND_LABEL_KEY));
+        assertEquals("bob", friends.get(1).getString("Marker"));
+        // No friends -> no "Friends" tag written -> reads back empty (the path an older lives.dat takes).
+        assertTrue(back.get(1).friendSnapshots().isEmpty());
+    }
+
+    @Test
     void readLegacyLivesFormatMigratesWithUnknownCarriage() {
         // Pre-death-log global format: one snapshot per player under "Lives", no ids/carriage.
         CompoundTag tag = new CompoundTag();

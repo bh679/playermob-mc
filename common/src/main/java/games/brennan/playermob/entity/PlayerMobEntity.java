@@ -22,6 +22,7 @@ import games.brennan.playermob.entity.goal.TrainRecoveryGoal;
 import games.brennan.playermob.entity.goal.WeaponAwareAttackGoal;
 import games.brennan.playermob.player.PlayerLifeRecord;
 import games.brennan.playermob.player.PlayerLifeStore;
+import games.brennan.playermob.player.GlobalLifeStore;
 import games.brennan.playermob.player.PlayerReincarnation;
 import games.brennan.playermob.skin.PlayerMobSkin;
 import games.brennan.playermob.skin.PlayerMobSkinRegistry;
@@ -393,6 +394,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * {@link #maybeSpawnFriendPair}).
      */
     private static final float DT_PAIR_CHANCE = 0.10F;
+
+    /**
+     * Chance, per Dungeon-Train echo spawn that has logged friends, to also bring back a friend-echo
+     * of one of them (see {@link #spawnFriendEcho}). Higher than {@link #DT_PAIR_CHANCE} because it's
+     * already gated behind the echo roll and the dead player having had a loved one — still the mod's
+     * one-named-constant-per-probability style.
+     */
+    private static final float ECHO_FRIEND_CHANCE = 0.50F;
 
     /**
      * UUID of the Dungeon-Train spawn companion this mob was paired with as max friends, or
@@ -1004,10 +1013,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // snapshot here (before the rolls) pins skin + traits explicit, so the rolls below
         // skip — same path as the reincarnation egg. Skipped when a skin is already loaded
         // (egg / Skin* summon), so it never clobbers an explicit identity.
-        boolean reincarnated = reason == MobSpawnType.EVENT && !skinExplicit
-            && PlayerReincarnation.maybeReincarnateOnSpawn(this, world);
-        rollSpawnDefaults(world.getRandom(), reincarnated);
-        maybeSpawnFriendPair(world, reason);
+        GlobalLifeStore.DeathRecord echo = reason == MobSpawnType.EVENT && !skinExplicit
+            ? PlayerReincarnation.maybeReincarnateOnSpawn(this, world) : null;
+        rollSpawnDefaults(world.getRandom(), echo != null);
+        maybeSpawnFriendPair(world, reason, echo);
         return super.finalizeSpawn(world, difficulty, reason, data);
     }
 
@@ -1049,41 +1058,95 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     }
 
     /**
-     * On a Dungeon-Train ({@link MobSpawnType#EVENT}) spawn, with probability
-     * {@link #DT_PAIR_CHANCE}, spawn one companion PlayerMob beside this one and set both as
-     * max friends (feeling {@link FeelingLedger#MAX}) toward each other, linked via
-     * {@link #trainPairPartner} so they march the train together.
+     * On a Dungeon-Train ({@link MobSpawnType#EVENT}) spawn, maybe spawn one companion PlayerMob
+     * beside this one as mutual max friends (see {@link #linkAsFriends}). Two flavours:
      *
-     * <p>The companion is built with {@code EntityType.create} + {@code addFreshEntity},
-     * which does <em>not</em> invoke {@link #finalizeSpawn} — so it neither re-rolls a pair
-     * nor recurses, and a spawn yields exactly a duo, never a chain. Egg / {@code /summon}
-     * spawns aren't {@code EVENT}, so this is a no-op for them.</p>
+     * <ul>
+     *   <li><b>Echo with logged friends</b> ({@code echo != null}, non-empty {@code friendSnapshots}):
+     *       with probability {@link #ECHO_FRIEND_CHANCE}, bring back a {@linkplain #spawnFriendEcho
+     *       friend-echo} of someone who actually loved this life — rebuilt with their last-seen gear.</li>
+     *   <li><b>Anything else</b> (a fresh non-echo mob): with probability {@link #DT_PAIR_CHANCE}, a
+     *       {@linkplain #spawnRandomFriend simple random buddy}. An echo whose life had no logged
+     *       friend spawns alone.</li>
+     * </ul>
+     *
+     * <p>Either companion is built with {@code EntityType.create} + {@code addFreshEntity}, which does
+     * <em>not</em> invoke {@link #finalizeSpawn} — so it neither re-rolls a pair nor recurses, and a
+     * spawn yields exactly a duo, never a chain. Egg / {@code /summon} spawns aren't {@code EVENT},
+     * so this is a no-op for them.</p>
      */
-    private void maybeSpawnFriendPair(ServerLevelAccessor world, MobSpawnType reason) {
+    private void maybeSpawnFriendPair(ServerLevelAccessor world, MobSpawnType reason,
+                                      GlobalLifeStore.DeathRecord echo) {
         if (reason != MobSpawnType.EVENT) {
             return;                                   // only natural Dungeon-Train spawns pair up
         }
-        if (world.getRandom().nextFloat() >= DT_PAIR_CHANCE) {
-            return;
+        RandomSource random = world.getRandom();
+        if (echo != null) {
+            List<CompoundTag> friends = echo.friendSnapshots();
+            if (friends.isEmpty() || random.nextFloat() >= ECHO_FRIEND_CHANCE) {
+                return;                               // no one loved this life, or the roll missed
+            }
+            spawnFriendEcho(world, friends.get(random.nextInt(friends.size())));
+        } else if (random.nextFloat() < DT_PAIR_CHANCE) {
+            spawnRandomFriend(world);
         }
+    }
+
+    /** Spawn a fresh random max-friends buddy beside this mob (the non-echo pair). */
+    private void spawnRandomFriend(ServerLevelAccessor world) {
         ServerLevel level = world.getLevel();
         PlayerMobEntity friend = PlayerMobRegistry.PLAYER_MOB.create(level);
         if (friend == null) {
             return;
         }
-        // Spawn on this mob's already-valid tile; entity collision separates them next tick.
-        // Avoids clipping the companion into a carriage wall by guessing an offset.
-        friend.moveTo(getX(), getY(), getZ(), getYRot(), 0.0F);
+        placeCompanion(friend);
         friend.rollSpawnDefaults(world.getRandom(), false);
-        // Mutual max friendship — persisted via the FeelingLedger NBT, synced for the menu.
+        linkAsFriends(friend);
+        level.addFreshEntity(friend);
+    }
+
+    /**
+     * Spawn a friend-echo beside this mob from a stored {@code friendSnapshot} — a PlayerMob that
+     * loved the life this echo embodies. {@code readAdditionalSaveData} rebuilds it exactly as last
+     * seen (skin/identity, gear, traits), and it's titled "Echo of &lt;label&gt;" from the snapshot's
+     * {@link GlobalLifeStore#FRIEND_LABEL_KEY}. Like {@link #spawnRandomFriend} it skips
+     * {@code finalizeSpawn}, so the friend-echo never rolls its own echo or friend.
+     */
+    private void spawnFriendEcho(ServerLevelAccessor world, CompoundTag friendSnapshot) {
+        ServerLevel level = world.getLevel();
+        PlayerMobEntity friend = PlayerMobRegistry.PLAYER_MOB.create(level);
+        if (friend == null) {
+            return;
+        }
+        placeCompanion(friend);
+        friend.readAdditionalSaveData(friendSnapshot.copy());
+        String label = friendSnapshot.getString(GlobalLifeStore.FRIEND_LABEL_KEY);
+        friend.setCustomName(Component.literal("Echo of " + (label.isBlank() ? "a friend" : label)));
+        friend.setCustomNameVisible(true);
+        linkAsFriends(friend);
+        level.addFreshEntity(friend);
+    }
+
+    /**
+     * Place {@code friend} on this mob's already-valid tile; entity collision separates them next
+     * tick. Avoids clipping the companion into a carriage wall by guessing an offset.
+     */
+    private void placeCompanion(PlayerMobEntity friend) {
+        friend.moveTo(getX(), getY(), getZ(), getYRot(), 0.0F);
+    }
+
+    /**
+     * Make {@code friend} and this mob mutual max friends (feeling {@link FeelingLedger#MAX}), synced
+     * for the menu, and link them via {@link #trainPairPartner} so they latch one shared march
+     * direction (see {@link #latchTrainExploreDirection}) and travel the train together.
+     */
+    private void linkAsFriends(PlayerMobEntity friend) {
         this.feelings.set(friend.getUUID(), FeelingLedger.MAX);
         friend.feelings.set(this.getUUID(), FeelingLedger.MAX);
         this.pushDispositionToClient();
         friend.pushDispositionToClient();
-        // Link the pair so they latch one shared march direction (latchTrainExploreDirection).
         this.trainPairPartner = friend.getUUID();
         friend.trainPairPartner = this.getUUID();
-        level.addFreshEntity(friend);
     }
 
     // ---- Despawn / persistence -------------------------------------------

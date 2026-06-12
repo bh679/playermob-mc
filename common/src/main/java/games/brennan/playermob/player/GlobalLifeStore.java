@@ -63,9 +63,24 @@ public final class GlobalLifeStore {
     private static final String TAG_NAME = "Name";
     private static final String TAG_CARRIAGE = "Carriage";
     private static final String TAG_SNAPSHOT = "Snapshot";
+    private static final String TAG_FRIENDS = "Friends";
 
-    /** One recorded death: a snapshot plus where/when it happened. */
-    public record DeathRecord(long id, UUID uuid, String name, int carriage, CompoundTag snapshot) {}
+    /** NBT key, inside a friend snapshot, holding the label its friend-echo is titled with ("Echo of &lt;label&gt;"). */
+    public static final String FRIEND_LABEL_KEY = "FriendLabel";
+
+    /**
+     * One recorded death: the player's own reincarnation snapshot, where/when it happened, and
+     * snapshots of the PlayerMobs that loved them at death ({@code friendSnapshots}) — replayed as
+     * "friend-echoes" beside an echo of this life. Empty when no loved one was nearby, and for every
+     * pre-friend-pair record.
+     */
+    public record DeathRecord(long id, UUID uuid, String name, int carriage,
+                              CompoundTag snapshot, List<CompoundTag> friendSnapshots) {
+        /** A death with no logged friends — keeps the legacy/test call-sites that predate friend capture. */
+        public DeathRecord(long id, UUID uuid, String name, int carriage, CompoundTag snapshot) {
+            this(id, uuid, name, carriage, snapshot, List.of());
+        }
+    }
 
     /** A live player's per-life echo session: which death ids they've already met. */
     private static final class LifeSession {
@@ -144,10 +159,30 @@ public final class GlobalLifeStore {
 
     // ---- writes -----------------------------------------------------------
 
-    /** Append a death to the log and persist. {@code carriage} is the room it happened in (or {@code NO_CARRIAGE}). */
+    /** Append a death with no logged friends. {@code carriage} is the room it happened in (or {@code NO_CARRIAGE}). */
     public void append(UUID id, String name, int carriage, CompoundTag snapshot) {
-        history.add(new DeathRecord(nextId++, id, name, carriage, snapshot.copy()));
+        append(id, name, carriage, snapshot, List.of());
+    }
+
+    /**
+     * Append a death to the log and persist, together with snapshots of the PlayerMobs that loved
+     * this player at death ({@code friends}) for later friend-echo replay. All tags are
+     * defensively copied so the caller can't mutate the stored record.
+     */
+    public void append(UUID id, String name, int carriage, CompoundTag snapshot, List<CompoundTag> friends) {
+        history.add(new DeathRecord(nextId++, id, name, carriage, snapshot.copy(), copyAll(friends)));
         save();
+    }
+
+    private static List<CompoundTag> copyAll(List<CompoundTag> tags) {
+        if (tags.isEmpty()) {
+            return List.of();
+        }
+        List<CompoundTag> out = new ArrayList<>(tags.size());
+        for (CompoundTag t : tags) {
+            out.add(t.copy());
+        }
+        return out;
     }
 
     /** Forget a player's "used this life" set — call on death and on world change. */
@@ -240,6 +275,13 @@ public final class GlobalLifeStore {
             }
             entry.putInt(TAG_CARRIAGE, r.carriage());
             entry.put(TAG_SNAPSHOT, r.snapshot().copy());
+            if (!r.friendSnapshots().isEmpty()) {
+                ListTag friends = new ListTag();
+                for (CompoundTag f : r.friendSnapshots()) {
+                    friends.add(f.copy());
+                }
+                entry.put(TAG_FRIENDS, friends);
+            }
             deaths.add(entry);
         }
         tag.put(TAG_DEATHS, deaths);
@@ -264,7 +306,8 @@ public final class GlobalLifeStore {
             int carriage = entry.contains(TAG_CARRIAGE, Tag.TAG_ANY_NUMERIC)
                 ? entry.getInt(TAG_CARRIAGE) : NO_CARRIAGE;
             String name = entry.contains(TAG_NAME, Tag.TAG_STRING) ? entry.getString(TAG_NAME) : null;
-            out.add(new DeathRecord(id, entry.getUUID(TAG_UUID), name, carriage, entry.getCompound(TAG_SNAPSHOT)));
+            out.add(new DeathRecord(id, entry.getUUID(TAG_UUID), name, carriage,
+                entry.getCompound(TAG_SNAPSHOT), readFriendList(entry)));
         }
         // Back-compat: the pre-death-log global format stored one snapshot per player under "Lives".
         if (out.isEmpty() && tag.contains(TAG_LEGACY_LIVES, Tag.TAG_LIST)) {
@@ -282,6 +325,19 @@ public final class GlobalLifeStore {
         }
         long storedNext = tag.contains(TAG_NEXT_ID, Tag.TAG_ANY_NUMERIC) ? tag.getLong(TAG_NEXT_ID) : 0L;
         return Math.max(storedNext, maxId + 1);
+    }
+
+    /** Friend snapshots stored under {@code entry}, or empty — a missing key (every older record) reads as none. */
+    private static List<CompoundTag> readFriendList(CompoundTag entry) {
+        if (!entry.contains(TAG_FRIENDS, Tag.TAG_LIST)) {
+            return List.of();
+        }
+        ListTag list = entry.getList(TAG_FRIENDS, Tag.TAG_COMPOUND);
+        List<CompoundTag> out = new ArrayList<>(list.size());
+        for (int i = 0; i < list.size(); i++) {
+            out.add(list.getCompound(i));
+        }
+        return out;
     }
 
     private void load() {
