@@ -10,39 +10,41 @@ import net.minecraft.world.entity.ai.goal.Goal;
 import java.util.EnumSet;
 
 /**
- * Makes a {@link PlayerMobEntity} tag along with an individual it has come to love
- * (feeling ≥ {@link DispositionResolver#FEELING_LOVE}) — a player or another PlayerMob.
- * Companionship: it trails the loved one, sprints to catch up when they pull away, and
- * parks nearby when close so its own goals (raiding, exploring, strolling) get a turn.
+ * Makes a {@link PlayerMobEntity} catch up to an individual it has come to love
+ * (feeling ≥ {@link DispositionResolver#FEELING_LOVE}) — a player or another PlayerMob —
+ * when they drift too far apart, then rejoin normal behaviour once it's back together.
  *
- * <p><b>Priority &amp; combat.</b> Registered at goalSelector priority 2, right after
- * {@link WeaponAwareAttackGoal}. Both want the MOVE/LOOK flags, but they're mutually
- * exclusive: the attack goal needs a target and this goal self-gates on {@code target ==
- * null}. So a combat target means fight; no target means follow. Sitting at priority 2 lets
- * following preempt every "own task" (raid 3, harvest 6, train-advance 7, stroll 8) while
- * still yielding to combat and the priority-1 social/recovery goals — exactly "deprioritise
- * its own tasks to follow the one it loves." <b>Joining its fights</b> then needs no code
- * here: following puts the mob beside the loved one, where the existing target goals
- * ({@code NearestAttackableTargetGoal} / {@link DefendLovedOneGoal}) acquire a foe and the
- * attack goal engages.</p>
+ * <p><b>Catch-up, not a constant shadow.</b> Following only engages once the loved one is
+ * <em>more than {@value FollowLovedOnePolicy#FOLLOW_CARRIAGES} carriages</em> away on a
+ * Dungeon Train (separation = {@code carriageIndex} difference, monotonic along the whole
+ * train), or more than {@link FollowLovedOnePolicy#FOLLOW_BLOCKS} blocks away anywhere else.
+ * The mob then <b>sprints</b> ({@link FollowLovedOnePolicy#CATCH_UP_SPEED}) to close the gap
+ * and releases once caught up ({@value FollowLovedOnePolicy#KEEP_CARRIAGES} carriage /
+ * {@link FollowLovedOnePolicy#KEEP_BLOCKS} blocks). Inside that distance it just does its own
+ * thing (raiding, exploring carriages, strolling) — so a pair travels the train together, each
+ * doing its own thing, whoever falls behind sprinting to rejoin.</p>
  *
- * <p><b>Who, and mutual love.</b> The loved one is chosen by
- * {@link PlayerMobEntity#findFollowTarget()} (nearest, most-loved, train-allowed). For a
- * mutual mob-pair that helper hands the follow role to just one of them (the higher-UUID
- * mob) so they travel together instead of freezing face-to-face — see
- * {@link FollowLovedOnePolicy#leads}.</p>
+ * <p><b>Priority &amp; combat.</b> goalSelector priority 2, after the attack goal; mutually
+ * exclusive with it via the {@code target == null} self-gate (target → fight, none → maybe
+ * chase). At priority 2 a catch-up preempts the autonomous explore/stroll goals (3–8); when
+ * <em>not</em> catching up it isn't running, so those drive normal behaviour. Yields to combat,
+ * to the priority-1 social goals, and to {@link TrainRecoveryGoal} — a mob that fell off gets
+ * back aboard first ({@code !isRecovering()}), and a loved one who fell off fails the same-train
+ * {@code allowsTarget} gate, so they never chase each other off the train.</p>
  *
- * <p><b>Distances</b> ({@link FollowLovedOnePolicy}): start following past {@code START}
- * (6), keep going until parked within {@code STOP} (3), sprint past {@code SPRINT} (10), and
- * lose the loved one past {@code SCAN} (24). Not train-gated — it works in any world; the
- * Dungeon Train only adds the carriage-exploring feel (the follower trails its loved one
- * room-to-room while the leader's {@link AdvanceCarriageGoal} drives the pair forward).</p>
+ * <p><b>Doors.</b> Crossing closed doors — and iron doors via their button/lever — to catch up
+ * needs no code here: {@code PlayerMobEntity} opens any blocking door every tick while on a
+ * train, whichever goal owns movement.</p>
+ *
+ * <p><b>Who, and mutual love.</b> The loved one is {@link PlayerMobEntity#findFollowTarget()};
+ * for a mutual mob-pair that helper hands the chase role to just one of them (the higher-UUID
+ * mob) so the other leads — see {@link FollowLovedOnePolicy#leads}.</p>
  */
 public final class FollowLovedOneGoal extends Goal implements DescribableGoal {
 
-    /** Re-path cadence: the loved one moves, so re-issue moveTo every ½s (as AdvanceCarriageGoal). */
+    /** Re-path cadence: the loved one moves, so re-issue moveTo every ½s. */
     private static final int REPATH_INTERVAL = 10;
-    /** Throttle the loved-one scan in {@link #canUse()} when there's no one to follow (1s). */
+    /** Throttle the (wide) loved-one scan when there's no one far enough to chase (1s). */
     private static final int IDLE_SCAN_COOLDOWN = 20;
 
     private final PlayerMobEntity mob;
@@ -72,19 +74,13 @@ public final class FollowLovedOneGoal extends Goal implements DescribableGoal {
             scanCooldown--;
             return false;
         }
-        if (mob.getTarget() != null) {
-            return false; // a target means fight — the attack goal owns this slot
-        }
-        if (mob.isRecovering() || mob.isCrossingGap()) {
-            return false; // getting back aboard / mid-leap takes precedence
+        if (mob.getTarget() != null || mob.isRecovering() || mob.isCrossingGap()) {
+            return false; // fight / get-back-aboard / mid-leap take precedence
         }
         LivingEntity candidate = mob.findFollowTarget();
-        if (candidate == null) {
-            scanCooldown = IDLE_SCAN_COOLDOWN;
+        if (candidate == null || !tooFarFrom(candidate)) {
+            scanCooldown = IDLE_SCAN_COOLDOWN; // no one to chase right now — ease off the wide scan
             return false;
-        }
-        if (!FollowLovedOnePolicy.wantsToFollow(mob.distanceTo(candidate))) {
-            return false; // already close enough — parked, let the own-task goals run
         }
         this.loved = candidate;
         return true;
@@ -98,8 +94,8 @@ public final class FollowLovedOneGoal extends Goal implements DescribableGoal {
             && !mob.isRecovering()
             && !mob.isCrossingGap()
             && mob.feelingToward(loved) >= DispositionResolver.FEELING_LOVE
-            && TrainConfinement.allowsTarget(mob, loved) // don't trail a loved one off the train
-            && FollowLovedOnePolicy.keepFollowing(mob.distanceTo(loved));
+            && TrainConfinement.allowsTarget(mob, loved) // dropped if the loved one leaves the train
+            && stillCatchingUp(loved);
     }
 
     @Override
@@ -133,11 +129,41 @@ public final class FollowLovedOneGoal extends Goal implements DescribableGoal {
         }
     }
 
-    /** Walk (or sprint, when far) toward the loved one's live position. */
+    /** Sprint toward the loved one's live position — following only ever happens when far. */
     private void issueMove() {
         if (loved != null) {
-            double speed = FollowLovedOnePolicy.speedFor(mob.distanceTo(loved));
-            mob.getNavigation().moveTo(loved, speed);
+            mob.getNavigation().moveTo(loved, FollowLovedOnePolicy.CATCH_UP_SPEED);
         }
+    }
+
+    /** Whether the loved one is far enough to start a catch-up (carriages on a train, else blocks). */
+    private boolean tooFarFrom(LivingEntity other) {
+        int carriages = carriageSeparation(other);
+        return carriages >= 0
+            ? FollowLovedOnePolicy.followByCarriages(carriages)
+            : FollowLovedOnePolicy.followByBlocks(mob.distanceTo(other));
+    }
+
+    /** Whether to keep catching up — not yet rejoined. */
+    private boolean stillCatchingUp(LivingEntity other) {
+        int carriages = carriageSeparation(other);
+        return carriages >= 0
+            ? FollowLovedOnePolicy.keepByCarriages(carriages)
+            : FollowLovedOnePolicy.keepByBlocks(mob.distanceTo(other));
+    }
+
+    /**
+     * Carriage separation along the train, or {@code -1} when either the mob or the loved one
+     * isn't on a train (the block fallback applies then). {@code carriageIndex} is the room
+     * index, monotonic along the whole train, so the absolute difference is literally how many
+     * carriages apart they are.
+     */
+    private int carriageSeparation(LivingEntity other) {
+        int mine = TrainConfinement.carriageIndex(mob);
+        int theirs = TrainConfinement.carriageIndex(other);
+        if (mine == TrainConfinement.NO_CARRIAGE || theirs == TrainConfinement.NO_CARRIAGE) {
+            return -1;
+        }
+        return Math.abs(mine - theirs);
     }
 }

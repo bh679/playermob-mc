@@ -1215,37 +1215,23 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
 
     // ---- Follow-loved-one support (FollowLovedOneGoal) --------------------
 
-    /** Cached {@link #findFollowTarget()} for the current tick — two callers read it. */
-    private LivingEntity followTargetCache;
-    private int followTargetTick = -1;
-
     /**
      * The entity this mob should follow because it has come to love it — the nearest,
      * most-loved player or PlayerMob within {@link FollowLovedOnePolicy#SCAN_RANGE} (feeling
      * ≥ {@link DispositionResolver#FEELING_LOVE} and {@link TrainConfinement#allowsTarget
      * train-allowed}), or {@code null} if it has no one to follow. Drives
-     * {@code FollowLovedOneGoal} and the follower-discipline guard in
-     * {@code AdvanceCarriageGoal}.
+     * {@code FollowLovedOneGoal} (which throttles how often it asks).
      *
      * <p><b>Mutual-love leadership:</b> a candidate PlayerMob that loves this mob back is
      * skipped when this mob {@linkplain FollowLovedOnePolicy#leads leads} the pair (lower
-     * UUID) — so exactly one of a mutual pair follows and the other leads, letting them
-     * travel together instead of freezing face-to-face. A loved player is never skipped.</p>
+     * UUID) — so exactly one of a mutual pair chases and the other leads, letting them travel
+     * together instead of converging on each other. A loved player is never skipped.</p>
      *
-     * <p>Recomputed at most once per tick (mirrors {@link #selfCombatPower()}), since the
-     * goal and the advance-goal guard both ask for it each tick.</p>
+     * <p>Only players and other PlayerMobs ever reach the love threshold, so a non-categorised
+     * entity's DEFAULT feeling keeps it out.</p>
      */
     public LivingEntity findFollowTarget() {
-        if (followTargetTick == tickCount) {
-            return followTargetCache;
-        }
-        followTargetTick = tickCount;
-        followTargetCache = scanFollowTarget(FollowLovedOnePolicy.SCAN_RANGE);
-        return followTargetCache;
-    }
-
-    /** Uncached scan behind {@link #findFollowTarget()}; only loved players/PlayerMobs qualify. */
-    private LivingEntity scanFollowTarget(double range) {
+        double range = FollowLovedOnePolicy.SCAN_RANGE;
         AABB box = getBoundingBox().inflate(range);
         double rangeSq = range * range;
         LivingEntity best = null;
