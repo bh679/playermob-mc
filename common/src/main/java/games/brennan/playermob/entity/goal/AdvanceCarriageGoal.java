@@ -88,6 +88,13 @@ public final class AdvanceCarriageGoal extends Goal implements DescribableGoal {
         if (mob.getTarget() != null) {
             return false; // combat preempts — recheck promptly once it's over
         }
+        if (mob.findFollowTarget() != null) {
+            // This mob loves someone nearby → trail them (FollowLovedOneGoal) instead of
+            // marching off on its own. A mutual pair's leader has no follow target, so it
+            // still advances and the follower tags along — the pair explores together.
+            scanCooldown = EMPTY_SCAN_COOLDOWN;
+            return false;
+        }
         int dir = mob.getTrainExploreDir();
         if (dir == 0) {
             scanCooldown = EMPTY_SCAN_COOLDOWN; // not latched yet (geometry not yet trusted)
