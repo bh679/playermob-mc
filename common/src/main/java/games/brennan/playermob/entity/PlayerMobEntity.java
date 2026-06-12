@@ -30,6 +30,7 @@ import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.particles.ItemParticleOption;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.util.Mth;
+import net.minecraft.util.RandomSource;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
@@ -273,6 +274,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private static final String TAG_SKIN_SLIM = "SkinSlim";
     private static final String TAG_CLOSES_DOORS = "ClosesDoors";
     private static final String TAG_TRAIN_EXPLORE_DIR = "TrainExploreDir";
+    private static final String TAG_TRAIN_PAIR_PARTNER = "TrainPairPartner";
     private static final String TAG_EXPLORED_BLOCKS = "ExploredBlocks";
     private static final String TAG_EXPLORED_ENTITIES = "ExploredEntities";
     private static final String TAG_POS = "Pos";
@@ -382,6 +384,23 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * traversal) must revisit re-latching on a genuine disembark/re-board.</p>
      */
     private int trainExploreDir;
+
+    /**
+     * Chance, per Dungeon-Train ({@link MobSpawnType#EVENT}) spawn, to also spawn one
+     * companion PlayerMob that is mutually max friends with this mob (see
+     * {@link #maybeSpawnFriendPair}).
+     */
+    private static final float DT_PAIR_CHANCE = 0.10F;
+
+    /**
+     * UUID of the Dungeon-Train spawn companion this mob was paired with as max friends, or
+     * {@code null} if it has none. Used once, at boarding, to copy the partner's
+     * already-latched march direction (see {@link #latchTrainExploreDirection}) so a
+     * spawned-together pair travels the train the same way instead of splitting at the
+     * carriage-0 boundary after collision nudges them apart. Persisted (additive NBT);
+     * never reset — once both have latched it has no further effect.
+     */
+    private UUID trainPairPartner;
 
     /**
      * True only while {@link CrossGroupGapGoal} is carrying the mob across the gap
@@ -830,10 +849,34 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (trainExploreDir != 0 || !TrainConfinement.isConfined(this)) {
             return;
         }
+        // A spawned-together pair (see maybeSpawnFriendPair) shares one march direction: if
+        // our partner has already latched, copy it — so collision drift across carriage 0 in
+        // the first ticks after spawn can't split the pair onto opposite headings.
+        Integer shared = partnerExploreDir();
+        if (shared != null) {
+            trainExploreDir = shared;
+            return;
+        }
         int idx = TrainConfinement.carriageIndex(this);
         if (idx != TrainConfinement.NO_CARRIAGE) {
             trainExploreDir = TrainConfinement.boardingDirection(idx);
         }
+    }
+
+    /**
+     * The pair partner's latched march direction ({@code -1}/{@code +1}), or {@code null} if
+     * this mob has no {@link #trainPairPartner}, the partner isn't loaded, or it hasn't
+     * latched yet. Whichever of the pair latches first decides; the other copies it, so the
+     * two always march the train the same way.
+     */
+    private Integer partnerExploreDir() {
+        if (trainPairPartner == null || !(level() instanceof ServerLevel server)) {
+            return null;
+        }
+        return server.getEntity(trainPairPartner) instanceof PlayerMobEntity partner
+                && partner.trainExploreDir != 0
+            ? partner.trainExploreDir
+            : null;
     }
 
     /**
@@ -954,19 +997,32 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
                                         DifficultyInstance difficulty,
                                         MobSpawnType reason,
                                         SpawnGroupData data) {
+        rollSpawnDefaults(world.getRandom());
+        maybeSpawnFriendPair(world, reason);
+        return super.finalizeSpawn(world, difficulty, reason, data);
+    }
+
+    /**
+     * The per-mob spawn rolls — skin (unless pinned by loaded NBT), the two locked traits,
+     * and the door-closing personality — then a client sync for the menu UI. Extracted from
+     * {@link #finalizeSpawn} so a {@link #maybeSpawnFriendPair} companion, which is created
+     * with {@code EntityType.create} (and so never runs {@code finalizeSpawn}), still gets a
+     * normal mob's randomised look and personality.
+     */
+    private void rollSpawnDefaults(RandomSource random) {
         // Keep a skin already loaded from NBT (a reincarnation egg's snapshot, or a
         // /summon with a Skin* tag). A spawn egg merges its entity_data BEFORE
         // finalizeSpawn, so without this guard the roll would clobber that skin.
         if (!skinExplicit) {
-            setSkinIndex(world.getRandom().nextInt(SKIN_COUNT));
+            setSkinIndex(random.nextInt(SKIN_COUNT));
             // Bundled defaults: roll the arm model independently of the name, ~50/50.
             // Vanilla DefaultPlayerSkin ships every default name in both wide and slim
             // and picks (name × model) uniformly by UUID hash, so there's no canonical
             // per-name model — we mirror that coin-flip. A URL skin (below) overrides
             // this with its own authored model.
-            setSkinSlim(world.getRandom().nextBoolean());
-            if (world.getRandom().nextFloat() < URL_SKIN_CHANCE) {
-                PlayerMobSkinRegistry.pickRandom(world.getRandom()).ifPresent(skin -> {
+            setSkinSlim(random.nextBoolean());
+            if (random.nextFloat() < URL_SKIN_CHANCE) {
+                PlayerMobSkinRegistry.pickRandom(random).ifPresent(skin -> {
                     setSkinTextureUrl(skin.textureUrl());
                     setSkinSlim(skin.model() == SkinModel.SLIM);
                 });
@@ -974,11 +1030,48 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         }
         // Roll any trait not pinned by a spawn egg's entity_data or /summon NBT
         // (an archetype egg / partial summon leaves the rest to chance).
-        traits.rollIfUnset(world.getRandom());
+        traits.rollIfUnset(random);
         pushDispositionToClient();
         // Roll the door-closing personality (~50% close behind, ~50% leave open).
-        this.closesDoors = world.getRandom().nextBoolean();
-        return super.finalizeSpawn(world, difficulty, reason, data);
+        this.closesDoors = random.nextBoolean();
+    }
+
+    /**
+     * On a Dungeon-Train ({@link MobSpawnType#EVENT}) spawn, with probability
+     * {@link #DT_PAIR_CHANCE}, spawn one companion PlayerMob beside this one and set both as
+     * max friends (feeling {@link FeelingLedger#MAX}) toward each other, linked via
+     * {@link #trainPairPartner} so they march the train together.
+     *
+     * <p>The companion is built with {@code EntityType.create} + {@code addFreshEntity},
+     * which does <em>not</em> invoke {@link #finalizeSpawn} — so it neither re-rolls a pair
+     * nor recurses, and a spawn yields exactly a duo, never a chain. Egg / {@code /summon}
+     * spawns aren't {@code EVENT}, so this is a no-op for them.</p>
+     */
+    private void maybeSpawnFriendPair(ServerLevelAccessor world, MobSpawnType reason) {
+        if (reason != MobSpawnType.EVENT) {
+            return;                                   // only natural Dungeon-Train spawns pair up
+        }
+        if (world.getRandom().nextFloat() >= DT_PAIR_CHANCE) {
+            return;
+        }
+        ServerLevel level = world.getLevel();
+        PlayerMobEntity friend = PlayerMobRegistry.PLAYER_MOB.create(level);
+        if (friend == null) {
+            return;
+        }
+        // Spawn on this mob's already-valid tile; entity collision separates them next tick.
+        // Avoids clipping the companion into a carriage wall by guessing an offset.
+        friend.moveTo(getX(), getY(), getZ(), getYRot(), 0.0F);
+        friend.rollSpawnDefaults(world.getRandom());
+        // Mutual max friendship — persisted via the FeelingLedger NBT, synced for the menu.
+        this.feelings.set(friend.getUUID(), FeelingLedger.MAX);
+        friend.feelings.set(this.getUUID(), FeelingLedger.MAX);
+        this.pushDispositionToClient();
+        friend.pushDispositionToClient();
+        // Link the pair so they latch one shared march direction (latchTrainExploreDirection).
+        this.trainPairPartner = friend.getUUID();
+        friend.trainPairPartner = this.getUUID();
+        level.addFreshEntity(friend);
     }
 
     // ---- Despawn / persistence -------------------------------------------
@@ -2402,6 +2495,12 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (this.trainExploreDir != 0) {
             tag.putInt(TAG_TRAIN_EXPLORE_DIR, this.trainExploreDir);
         }
+        // Friend-pair partner — additive. Only written when paired (most mobs aren't), so an
+        // unpaired mob round-trips no key. Survives the rare save in the few ticks before
+        // both partners have latched their shared march direction.
+        if (this.trainPairPartner != null) {
+            tag.putUUID(TAG_TRAIN_PAIR_PARTNER, this.trainPairPartner);
+        }
         // URL skin tags are purely additive on top of v1 (SkinIndex). Only
         // write the URL key when set, so 0.2.0-loaded mobs that never had a
         // URL assigned don't round-trip an empty string back into the save.
@@ -2454,6 +2553,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         this.closesDoors = tag.getBoolean(TAG_CLOSES_DOORS);
         // Missing key ⇒ 0 ⇒ unlatched ⇒ re-derived on the next train boarding. Additive.
         this.trainExploreDir = tag.getInt(TAG_TRAIN_EXPLORE_DIR);
+        // Missing key ⇒ null ⇒ no pair (every pre-pair-feature mob). Additive.
+        this.trainPairPartner =
+            tag.hasUUID(TAG_TRAIN_PAIR_PARTNER) ? tag.getUUID(TAG_TRAIN_PAIR_PARTNER) : null;
         // Backward compat: 0.2.0 saves have no SkinTextureUrl tag. Missing key
         // ⇒ URL stays the default "" ⇒ renderer uses the legacy bundled-
         // vanilla path keyed off SkinIndex. New v2 mobs round-trip the URL.
