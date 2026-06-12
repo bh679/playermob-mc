@@ -100,6 +100,9 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
     /** Ticks a just-toggled hand door is left alone before it may be toggled again — anti-flap. */
     private static final int DOOR_TOGGLE_COOLDOWN = 20;
 
+    /** How close another PlayerMob must be for a mob to hold a door open rather than close it on them. */
+    private static final double DOOR_COMPANION_REACH = 2.5;
+
     /**
      * Per-mob "I just toggled this door" memory for the path-aware door reflex:
      * {@code {doorPosLong, ticksLeft}}. A door that obstructed the mob's travel axis is toggled
@@ -487,10 +490,16 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         }
         if (hand != null) {
             long posLong = hand.pos().asLong();
+            BlockPos doorPos = hand.pos();
+            boolean desiredOpen = !hand.state().getValue(DoorBlock.OPEN);
             boolean coolingSameDoor = cooldown != null && cooldown[0] == posLong && cooldown[1] > 0;
-            if (!coolingSameDoor) {
-                BlockPos doorPos = hand.pos();
-                boolean desiredOpen = !hand.state().getValue(DoorBlock.OPEN);
+            // Don't slam a door shut on a companion. The "close it to clear my perpendicular axis"
+            // reflex, run independently per mob, otherwise fights another mob's "open it to clear my
+            // facing axis" reflex on the SAME door — two PlayerMobs flapping one door open/closed
+            // (now common when a pair travels together). So a mob holds off *closing* while another
+            // PlayerMob is right beside it; whoever's left closes it once alone. Opening is never held.
+            boolean holdOpenForCompanion = !desiredOpen && anotherPlayerMobBeside(level, playerMob);
+            if (!coolingSameDoor && !holdOpenForCompanion) {
                 // Defer the open/close into a deliberate window: the mob faces the door, swings, then
                 // operates it, interrupting combat/movement (DoorOperationGoal) rather than flipping it
                 // silently. The eye→door offset is taken in the carriage's sub-level frame, which equals
@@ -517,6 +526,17 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         if (iron != null && operateControlNear(playerMob, level, c, iron.pos())) {
             playerMob.interruptForDoorOperation(); // pause combat/movement for the control press too
         }
+    }
+
+    /**
+     * Whether another {@link PlayerMobEntity} is right beside {@code self} (within {@link
+     * #DOOR_COMPANION_REACH}). Used to hold a door open rather than close it on a companion —
+     * two mobs otherwise flap a shared door, each closing it to clear its own path while the
+     * other reopens it.
+     */
+    private static boolean anotherPlayerMobBeside(ServerLevel level, PlayerMobEntity self) {
+        AABB box = self.getBoundingBox().inflate(DOOR_COMPANION_REACH);
+        return !level.getEntitiesOfClass(PlayerMobEntity.class, box, other -> other != self).isEmpty();
     }
 
     /**
