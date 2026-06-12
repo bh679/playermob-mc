@@ -1,6 +1,7 @@
 package games.brennan.playermob.entity;
 
 import games.brennan.playermob.PlayerMobRegistry;
+import games.brennan.playermob.compat.PlayerMobSocialHooks;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.goal.AdvanceCarriageGoal;
 import games.brennan.playermob.entity.goal.BlockArrowsGoal;
@@ -21,6 +22,7 @@ import games.brennan.playermob.entity.goal.TrainRecoveryGoal;
 import games.brennan.playermob.entity.goal.WeaponAwareAttackGoal;
 import games.brennan.playermob.player.PlayerLifeRecord;
 import games.brennan.playermob.player.PlayerLifeStore;
+import games.brennan.playermob.player.PlayerReincarnation;
 import games.brennan.playermob.skin.PlayerMobSkin;
 import games.brennan.playermob.skin.PlayerMobSkinRegistry;
 import games.brennan.playermob.skin.SkinModel;
@@ -997,19 +999,26 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
                                         DifficultyInstance difficulty,
                                         MobSpawnType reason,
                                         SpawnGroupData data) {
-        rollSpawnDefaults(world.getRandom());
+        // Dungeon Train spawns PlayerMobs via finalizeSpawn(..., EVENT, ...); give those
+        // a chance to embody a stored past life instead of a fresh random mob. Applying the
+        // snapshot here (before the rolls) pins skin + traits explicit, so the rolls below
+        // skip — same path as the reincarnation egg. Skipped when a skin is already loaded
+        // (egg / Skin* summon), so it never clobbers an explicit identity.
+        boolean reincarnated = reason == MobSpawnType.EVENT && !skinExplicit
+            && PlayerReincarnation.maybeReincarnateOnSpawn(this, world);
+        rollSpawnDefaults(world.getRandom(), reincarnated);
         maybeSpawnFriendPair(world, reason);
         return super.finalizeSpawn(world, difficulty, reason, data);
     }
 
     /**
      * The per-mob spawn rolls — skin (unless pinned by loaded NBT), the two locked traits,
-     * and the door-closing personality — then a client sync for the menu UI. Extracted from
+     * and (unless {@code reincarnated}) the door-closing personality — then a client sync. Extracted from
      * {@link #finalizeSpawn} so a {@link #maybeSpawnFriendPair} companion, which is created
      * with {@code EntityType.create} (and so never runs {@code finalizeSpawn}), still gets a
      * normal mob's randomised look and personality.
      */
-    private void rollSpawnDefaults(RandomSource random) {
+    private void rollSpawnDefaults(RandomSource random, boolean reincarnated) {
         // Keep a skin already loaded from NBT (a reincarnation egg's snapshot, or a
         // /summon with a Skin* tag). A spawn egg merges its entity_data BEFORE
         // finalizeSpawn, so without this guard the roll would clobber that skin.
@@ -1032,8 +1041,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // (an archetype egg / partial summon leaves the rest to chance).
         traits.rollIfUnset(random);
         pushDispositionToClient();
-        // Roll the door-closing personality (~50% close behind, ~50% leave open).
-        this.closesDoors = random.nextBoolean();
+        // Roll the door-closing personality (~50% close behind, ~50% leave open),
+        // unless a reincarnation already restored it from the past life's snapshot.
+        if (!reincarnated) {
+            this.closesDoors = random.nextBoolean();
+        }
     }
 
     /**
@@ -1062,7 +1074,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // Spawn on this mob's already-valid tile; entity collision separates them next tick.
         // Avoids clipping the companion into a carriage wall by guessing an offset.
         friend.moveTo(getX(), getY(), getZ(), getYRot(), 0.0F);
-        friend.rollSpawnDefaults(world.getRandom());
+        friend.rollSpawnDefaults(world.getRandom(), false);
         // Mutual max friendship — persisted via the FeelingLedger NBT, synced for the menu.
         this.feelings.set(friend.getUUID(), FeelingLedger.MAX);
         friend.feelings.set(this.getUUID(), FeelingLedger.MAX);
@@ -1602,6 +1614,12 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // independent of the thrower, so this doesn't change re-collection timing.
         thrown.setThrower(this);
         level().addFreshEntity(thrown);
+        // Announce a gift to a player so an optional mod (e.g. Dungeon Train's befriended
+        // advancement) can credit it by subscribing to PlayerMobSocialHooks — no mixin into
+        // this method required. No-op when nothing is installed.
+        if (target instanceof ServerPlayer recipient) {
+            PlayerMobSocialHooks.onMobGift(recipient, getUUID());
+        }
     }
 
     /** A flower — the last-resort gift when the pack is empty and nothing's nearby to fetch. */
@@ -2113,6 +2131,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // Credit the real player's lifetime kindness by the gift's worth.
         if (gifter instanceof ServerPlayer sp) {
             PlayerLifeStore.record(sp, PlayerLifeRecord.Signal.GIFT, delta);
+            // Announce a player→mob gift so an optional mod (e.g. Dungeon Train's befriended
+            // advancement) can credit it by subscribing to PlayerMobSocialHooks — no mixin
+            // into the pickup path required. No-op when nothing is installed.
+            PlayerMobSocialHooks.onPlayerGift(sp, getUUID());
         }
         pushDispositionToClient();
     }

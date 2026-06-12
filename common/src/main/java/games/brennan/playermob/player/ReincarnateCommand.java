@@ -74,10 +74,9 @@ public final class ReincarnateCommand {
         if (profile == null) {
             return 0;
         }
-        PlayerLifeStore store = PlayerLifeStore.get(source.getLevel());
-        PlayerLifeRecord tally = store.current(profile.getId());
+        PlayerLifeRecord tally = PlayerLifeStore.get(source.getLevel()).current(profile.getId());
         DispositionTraits traits = tally.toTraits();
-        boolean hasPast = store.hasLastLife(profile.getId());
+        boolean hasPast = GlobalLifeStore.get(source.getServer()).hasAnyForPlayer(profile.getId());
         String summary = String.format(
             "%s — attacks %d, kills %d, kindness %.1f, harms %d → would reincarnate "
                 + "Fight/Flight %d, Friendliness %d%s",

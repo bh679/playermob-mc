@@ -97,6 +97,15 @@ public final class TrainConfinement {
     }
 
     /**
+     * The carriage {@code pIdx} for a just-spawned mob that may still be at a carriage's
+     * sub-level coordinates (e.g. inside {@code finalizeSpawn}); {@link #NO_CARRIAGE} without
+     * a train mod or if it can't be resolved. See {@link TrainEnvironment#spawnCarriageIndex}.
+     */
+    public static int spawnCarriageIndex(Entity self) {
+        return environment.spawnCarriageIndex(self);
+    }
+
+    /**
      * World-space waypoint at the centre of the next carriage room in step
      * direction {@code dir} within the same group, or {@code null} if not on a
      * train or at the group boundary. Always {@code null} without a train mod.

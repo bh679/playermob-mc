@@ -2,6 +2,7 @@ package games.brennan.playermob.player;
 
 import com.mojang.logging.LogUtils;
 import games.brennan.playermob.PlayerMobRegistry;
+import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
@@ -11,8 +12,10 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.CustomData;
+import net.minecraft.world.level.ServerLevelAccessor;
 import org.slf4j.Logger;
 
 import java.util.ArrayList;
@@ -34,6 +37,15 @@ public final class PlayerReincarnation {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
+    /**
+     * Chance that a Dungeon-Train ({@link net.minecraft.world.entity.MobSpawnType#EVENT})
+     * PlayerMob spawn embodies a stored past life instead of a fresh random mob. The
+     * single tunable for that behaviour — the mod has no config system and expresses
+     * every probability as a named constant (cf. {@code PlayerMobEntity.URL_SKIN_CHANCE}).
+     * Composes on top of Dungeon Train's own "1-in-N" decision to spawn a group at all.
+     */
+    public static final float REINCARNATION_SPAWN_CHANCE = 0.25F; // 1-in-4 EVENT PlayerMobs attempt to embody a stored past life (echo when an eligible one exists)
+
     /** Slots copied verbatim from the dead player onto the reincarnated mob. */
     private static final EquipmentSlot[] WORN_SLOTS = {
         EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET,
@@ -53,7 +65,15 @@ public final class PlayerReincarnation {
             PlayerLifeStore store = PlayerLifeStore.get(level);
             PlayerLifeRecord record = store.current(player.getUUID());
             CompoundTag snapshot = buildSnapshot(level, player, record);
-            store.completeLife(player.getUUID(), player.getGameProfile().getName(), snapshot);
+            // The completed snapshot is appended to the GLOBAL death log (cross-world); only
+            // the in-progress tally was world-scoped, so reset it on the world store.
+            store.resetCurrent(player.getUUID());
+            // Record the carriage they died in so Dungeon-Train echoes can match depth.
+            int carriage = TrainConfinement.carriageIndex(player);
+            GlobalLifeStore global = GlobalLifeStore.get(level.getServer());
+            global.append(player.getUUID(), player.getGameProfile().getName(), carriage, snapshot);
+            // A new life begins on respawn — all past lives are available to meet again.
+            global.resetSession(player.getUUID());
         } catch (RuntimeException e) {
             LOGGER.error("[playermob] failed to snapshot reincarnation for {}", player.getGameProfile().getName(), e);
         }
@@ -64,17 +84,61 @@ public final class PlayerReincarnation {
      * {@link ItemStack#EMPTY} if that player has no recorded past life.
      */
     public static ItemStack reincarnationEgg(ServerLevel level, UUID playerId) {
-        PlayerLifeStore store = PlayerLifeStore.get(level);
-        CompoundTag snapshot = store.lastLife(playerId);
+        GlobalLifeStore store = GlobalLifeStore.get(level.getServer());
+        CompoundTag snapshot = store.mostRecentForPlayer(playerId);
         if (snapshot == null) {
             return ItemStack.EMPTY;
         }
         ItemStack egg = new ItemStack(PlayerMobRegistry.PLAYER_MOB_SPAWN_EGG);
         egg.set(DataComponents.ENTITY_DATA, CustomData.of(snapshot));
-        String name = store.lastName(playerId);
+        String name = store.mostRecentNameForPlayer(playerId);
         egg.set(DataComponents.CUSTOM_NAME,
             Component.literal("Echo of " + (name != null ? name : "a Lost Soul")));
         return egg;
+    }
+
+    /**
+     * With probability {@link #REINCARNATION_SPAWN_CHANCE}, turn a freshly-created
+     * Dungeon-Train PlayerMob into a stored past life; returns {@code true} if it did.
+     * Called from {@link PlayerMobEntity#finalizeSpawn} for {@code EVENT} spawns,
+     * <em>before</em> the default skin/trait rolls — applying the snapshot via
+     * {@code readAdditionalSaveData} pins the skin and traits explicit so those rolls
+     * become no-ops (the same mechanism the reincarnation egg relies on).
+     *
+     * <p>The life is drawn from the global death log by {@link GlobalLifeStore#pickEchoFor}:
+     * deaths within {@link GlobalLifeStore#CARRIAGE_RADIUS} carriages of the spawn that the
+     * nearest player hasn't met this life, weighted toward newer deaths. No eligible life
+     * (empty band / all met / unresolved carriage) returns {@code false} so the spawn falls
+     * back to a normal random PlayerMob. Never throws into the spawn flow.</p>
+     */
+    public static boolean maybeReincarnateOnSpawn(PlayerMobEntity mob, ServerLevelAccessor world) {
+        try {
+            if (world.getRandom().nextFloat() >= REINCARNATION_SPAWN_CHANCE) {
+                return false;
+            }
+            ServerLevel level = world.getLevel();
+            int spawnCarriage = TrainConfinement.spawnCarriageIndex(mob);
+            // The nearest player owns the "met this life" set that gates reuse (singleplayer = the player).
+            Player nearest = level.getNearestPlayer(mob, -1.0);
+            UUID owner = nearest == null ? null : nearest.getUUID();
+            GlobalLifeStore store = GlobalLifeStore.get(level.getServer());
+            GlobalLifeStore.DeathRecord echo = store.pickEchoFor(owner, spawnCarriage, world.getRandom());
+            if (echo == null) {
+                return false;
+            }
+            mob.readAdditionalSaveData(echo.snapshot().copy());
+            // Name the echo after the past life so it reads as a returning soul — and,
+            // because AdventureItemNames skips mobs that already carry a CustomName, so AIN
+            // doesn't overwrite it with a random PlayerMob name. AIN's finalizeSpawn naming
+            // runs when super.finalizeSpawn returns (after this), so setting the name here
+            // wins. Mirrors the reincarnation egg's "Echo of X" label.
+            mob.setCustomName(Component.literal("Echo of " + echo.name()));
+            mob.setCustomNameVisible(true);
+            return true;
+        } catch (RuntimeException e) {
+            LOGGER.error("[playermob] failed to apply a reincarnation on spawn", e);
+            return false;
+        }
     }
 
     // ---- snapshot building ------------------------------------------------
