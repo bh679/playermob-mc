@@ -26,7 +26,7 @@ class DefaultSkinPackTest {
 
     private static final String SKINS_RESOURCE_PATH = "/data/playermob/playermob_skins";
     private static final String EXPECTED_URL_PREFIX = "http://textures.minecraft.net/texture/";
-    private static final int MIN_EXPECTED_SKINS = 25;
+    private static final int MIN_EXPECTED_SKINS = 60;
 
     @Test
     void defaultSkinPackParses() throws Exception {
