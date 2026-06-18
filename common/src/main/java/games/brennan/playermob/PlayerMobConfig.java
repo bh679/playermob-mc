@@ -27,6 +27,7 @@ public final class PlayerMobConfig {
     private static final String KEY_ECHO_FRIEND_CHANCE = "echoFriendChance";
     private static final String KEY_DEBUG_SPAWN_LOG = "debugSpawnLog";
     private static final String KEY_TRAIN_DIG_THROUGH = "trainDigThrough";
+    private static final String KEY_TRAIN_FOLLOW_LOVED_PLAYER = "trainFollowLovedPlayer";
 
     /** Default chance a Dungeon-Train echo with logged friends also brings back a friend-echo. */
     public static final float DEFAULT_ECHO_FRIEND_CHANCE = 0.40F;
@@ -34,10 +35,13 @@ public final class PlayerMobConfig {
     public static final boolean DEFAULT_DEBUG_SPAWN_LOG = false;
     /** PlayerMobs dig through fill (ice/dirt/mud/moss/logs) blocking a Dungeon-Train carriage; on by default. */
     public static final boolean DEFAULT_TRAIN_DIG_THROUGH = true;
+    /** On a Dungeon Train, a PlayerMob that loves a player aboard heads to that player's carriage; on by default. */
+    public static final boolean DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER = true;
 
     private static volatile float echoFriendChance = DEFAULT_ECHO_FRIEND_CHANCE;
     private static volatile boolean debugSpawnLog = DEFAULT_DEBUG_SPAWN_LOG;
     private static volatile boolean trainDigThrough = DEFAULT_TRAIN_DIG_THROUGH;
+    private static volatile boolean trainFollowLovedPlayer = DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER;
 
     private PlayerMobConfig() {}
 
@@ -58,6 +62,15 @@ public final class PlayerMobConfig {
      */
     public static boolean trainDigThrough() {
         return trainDigThrough;
+    }
+
+    /**
+     * When true (default), a PlayerMob riding a Dungeon Train that loves a player aboard the same train
+     * abandons its fixed march and heads to that player's carriage, idling once it's in the same
+     * carriage. See {@code PlayerMobEntity#effectiveTrainMarchDir}.
+     */
+    public static boolean trainFollowLovedPlayer() {
+        return trainFollowLovedPlayer;
     }
 
     /**
@@ -86,22 +99,26 @@ public final class PlayerMobConfig {
             echoFriendChance = v.echoFriendChance();
             debugSpawnLog = v.debugSpawnLog();
             trainDigThrough = v.trainDigThrough();
-            LOGGER.info("[{}] config: {}={}, {}={}, {}={}", PlayerMob.MOD_ID,
+            trainFollowLovedPlayer = v.trainFollowLovedPlayer();
+            LOGGER.info("[{}] config: {}={}, {}={}, {}={}, {}={}", PlayerMob.MOD_ID,
                 KEY_ECHO_FRIEND_CHANCE, echoFriendChance, KEY_DEBUG_SPAWN_LOG, debugSpawnLog,
-                KEY_TRAIN_DIG_THROUGH, trainDigThrough);
+                KEY_TRAIN_DIG_THROUGH, trainDigThrough,
+                KEY_TRAIN_FOLLOW_LOVED_PLAYER, trainFollowLovedPlayer);
         } catch (IOException | RuntimeException e) {
             LOGGER.warn("[{}] failed to load {}; using defaults", PlayerMob.MOD_ID, FILE, e);
         }
     }
 
     /** Parsed, validated values — split out (pure, no I/O) so the parsing rules are unit-tested. */
-    record Values(float echoFriendChance, boolean debugSpawnLog, boolean trainDigThrough) {}
+    record Values(float echoFriendChance, boolean debugSpawnLog, boolean trainDigThrough,
+                  boolean trainFollowLovedPlayer) {}
 
     static Values parse(Properties props) {
         return new Values(
             clamp01(parseFloat(props.getProperty(KEY_ECHO_FRIEND_CHANCE), DEFAULT_ECHO_FRIEND_CHANCE)),
             parseBool(props.getProperty(KEY_DEBUG_SPAWN_LOG), DEFAULT_DEBUG_SPAWN_LOG),
-            parseBool(props.getProperty(KEY_TRAIN_DIG_THROUGH), DEFAULT_TRAIN_DIG_THROUGH));
+            parseBool(props.getProperty(KEY_TRAIN_DIG_THROUGH), DEFAULT_TRAIN_DIG_THROUGH),
+            parseBool(props.getProperty(KEY_TRAIN_FOLLOW_LOVED_PLAYER), DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER));
     }
 
     private static float parseFloat(String raw, float fallback) {
@@ -148,9 +165,13 @@ public final class PlayerMobConfig {
             + "# trainDigThrough: when true, a PlayerMob riding a Dungeon Train mines soft fill\n"
             + "#   (ice, dirt, mud, moss, logs) blocking its march once it's stuck against it, to\n"
             + "#   pass through a packed carriage. Default true.\n"
+            + "# trainFollowLovedPlayer: when true, a PlayerMob on a Dungeon Train that loves a player\n"
+            + "#   aboard the same train abandons its fixed march to head to that player's carriage,\n"
+            + "#   idling once it's in the same carriage. Default true.\n"
             + KEY_ECHO_FRIEND_CHANCE + "=" + DEFAULT_ECHO_FRIEND_CHANCE + "\n"
             + KEY_DEBUG_SPAWN_LOG + "=" + DEFAULT_DEBUG_SPAWN_LOG + "\n"
-            + KEY_TRAIN_DIG_THROUGH + "=" + DEFAULT_TRAIN_DIG_THROUGH + "\n";
+            + KEY_TRAIN_DIG_THROUGH + "=" + DEFAULT_TRAIN_DIG_THROUGH + "\n"
+            + KEY_TRAIN_FOLLOW_LOVED_PLAYER + "=" + DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER + "\n";
         Files.writeString(file, body);
     }
 }

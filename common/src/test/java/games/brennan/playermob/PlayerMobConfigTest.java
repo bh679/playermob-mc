@@ -28,6 +28,7 @@ class PlayerMobConfigTest {
         assertEquals(PlayerMobConfig.DEFAULT_ECHO_FRIEND_CHANCE, v.echoFriendChance(), 1e-6);
         assertEquals(PlayerMobConfig.DEFAULT_DEBUG_SPAWN_LOG, v.debugSpawnLog());
         assertEquals(PlayerMobConfig.DEFAULT_TRAIN_DIG_THROUGH, v.trainDigThrough());
+        assertEquals(PlayerMobConfig.DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER, v.trainFollowLovedPlayer());
     }
 
     @Test
@@ -37,6 +38,15 @@ class PlayerMobConfigTest {
         assertTrue(PlayerMobConfig.parse(props("trainDigThrough", "true")).trainDigThrough());
         // Unrecognised value → default (true), like the other boolean key.
         assertTrue(PlayerMobConfig.parse(props("trainDigThrough", "maybe")).trainDigThrough());
+    }
+
+    @Test
+    void trainFollowLovedPlayerParsedAndDefaultsOn() {
+        assertTrue(PlayerMobConfig.DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER, "ships on by default");
+        assertFalse(PlayerMobConfig.parse(props("trainFollowLovedPlayer", "false")).trainFollowLovedPlayer());
+        assertTrue(PlayerMobConfig.parse(props("trainFollowLovedPlayer", "true")).trainFollowLovedPlayer());
+        // Unrecognised value → default (true), like the other boolean key.
+        assertTrue(PlayerMobConfig.parse(props("trainFollowLovedPlayer", "maybe")).trainFollowLovedPlayer());
     }
 
     @Test

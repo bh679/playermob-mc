@@ -78,4 +78,16 @@ public final class FollowLovedOnePolicy {
     public static boolean leads(UUID self, UUID other) {
         return self.compareTo(other) < 0;
     }
+
+    /**
+     * Step direction along the train toward a loved one's carriage: {@code +1} when its carriage
+     * index is higher than {@code myCarriageIndex}, {@code -1} when lower, {@code 0} when they share a
+     * carriage. Pure (the indices are {@link games.brennan.playermob.compat.TrainConfinement}'s
+     * monotonic room index), so it unit-tests without a world. A loved mob feeds the result to its
+     * train-march goals to abandon its fixed boarding direction and head toward the player instead;
+     * {@code 0} (same carriage) lets those goals idle, so the mob just travels with you.
+     */
+    public static int marchDirectionToward(int myCarriageIndex, int lovedCarriageIndex) {
+        return Integer.compare(lovedCarriageIndex, myCarriageIndex);
+    }
 }

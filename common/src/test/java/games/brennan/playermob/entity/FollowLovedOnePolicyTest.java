@@ -9,6 +9,8 @@ import static games.brennan.playermob.entity.FollowLovedOnePolicy.followByCarria
 import static games.brennan.playermob.entity.FollowLovedOnePolicy.keepByBlocks;
 import static games.brennan.playermob.entity.FollowLovedOnePolicy.keepByCarriages;
 import static games.brennan.playermob.entity.FollowLovedOnePolicy.leads;
+import static games.brennan.playermob.entity.FollowLovedOnePolicy.marchDirectionToward;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -55,5 +57,14 @@ class FollowLovedOnePolicyTest {
         // Deterministic, and a mob never leads over itself.
         assertTrue(leads(a, b));
         assertFalse(leads(a, a));
+    }
+
+    @Test
+    void marchesTowardTheLovedCarriage() {
+        assertEquals(1, marchDirectionToward(0, 3));    // loved ahead (higher index) → step up
+        assertEquals(-1, marchDirectionToward(3, 0));   // loved behind (lower index) → step down
+        assertEquals(0, marchDirectionToward(2, 2));    // same carriage → idle (march goals no-op)
+        assertEquals(1, marchDirectionToward(-2, -1));  // monotonic across the signed carriage-0 origin
+        assertEquals(-1, marchDirectionToward(1, -4));
     }
 }

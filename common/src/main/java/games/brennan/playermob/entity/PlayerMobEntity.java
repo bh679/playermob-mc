@@ -400,6 +400,20 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private int trainExploreDir;
 
     /**
+     * Cached redirect of the Dungeon-Train march toward a player this mob loves, refreshed on a
+     * throttle in {@link #customServerAiStep} and read by {@link #effectiveTrainMarchDir}. When
+     * {@link #hasLovedMarchOverride} is set it replaces the fixed {@link #trainExploreDir}:
+     * {@code +1}/{@code -1} steps toward the loved player's carriage, {@code 0} once in the same
+     * carriage (so the march goals idle and the mob just travels with the player). Server-only and
+     * transient — never saved, recomputed from a live scan; reuses {@link DispositionResolver#FEELING_LOVE}
+     * and is gated by {@link PlayerMobConfig#trainFollowLovedPlayer}.
+     */
+    private int lovedMarchDir;
+    private boolean hasLovedMarchOverride;
+    /** Re-scan cadence (ticks) for the loved-player march redirect; the march goals read the cache every tick. */
+    private static final int LOVED_MARCH_REFRESH_TICKS = 10;
+
+    /**
      * Chance, per Dungeon-Train ({@link MobSpawnType#EVENT}) spawn, to also spawn one
      * companion PlayerMob that is mutually max friends with this mob (see
      * {@link #maybeSpawnFriendPair}).
@@ -669,7 +683,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             // sub-level block space (the fill doesn't sit at the mob's world position), so it can't
             // be an ordinary block-breaking goal. No-op without Dungeon Train.
             TrainConfinement.digObstructingBlock(this);
+            // Travel-with-a-loved-player: while a player it loves rides the same train, redirect the
+            // march toward that player's carriage instead of the fixed boarding direction (see
+            // effectiveTrainMarchDir). Throttled — the two march goals read the cached value every tick.
+            if (this.tickCount % LOVED_MARCH_REFRESH_TICKS == 0) {
+                refreshLovedMarchOverride();
+            }
         } else {
+            hasLovedMarchOverride = false;   // off a train ⇒ no redirect (the march goals don't run here)
             setDigging(false);   // off a train ⇒ never mid-dig (the reflex that clears it doesn't run here)
             // Off a train, opening is handled by PlayerMobDoorGoal; this reflex adds the
             // close-when-stuck half — an open door can block the perpendicular path.
@@ -917,6 +938,72 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      */
     public int getTrainExploreDir() {
         return this.trainExploreDir;
+    }
+
+    /**
+     * The Dungeon-Train march direction the {@link AdvanceCarriageGoal} / {@link CrossGroupGapGoal}
+     * actually follow: when a loved player rides the same train (refreshed in
+     * {@link #customServerAiStep}), the step toward that player's carriage — {@code +1}/{@code -1}, or
+     * {@code 0} once in the same carriage so both goals idle — otherwise the fixed latched
+     * {@link #trainExploreDir}. This is the "abandon the fixed march to travel with you" redirect;
+     * {@code 0} is exactly how the unlatched default already no-ops, so the goals only swap which getter
+     * they read.
+     */
+    public int effectiveTrainMarchDir() {
+        return hasLovedMarchOverride ? lovedMarchDir : this.trainExploreDir;
+    }
+
+    /**
+     * Refresh the {@linkplain #effectiveTrainMarchDir loved-player march redirect}: if the feature is
+     * enabled and a player this mob loves ({@code feeling >=} {@link DispositionResolver#FEELING_LOVE})
+     * rides the same train within {@link FollowLovedOnePolicy#SCAN_RANGE}, latch the step toward that
+     * player's carriage ({@code 0} when already together); otherwise clear the redirect so the mob
+     * resumes its fixed march. Called on a throttle from {@link #customServerAiStep} while confined.
+     */
+    private void refreshLovedMarchOverride() {
+        if (!PlayerMobConfig.trainFollowLovedPlayer()) {
+            hasLovedMarchOverride = false;
+            return;
+        }
+        Player loved = nearestLovedPlayerAboard();
+        if (loved == null) {
+            hasLovedMarchOverride = false;
+            return;
+        }
+        int mine = TrainConfinement.carriageIndex(this);
+        int theirs = TrainConfinement.carriageIndex(loved);
+        if (mine == TrainConfinement.NO_CARRIAGE || theirs == TrainConfinement.NO_CARRIAGE) {
+            hasLovedMarchOverride = false;
+            return;
+        }
+        lovedMarchDir = FollowLovedOnePolicy.marchDirectionToward(mine, theirs);
+        hasLovedMarchOverride = true;
+    }
+
+    /**
+     * The nearest player this mob loves ({@code feeling >=} {@link DispositionResolver#FEELING_LOVE})
+     * on the same train within {@link FollowLovedOnePolicy#SCAN_RANGE}, or {@code null} if none. The
+     * {@link TrainConfinement#allowsTarget same-train gate} is what keeps the redirect from walking the
+     * mob off the train — it only ever heads toward a player still aboard. Player-only and mirrors
+     * {@link #findFollowTarget}'s scan; mutual-mob travel stays with {@link FollowLovedOneGoal}.
+     */
+    private Player nearestLovedPlayerAboard() {
+        double range = FollowLovedOnePolicy.SCAN_RANGE;
+        AABB box = getBoundingBox().inflate(range);
+        double rangeSq = range * range;
+        Player best = null;
+        double bestDistSq = Double.MAX_VALUE;
+        for (Player player : level().getEntitiesOfClass(Player.class, box)) {
+            if (!player.isAlive()) continue;
+            if (feelingToward(player) < DispositionResolver.FEELING_LOVE) continue;
+            if (!TrainConfinement.allowsTarget(this, player)) continue;
+            double distSq = distanceToSqr(player);
+            if (distSq <= rangeSq && distSq < bestDistSq) {
+                best = player;
+                bestDistSq = distSq;
+            }
+        }
+        return best;
     }
 
     /**

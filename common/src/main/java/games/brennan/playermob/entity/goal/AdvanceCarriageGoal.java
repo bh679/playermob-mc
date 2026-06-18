@@ -23,9 +23,12 @@ import java.util.EnumSet;
  * if the room is empty, this goal re-fires and hops to the room after. That
  * priority interplay is what produces "fully explore the room, then advance."</p>
  *
- * <p><b>Direction.</b> Read from {@link PlayerMobEntity#getTrainExploreDir()},
- * which is latched once on boarding (march toward carriage 0 and past it) and
- * kept thereafter, so the mob travels consistently even after crossing 0.</p>
+ * <p><b>Direction.</b> Read from {@link PlayerMobEntity#effectiveTrainMarchDir()} — normally the
+ * fixed {@link PlayerMobEntity#getTrainExploreDir() boarding direction} (latched once on boarding,
+ * march toward carriage 0 and past it, kept thereafter so travel stays consistent across 0), but
+ * redirected toward a player the mob loves while one rides the same train. So a loved mob abandons
+ * its fixed march to travel with that player, and idles here ({@code dir == 0}) once it shares their
+ * carriage.</p>
  *
  * <p><b>Moving target.</b> The waypoint — the centre of the next room — is
  * re-resolved every tick via {@link TrainConfinement#nextCarriageTarget}, because
@@ -88,9 +91,9 @@ public final class AdvanceCarriageGoal extends Goal implements DescribableGoal {
         if (mob.getTarget() != null) {
             return false; // combat preempts — recheck promptly once it's over
         }
-        int dir = mob.getTrainExploreDir();
+        int dir = mob.effectiveTrainMarchDir();
         if (dir == 0) {
-            scanCooldown = EMPTY_SCAN_COOLDOWN; // not latched yet (geometry not yet trusted)
+            scanCooldown = EMPTY_SCAN_COOLDOWN; // not latched yet, or a loved player shares our carriage (idle with them)
             return false;
         }
         Vec3 next = TrainConfinement.nextCarriageTarget(mob, dir);
@@ -136,10 +139,11 @@ public final class AdvanceCarriageGoal extends Goal implements DescribableGoal {
     @Override
     public void tick() {
         phaseTicks++;
-        // Re-resolve every tick: the carriage moves, so last tick's world point
-        // has drifted. A null now means we crossed out of the group or lost the
-        // carriage — give up this hop.
-        Vec3 next = TrainConfinement.nextCarriageTarget(mob, mob.getTrainExploreDir());
+        // Re-resolve every tick: the carriage moves, so last tick's world point has drifted. dir 0
+        // means a loved player now shares our carriage (travel-with-you idle); a null means we crossed
+        // out of the group or lost the carriage — either way give up this hop.
+        int dir = mob.effectiveTrainMarchDir();
+        Vec3 next = dir == 0 ? null : TrainConfinement.nextCarriageTarget(mob, dir);
         if (next == null) {
             stop();
             return;

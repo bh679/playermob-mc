@@ -25,8 +25,10 @@ import java.util.EnumSet;
  * in {@link GapLeap}, shared with the flee escape ({@link FleeFromCategoryGoal}). While
  * committed to a hop the mob declines new combat targets
  * ({@link PlayerMobEntity#setCrossingGap}) so a passing hostile can't abandon it mid-air, and
- * the latched {@link PlayerMobEntity#getTrainExploreDir()} is never reset, so the mob keeps
- * the same direction on the far side.</p>
+ * the latched {@link PlayerMobEntity#getTrainExploreDir()} is never reset, so the mob keeps the
+ * same fixed direction on the far side. The approach follows
+ * {@link PlayerMobEntity#effectiveTrainMarchDir()}, so a mob crossing toward a player it loves aims
+ * at the group nearest that player.</p>
  *
  * <p>Off a train (always on Fabric/Forge, and on NeoForge without Dungeon Train)
  * {@link TrainConfinement#nextGroupTarget} is {@code null} and this goal never engages,
@@ -80,9 +82,9 @@ public final class CrossGroupGapGoal extends Goal implements DescribableGoal {
         if (mob.getTarget() != null) {
             return false; // combat preempts — recheck promptly once it's over
         }
-        int dir = mob.getTrainExploreDir();
+        int dir = mob.effectiveTrainMarchDir();
         if (dir == 0) {
-            scanCooldown = EMPTY_SCAN_COOLDOWN; // not latched yet (geometry not yet trusted)
+            scanCooldown = EMPTY_SCAN_COOLDOWN; // not latched yet, or a loved player shares our carriage (idle with them)
             return false;
         }
         if (TrainConfinement.nextCarriageTarget(mob, dir) != null) {
@@ -157,9 +159,10 @@ public final class CrossGroupGapGoal extends Goal implements DescribableGoal {
         phaseTicks++;
         leap.trackCarry(mob);
 
-        Vec3 next = TrainConfinement.nextGroupTarget(mob, mob.getTrainExploreDir());
+        int dir = mob.effectiveTrainMarchDir();
+        Vec3 next = dir == 0 ? null : TrainConfinement.nextGroupTarget(mob, dir);
         if (next == null) {
-            stop(); // lost the adjacent group
+            stop(); // lost the adjacent group (or a loved player now shares our carriage)
             return;
         }
         target = next;
