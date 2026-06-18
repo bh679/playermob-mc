@@ -130,9 +130,9 @@ import java.util.UUID;
  *
  * <p><b>Skins</b> — Each mob rolls its look in {@link #finalizeSpawn}. It
  * always rolls a bundled-vanilla index in {@code [0, SKIN_COUNT)}, then with
- * probability {@link #URL_SKIN_CHANCE} (~30%) overrides it with a Mojang skin
+ * probability {@link #URL_SKIN_CHANCE} (~40%) overrides it with a Mojang skin
  * texture URL drawn from the datapack-extensible {@link PlayerMobSkinRegistry}.
- * So ~70% of mobs wear a vanilla default and ~30% wear a recognisable
+ * So ~60% of mobs wear a vanilla default and ~40% wear a recognisable
  * real-player skin. The client renderer ({@code PlayerMobRenderer}, not
  * imported here to keep this class server-loadable) prefers the URL when set
  * and falls back to the bundled index otherwise. Both fields persist across
@@ -224,13 +224,13 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * datapack-fed {@link PlayerMobSkinRegistry} instead of one of the
      * {@link #SKIN_COUNT} bundled vanilla default skins.
      *
-     * <p>{@code 0.30f} ⇒ ~30% real-player skins, ~70% vanilla defaults. The
+     * <p>{@code 0.40f} ⇒ ~40% real-player skins, ~60% vanilla defaults. The
      * vanilla defaults stay the common case so the mob reads as "a player"
      * at a glance, with recognisable real skins as the occasional standout.
      * Only consulted when the registry is non-empty — an empty registry
      * always falls back to a bundled skin regardless of this roll.</p>
      */
-    private static final float URL_SKIN_CHANCE = 0.30f;
+    private static final float URL_SKIN_CHANCE = 0.40f;
 
     /** Backpack size — matches Pillager (5) plus a little extra. */
     private static final int INVENTORY_SIZE = 8;
@@ -1034,11 +1034,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * Roll the random skin at spawn so all clients see the same value.
      * Server-side; syncs to clients via SynchedEntityData.
      *
-     * <p>Always rolls a bundled-vanilla index first — it's both the ~70%
+     * <p>Always rolls a bundled-vanilla index first — it's both the ~60%
      * common case (see {@link #URL_SKIN_CHANCE}) and the downgrade-safe
      * payload for 0.2.0 clients. Then, with probability
      * {@link #URL_SKIN_CHANCE}, overrides it with a Mojang URL skin from
-     * {@link PlayerMobSkinRegistry}. The other ~70% keep the bundled
+     * {@link PlayerMobSkinRegistry}. The other ~60% keep the bundled
      * vanilla skin (URL left blank ⇒ renderer uses the index path). An
      * empty registry always falls through to the bundled skin.</p>
      */
