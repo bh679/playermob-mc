@@ -1,3 +1,21 @@
 {
-  "entries": []
+  "entries": [
+    {
+      "id": "streamer-mcc-skins",
+      "version": "0.41.0",
+      "type": "content",
+      "title": "30 more player skins \u2014 Dream SMP, MCC & YouTubers",
+      "summary": "PlayerMobs can now spawn wearing 30 additional real-player skins from the Minecraft streaming and MCC scene \u2014 Dream, Technoblade, CaptainSparklez, LDShadowLady, Skeppy and more \u2014 bringing the custom-skin pool to 68. Recognizable real-player skins also show up more often: a naturally-spawned PlayerMob now has a 40% chance (up from 30%) of wearing one instead of a vanilla default.",
+      "highlights": [
+        "30 new skins (pool now 68): Dream SMP, MCC players, and Minecraft YouTubers",
+        "Recognizable real-player skins now appear ~40% of the time, up from ~30%",
+        "Each skin renders with its correct slim or wide arm model"
+      ],
+      "pr": 94,
+      "date": "2026-06-18",
+      "released": false,
+      "released_in": null,
+      "released_at": null
+    }
+  ]
 }
