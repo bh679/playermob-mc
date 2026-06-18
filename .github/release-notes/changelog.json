@@ -16,6 +16,24 @@
       "released": false,
       "released_in": null,
       "released_at": null
+    },
+    {
+      "id": "train-follow-loved-player",
+      "version": "0.42.0",
+      "type": "feat",
+      "title": "Loved PlayerMobs travel with you on the Dungeon Train",
+      "summary": "On a Dungeon Train, a PlayerMob that has come to love you now abandons its own fixed route and makes its way to your carriage, settling in once it's with you. Move on down the train and it follows; step off the train and it stays aboard and goes back to its usual wandering.",
+      "highlights": [
+        "A PlayerMob that loves you heads to your carriage instead of marching its own way",
+        "Uses the full train toolkit to reach you \u2014 stepping through rooms, leaping carriage-group gaps, opening doors, and digging through fill",
+        "Relaxes and does its own thing once it shares your carriage; resumes its route if you leave the train",
+        "Toggle with the new trainFollowLovedPlayer config option (on by default)"
+      ],
+      "pr": 96,
+      "date": "2026-06-18",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
