@@ -304,9 +304,15 @@ public final class PlayerMobRenderer
      */
     public static ResourceLocation resolveSkin(PlayerMobEntity entity) {
         String url = entity.getSkinTextureUrl();
-        // Reincarnation: resolve the source player's own skin via SkinManager.
+        // Reincarnation: a profile-ref carries the source player's skin URL captured at death.
+        // Draw it through the normal Mojang-URL path (shared vanilla skin cache). A url-less ref
+        // (offline/dev death, or a pre-fix saved ref) falls back to the source player's default.
         Optional<SourceProfileSkin.Ref> source = SourceProfileSkin.decode(url);
         if (source.isPresent()) {
+            String captured = source.get().url();
+            if (!captured.isEmpty()) {
+                return PlayerMobSkinTextures.lookup(captured, entity.isSkinSlim());
+            }
             return PlayerMobSkinTextures.playerSkin(source.get().uuid(), source.get().name()).texture();
         }
         if (!url.isEmpty()) {
@@ -328,13 +334,16 @@ public final class PlayerMobRenderer
     }
 
     /**
-     * Whether to draw the slim (3-pixel-arm) body model. For a reincarnation skin the
-     * slim/wide choice comes from the resolved source-player skin — so it tracks the
-     * player's real model — otherwise from the mob's own synched slim flag.
+     * Whether to draw the slim (3-pixel-arm) body model. For a reincarnation skin the arm model
+     * was captured at death into the synched slim flag (a pre-fix url-less ref still resolves it
+     * from the source-player skin); otherwise it comes from the mob's own synched slim flag.
      */
     private static boolean isSlimModel(PlayerMobEntity entity) {
         Optional<SourceProfileSkin.Ref> source = SourceProfileSkin.decode(entity.getSkinTextureUrl());
         if (source.isPresent()) {
+            if (!source.get().url().isEmpty()) {
+                return entity.isSkinSlim();
+            }
             return PlayerMobSkinTextures.playerSkin(source.get().uuid(), source.get().name()).model()
                 == PlayerSkin.Model.SLIM;
         }

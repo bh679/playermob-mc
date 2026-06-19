@@ -35,6 +35,32 @@ class SourceProfileSkinTest {
     }
 
     @Test
+    void capturedUrlRoundTrips() {
+        String url = "http://textures.minecraft.net/texture/0123abcDEF456";
+        Optional<Ref> ref = SourceProfileSkin.decode(SourceProfileSkin.encode(ID, "Brennan", url));
+        assertTrue(ref.isPresent());
+        assertEquals(ID, ref.get().uuid());
+        assertEquals("Brennan", ref.get().name());
+        assertEquals(url, ref.get().url());
+    }
+
+    @Test
+    void noUrlSegmentDecodesToEmptyUrl() {
+        Optional<Ref> ref = SourceProfileSkin.decode(SourceProfileSkin.encode(ID, "Brennan"));
+        assertTrue(ref.isPresent());
+        assertEquals("Brennan", ref.get().name());
+        assertEquals("", ref.get().url());
+    }
+
+    @Test
+    void emptyUrlEncodesIdenticallyToTwoArgForm() {
+        // A url-less capture must encode the same as the legacy two-arg form (no trailing
+        // separator), so old and new refs are byte-identical and decode the same.
+        assertEquals(SourceProfileSkin.encode(ID, "Brennan"),
+            SourceProfileSkin.encode(ID, "Brennan", ""));
+    }
+
+    @Test
     void realUrlIsNotAProfileRef() {
         assertTrue(SourceProfileSkin.decode("http://textures.minecraft.net/texture/abc").isEmpty());
     }

@@ -1,5 +1,6 @@
 package games.brennan.playermob.player;
 
+import com.mojang.authlib.minecraft.MinecraftProfileTexture;
 import com.mojang.logging.LogUtils;
 import games.brennan.playermob.PlayerMobRegistry;
 import games.brennan.playermob.compat.TrainConfinement;
@@ -188,14 +189,34 @@ public final class PlayerReincarnation {
     }
 
     /**
-     * Tag the mob as a reincarnation of this player. The renderer resolves the skin
-     * from this identity through vanilla {@code SkinManager} — the player's real skin
-     * in production, their UUID-derived default skin offline/in dev — so the mob always
-     * matches how the player is rendered, and stays current if they reskin.
+     * Tag the mob as a reincarnation of this player and capture the player's current skin.
+     *
+     * <p>We read the skin texture URL + arm model already present on the dying player's
+     * authenticated {@code GameProfile} (no network download — the server populated it at login)
+     * and store the URL in the reincarnation ref plus the model in the synched slim flag. The
+     * renderer then draws it through the normal Mojang-URL skin path. We capture rather than
+     * resolve live because vanilla {@code SkinManager} can't turn a bare uuid into a skin (see
+     * {@link SourceProfileSkin}). When no textures are available (offline/dev, or a pure-offline
+     * server) the ref carries no URL and the mob falls back to the default skin — and capture
+     * never throws into the death snapshot.</p>
      */
     private static void applySkin(PlayerMobEntity ghost, ServerPlayer player) {
+        String url = "";
+        try {
+            MinecraftProfileTexture skin = player.getServer().getSessionService()
+                .getTextures(player.getGameProfile()).skin();
+            if (skin != null) {
+                url = skin.getUrl();
+                ghost.setSkinSlim("slim".equals(skin.getMetadata("model")));
+            }
+        } catch (RuntimeException e) {
+            // Skin capture must never break snapshot building — fall back to a url-less ref
+            // (renders the default skin, exactly as before capture existed).
+            LOGGER.warn("[playermob] could not capture skin for reincarnation of {}",
+                player.getGameProfile().getName(), e);
+        }
         ghost.setSkinTextureUrl(
-            SourceProfileSkin.encode(player.getUUID(), player.getGameProfile().getName()));
+            SourceProfileSkin.encode(player.getUUID(), player.getGameProfile().getName(), url));
     }
 
     /**
