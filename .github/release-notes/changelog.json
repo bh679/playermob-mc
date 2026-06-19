@@ -34,6 +34,23 @@
       "released": false,
       "released_in": null,
       "released_at": null
+    },
+    {
+      "id": "reincarnation-echo-real-skin",
+      "version": "0.43.0",
+      "type": "fix",
+      "title": "Reincarnated echoes wear the player's real skin",
+      "summary": "\"Echo of <name>\" PlayerMobs on the Dungeon Train now show the real skin of the player they're an echo of, instead of a default Steve/Alex skin. Their name was already right \u2014 now their look matches too.",
+      "highlights": [
+        "Dungeon-Train echoes match the skin of the player they came from",
+        "Also fixes the friend-echoes that travel alongside them",
+        "The skin is captured at the moment of death, so each echo looks like that player did then"
+      ],
+      "pr": 98,
+      "date": "2026-06-19",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
