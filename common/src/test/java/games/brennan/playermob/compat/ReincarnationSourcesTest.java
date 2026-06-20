@@ -100,6 +100,30 @@ class ReincarnationSourcesTest {
             ReincarnationQuery.any(null), seen, null, RandomSource.create(1)));
     }
 
+    // ---- per-band cap (only the newest few are ever eligible) ----
+
+    @Test
+    void pickFromConsidersOnlyTheNewestFewPerSource() {
+        // 8 lives oldest->newest; only the newest MAX_CANDIDATES_PER_BAND should ever be picked.
+        ReincarnationRecord[] lives = new ReincarnationRecord[8];
+        for (int i = 0; i < lives.length; i++) {
+            lives[i] = rec("dp", Integer.toString(i), 0);
+        }
+        ReincarnationSource s = source(lives);
+        ReincarnationQuery q = ReincarnationQuery.byCarriage(0, null);
+
+        Set<String> picked = new HashSet<>();
+        for (int seed = 0; seed < 400; seed++) {
+            picked.add(ReincarnationSources.pickFrom(
+                List.of(s), NO_SERVER, q, Set.of(), null, RandomSource.create(seed)).key());
+        }
+        int kept = ReincarnationSources.MAX_CANDIDATES_PER_BAND;
+        for (int i = 0; i < lives.length - kept; i++) { // oldest (8 - 5 = 3) must never surface
+            assertTrue(!picked.contains(Integer.toString(i)), "older-than-newest-" + kept + " life " + i + " leaked in");
+        }
+        assertTrue(picked.contains(Integer.toString(lives.length - 1)), "the newest life should still surface");
+    }
+
     // ---- resilience ----
 
     @Test

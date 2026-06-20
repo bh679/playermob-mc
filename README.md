@@ -85,9 +85,15 @@ thread** during entity spawn, so `candidates(...)` must return from local state 
 I/O. For a network-backed mod this means *pre-fetching* remote lives into a local cache ahead of
 spawns — never fetching inside the call. Because Dungeon-Train spawns only ever query the band
 **around the player's current carriage** (`q.carriage()`), the recommended strategy is a small
-**sliding window**: keep a bounded sample of remote lives for the player's current depth band
-(±a few dozen carriages, refreshed as they advance) rather than the whole world's log. The cache
-size is then O(window), independent of how large the global log grows.
+**sliding window**: keep a bounded sample of remote lives for the player's current depth band,
+refreshed as they advance, rather than the whole world's log.
+
+PlayerMob only ever uses the **newest ~5 lives per band per source** (it trims each source's
+candidates to `ReincarnationSources.MAX_CANDIDATES_PER_BAND` — a ±band rarely yields more than a
+handful of echoes before the player moves on, and the recency weighting makes the rest negligible).
+So a source need only cache/fetch **~5 lives per band** — and it can pull several bands at once and
+re-fetch only when the player crosses the pre-fetched range, keeping fetch frequency low. Cache
+size is then O(bands-ahead × 5), independent of how large the global log grows.
 
 ## License
 
