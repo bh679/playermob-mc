@@ -70,6 +70,20 @@
       "released": true,
       "released_in": "v0.44.0",
       "released_at": "2026-06-20T05:22:24Z"
+    },
+    {
+      "id": "train-march-direction-seam",
+      "version": "0.45.0",
+      "type": "feat",
+      "title": "Integration seam to steer a PlayerMob's train march",
+      "summary": "Adds a small compatibility seam (TrainConfinement.setMarchDirection) that lets a Dungeon-Train host set a freshly-spawned PlayerMob's fixed march direction along the train, overriding its normal boarding choice. PlayerMob's own behaviour is unchanged; Dungeon Train uses this so a PlayerMob can be spawned already heading your way.",
+      "highlights": [
+        "New compat API: TrainConfinement.setMarchDirection(mob, dir) plus PlayerMobEntity.setTrainExploreDir(int)."
+      ],
+      "date": "2026-06-20",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
