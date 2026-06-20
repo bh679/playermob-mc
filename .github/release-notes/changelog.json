@@ -51,6 +51,23 @@
       "released": true,
       "released_in": "v0.43.0",
       "released_at": "2026-06-19T09:00:44Z"
+    },
+    {
+      "id": "external-reincarnation-sources",
+      "version": "0.44.0",
+      "type": "feat",
+      "title": "Reincarnations can come from other mods",
+      "summary": "PlayerMob now has a two-way reincarnation bridge other mods can plug into: a companion mod can both add past lives to the pool a PlayerMob may return as, and read PlayerMob's death log. With no such mod installed nothing changes \u2014 except that Dungeon Train echoes now lean toward your more recent past lives.",
+      "highlights": [
+        "Other mods can contribute past lives to the reincarnation pool \u2014 a spawning PlayerMob can come back as a life from an integrating mod, not just PlayerMob's own death log.",
+        "Other mods can read PlayerMob's death log (who died, where, and their skin, gear and traits).",
+        "Dungeon Train echoes now favour your more recent deaths, with a mild lean toward lives that ended near your current depth."
+      ],
+      "pr": 99,
+      "date": "2026-06-20",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
