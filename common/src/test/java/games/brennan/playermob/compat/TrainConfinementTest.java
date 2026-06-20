@@ -2,10 +2,12 @@ package games.brennan.playermob.compat;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.Mob;
 import net.minecraft.world.phys.Vec3;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -96,6 +98,15 @@ class TrainConfinementTest {
         assertEquals(-1, TrainConfinement.boardingDirection(0), "at 0 → down (default)");
         assertEquals(-1, TrainConfinement.boardingDirection(1), "just above 0 → down");
         assertEquals(-1, TrainConfinement.boardingDirection(5), "deep positive → down");
+    }
+
+    @Test
+    void setMarchDirectionIgnoresNonPlayerMob() {
+        // The seam casts to PlayerMobEntity, so a null / non-PlayerMob mob is a safe no-op —
+        // callers (Dungeon Train) need no reference to PlayerMob's entity class. The real
+        // behaviour on a live PlayerMobEntity (sign stored, boarding latch keeps it) is covered
+        // by the in-game Gate 2 smoke test, not unit-testable here.
+        assertDoesNotThrow(() -> TrainConfinement.setMarchDirection((Mob) null, +1));
     }
 
     /**

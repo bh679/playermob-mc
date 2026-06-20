@@ -942,6 +942,21 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     }
 
     /**
+     * Set the fixed Dungeon-Train march direction explicitly, overriding the
+     * {@linkplain #latchTrainExploreDirection boarding latch}. A spawner that places a mob with an
+     * intended heading — e.g. Dungeon Train's behind-the-player spawn, which wants the mob to march
+     * the player's own travel direction rather than the default toward-carriage-0 route — calls this
+     * right after spawn. Because the latch short-circuits once {@link #trainExploreDir} is non-zero,
+     * the value set here is kept, not recomputed from the boarding carriage. Stored as a sign
+     * ({@code -1}/{@code 0}/{@code +1}); {@code 0} leaves the mob unlatched so the latch picks normally.
+     *
+     * @param dir desired march direction; only its sign is used
+     */
+    public void setTrainExploreDir(int dir) {
+        this.trainExploreDir = Integer.signum(dir);
+    }
+
+    /**
      * The Dungeon-Train march direction the {@link AdvanceCarriageGoal} / {@link CrossGroupGapGoal}
      * actually follow: when a loved player rides the same train (refreshed in
      * {@link #customServerAiStep}), the step toward that player's carriage — {@code +1}/{@code -1}, or

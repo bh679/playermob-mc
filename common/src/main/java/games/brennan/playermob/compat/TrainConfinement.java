@@ -1,7 +1,9 @@
 package games.brennan.playermob.compat;
 
+import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.Mob;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
@@ -153,5 +155,18 @@ public final class TrainConfinement {
      */
     public static int boardingDirection(int carriageIndex) {
         return carriageIndex < 0 ? +1 : -1;
+    }
+
+    /**
+     * Override {@code mob}'s fixed train march direction to the sign of {@code dir}, bypassing the
+     * boarding latch. The stable seam a consuming mod (Dungeon Train) calls right after spawning a
+     * PlayerMob it wants to march a specific way — e.g. a behind-the-player spawn set to follow the
+     * player's own travel direction. No-op when {@code mob} is not a PlayerMob, so callers need no
+     * reference to PlayerMob's entity class. See {@link PlayerMobEntity#setTrainExploreDir}.
+     */
+    public static void setMarchDirection(Mob mob, int dir) {
+        if (mob instanceof PlayerMobEntity pm) {
+            pm.setTrainExploreDir(dir);
+        }
     }
 }
