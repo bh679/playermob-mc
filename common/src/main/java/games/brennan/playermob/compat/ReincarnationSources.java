@@ -59,17 +59,25 @@ public final class ReincarnationSources {
     }
 
     /**
-     * Draw one past life for {@code query} from the combined pool, or empty to fall back to a fresh
-     * random mob. Pools every source's eligible {@linkplain ReincarnationSource#candidates
-     * candidates}, drops the ones {@code query.owner()} has already met this session, then makes the
-     * recency/proximity-weighted pick ({@link ReincarnationWeighting}). Marks the pick met. A source
-     * that throws is logged and skipped — selection never throws into the spawn flow.
+     * Draw one past life for {@code query} from the sources of the requested kind, or empty to fall
+     * back to a fresh mob. {@code remote} selects the pool: {@code false} = PlayerMob's own local
+     * death log (self allowed); {@code true} = the remote pools registered by integrating mods, with
+     * the live player ({@code query.owner()}) excluded so a remote echo is never the player
+     * themselves. A spawning mob rolls the two kinds on separate chances, so a remote pool never
+     * dilutes the local one. Pools every matching source's eligible {@linkplain
+     * ReincarnationSource#candidates candidates}, drops the ones {@code query.owner()} has already met
+     * this session, then makes the recency/proximity-weighted pick ({@link ReincarnationWeighting})
+     * and marks it met. A source that throws is logged and skipped — selection never throws into the
+     * spawn flow.
      */
     public static Optional<ReincarnationRecord> pick(MinecraftServer server, ReincarnationQuery query,
-                                                     RandomSource rng) {
+                                                     RandomSource rng, boolean remote) {
         onServer(server);
         Set<String> seen = query.owner() == null ? Set.of() : metFor(query.owner());
-        ReincarnationRecord chosen = pickFrom(sources, server, query, seen, rng);
+        // Remote echoes never embody the live player themselves — only their own world's local pool can.
+        UUID excludePlayer = remote ? query.owner() : null;
+        ReincarnationRecord chosen =
+            pickFrom(filterByKind(sources, remote), server, query, seen, excludePlayer, rng);
         if (chosen == null) {
             return Optional.empty();
         }
@@ -79,16 +87,29 @@ public final class ReincarnationSources {
         return Optional.of(chosen);
     }
 
+    /** The registered sources of the requested kind ({@code remote} true ⇒ external pools; false ⇒ the local log). */
+    static List<ReincarnationSource> filterByKind(List<ReincarnationSource> sources, boolean remote) {
+        List<ReincarnationSource> out = new ArrayList<>();
+        for (ReincarnationSource source : sources) {
+            if (source.remote() == remote) {
+                out.add(source);
+            }
+        }
+        return out;
+    }
+
     /**
      * The pure aggregation core (no global state): pool each source's candidates for {@code query},
-     * drop the ids in {@code seen}, and make the weighted pick — or {@code null} if nothing is left.
-     * Package-visible so the cross-source pooling is unit-tested directly.
+     * drop the ids in {@code seen} (and any life belonging to {@code excludePlayer}, used to keep
+     * remote echoes off the live player themselves), and make the weighted pick — or {@code null} if
+     * nothing is left. Package-visible so the cross-source pooling is unit-tested directly.
      */
     static ReincarnationRecord pickFrom(List<ReincarnationSource> sources, MinecraftServer server,
-                                        ReincarnationQuery query, Set<String> seen, RandomSource rng) {
+                                        ReincarnationQuery query, Set<String> seen,
+                                        UUID excludePlayer, RandomSource rng) {
         List<List<ReincarnationRecord>> groups = new ArrayList<>();
         for (ReincarnationSource source : sources) {
-            List<ReincarnationRecord> live = liveCandidates(source, server, query, seen);
+            List<ReincarnationRecord> live = liveCandidates(source, server, query, seen, excludePlayer);
             if (!live.isEmpty()) {
                 groups.add(live);
             }
@@ -96,16 +117,25 @@ public final class ReincarnationSources {
         return ReincarnationWeighting.choose(groups, query, rng);
     }
 
-    /** One source's candidates for {@code query} with the owner's met lives removed; empty (logged) on failure. */
+    /**
+     * One source's candidates for {@code query} with the owner's met lives removed — and, when
+     * {@code excludePlayer} is non-null, any life belonging to that player (self-exclusion for remote
+     * echoes). Empty (logged) on failure.
+     */
     private static List<ReincarnationRecord> liveCandidates(ReincarnationSource source, MinecraftServer server,
-                                                            ReincarnationQuery query, Set<String> seen) {
+                                                            ReincarnationQuery query, Set<String> seen,
+                                                            UUID excludePlayer) {
         try {
             List<ReincarnationRecord> candidates = source.candidates(server, query);
             List<ReincarnationRecord> live = new ArrayList<>(candidates.size());
             for (ReincarnationRecord r : candidates) {
-                if (!seen.contains(r.id())) {
-                    live.add(r);
+                if (seen.contains(r.id())) {
+                    continue;
                 }
+                if (excludePlayer != null && excludePlayer.equals(r.playerId())) {
+                    continue;
+                }
+                live.add(r);
             }
             return live;
         } catch (RuntimeException e) {

@@ -23,6 +23,12 @@ import java.util.List;
  */
 public final class GlobalLifeReincarnationSource implements ReincarnationSource {
 
+    /** The on-disk death log is the <em>local</em> pool — the player's own past lives, self included. */
+    @Override
+    public boolean remote() {
+        return false;
+    }
+
     /**
      * NBT key the snapshot stores the skin ref under — mirrors {@code PlayerMobEntity.TAG_SKIN_TEXTURE_URL}
      * (a stable {@code lives.dat} field). Used only to surface the captured player skin URL as a

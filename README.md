@@ -68,11 +68,26 @@ echo); `name`, `playerId`, `carriage`, and the captured `skinUrl` are pulled out
 PlayerMob's own death log is always a built-in source, so with no integrating mod the pool is
 just the local log — exactly the prior behaviour.
 
-Selection across the whole pool stays random but is **heavily skewed toward recent** lives, with
-a mild preference for lives that ended nearer the requesting carriage (see
-`ReincarnationWeighting`). Each live player won't be shown the same past life twice in a session
-(`ReincarnationQuery.owner()` gates that). All seam calls run on the **server thread** during
-entity spawn — implementations must answer synchronously from local state.
+**Local vs remote pools.** A spawning PlayerMob rolls two *separate* chances — one for a **local**
+life (PlayerMob's own death log; the player themselves may return) and an equal, independent one
+for a **remote** life (lives your mod supplies). The split means a remote pool never erodes the
+local self-reincarnation chance. Your source is **remote by default**; only the built-in log is
+local. Remote echoes **never embody the live player themselves** (PlayerMob excludes
+`query.owner()` from remote picks), so a player only meets *other* people as remote echoes.
+
+Selection within a pool stays random but is **heavily skewed toward recent** lives, with a mild
+preference for lives that ended nearer the requesting carriage (see `ReincarnationWeighting`).
+Each live player won't be shown the same past life twice in a session (`ReincarnationQuery.owner()`
+gates that).
+
+**Answer synchronously — pre-fetch, don't fetch on demand.** Every seam call runs on the **server
+thread** during entity spawn, so `candidates(...)` must return from local state with no blocking
+I/O. For a network-backed mod this means *pre-fetching* remote lives into a local cache ahead of
+spawns — never fetching inside the call. Because Dungeon-Train spawns only ever query the band
+**around the player's current carriage** (`q.carriage()`), the recommended strategy is a small
+**sliding window**: keep a bounded sample of remote lives for the player's current depth band
+(±a few dozen carriages, refreshed as they advance) rather than the whole world's log. The cache
+size is then O(window), independent of how large the global log grows.
 
 ## License
 

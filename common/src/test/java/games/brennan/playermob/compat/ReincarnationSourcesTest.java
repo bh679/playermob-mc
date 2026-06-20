@@ -25,13 +25,33 @@ class ReincarnationSourcesTest {
     private static final MinecraftServer NO_SERVER = null; // stub sources ignore it
 
     private static ReincarnationRecord rec(String source, String key, int carriage) {
-        return new ReincarnationRecord(source, key, new UUID(0L, 0L), key, carriage, "", new CompoundTag(), List.of());
+        return rec(source, key, carriage, new UUID(0L, 0L));
     }
 
-    /** A source that returns a fixed candidate list (ignoring server/query). */
+    private static ReincarnationRecord rec(String source, String key, int carriage, UUID player) {
+        return new ReincarnationRecord(source, key, player, key, carriage, "", new CompoundTag(), List.of());
+    }
+
+    /** A remote source (the default kind) that returns a fixed candidate list (ignoring server/query). */
     private static ReincarnationSource source(ReincarnationRecord... records) {
         List<ReincarnationRecord> list = List.of(records);
         return (server, query) -> list;
+    }
+
+    /** A local source (e.g. the built-in death log) returning a fixed candidate list. */
+    private static ReincarnationSource localSource(ReincarnationRecord... records) {
+        List<ReincarnationRecord> list = List.of(records);
+        return new ReincarnationSource() {
+            @Override
+            public List<ReincarnationRecord> candidates(MinecraftServer server, ReincarnationQuery query) {
+                return list;
+            }
+
+            @Override
+            public boolean remote() {
+                return false;
+            }
+        };
     }
 
     // ---- cross-source pooling ----
@@ -45,7 +65,7 @@ class ReincarnationSourcesTest {
         Set<String> seenSources = new HashSet<>();
         RandomSource rng = RandomSource.create(5);
         for (int i = 0; i < 500; i++) {
-            seenSources.add(ReincarnationSources.pickFrom(List.of(a, b), NO_SERVER, q, Set.of(), rng).sourceId());
+            seenSources.add(ReincarnationSources.pickFrom(List.of(a, b), NO_SERVER, q, Set.of(), null, rng).sourceId());
         }
         assertEquals(Set.of("a", "b"), seenSources, "both sources should surface over many draws");
     }
@@ -53,7 +73,7 @@ class ReincarnationSourcesTest {
     @Test
     void pickFromReturnsNullWithNoSources() {
         assertNull(ReincarnationSources.pickFrom(List.of(), NO_SERVER,
-            ReincarnationQuery.any(null), Set.of(), RandomSource.create(1)));
+            ReincarnationQuery.any(null), Set.of(), null, RandomSource.create(1)));
     }
 
     // ---- already-met de-dup ----
@@ -67,7 +87,7 @@ class ReincarnationSourcesTest {
 
         for (int seed = 0; seed < 20; seed++) { // newest is heavily favoured, so prove it's truly excluded
             ReincarnationRecord pick = ReincarnationSources.pickFrom(
-                List.of(s), NO_SERVER, q, seen, RandomSource.create(seed));
+                List.of(s), NO_SERVER, q, seen, null, RandomSource.create(seed));
             assertEquals("old", pick.key(), "the met life must never be picked");
         }
     }
@@ -77,7 +97,7 @@ class ReincarnationSourcesTest {
         ReincarnationSource s = source(rec("playermob", "x", 0), rec("playermob", "y", 0));
         Set<String> seen = Set.of("playermob:x", "playermob:y");
         assertNull(ReincarnationSources.pickFrom(List.of(s), NO_SERVER,
-            ReincarnationQuery.any(null), seen, RandomSource.create(1)));
+            ReincarnationQuery.any(null), seen, null, RandomSource.create(1)));
     }
 
     // ---- resilience ----
@@ -89,8 +109,41 @@ class ReincarnationSourcesTest {
         };
         ReincarnationSource ok = source(rec("ok", "1", 0));
         ReincarnationRecord pick = ReincarnationSources.pickFrom(
-            List.of(boom, ok), NO_SERVER, ReincarnationQuery.any(null), Set.of(), RandomSource.create(3));
+            List.of(boom, ok), NO_SERVER, ReincarnationQuery.any(null), Set.of(), null, RandomSource.create(3));
         assertEquals("ok", pick.sourceId(), "a throwing source is skipped, not fatal");
+    }
+
+    // ---- local vs remote kind + self-exclusion ----
+
+    @Test
+    void filterByKindSplitsLocalAndRemote() {
+        ReincarnationSource local = localSource(rec("playermob", "1", 0));
+        ReincarnationSource remote = source(rec("dp", "1", 0));
+        List<ReincarnationSource> all = List.of(local, remote);
+
+        assertEquals(List.of(remote), ReincarnationSources.filterByKind(all, true), "remote kind");
+        assertEquals(List.of(local), ReincarnationSources.filterByKind(all, false), "local kind");
+    }
+
+    @Test
+    void pickFromExcludesTheGivenPlayer() {
+        // Remote self-exclusion: a remote pool of two lives — one is the live player's own — must
+        // never return that player's life when excludePlayer is set.
+        UUID me = new UUID(0L, 7L);
+        UUID other = new UUID(0L, 8L);
+        ReincarnationSource remote = source(
+            rec("dp", "mine", 0, me), rec("dp", "theirs", 0, other));
+        ReincarnationQuery q = ReincarnationQuery.byCarriage(0, me);
+
+        for (int seed = 0; seed < 20; seed++) {
+            ReincarnationRecord pick = ReincarnationSources.pickFrom(
+                List.of(remote), NO_SERVER, q, Set.of(), me, RandomSource.create(seed));
+            assertEquals("theirs", pick.key(), "a remote echo must never be the live player themselves");
+        }
+        // With only the player's own life available, the remote pool yields nothing.
+        ReincarnationSource onlyMine = source(rec("dp", "mine", 0, me));
+        assertNull(ReincarnationSources.pickFrom(
+            List.of(onlyMine), NO_SERVER, q, Set.of(), me, RandomSource.create(1)));
     }
 
     // ---- read aggregation + cap ----

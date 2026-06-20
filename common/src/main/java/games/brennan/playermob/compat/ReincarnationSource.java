@@ -31,6 +31,17 @@ public interface ReincarnationSource {
     List<ReincarnationRecord> candidates(MinecraftServer server, ReincarnationQuery query);
 
     /**
+     * Whether this source supplies <em>remote</em> lives — past lives from other worlds/servers.
+     * A spawning PlayerMob rolls local and remote reincarnations on <em>separate</em> chances, and
+     * remote picks never embody the live player themselves, so the registry must know which pool a
+     * source belongs to. An integrating mod (e.g. Discord Presence) is remote by default; only
+     * PlayerMob's own on-disk death log declares itself local (overrides to {@code false}).
+     */
+    default boolean remote() {
+        return true;
+    }
+
+    /**
      * The newest lives this source knows, up to {@code limit} (newest first) — the read direction,
      * for a mod that wants to display/relay PlayerMob's death log. Defaults to none, so a
      * supply-only source need not implement it.
