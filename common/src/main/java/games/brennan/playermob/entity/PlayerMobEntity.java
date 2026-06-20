@@ -3,6 +3,7 @@ package games.brennan.playermob.entity;
 import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.PlayerMobRegistry;
 import games.brennan.playermob.compat.PlayerMobSocialHooks;
+import games.brennan.playermob.compat.ReincarnationRecord;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.goal.AdvanceCarriageGoal;
 import games.brennan.playermob.entity.goal.BlockArrowsGoal;
@@ -1139,7 +1140,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // snapshot here (before the rolls) pins skin + traits explicit, so the rolls below
         // skip — same path as the reincarnation egg. Skipped when a skin is already loaded
         // (egg / Skin* summon), so it never clobbers an explicit identity.
-        GlobalLifeStore.DeathRecord echo = reason == MobSpawnType.EVENT && !skinExplicit
+        ReincarnationRecord echo = reason == MobSpawnType.EVENT && !skinExplicit
             ? PlayerReincarnation.maybeReincarnateOnSpawn(this, world) : null;
         rollSpawnDefaults(world.getRandom(), echo != null);
         boolean companion = maybeSpawnFriendPair(world, reason, echo);
@@ -1209,7 +1210,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      *     {@link DtSpawnDebug} readout to colour the spawn message.
      */
     private boolean maybeSpawnFriendPair(ServerLevelAccessor world, MobSpawnType reason,
-                                         GlobalLifeStore.DeathRecord echo) {
+                                         ReincarnationRecord echo) {
         if (reason != MobSpawnType.EVENT) {
             return false;                             // only natural Dungeon-Train spawns pair up
         }

@@ -3,6 +3,9 @@ package games.brennan.playermob.player;
 import com.mojang.authlib.minecraft.MinecraftProfileTexture;
 import com.mojang.logging.LogUtils;
 import games.brennan.playermob.PlayerMobRegistry;
+import games.brennan.playermob.compat.ReincarnationQuery;
+import games.brennan.playermob.compat.ReincarnationRecord;
+import games.brennan.playermob.compat.ReincarnationSources;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.DispositionResolver;
 import games.brennan.playermob.entity.PlayerMobEntity;
@@ -88,8 +91,9 @@ public final class PlayerReincarnation {
             List<CompoundTag> friends = captureFriendSnapshots(level, player);
             GlobalLifeStore global = GlobalLifeStore.get(level.getServer());
             global.append(player.getUUID(), player.getGameProfile().getName(), carriage, snapshot, friends);
-            // A new life begins on respawn — all past lives are available to meet again.
-            global.resetSession(player.getUUID());
+            // A new life begins on respawn — clear which past lives this player has already met,
+            // so every life across the whole reincarnation pool is available to meet again.
+            ReincarnationSources.resetSession(player.getUUID());
         } catch (RuntimeException e) {
             LOGGER.error("[playermob] failed to snapshot reincarnation for {}", player.getGameProfile().getName(), e);
         }
@@ -116,20 +120,21 @@ public final class PlayerReincarnation {
     /**
      * With probability {@link #REINCARNATION_SPAWN_CHANCE}, turn a freshly-created
      * Dungeon-Train PlayerMob into a stored past life; returns the embodied
-     * {@link GlobalLifeStore.DeathRecord} (whose {@code friendSnapshots} the caller may replay as a
+     * {@link ReincarnationRecord} (whose {@code friendSnapshots} the caller may replay as a
      * friend-echo), or {@code null} if it stayed a fresh mob.
      * Called from {@link PlayerMobEntity#finalizeSpawn} for {@code EVENT} spawns,
      * <em>before</em> the default skin/trait rolls — applying the snapshot via
      * {@code readAdditionalSaveData} pins the skin and traits explicit so those rolls
      * become no-ops (the same mechanism the reincarnation egg relies on).
      *
-     * <p>The life is drawn from the global death log by {@link GlobalLifeStore#pickEchoFor}:
-     * deaths within {@link GlobalLifeStore#CARRIAGE_RADIUS} carriages of the spawn that the
-     * nearest player hasn't met this life, weighted toward newer deaths. No eligible life
-     * (empty band / all met / unresolved carriage) returns {@code null} so the spawn falls
-     * back to a normal random PlayerMob. Never throws into the spawn flow.</p>
+     * <p>The life is drawn from the whole {@link ReincarnationSources reincarnation pool} —
+     * PlayerMob's own death log plus any source an integrating mod registered — for this spawn's
+     * carriage depth: deaths within {@link GlobalLifeStore#CARRIAGE_RADIUS} carriages that the
+     * nearest player hasn't met this life, weighted toward newer deaths and nearer carriages. No
+     * eligible life (empty band / all met / unresolved carriage) returns {@code null} so the spawn
+     * falls back to a normal random PlayerMob. Never throws into the spawn flow.</p>
      */
-    public static GlobalLifeStore.DeathRecord maybeReincarnateOnSpawn(PlayerMobEntity mob, ServerLevelAccessor world) {
+    public static ReincarnationRecord maybeReincarnateOnSpawn(PlayerMobEntity mob, ServerLevelAccessor world) {
         try {
             if (world.getRandom().nextFloat() >= REINCARNATION_SPAWN_CHANCE) {
                 return null;
@@ -139,8 +144,9 @@ public final class PlayerReincarnation {
             // The nearest player owns the "met this life" set that gates reuse (singleplayer = the player).
             Player nearest = level.getNearestPlayer(mob, -1.0);
             UUID owner = nearest == null ? null : nearest.getUUID();
-            GlobalLifeStore store = GlobalLifeStore.get(level.getServer());
-            GlobalLifeStore.DeathRecord echo = store.pickEchoFor(owner, spawnCarriage, world.getRandom());
+            ReincarnationRecord echo = ReincarnationSources.pick(
+                level.getServer(), ReincarnationQuery.byCarriage(spawnCarriage, owner), world.getRandom())
+                .orElse(null);
             if (echo == null) {
                 return null;
             }

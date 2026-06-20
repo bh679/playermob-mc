@@ -9,18 +9,15 @@ import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.Tag;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.util.RandomSource;
 import org.slf4j.Logger;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -82,17 +79,11 @@ public final class GlobalLifeStore {
         }
     }
 
-    /** A live player's per-life echo session: which death ids they've already met. */
-    private static final class LifeSession {
-        final Set<Long> usedIds = new java.util.HashSet<>();
-    }
-
     private static MinecraftServer cachedServer;
     private static GlobalLifeStore cached;
 
     private final Path path;
     private final List<DeathRecord> history = new ArrayList<>(); // oldest -> newest
-    private final Map<UUID, LifeSession> sessions = new HashMap<>(); // transient, per live player
     private long nextId = 1L;
 
     private GlobalLifeStore(Path path) {
@@ -185,41 +176,54 @@ public final class GlobalLifeStore {
         return out;
     }
 
-    /** Forget a player's "used this life" set — call on death and on world change. */
-    public void resetSession(UUID id) {
-        sessions.remove(id);
-    }
+    // ---- candidate sets (consumed by the reincarnation source registry) ---
 
     /**
-     * Pick a stored past life to embody as a Dungeon-Train echo at {@code spawnCarriage}
-     * for {@code owner} (the live player it's spawning near), or {@code null} to fall back
-     * to a normal random mob. Draws from deaths within {@link #CARRIAGE_RADIUS} carriages of
-     * the spawn that {@code owner} hasn't met this life, weighted toward newer deaths; marks
-     * the pick used. Returns a defensive copy via the record's snapshot (caller copies).
+     * Deaths within {@link #CARRIAGE_RADIUS} carriages of {@code carriage}, oldest→newest — the
+     * depth band a Dungeon-Train echo is drawn from. Empty when {@code carriage} is
+     * {@link #NO_CARRIAGE} (no depth to compare against). The weighted pick over these is the
+     * registry's job; this is just the eligible set.
      */
-    public DeathRecord pickEchoFor(UUID owner, int spawnCarriage, RandomSource rng) {
-        if (spawnCarriage == NO_CARRIAGE) {
-            return null; // can't measure depth proximity without a spawn carriage
+    public List<DeathRecord> recordsInBand(int carriage) {
+        if (carriage == NO_CARRIAGE) {
+            return List.of();
         }
-        LifeSession session = owner == null ? null : sessions.computeIfAbsent(owner, k -> new LifeSession());
-        Set<Long> used = session == null ? Collections.emptySet() : session.usedIds;
-        List<DeathRecord> eligible = eligible(history, spawnCarriage, CARRIAGE_RADIUS, used);
-        DeathRecord pick = pickWeightedNewer(eligible, rng);
-        if (pick != null && session != null) {
-            session.usedIds.add(pick.id());
+        return eligible(history, carriage, CARRIAGE_RADIUS);
+    }
+
+    /** Every death belonging to {@code id}, oldest→newest (a fresh list; records are shared). */
+    public List<DeathRecord> recordsForPlayer(UUID id) {
+        List<DeathRecord> out = new ArrayList<>();
+        for (DeathRecord r : history) {
+            if (r.uuid().equals(id)) {
+                out.add(r);
+            }
         }
-        return pick;
+        return out;
+    }
+
+    /** Every recorded death, oldest→newest (a fresh list; records are shared). */
+    public List<DeathRecord> allRecords() {
+        return new ArrayList<>(history);
+    }
+
+    /** The newest {@code limit} deaths, newest first (a fresh list; records are shared). */
+    public List<DeathRecord> recent(int limit) {
+        List<DeathRecord> out = new ArrayList<>();
+        for (int i = history.size() - 1; i >= 0 && out.size() < limit; i--) {
+            out.add(history.get(i));
+        }
+        return out;
     }
 
     // ---- pure helpers (unit-tested; no world / no filesystem) -------------
 
     /**
-     * Deaths within {@code radius} carriages of {@code spawnCarriage} that aren't in
-     * {@code usedIds} and have a known carriage — preserving oldest→newest order (so the
-     * last element is the most recent, which {@link #pickWeightedNewer} weights highest).
+     * Deaths within {@code radius} carriages of {@code spawnCarriage} that have a known carriage,
+     * preserving oldest→newest order (so the last element is the most recent). Just the depth-band
+     * filter — the recency/proximity-weighted pick over the result lives in the registry.
      */
-    static List<DeathRecord> eligible(List<DeathRecord> historyOldestFirst, int spawnCarriage,
-                                      int radius, Set<Long> usedIds) {
+    static List<DeathRecord> eligible(List<DeathRecord> historyOldestFirst, int spawnCarriage, int radius) {
         List<DeathRecord> out = new ArrayList<>();
         for (DeathRecord r : historyOldestFirst) {
             if (r.carriage() == NO_CARRIAGE) {
@@ -228,38 +232,9 @@ public final class GlobalLifeStore {
             if (Math.abs((long) r.carriage() - spawnCarriage) > radius) {
                 continue;
             }
-            if (usedIds.contains(r.id())) {
-                continue;
-            }
             out.add(r);
         }
         return out;
-    }
-
-    /**
-     * Random pick from {@code eligibleOldestFirst} weighted toward the newer end: with
-     * {@code n} candidates the oldest has weight 1 and the newest weight {@code n}, so newer
-     * deaths are likelier but older ones can still surface. {@code null} if empty.
-     */
-    static DeathRecord pickWeightedNewer(List<DeathRecord> eligibleOldestFirst, RandomSource rng) {
-        int n = eligibleOldestFirst.size();
-        if (n == 0) {
-            return null;
-        }
-        int total = n * (n + 1) / 2; // sum of weights 1..n
-        return eligibleOldestFirst.get(weightedIndex(n, rng.nextInt(total)));
-    }
-
-    /** Map {@code roll} in {@code [0, n(n+1)/2)} to an index in {@code [0, n)} under weights 1..n. */
-    static int weightedIndex(int n, int roll) {
-        int cumulative = 0;
-        for (int i = 0; i < n; i++) {
-            cumulative += i + 1; // element i (oldest=0) has weight i+1
-            if (roll < cumulative) {
-                return i;
-            }
-        }
-        return n - 1;
     }
 
     // ---- persistence ------------------------------------------------------

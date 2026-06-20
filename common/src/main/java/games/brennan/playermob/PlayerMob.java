@@ -1,6 +1,8 @@
 package games.brennan.playermob;
 
 import com.mojang.logging.LogUtils;
+import games.brennan.playermob.compat.ReincarnationSources;
+import games.brennan.playermob.player.GlobalLifeReincarnationSource;
 import org.slf4j.Logger;
 
 import java.nio.file.Path;
@@ -31,14 +33,17 @@ public final class PlayerMob {
      * {@link PlayerMobRegistry#PLAYER_MOB_SPAWN_EGG}. Any common-side wiring
      * that depends on the registered types belongs here.
      *
-     * <p>Loads {@link PlayerMobConfig} from {@code configDir} (the only common wiring so far),
-     * then logs — registration lives per-loader (see {@link PlayerMobRegistry} for the rationale).</p>
+     * <p>Loads {@link PlayerMobConfig} from {@code configDir} and registers PlayerMob's own death log
+     * as the built-in {@link ReincarnationSources reincarnation source}, then logs — registration of
+     * the entity types lives per-loader (see {@link PlayerMobRegistry} for the rationale).</p>
      *
      * @param configDir the loader's config directory (Fabric {@code getConfigDir()},
      *     Forge/NeoForge {@code FMLPaths.CONFIGDIR}); {@code playermob.properties} is read from it.
      */
     public static void init(Path configDir) {
         PlayerMobConfig.load(configDir);
+        // The local death log is always a source; integrating mods register their own on top.
+        ReincarnationSources.register(new GlobalLifeReincarnationSource());
         LOGGER.info("[{}] common init — entity={}, spawn egg={}",
                     MOD_ID,
                     PlayerMobRegistry.PLAYER_MOB,
