@@ -84,6 +84,21 @@
       "released": true,
       "released_in": "v0.45.0",
       "released_at": "2026-06-20T07:12:12Z"
+    },
+    {
+      "id": "echo-spawn-seam",
+      "version": "0.46.0",
+      "type": "feat",
+      "title": "Echo-spawn modding seam",
+      "summary": "Adds a modding hook so an integrating mod can react the moment a PlayerMob spawns as a reincarnated echo \u2014 Dungeon Train uses it to chronicle cross-world echo encounters.",
+      "highlights": [
+        "New PlayerMobSpawnHooks seam reports each echo spawn with its source life and whether it came from a local or remote (cross-world) pool."
+      ],
+      "pr": 0,
+      "date": "2026-06-21",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
