@@ -3,6 +3,7 @@ package games.brennan.playermob.player;
 import com.mojang.authlib.minecraft.MinecraftProfileTexture;
 import com.mojang.logging.LogUtils;
 import games.brennan.playermob.PlayerMobRegistry;
+import games.brennan.playermob.compat.PlayerMobSpawnHooks;
 import games.brennan.playermob.compat.ReincarnationQuery;
 import games.brennan.playermob.compat.ReincarnationRecord;
 import games.brennan.playermob.compat.ReincarnationSources;
@@ -151,9 +152,12 @@ public final class PlayerReincarnation {
             // remote pool never eats into the local self-reincarnation chance; the rest stays fresh.
             float roll = world.getRandom().nextFloat();
             ReincarnationRecord echo;
+            boolean remote;
             if (roll < SELF_REINCARNATION_CHANCE) {
+                remote = false;
                 echo = ReincarnationSources.pick(level.getServer(), query, world.getRandom(), false).orElse(null);
             } else if (roll < SELF_REINCARNATION_CHANCE + REMOTE_REINCARNATION_CHANCE) {
+                remote = true;
                 echo = ReincarnationSources.pick(level.getServer(), query, world.getRandom(), true).orElse(null);
             } else {
                 return null;
@@ -169,6 +173,9 @@ public final class PlayerReincarnation {
             // wins. Mirrors the reincarnation egg's "Echo of X" label.
             mob.setCustomName(Component.literal("Echo of " + echo.name()));
             mob.setCustomNameVisible(true);
+            // Announce the spawn to any integrating mod (e.g. Dungeon Train's remote-echo encounter
+            // journal). The dispatcher swallows observer faults, so this never disrupts the spawn.
+            PlayerMobSpawnHooks.onEchoSpawned(mob, echo, remote);
             return echo;
         } catch (RuntimeException e) {
             LOGGER.error("[playermob] failed to apply a reincarnation on spawn", e);
