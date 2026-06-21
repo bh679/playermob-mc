@@ -99,6 +99,23 @@
       "released": true,
       "released_in": "v0.46.0",
       "released_at": "2026-06-21T04:52:23Z"
+    },
+    {
+      "id": "trait-weighted-feelings",
+      "version": "0.47.0",
+      "type": "feat",
+      "title": "Personality now colours how PlayerMobs feel about you",
+      "summary": "A PlayerMob's friendliness and aggression now shape how strongly it reacts to you, not just how it behaves. The friendlier a mob, the more it warms to acts of kindness \u2014 gifts, bows, and being defended land harder. The more aggressive a mob, the less it cares about being struck \u2014 a hot-tempered fighter shrugs off a blow that would turn a gentler mob against you.",
+      "highlights": [
+        "Friendly mobs warm up to twice as fast from gifts, bows, and rescues (\u00d71.0 at minimum friendliness rising to \u00d72.0 at maximum).",
+        "Aggressive mobs barely hold a grudge for being hit, while timid mobs take it to heart (\u00d70.2 at maximum aggression up to \u00d71.2 at minimum).",
+        "The Aggressive archetype is now both hard to befriend and slow to anger when struck; the Friendly archetype bonds quickly but is more easily hurt."
+      ],
+      "pr": 103,
+      "date": "2026-06-21",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
