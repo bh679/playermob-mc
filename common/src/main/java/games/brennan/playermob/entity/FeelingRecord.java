@@ -104,21 +104,42 @@ public record FeelingRecord(float feeling, float crouchBudgetUsed, float crouchC
             defendCount, lastCarriageIndex, lastWitnessTick);
     }
 
-    /** One debounced crouch: +{@link #CROUCH_STEP} feeling until the lifetime cap is spent. */
+    /** One debounced crouch at neutral strength — see {@link #afterCrouch(float)}. */
     public FeelingRecord afterCrouch() {
+        return afterCrouch(1.0F);
+    }
+
+    /**
+     * One debounced crouch scaled by {@code scale} (the mob's friendliness-driven
+     * {@link DispositionResolver#kindnessScale}): +{@link #CROUCH_STEP}·scale feeling, the
+     * scaled step also charged against the lifetime {@code crouchCap}. A friendlier mob reacts
+     * more per bow and reaches the cap sooner; the +2 ceiling itself is unchanged.
+     */
+    public FeelingRecord afterCrouch(float scale) {
         if (crouchBudgetUsed >= crouchCap) {
             return this;
         }
-        return new FeelingRecord(clamp(feeling + CROUCH_STEP), crouchBudgetUsed + CROUCH_STEP,
+        float step = CROUCH_STEP * scale;
+        return new FeelingRecord(clamp(feeling + step), crouchBudgetUsed + step,
             crouchCap, defendCount, lastCarriageIndex, lastWitnessTick);
     }
 
-    /** One credited defence: +{@link #DEFEND_STEP} feeling until {@link #DEFEND_CAP} reached. */
+    /** One credited defence at neutral strength — see {@link #afterDefend(float)}. */
     public FeelingRecord afterDefend() {
+        return afterDefend(1.0F);
+    }
+
+    /**
+     * One credited defence scaled by {@code scale} (the mob's friendliness-driven
+     * {@link DispositionResolver#kindnessScale}): +{@link #DEFEND_STEP}·scale feeling, until
+     * {@link #DEFEND_CAP} defences are counted. The cap is on the defence <em>count</em>, so a
+     * friendlier mob banks more total feeling across its (still ≤ {@link #DEFEND_CAP}) rescues.
+     */
+    public FeelingRecord afterDefend(float scale) {
         if (defendCount >= DEFEND_CAP) {
             return this;
         }
-        return new FeelingRecord(clamp(feeling + DEFEND_STEP), crouchBudgetUsed, crouchCap,
+        return new FeelingRecord(clamp(feeling + DEFEND_STEP * scale), crouchBudgetUsed, crouchCap,
             defendCount + 1, lastCarriageIndex, lastWitnessTick);
     }
 

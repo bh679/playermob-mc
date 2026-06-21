@@ -116,10 +116,19 @@ public final class FeelingLedger {
         put(id, recordFor(id).withFeeling(value));
     }
 
-    /** One debounced crouch toward {@code id}. Returns {@code true} if feeling changed. */
+    /** One debounced crouch toward {@code id} at neutral strength. */
     public boolean crouch(UUID id) {
+        return crouch(id, 1.0F);
+    }
+
+    /**
+     * One debounced crouch toward {@code id}, scaled by {@code scale} (the mob's
+     * friendliness-driven {@link DispositionResolver#kindnessScale}). Returns {@code true}
+     * if feeling changed.
+     */
+    public boolean crouch(UUID id, float scale) {
         FeelingRecord before = recordFor(id);
-        FeelingRecord after = before.afterCrouch();
+        FeelingRecord after = before.afterCrouch(scale);
         if (after == before) {
             return false;
         }
@@ -127,17 +136,23 @@ public final class FeelingLedger {
         return true;
     }
 
-    /**
-     * Credit {@code id} for defending the mob at game tick {@code eventTick}.
-     * Debounced per-individual on {@code eventTick} so one rescue isn't counted
-     * every poll. Returns {@code true} if feeling changed.
-     */
+    /** Credit {@code id} for defending the mob at game tick {@code eventTick}, at neutral strength. */
     public boolean defend(UUID id, int eventTick) {
+        return defend(id, eventTick, 1.0F);
+    }
+
+    /**
+     * Credit {@code id} for defending the mob at game tick {@code eventTick}, scaled by
+     * {@code scale} (the mob's friendliness-driven {@link DispositionResolver#kindnessScale}).
+     * Debounced per-individual on {@code eventTick} so one rescue isn't counted every poll.
+     * Returns {@code true} if feeling changed.
+     */
+    public boolean defend(UUID id, int eventTick, float scale) {
         FeelingRecord before = recordFor(id);
         if (eventTick <= before.lastWitnessTick()) {
             return false;
         }
-        FeelingRecord credited = before.afterDefend();
+        FeelingRecord credited = before.afterDefend(scale);
         put(id, credited.withWitnessTick(eventTick));
         return credited.feeling() != before.feeling();
     }

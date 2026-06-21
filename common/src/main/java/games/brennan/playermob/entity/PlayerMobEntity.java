@@ -792,7 +792,8 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             nextCrouch.put(id, greetCrouch);
             Boolean was = crouchHeld.get(id);
             if (greetCrouch && (was == null || !was)) {
-                changed |= feelings.crouch(id);
+                // Friendlier mobs warm faster per bow (DispositionResolver.kindnessScale).
+                changed |= feelings.crouch(id, DispositionResolver.kindnessScale(friendliness()));
                 // Credit the real player's lifetime kindness for the greeting gesture.
                 if (e instanceof ServerPlayer sp) {
                     PlayerLifeStore.record(sp, PlayerLifeRecord.Signal.CROUCH, 0);
@@ -842,7 +843,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
                 || TargetCategory.classify(defender) != TargetCategory.PLAYERS) {
             return false;
         }
-        boolean defended = feelings.defend(defender.getUUID(), myAttacker.getLastHurtByMobTimestamp());
+        // Friendlier mobs value being defended more (DispositionResolver.kindnessScale).
+        boolean defended = feelings.defend(defender.getUUID(),
+            myAttacker.getLastHurtByMobTimestamp(), DispositionResolver.kindnessScale(friendliness()));
         if (defended && defender instanceof ServerPlayer sp) {
             PlayerLifeStore.record(sp, PlayerLifeRecord.Signal.DEFEND, 0);
         }
@@ -2392,8 +2395,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         double giftScore = EquipmentEvaluator.score(gift);
         double currentScore = EquipmentEvaluator.score(getItemBySlot(getEquipmentSlotForItem(gift)));
         float delta = FeelingRecord.giftDelta(giftScore, currentScore);
-        feelings.adjust(gifter.getUUID(), delta);
-        // Credit the real player's lifetime kindness by the gift's worth.
+        // Friendlier mobs are moved more by the same gift (DispositionResolver.kindnessScale).
+        feelings.adjust(gifter.getUUID(), delta * DispositionResolver.kindnessScale(friendliness()));
+        // Credit the real player's lifetime kindness by the gift's worth — unscaled, since the
+        // store tracks what the player did, not this mob's trait-coloured perception of it.
         if (gifter instanceof ServerPlayer sp) {
             PlayerLifeStore.record(sp, PlayerLifeRecord.Signal.GIFT, delta);
             // Announce a player→mob gift so an optional mod (e.g. Dungeon Train's befriended
@@ -2907,7 +2912,8 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     /**
      * When struck by a categorisable entity: cool the mob's feeling toward a
      * player/PlayerMob attacker in proportion to the damage ({@link #DMG_TO_FEELING}),
-     * then react immediately — a fighter ({@code fightFlight >= 5}) retaliates;
+     * scaled down for aggressive mobs ({@link DispositionResolver#attackScale}), then react
+     * immediately — a fighter ({@code fightFlight >= 5}) retaliates;
      * a flighty mob drops the retaliation target so {@link FleeFromCategoryGoal}
      * takes over. Creative/spectator attackers are ignored entirely.
      */
@@ -2934,7 +2940,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
                 // (a solid blow can flip neutral straight into "hate").
                 if (category == TargetCategory.PLAYERS) {
                     // recordAttack (not adjust): a ≥1-feeling loss re-opens crouch headroom.
-                    feelings.recordAttack(attacker.getUUID(), -amount * DMG_TO_FEELING);
+                    // More aggressive mobs care less about being hit (DispositionResolver.attackScale).
+                    feelings.recordAttack(attacker.getUUID(),
+                        -amount * DMG_TO_FEELING * DispositionResolver.attackScale(fightFlight()));
                     // Credit the real player's lifetime aggression by the damage dealt.
                     if (attacker instanceof ServerPlayer sp) {
                         PlayerLifeStore.record(sp, PlayerLifeRecord.Signal.ATTACK, amount);

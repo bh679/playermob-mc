@@ -129,6 +129,22 @@ class FeelingLedgerTest {
         assertEquals(0, r.defendCount());
     }
 
+    @Test
+    void scaledOverloadsRouteThroughScaledRecordEvents() {
+        FeelingLedger ledger = new FeelingLedger();
+        UUID id = UUID.randomUUID();
+        // A friendlier mob (scale 2.0) warms twice as fast per bow and banks twice per defence.
+        assertTrue(ledger.crouch(id, 2.0f));                 // +0.2 → 5.2
+        assertEquals(5.2f, ledger.feelingToward(id), EPS);
+        assertTrue(ledger.defend(id, 200, 2.0f));            // +2.0 → 7.2
+        assertEquals(7.2f, ledger.feelingToward(id), EPS);
+        assertFalse(ledger.defend(id, 200, 2.0f), "same event tick is still debounced");
+        // The unscaled overloads equal a neutral scale of 1.0.
+        UUID baseline = UUID.randomUUID();
+        assertTrue(ledger.crouch(baseline));
+        assertEquals(5.1f, ledger.feelingToward(baseline), EPS);
+    }
+
     // ---- NBT round-trip incl. legacy Phase A entries ----
 
     @Test

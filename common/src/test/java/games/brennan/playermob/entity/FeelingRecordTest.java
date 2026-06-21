@@ -90,6 +90,45 @@ class FeelingRecordTest {
         assertSame(r, r.afterDefend());                             // capped → no-op
     }
 
+    // ---- trait-weighted scaling (friendliness via DispositionResolver.kindnessScale) ----
+
+    @Test
+    void scaledCrouchJumpsMorePerBowButKeepsTheCeiling() {
+        // A max-friendly mob (scale 2.0) gains 0.2 per bow instead of 0.1 ...
+        FeelingRecord one = FeelingRecord.NEUTRAL.afterCrouch(2.0f);
+        assertEquals(5.2f, one.feeling(), EPS);
+        assertEquals(0.2f, one.crouchBudgetUsed(), EPS);
+        // ... but the +2 lifetime ceiling is unchanged — it just reaches it in fewer bows.
+        FeelingRecord r = FeelingRecord.NEUTRAL;
+        for (int i = 0; i < 100; i++) {
+            r = r.afterCrouch(2.0f);
+        }
+        assertEquals(7.0f, r.feeling(), 0.25f);                      // still +2 over neutral
+        assertTrue(r.crouchBudgetUsed() >= 2.0f && r.crouchBudgetUsed() < 2.4f);
+        assertSame(r, r.afterCrouch(2.0f));                          // capped → no-op at any scale
+    }
+
+    @Test
+    void scaledDefendBanksMorePerRescueWithinTheCountCap() {
+        // The defend cap is on COUNT (2), so scaling the per-defence feeling genuinely raises
+        // the total: a max-friendly mob banks +4 across its two rescues vs the neutral +2.
+        FeelingRecord r = FeelingRecord.NEUTRAL.afterDefend(2.0f);
+        assertEquals(7.0f, r.feeling(), EPS);
+        assertEquals(1, r.defendCount());
+        r = r.afterDefend(2.0f);
+        assertEquals(9.0f, r.feeling(), EPS);
+        assertEquals(2, r.defendCount());
+        assertSame(r, r.afterDefend(2.0f));                         // count cap reached → no-op
+    }
+
+    @Test
+    void unscaledOverloadsMatchNeutralScaleOfOne() {
+        assertEquals(FeelingRecord.NEUTRAL.afterCrouch().feeling(),
+            FeelingRecord.NEUTRAL.afterCrouch(1.0f).feeling(), EPS);
+        assertEquals(FeelingRecord.NEUTRAL.afterDefend().feeling(),
+            FeelingRecord.NEUTRAL.afterDefend(1.0f).feeling(), EPS);
+    }
+
     // ---- travel ----
 
     @Test

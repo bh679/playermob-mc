@@ -2,7 +2,9 @@ package games.brennan.playermob.entity;
 
 import org.junit.jupiter.api.Test;
 
+import static games.brennan.playermob.entity.DispositionResolver.attackScale;
 import static games.brennan.playermob.entity.DispositionResolver.innerRadius;
+import static games.brennan.playermob.entity.DispositionResolver.kindnessScale;
 import static games.brennan.playermob.entity.DispositionResolver.onHurt;
 import static games.brennan.playermob.entity.DispositionResolver.outerRadius;
 import static games.brennan.playermob.entity.DispositionResolver.resolve;
@@ -170,6 +172,37 @@ class DispositionResolverTest {
                 assertTrue(witnessedAttackDelta(ff, feeling) <= 3.0f + EPS,
                     "delta exceeded the cap at ff=" + ff + " feeling=" + feeling);
             }
+        }
+    }
+
+    // ---- trait-weighted feeling scaling ----
+
+    @Test
+    void kindnessScaleRisesWithFriendlinessNeverDampens() {
+        assertEquals(1.0f, kindnessScale(0), EPS);    // unfriendly → base floor, never below 1×
+        assertEquals(1.3f, kindnessScale(3), EPS);
+        assertEquals(1.5f, kindnessScale(5), EPS);    // neutral
+        assertEquals(2.0f, kindnessScale(10), EPS);   // max friendly → double the reaction
+    }
+
+    @Test
+    void attackScaleFallsWithAggression() {
+        assertEquals(1.2f, attackScale(0), EPS);      // timid takes a hit hardest
+        assertEquals(0.9f, attackScale(3), EPS);
+        assertEquals(0.7f, attackScale(5), EPS);      // neutral
+        assertEquals(0.2f, attackScale(10), EPS);     // aggressive barely minds being hit
+    }
+
+    @Test
+    void traitScalesClampOutOfRangeAndStayPositive() {
+        // Defensive clamp: out-of-band traits saturate at the 0/10 ends, never invert sign.
+        assertEquals(kindnessScale(0), kindnessScale(-5), EPS);
+        assertEquals(kindnessScale(10), kindnessScale(99), EPS);
+        assertEquals(attackScale(0), attackScale(-5), EPS);
+        assertEquals(attackScale(10), attackScale(99), EPS);
+        for (int t = 0; t <= 10; t++) {
+            assertTrue(kindnessScale(t) >= 1.0f, "kindness never dampens at trait " + t);
+            assertTrue(attackScale(t) > 0.0f, "attack scale stays positive at trait " + t);
         }
     }
 

@@ -174,6 +174,46 @@ public final class DispositionResolver {
         return Math.abs(delta) < 1e-4F ? 0.0F : delta;
     }
 
+    // ---- Trait-weighted feeling scaling ------------------------------------
+    //
+    // Traits decide WHICH reaction the mob picks (resolve / onHurt); these decide
+    // HOW STRONGLY the resulting feeling-event lands. Pure and primitives-only like
+    // the rest of this class, so they unit-test without a live world.
+
+    /** Kindness multiplier at friendliness 0 — the floor; kindness only ever amplifies (≥ 1.0×). */
+    public static final float KINDNESS_SCALE_BASE = 1.0F;
+    /** Added kindness multiplier per point of friendliness → 2.0× at friendliness 10. */
+    public static final float KINDNESS_SCALE_PER_POINT = 0.1F;
+    /** Attack feeling-loss multiplier at fightFlight 0 — a timid mob takes a hit hardest. */
+    public static final float ATTACK_SCALE_BASE = 1.2F;
+    /** Subtracted attack multiplier per point of fightFlight → 0.2× at fightFlight 10. */
+    public static final float ATTACK_SCALE_PER_POINT = 0.1F;
+
+    /**
+     * Multiplier on the feeling <b>gained</b> from an act of kindness (gift, bow, defend),
+     * rising with friendliness: {@link #KINDNESS_SCALE_BASE 1.0}× at 0 up to 2.0× at 10. A
+     * friendlier mob is won over faster and further. Never dampens (≥ 1.0×).
+     */
+    public static float kindnessScale(int friendliness) {
+        return KINDNESS_SCALE_BASE + clampTrait(friendliness) * KINDNESS_SCALE_PER_POINT;
+    }
+
+    /**
+     * Multiplier on the feeling <b>lost</b> when attacked, falling with fightFlight:
+     * {@link #ATTACK_SCALE_BASE 1.2}× at 0 down to 0.2× at 10. The more aggressive the mob,
+     * the less a hit cools its feeling toward the attacker (it cares less about being hit).
+     */
+    public static float attackScale(int fightFlight) {
+        return ATTACK_SCALE_BASE - clampTrait(fightFlight) * ATTACK_SCALE_PER_POINT;
+    }
+
+    /** Clamp a trait to {@code [MIN, MAX]} — defensive; traits are already bounded at source. */
+    private static int clampTrait(int trait) {
+        if (trait < DispositionTraits.MIN) return DispositionTraits.MIN;
+        if (trait > DispositionTraits.MAX) return DispositionTraits.MAX;
+        return trait;
+    }
+
     // ---- "Can I win?" assessment (Phase C: the mid fight/flight band) ------
     //
     // The hard cut at FF_FIGHT (5) holds at the extremes, but the middle of the
