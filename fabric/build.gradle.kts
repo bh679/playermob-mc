@@ -22,6 +22,7 @@ val minecraftRange = when (mc) {
     "1.20.1" -> "~1.20.1"
     else     -> "~1.21.1"
 }
+val javaMin = if (stonecutter.eval(mc, ">=1.20.5")) "21" else "17"
 
 version = "${common.mod.version}+$mc"
 base {
@@ -101,6 +102,7 @@ tasks.processResources {
         "version" to common.mod.version,
         "fabric_loader_version" to prop("fabric_loader_version")!!,
         "minecraft_range" to minecraftRange,
+        "java_min" to javaMin,
         "mod_name" to common.mod.name,
         "mod_description" to common.mod.description,
         "mod_authors" to common.mod.authors,
