@@ -56,14 +56,21 @@ public final class RegistryCompat {
      * {@code "id"} naming the entity type (vanilla requires it; the caller already
      * sets it).
      */
+    //? if >=26 {
+    /*public static SpawnEggItem archetypeSpawnEgg(EntityType<? extends Mob> type, int background, int highlight,
+                                                 CompoundTag entityData, net.minecraft.resources.Identifier eggId) {*/
+    //?} else {
     public static SpawnEggItem archetypeSpawnEgg(EntityType<? extends Mob> type, int background, int highlight,
-                                                 CompoundTag entityData) {
+                                                 CompoundTag entityData, ResourceLocation eggId) {
+    //?}
         //? if >=26 {
         /*// 26.x dropped the (type, bgColor, hlColor, Properties) ctor — the egg's entity type now
         // rides the ENTITY_DATA component (TypedEntityData), and the two egg colours are
-        // data-driven from the item model/texture rather than constructor args.
-        return new SpawnEggItem(
-            new Item.Properties().component(DataComponents.ENTITY_DATA, TypedEntityData.of(type, entityData)));
+        // data-driven from the item model/texture rather than constructor args. Item.Properties
+        // must also carry its registry id before the Item ctor runs (ctor calls itemIdOrThrow()).
+        return new SpawnEggItem(new Item.Properties()
+            .setId(net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.ITEM, eggId))
+            .component(DataComponents.ENTITY_DATA, TypedEntityData.of(type, entityData)));
         *///?} else if >=1.21.1 {
         return new SpawnEggItem(type, background, highlight,
             new Item.Properties().component(DataComponents.ENTITY_DATA, CustomData.of(entityData)));

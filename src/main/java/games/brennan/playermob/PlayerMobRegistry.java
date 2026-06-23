@@ -147,7 +147,11 @@ public final class PlayerMobRegistry {
         /*// 26.x: the spawn egg's entity type rides the ENTITY_DATA component; egg colours are
         // data-driven from the item model rather than constructor args. The data tag is empty
         // (a fully-random egg pins nothing) but still names the type via TypedEntityData.
-        return new SpawnEggItem(new Item.Properties().component(
+        // 26.x: Item.Properties must carry its registry id before the Item ctor runs
+        // (the ctor calls itemIdOrThrow()), so set it here from the egg's known id.
+        return new SpawnEggItem(new Item.Properties()
+            .setId(net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.ITEM, PLAYER_MOB_SPAWN_EGG_ID))
+            .component(
             net.minecraft.core.component.DataComponents.ENTITY_DATA,
             net.minecraft.world.item.component.TypedEntityData.of(type, new CompoundTag())));
         *///?} else {
@@ -162,6 +166,7 @@ public final class PlayerMobRegistry {
      */
     public static SpawnEggItem createArchetypeSpawnEgg(EntityType<? extends Mob> type, Archetype archetype) {
         return RegistryCompat.archetypeSpawnEgg(
-            type, SPAWN_EGG_PRIMARY, archetype.eggColor, archetypeEggData(archetype));
+            type, SPAWN_EGG_PRIMARY, archetype.eggColor, archetypeEggData(archetype),
+            archetypeSpawnEggId(archetype));
     }
 }
