@@ -13,7 +13,7 @@ val common: Project = requireNotNull(stonecutter.node.sibling("")?.project) {
 }
 
 val forgeVersion = when (mc) {
-    "1.20.1" -> "1.20.1-47.4.0"
+    "1.20.1" -> "1.20.1-47.4.20"
     else     -> "1.21.1-52.1.14"
 }
 

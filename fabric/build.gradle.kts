@@ -15,7 +15,7 @@ val common: Project = requireNotNull(stonecutter.node.sibling("")?.project) {
 // Per-MC dependency coordinates. 1.21.1 is the only active version until the
 // 1.20.1 node is added; the `when` keeps the back-port a one-line change.
 val fabricApiVersion = when (mc) {
-    "1.20.1" -> "0.92.5+1.20.1"
+    "1.20.1" -> "0.92.9+1.20.1"
     else     -> "0.103.0+1.21.1"
 }
 

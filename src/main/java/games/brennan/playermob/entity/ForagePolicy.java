@@ -1,6 +1,8 @@
 package games.brennan.playermob.entity;
 
+//? if >=1.21.1 {
 import net.minecraft.core.component.DataComponents;
+//?}
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.animal.Animal;
 import net.minecraft.world.entity.animal.Chicken;
@@ -78,7 +80,11 @@ public final class ForagePolicy {
 
     /** True if the stack is something the mob can eat — carries a FOOD component. */
     public static boolean isEdible(ItemStack stack) {
+        //? if >=1.21.1 {
         return stack.has(DataComponents.FOOD);
+        //?} else {
+        /*return stack.getItem().getFoodProperties() != null;*/
+        //?}
     }
 
     /**
