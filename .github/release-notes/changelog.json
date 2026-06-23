@@ -133,6 +133,23 @@
       "released": true,
       "released_in": "v0.48.0",
       "released_at": "2026-06-23T05:17:14Z"
+    },
+    {
+      "id": "minecraft-262-latest",
+      "version": "0.49.0",
+      "type": "feat",
+      "title": "PlayerMob now runs on the latest Minecraft (26.2)",
+      "summary": "PlayerMob now ships a build for Minecraft 26.2 'Chaos Cubed' (Fabric and NeoForge), on top of the existing 1.20.1 and 1.21.1 builds. It's the same player-shaped, weapon-aware mob \u2014 now on the latest Minecraft.",
+      "highlights": [
+        "New 26.2 build for Fabric and NeoForge.",
+        "PlayerMob now covers Minecraft 1.20.1, 1.21.1, and 26.2 \u2014 grab the jar matching your version + loader.",
+        "NeoForge 26.2 is still in beta upstream, so treat the 26.2 build as a preview."
+      ],
+      "pr": 107,
+      "date": "2026-06-23",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
