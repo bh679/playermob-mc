@@ -47,6 +47,16 @@ public final class SkinCompat {
 
     private SkinCompat() {}
 
+    //? if >=26 {
+    /*// 26.x's SkinManager.createLookup(profile, …) returns a Supplier that yields the UUID
+    // default skin until its async fetch lands, then flips to the real texture. Cache the
+    // Supplier per profile (create it ONCE) and poll it each frame — building a fresh lookup
+    // every frame (the naive port) restarts the fetch each time, so it never resolves and the
+    // mob stays on the default (Steve) skin.
+    private static final java.util.concurrent.ConcurrentHashMap<GameProfile, java.util.function.Supplier<PlayerSkin>> LOOKUPS =
+        new java.util.concurrent.ConcurrentHashMap<>();
+    *///?}
+
     /**
      * Resolve {@code profile}'s skin through vanilla {@code SkinManager} without
      * signature validation — the texture the client would render that profile with,
@@ -55,7 +65,8 @@ public final class SkinCompat {
      */
     public static PlayerSkinInfo insecureSkin(GameProfile profile) {
         //? if >=26 {
-        /*PlayerSkin skin = Minecraft.getInstance().getSkinManager().createLookup(profile, false).get();
+        /*PlayerSkin skin = LOOKUPS.computeIfAbsent(profile,
+            p -> Minecraft.getInstance().getSkinManager().createLookup(p, false)).get();
         return new PlayerSkinInfo(skin.body().texturePath(), skin.model() == PlayerModelType.SLIM);
         *///?} else {
         //? if >=1.21.1 {

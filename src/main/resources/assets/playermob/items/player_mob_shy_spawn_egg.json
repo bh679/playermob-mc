@@ -1,16 +1,6 @@
 {
   "model": {
     "type": "minecraft:model",
-    "model": "minecraft:item/template_spawn_egg",
-    "tints": [
-      {
-        "type": "minecraft:constant",
-        "value": 14530711
-      },
-      {
-        "type": "minecraft:constant",
-        "value": 3847130
-      }
-    ]
+    "model": "playermob:item/player_mob_shy_spawn_egg_baked"
   }
 }
