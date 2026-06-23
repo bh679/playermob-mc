@@ -1,13 +1,21 @@
 package games.brennan.playermob.player;
 
+import games.brennan.playermob.compat.NbtCompat;
+//? if <26 {
 import net.minecraft.core.HolderLookup;
+//?}
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.saveddata.SavedData;
+//? if >=26 {
+/*import net.minecraft.world.level.saveddata.SavedDataType;
+import net.minecraft.world.level.storage.SavedDataStorage;
+*///?} else {
 import net.minecraft.world.level.storage.DimensionDataStorage;
+//?}
 
 import java.util.HashMap;
 import java.util.Map;
@@ -52,8 +60,27 @@ public final class PlayerLifeStore extends SavedData {
 
     public PlayerLifeStore() {}
 
+    //? if >=26 {
+    /*// 26.x SavedData is codec-based: the SavedDataType bundles the id, constructor, and a
+    // Codec<PlayerLifeStore>. We reuse the existing CompoundTag (de)serialisation by mapping
+    // CompoundTag.CODEC through saveToTag/loadFromTag — same on-disk bytes as earlier versions,
+    // so worlds round-trip cleanly. (DataFixTypes.LEVEL is the generic catch-all fixer type.)
+    private static final SavedDataType<PlayerLifeStore> TYPE = new SavedDataType<>(
+        games.brennan.playermob.compat.RegistryCompat.id(
+            games.brennan.playermob.PlayerMob.MOD_ID, DATA_NAME),
+        PlayerLifeStore::new,
+        net.minecraft.nbt.CompoundTag.CODEC.xmap(
+            PlayerLifeStore::loadFromTag,
+            store -> store.saveToTag(new net.minecraft.nbt.CompoundTag())),
+        net.minecraft.util.datafix.DataFixTypes.LEVEL);
+    *///?}
+
     /** Fetch (or create) the single store, always from the overworld's storage. */
     public static PlayerLifeStore get(ServerLevel level) {
+        //? if >=26 {
+        /*SavedDataStorage storage = level.getServer().overworld().getDataStorage();
+        return storage.computeIfAbsent(TYPE);
+        *///?} else {
         DimensionDataStorage storage = level.getServer().overworld().getDataStorage();
         //? if >=1.21.1 {
         return storage.computeIfAbsent(
@@ -62,6 +89,7 @@ public final class PlayerLifeStore extends SavedData {
         //?} else {
         /*// 1.20.1 computeIfAbsent takes (loader, factory, name) directly — no SavedData.Factory.
         return storage.computeIfAbsent(PlayerLifeStore::load, PlayerLifeStore::new, DATA_NAME);*/
+        //?}
         //?}
     }
 
@@ -80,7 +108,12 @@ public final class PlayerLifeStore extends SavedData {
      * player's server level.
      */
     public static void record(ServerPlayer player, PlayerLifeRecord.Signal signal, float magnitude) {
+        //? if >=26 {
+        /*// 26.x renamed ServerPlayer.serverLevel() → level() (still returns ServerLevel).
+        get(player.level()).credit(player.getUUID(), signal, magnitude);
+        *///?} else {
         get(player.serverLevel()).credit(player.getUUID(), signal, magnitude);
+        //?}
     }
 
     public void credit(UUID id, PlayerLifeRecord.Signal signal, float magnitude) {
@@ -117,6 +150,7 @@ public final class PlayerLifeStore extends SavedData {
 
     // ---- persistence ------------------------------------------------------
 
+    //? if <26 {
     //? if >=1.21.1 {
     @Override
     public CompoundTag save(CompoundTag tag, HolderLookup.Provider registries) {
@@ -124,13 +158,20 @@ public final class PlayerLifeStore extends SavedData {
     /*@Override
     public CompoundTag save(CompoundTag tag) {
     *///?}
+        return saveToTag(tag);
+    }
+    //?}
+
+    /** Version-agnostic NBT writer — the on-disk format, shared by the pre-26 {@code save}
+     *  override and the 26.x codec. */
+    private CompoundTag saveToTag(CompoundTag tag) {
         ListTag currentList = new ListTag();
         for (Map.Entry<UUID, PlayerLifeRecord> e : current.entrySet()) {
             if (e.getValue().isEmpty()) {
                 continue; // don't bloat the save with empty tallies
             }
             CompoundTag entry = new CompoundTag();
-            entry.putUUID(TAG_UUID, e.getKey());
+            NbtCompat.putUUID(entry, TAG_UUID, e.getKey());
             e.getValue().save(entry);
             currentList.add(entry);
         }
@@ -142,7 +183,7 @@ public final class PlayerLifeStore extends SavedData {
             ListTag lastList = new ListTag();
             for (Map.Entry<UUID, CompoundTag> e : legacyLastLife.entrySet()) {
                 CompoundTag entry = new CompoundTag();
-                entry.putUUID(TAG_UUID, e.getKey());
+                NbtCompat.putUUID(entry, TAG_UUID, e.getKey());
                 String name = legacyLastName.get(e.getKey());
                 if (name != null) {
                     entry.putString(TAG_NAME, name);
@@ -155,31 +196,39 @@ public final class PlayerLifeStore extends SavedData {
         return tag;
     }
 
+    //? if <26 {
     //? if >=1.21.1 {
     public static PlayerLifeStore load(CompoundTag tag, HolderLookup.Provider registries) {
     //?} else {
     /*public static PlayerLifeStore load(CompoundTag tag) {
     *///?}
+        return loadFromTag(tag);
+    }
+    //?}
+
+    /** Version-agnostic NBT reader — the on-disk format, shared by the pre-26 {@code load}
+     *  factory and the 26.x codec. */
+    private static PlayerLifeStore loadFromTag(CompoundTag tag) {
         PlayerLifeStore store = new PlayerLifeStore();
 
-        ListTag currentList = tag.getList(TAG_CURRENT, Tag.TAG_COMPOUND);
+        ListTag currentList = NbtCompat.getListOfType(tag, TAG_CURRENT, Tag.TAG_COMPOUND);
         for (int i = 0; i < currentList.size(); i++) {
-            CompoundTag entry = currentList.getCompound(i);
-            if (entry.hasUUID(TAG_UUID)) {
-                store.current.put(entry.getUUID(TAG_UUID), PlayerLifeRecord.load(entry));
+            CompoundTag entry = NbtCompat.compoundAt(currentList, i);
+            if (NbtCompat.hasUUID(entry, TAG_UUID)) {
+                store.current.put(NbtCompat.getUUID(entry, TAG_UUID), PlayerLifeRecord.load(entry));
             }
         }
 
         // Legacy last-life snapshots from older builds — loaded only so GlobalLifeStore
         // can import them once; current builds write these in the global file instead.
-        ListTag lastList = tag.getList(TAG_LAST, Tag.TAG_COMPOUND);
+        ListTag lastList = NbtCompat.getListOfType(tag, TAG_LAST, Tag.TAG_COMPOUND);
         for (int i = 0; i < lastList.size(); i++) {
-            CompoundTag entry = lastList.getCompound(i);
-            if (entry.hasUUID(TAG_UUID)) {
-                UUID id = entry.getUUID(TAG_UUID);
-                store.legacyLastLife.put(id, entry.getCompound(TAG_SNAPSHOT));
-                if (entry.contains(TAG_NAME, Tag.TAG_STRING)) {
-                    store.legacyLastName.put(id, entry.getString(TAG_NAME));
+            CompoundTag entry = NbtCompat.compoundAt(lastList, i);
+            if (NbtCompat.hasUUID(entry, TAG_UUID)) {
+                UUID id = NbtCompat.getUUID(entry, TAG_UUID);
+                store.legacyLastLife.put(id, NbtCompat.getCompoundOrEmpty(entry, TAG_SNAPSHOT));
+                if (NbtCompat.containsOfType(entry, TAG_NAME, Tag.TAG_STRING)) {
+                    store.legacyLastName.put(id, NbtCompat.getStringOr(entry, TAG_NAME, null));
                 }
             }
         }

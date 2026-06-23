@@ -6,7 +6,11 @@ import games.brennan.playermob.compat.PlayerSkinInfo;
 import games.brennan.playermob.compat.SkinCompat;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+//? if >=26 {
+/*import net.minecraft.resources.Identifier;
+*///?} else {
 import net.minecraft.resources.ResourceLocation;
+//?}
 
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
@@ -50,7 +54,11 @@ public final class PlayerMobSkinTextures {
      * frame so the in-flight default flips to the real texture as soon as
      * the async fetch completes — no event subscription needed.
      */
+    //? if >=26 {
+    /*private static final ConcurrentHashMap<String, Identifier> CACHE = new ConcurrentHashMap<>();
+    *///?} else {
     private static final ConcurrentHashMap<String, ResourceLocation> CACHE = new ConcurrentHashMap<>();
+    //?}
 
     /**
      * Cached fake GameProfiles per URL so we don't rebuild the Property
@@ -92,7 +100,11 @@ public final class PlayerMobSkinTextures {
      *                   texture's {@code metadata.model} here; the renderer
      *                   separately swaps to the slim body model per-mob.
      */
+    //? if >=26 {
+    /*public static Identifier lookup(String textureUrl, boolean slim) {
+    *///?} else {
     public static ResourceLocation lookup(String textureUrl, boolean slim) {
+    //?}
         if (textureUrl == null || textureUrl.isEmpty()) {
             return SkinCompat.defaultTexture();
         }
@@ -102,7 +114,7 @@ public final class PlayerMobSkinTextures {
         // cache to short-circuit subsequent frames after success.
         GameProfile profile = PROFILES.computeIfAbsent(textureUrl,
             url -> buildFakeProfile(url, slim));
-        ResourceLocation resolved = SkinCompat.insecureSkin(profile).texture();
+        var resolved = SkinCompat.insecureSkin(profile).texture();
         if (resolved != null) {
             CACHE.put(textureUrl, resolved);
             return resolved;
@@ -121,7 +133,13 @@ public final class PlayerMobSkinTextures {
         GameProfile profile = new GameProfile(uuid, "PlayerMob");
         String json = textureJson(textureUrl, slim);
         String base64 = Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
+        //? if >=26 {
+        /*// authlib 9 (MC 26.x) renamed GameProfile.getProperties() → properties().
+        // (Third Property arg is the signature — null for our unsigned synthetic profile.)
+        profile.properties().put("textures", new Property("textures", base64, null));
+        *///?} else {
         profile.getProperties().put("textures", new Property("textures", base64, /* signature */ null));
+        //?}
         return profile;
     }
 

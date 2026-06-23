@@ -30,7 +30,11 @@ public final class WitnessedAttacks {
      */
     public static void onHurt(LivingEntity victim, DamageSource source) {
         Level level = victim.level();
+        //? if >=26 {
+        /*if (level.isClientSide()) {
+        *///?} else {
         if (level.isClientSide) {
+        //?}
             return;
         }
         if (!(source.getEntity() instanceof LivingEntity attacker)

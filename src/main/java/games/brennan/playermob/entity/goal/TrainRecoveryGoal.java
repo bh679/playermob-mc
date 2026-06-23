@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.compat.GameRuleCompat;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.compat.TrainEnvironment;
 import games.brennan.playermob.entity.BlockSourcePolicy;
@@ -15,7 +16,6 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
@@ -803,7 +803,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
             level.levelEvent(2001, gatherTargetPos, Block.getId(state)); // break particles + sound
             for (ItemStack drop : drops) {
                 ItemStack leftover = EquipmentEvaluator.addToContainer(mob.getInventory(), drop);
-                if (!leftover.isEmpty()) mob.spawnAtLocation(leftover);
+                if (!leftover.isEmpty()) mob.dropAtLocation(leftover);
             }
         }
         mob.level().destroyBlockProgress(mob.getId(), gatherTargetPos, -1);  // clear cracking overlay
@@ -903,7 +903,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
             mob.getInventory().setItem(logSlot, ItemStack.EMPTY);
         }
         ItemStack leftover = EquipmentEvaluator.addToContainer(mob.getInventory(), planks);
-        if (!leftover.isEmpty()) mob.spawnAtLocation(leftover);
+        if (!leftover.isEmpty()) mob.dropAtLocation(leftover);
         mob.swing(InteractionHand.MAIN_HAND);
         phase = Phase.BRIDGE;
         phaseTicks = 0;
@@ -1065,6 +1065,6 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
     }
 
     private boolean mobGriefingOn() {
-        return mob.level().getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING);
+        return GameRuleCompat.mobGriefing(mob.level());
     }
 }

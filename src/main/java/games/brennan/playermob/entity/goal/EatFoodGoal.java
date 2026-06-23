@@ -90,8 +90,17 @@ public final class EatFoodGoal extends Goal implements DescribableGoal {
         mob.setItemSlot(EquipmentSlot.OFFHAND, portion);
 
         // Opening "om" — vanilla plays the same sound on first bite for players.
+        //? if >=26 {
+        /*// 26.x removed LivingEntity.getEatingSound; the eating sound rides the CONSUMABLE
+        // component now (falling back to the generic eat sound for non-component food).
+        // SoundEvents.GENERIC_EAT is a Holder<SoundEvent> in 26.x, so unwrap with value().
+        net.minecraft.sounds.SoundEvent eatSound = games.brennan.playermob.compat.ItemDataCompat
+            .eatingSound(portion, net.minecraft.sounds.SoundEvents.GENERIC_EAT.value());
+        *///?} else {
+        net.minecraft.sounds.SoundEvent eatSound = mob.getEatingSound(portion);
+        //?}
         mob.playSound(
-            mob.getEatingSound(portion),
+            eatSound,
             0.5F,
             1.0F + (mob.getRandom().nextFloat() - mob.getRandom().nextFloat()) * 0.4F);
 
@@ -137,7 +146,7 @@ public final class EatFoodGoal extends Goal implements DescribableGoal {
             mob.heal((float) ItemDataCompat.nutrition(props));
             // Defensive copies of each effect happen inside the shim — the
             // supplier returns the same instance across calls.
-            ItemDataCompat.applyFoodEffects(props, mob, mob.getRandom());
+            ItemDataCompat.applyFoodEffects(food, props, mob, mob.getRandom());
         }
 
         food.shrink(1);
@@ -160,7 +169,7 @@ public final class EatFoodGoal extends Goal implements DescribableGoal {
             if (!inProgress.isEmpty()) {
                 ItemStack leftover = mob.getInventory().addItem(inProgress);
                 if (!leftover.isEmpty()) {
-                    mob.spawnAtLocation(leftover);
+                    mob.dropAtLocation(leftover);
                 }
             }
             mob.setItemSlot(EquipmentSlot.OFFHAND, previousOffhand);

@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.compat.GameRuleCompat;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.EquipmentEvaluator;
 import games.brennan.playermob.entity.ForagePolicy;
@@ -9,7 +10,6 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
@@ -89,7 +89,7 @@ public final class HarvestCropsGoal extends Goal implements DescribableGoal {
         }
         if (mob.getTarget() != null) return false;       // combat / hunting preempts
         if (!mob.wantsFood()) return false;
-        if (!mob.level().getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)) return false;
+        if (!GameRuleCompat.mobGriefing(mob.level())) return false;
 
         BlockPos found = findClosestRipeCrop();
         if (found == null) {
@@ -199,9 +199,9 @@ public final class HarvestCropsGoal extends Goal implements DescribableGoal {
         for (ItemStack drop : drops) {
             if (ForagePolicy.isEdible(drop)) {
                 ItemStack leftover = EquipmentEvaluator.addToContainer(mob.getInventory(), drop);
-                if (!leftover.isEmpty()) mob.spawnAtLocation(leftover);
+                if (!leftover.isEmpty()) mob.dropAtLocation(leftover);
             } else {
-                mob.spawnAtLocation(drop);
+                mob.dropAtLocation(drop);
             }
         }
         serverLevel.destroyBlock(targetPos, /* dropBlock */ false, mob);

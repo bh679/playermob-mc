@@ -1,5 +1,17 @@
 package games.brennan.playermob.neoforge.compat;
 
+//? if >=26 {
+/*// Dungeon Train ({@code dungeontrain}) is a NeoForge-1.21.1-only optional compile dependency and
+// does not exist for MC 26.x (see neoforge/build.gradle.kts). The real DT HUD de-overlap below
+// imports DT client symbols that can't resolve on 26, so on >=26 this is a never-called stub:
+// PlayerMobNeoForgeClient.installDungeonTrainHudOffset() (its only caller) is guarded to <26.
+// The class must still compile in the source set, so installVersionHudOffset() is a no-op here.
+// Line comments only inside this >=26 block (no nested block comments).
+public final class DungeonTrainHud {
+    private DungeonTrainHud() {}
+    public static void installVersionHudOffset() {}
+}
+*///?} else {
 import games.brennan.dungeontrain.client.HudText;
 import games.brennan.dungeontrain.client.VersionInfo;
 import games.brennan.dungeontrain.client.version.VersionStatusButton;
@@ -61,3 +73,4 @@ public final class DungeonTrainHud {
         return 0;
     }
 }
+//?}

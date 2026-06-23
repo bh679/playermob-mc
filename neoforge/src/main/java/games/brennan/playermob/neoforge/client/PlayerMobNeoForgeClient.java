@@ -5,8 +5,16 @@ import games.brennan.playermob.client.PlayerMobRenderer;
 import games.brennan.playermob.client.PlayerMobScreen;
 import games.brennan.playermob.client.VersionHudRenderer;
 import games.brennan.playermob.neoforge.PlayerMobNeoForge;
+//? if >=26 {
+/*// 26.x removed Mojang's net.minecraft.client.gui.LayeredDraw; NeoForge's GUI layer type is now
+// net.neoforged.neoforge.client.gui.GuiLayer (render takes a GuiGraphicsExtractor). ResourceLocation
+// was also renamed to Identifier.
+import net.minecraft.resources.Identifier;
+import net.neoforged.neoforge.client.gui.GuiLayer;
+*///?} else {
 import net.minecraft.client.gui.LayeredDraw;
 import net.minecraft.resources.ResourceLocation;
+//?}
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModList;
 import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
@@ -48,9 +56,18 @@ public final class PlayerMobNeoForgeClient {
     }
 
     private static void onRegisterGuiLayers(RegisterGuiLayersEvent event) {
+        //? if >=26 {
+        /*// 26.x: the HUD layer is a NeoForge GuiLayer whose render(GuiGraphicsExtractor, DeltaTracker)
+        // hands the extractor the common VersionHudRenderer.render(GuiGraphicsExtractor) already takes
+        // (it's guarded to that signature on 26). registerAboveAll now keys on an Identifier.
+        GuiLayer layer = (guiGraphicsExtractor, deltaTracker) -> VersionHudRenderer.render(guiGraphicsExtractor);
+        event.registerAboveAll(
+            Identifier.fromNamespaceAndPath(PlayerMob.MOD_ID, "version_hud"), layer);
+        *///?} else {
         LayeredDraw.Layer layer = (graphics, deltaTracker) -> VersionHudRenderer.render(graphics);
         event.registerAboveAll(
             ResourceLocation.fromNamespaceAndPath(PlayerMob.MOD_ID, "version_hud"), layer);
+        //?}
     }
 
     private static void onScreenRender(ScreenEvent.Render.Post event) {
@@ -73,6 +90,12 @@ public final class PlayerMobNeoForgeClient {
      * are never classloaded unless {@code dungeontrain} is present.
      */
     private static void installDungeonTrainHudOffset() {
+        //? if <26 {
+        // Dungeon Train is NeoForge-1.21.1-only (see build.gradle.kts) and can't load on MC 26.x, so
+        // on >=26 this is an empty no-op — the DT HUD de-overlap never runs and DungeonTrainHud is not
+        // referenced. The runtime ModList.isLoaded("dungeontrain") guard at the call site already
+        // prevents the call; this drops the compile reference on 26 as well.
         games.brennan.playermob.neoforge.compat.DungeonTrainHud.installVersionHudOffset();
+        //?}
     }
 }

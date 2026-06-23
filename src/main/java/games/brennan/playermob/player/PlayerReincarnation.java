@@ -75,13 +75,29 @@ public final class PlayerReincarnation {
     private PlayerReincarnation() {}
 
     /**
+     * The player's profile name. authlib 9 (MC 26.x) made {@code GameProfile} record-style,
+     * renaming {@code getName()} → {@code name()}.
+     */
+    private static String profileName(ServerPlayer player) {
+        //? if >=26 {
+        /*return player.getGameProfile().name();
+        *///?} else {
+        return player.getGameProfile().getName();
+        //?}
+    }
+
+    /**
      * Called from the player-death mixin at the moment of death (inventory still
      * intact). Snapshots this life and resets the player's live tally. Never throws
      * into the death flow — any failure is logged and swallowed.
      */
     public static void onDeath(ServerPlayer player) {
         try {
+            //? if >=26 {
+            /*ServerLevel level = player.level(); // 26.x: ServerPlayer.serverLevel() → level()
+            *///?} else {
             ServerLevel level = player.serverLevel();
+            //?}
             PlayerLifeStore store = PlayerLifeStore.get(level);
             PlayerLifeRecord record = store.current(player.getUUID());
             CompoundTag snapshot = buildSnapshot(level, player, record);
@@ -94,12 +110,12 @@ public final class PlayerReincarnation {
             // alongside a friend-echo of one of those loved ones (with its last-seen gear).
             List<CompoundTag> friends = captureFriendSnapshots(level, player);
             GlobalLifeStore global = GlobalLifeStore.get(level.getServer());
-            global.append(player.getUUID(), player.getGameProfile().getName(), carriage, snapshot, friends);
+            global.append(player.getUUID(), profileName(player), carriage, snapshot, friends);
             // A new life begins on respawn — clear which past lives this player has already met,
             // so every life across the whole reincarnation pool is available to meet again.
             ReincarnationSources.resetSession(player.getUUID());
         } catch (RuntimeException e) {
-            LOGGER.error("[playermob] failed to snapshot reincarnation for {}", player.getGameProfile().getName(), e);
+            LOGGER.error("[playermob] failed to snapshot reincarnation for {}", profileName(player), e);
         }
     }
 
@@ -165,7 +181,7 @@ public final class PlayerReincarnation {
             if (echo == null) {
                 return null; // the chosen pool had no eligible life — stay a fresh mob
             }
-            mob.readAdditionalSaveData(echo.snapshot().copy());
+            mob.applyCustomData(echo.snapshot().copy());
             // Name the echo after the past life so it reads as a returning soul — and,
             // because AdventureItemNames skips mobs that already carry a CustomName, so AIN
             // doesn't overwrite it with a random PlayerMob name. AIN's finalizeSpawn naming
@@ -186,7 +202,12 @@ public final class PlayerReincarnation {
     // ---- snapshot building ------------------------------------------------
 
     private static CompoundTag buildSnapshot(ServerLevel level, ServerPlayer player, PlayerLifeRecord record) {
+        //? if >=26 {
+        /*PlayerMobEntity ghost = PlayerMobRegistry.PLAYER_MOB.create(
+            level, net.minecraft.world.entity.EntitySpawnReason.MOB_SUMMONED);
+        *///?} else {
         PlayerMobEntity ghost = PlayerMobRegistry.PLAYER_MOB.create(level);
+        //?}
         if (ghost == null) {
             // Entity type is always registered by the time a player can die; this is
             // pure defensiveness. Fall back to a traits-only snapshot.
@@ -198,8 +219,7 @@ public final class PlayerReincarnation {
         applySkin(ghost, player);
         applyGear(ghost, player);
 
-        CompoundTag snapshot = new CompoundTag();
-        ghost.addAdditionalSaveData(snapshot);
+        CompoundTag snapshot = ghost.captureCustomData();
         // Overwrite the ghost's default 5/5 traits with the life-derived ones. The
         // entity already wrote the trait keys, so this is the single authoritative
         // write of FightFlight/Friendliness.
@@ -227,7 +247,12 @@ public final class PlayerReincarnation {
     private static void applySkin(PlayerMobEntity ghost, ServerPlayer player) {
         String url = "";
         try {
-            //? if >=1.21.1 {
+            //? if >=26 {
+            /*// 26.x: Entity.getServer() removed (reach it via level().getServer()), and
+            // MinecraftServer.getSessionService() moved to services().sessionService().
+            MinecraftProfileTexture skin = player.level().getServer().services().sessionService()
+                .getTextures(player.getGameProfile()).skin();
+            *///?} else if >=1.21.1 {
             MinecraftProfileTexture skin = player.getServer().getSessionService()
                 .getTextures(player.getGameProfile()).skin();
             //?} else {
@@ -244,10 +269,10 @@ public final class PlayerReincarnation {
             // Skin capture must never break snapshot building — fall back to a url-less ref
             // (renders the default skin, exactly as before capture existed).
             LOGGER.warn("[playermob] could not capture skin for reincarnation of {}",
-                player.getGameProfile().getName(), e);
+                profileName(player), e);
         }
         ghost.setSkinTextureUrl(
-            SourceProfileSkin.encode(player.getUUID(), player.getGameProfile().getName(), url));
+            SourceProfileSkin.encode(player.getUUID(), profileName(player), url));
     }
 
     /**
@@ -268,11 +293,20 @@ public final class PlayerReincarnation {
         Inventory inv = player.getInventory();
         List<ItemStack> foods = new ArrayList<>();
         List<ItemStack> other = new ArrayList<>();
-        for (int i = 0; i < inv.items.size(); i++) {
-            if (i == inv.selected) {
+        //? if >=26 {
+        /*// 26.x made Inventory.items / selected private; the main inventory list is
+        // getNonEquipmentItems() and the held slot is getSelectedSlot().
+        net.minecraft.core.NonNullList<ItemStack> items = inv.getNonEquipmentItems();
+        int selected = inv.getSelectedSlot();
+        *///?} else {
+        net.minecraft.core.NonNullList<ItemStack> items = inv.items;
+        int selected = inv.selected;
+        //?}
+        for (int i = 0; i < items.size(); i++) {
+            if (i == selected) {
                 continue; // the held item already went to MAINHAND
             }
-            ItemStack stack = inv.items.get(i);
+            ItemStack stack = items.get(i);
             if (stack.isEmpty()) {
                 continue;
             }
@@ -332,8 +366,7 @@ public final class PlayerReincarnation {
 
     /** Serialise one loved-one mob into a friend snapshot: its full state plus its friend-echo label. */
     private static CompoundTag snapshotFriend(PlayerMobEntity mob) {
-        CompoundTag tag = new CompoundTag();
-        mob.addAdditionalSaveData(tag);
+        CompoundTag tag = mob.captureCustomData();
         // Egg/ItemStack encoding needs an "id"; harmless for the direct create()+readAdditionalSaveData path.
         tag.putString("id", PlayerMobRegistry.PLAYER_MOB_ID.toString());
         tag.putString(GlobalLifeStore.FRIEND_LABEL_KEY, friendLabel(mob));

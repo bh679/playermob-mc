@@ -37,7 +37,13 @@ public final class ReincarnateCommand {
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(
             Commands.literal("playermob")
+                //? if >=26 {
+                /*// 26.x replaced the int permission level with PermissionCheck constants;
+                // LEVEL_GAMEMASTERS is the old op-level 2.
+                .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                *///?} else {
                 .requires(source -> source.hasPermission(2))
+                //?}
                 .then(Commands.literal("reincarnate")
                     .then(Commands.argument("player", GameProfileArgument.gameProfile())
                         .executes(ReincarnateCommand::reincarnate)))
@@ -70,14 +76,14 @@ public final class ReincarnateCommand {
 
     private static int reincarnate(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
         CommandSourceStack source = ctx.getSource();
-        GameProfile profile = firstProfile(ctx);
+        var profile = firstProfile(ctx);
         if (profile == null) {
             return 0;
         }
         ServerLevel level = source.getLevel();
-        ItemStack egg = PlayerReincarnation.reincarnationEgg(level, profile.getId());
+        ItemStack egg = PlayerReincarnation.reincarnationEgg(level, idOf(profile));
         if (egg.isEmpty()) {
-            source.sendFailure(Component.literal("No recorded past life for " + profile.getName() + "."));
+            source.sendFailure(Component.literal("No recorded past life for " + nameOf(profile) + "."));
             return 0;
         }
         ServerPlayer recipient = source.getPlayer();
@@ -88,31 +94,48 @@ public final class ReincarnateCommand {
         if (!recipient.getInventory().add(egg)) {
             recipient.drop(egg, false);
         }
-        String name = profile.getName();
+        String name = nameOf(profile);
         source.sendSuccess(() -> Component.literal("Reincarnation egg for " + name + " granted."), false);
         return 1;
     }
 
     private static int life(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
         CommandSourceStack source = ctx.getSource();
-        GameProfile profile = firstProfile(ctx);
+        var profile = firstProfile(ctx);
         if (profile == null) {
             return 0;
         }
-        PlayerLifeRecord tally = PlayerLifeStore.get(source.getLevel()).current(profile.getId());
+        PlayerLifeRecord tally = PlayerLifeStore.get(source.getLevel()).current(idOf(profile));
         DispositionTraits traits = tally.toTraits();
-        boolean hasPast = GlobalLifeStore.get(source.getServer()).hasAnyForPlayer(profile.getId());
+        boolean hasPast = GlobalLifeStore.get(source.getServer()).hasAnyForPlayer(idOf(profile));
         String summary = String.format(
             "%s — attacks %d, kills %d, kindness %.1f, harms %d → would reincarnate "
                 + "Fight/Flight %d, Friendliness %d%s",
-            profile.getName(), tally.attacks(), tally.kills(), tally.kindness(), tally.harms(),
+            nameOf(profile), tally.attacks(), tally.kills(), tally.kindness(), tally.harms(),
             traits.fightFlight(), traits.friendliness(),
             hasPast ? " (has a stored past life)" : "");
         source.sendSuccess(() -> Component.literal(summary), false);
         return 1;
     }
 
-    /** Resolve the first matched profile, or send a failure and return {@code null}. */
+    /** Resolve the first matched profile, or send a failure and return {@code null}.
+     *  26.x's {@code GameProfileArgument.getGameProfiles} returns {@code NameAndId} records
+     *  ({@code .id()}/{@code .name()}) instead of authlib {@code GameProfile}s. */
+    //? if >=26 {
+    /*private static net.minecraft.server.players.NameAndId firstProfile(
+            CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        Collection<net.minecraft.server.players.NameAndId> profiles =
+            GameProfileArgument.getGameProfiles(ctx, "player");
+        if (profiles.isEmpty()) {
+            ctx.getSource().sendFailure(Component.literal("No matching player."));
+            return null;
+        }
+        return profiles.iterator().next();
+    }
+
+    private static java.util.UUID idOf(net.minecraft.server.players.NameAndId p) { return p.id(); }
+    private static String nameOf(net.minecraft.server.players.NameAndId p) { return p.name(); }
+    *///?} else {
     private static GameProfile firstProfile(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
         Collection<GameProfile> profiles = GameProfileArgument.getGameProfiles(ctx, "player");
         if (profiles.isEmpty()) {
@@ -121,4 +144,8 @@ public final class ReincarnateCommand {
         }
         return profiles.iterator().next();
     }
+
+    private static java.util.UUID idOf(GameProfile p) { return p.getId(); }
+    private static String nameOf(GameProfile p) { return p.getName(); }
+    //?}
 }

@@ -1,14 +1,20 @@
 package games.brennan.playermob.fabric.client;
 
+import games.brennan.playermob.PlayerMob;
 import games.brennan.playermob.PlayerMobRegistry;
 import games.brennan.playermob.client.PlayerMobRenderer;
 import games.brennan.playermob.client.PlayerMobScreen;
 import games.brennan.playermob.client.VersionHudRenderer;
+import games.brennan.playermob.compat.RegistryCompat;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.fabricmc.fabric.api.client.rendering.v1.EntityRendererRegistry;
+//? if >=26 {
+/*import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
+*///?} else {
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
+//?}
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.minecraft.client.gui.screens.MenuScreens;
 
@@ -35,12 +41,30 @@ public final class PlayerMobFabricClient implements ClientModInitializer {
 
         // Dev-only build-info HUD — hidden on the `main`/release branch.
         // In-world:
+        //? if >=26 {
+        /*// 26.x replaced HudRenderCallback with the HudElementRegistry layer API; the element's
+        // extractRenderState callback hands us a GuiGraphicsExtractor (which VersionHudRenderer.render
+        // already takes on 26). addLast draws our label after the vanilla HUD elements.
+        HudElementRegistry.addLast(
+            RegistryCompat.id(PlayerMob.MOD_ID, "version_hud"),
+            (graphics, deltaTracker) -> VersionHudRenderer.render(graphics));
+        *///?} else {
         HudRenderCallback.EVENT.register(
             (graphics, tickCounter) -> VersionHudRenderer.render(graphics));
+        //?}
         // Main menu (and any screen — renderOnScreen filters to the title screen):
+        //? if >=26 {
+        /*// 26.x renamed the per-screen post-render hook from afterRender to afterExtract; the
+        // callback now hands a GuiGraphicsExtractor (which VersionHudRenderer.renderOnScreen takes).
+        ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) ->
+            ScreenEvents.afterExtract(screen).register(
+                (renderedScreen, graphics, mouseX, mouseY, tickDelta) ->
+                    VersionHudRenderer.renderOnScreen(graphics, renderedScreen)));
+        *///?} else {
         ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) ->
             ScreenEvents.afterRender(screen).register(
                 (renderedScreen, graphics, mouseX, mouseY, tickDelta) ->
                     VersionHudRenderer.renderOnScreen(graphics, renderedScreen)));
+        //?}
     }
 }

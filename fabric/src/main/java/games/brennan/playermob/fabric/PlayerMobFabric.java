@@ -8,20 +8,38 @@ import games.brennan.playermob.menu.PlayerMobMenu;
 import games.brennan.playermob.player.ReincarnateCommand;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+//? if >=26 {
+/*import net.fabricmc.fabric.api.creativetab.v1.CreativeModeTabEvents;
+*///?} else {
 import net.fabricmc.fabric.api.itemgroup.v1.ItemGroupEvents;
+//?}
 import net.fabricmc.fabric.api.object.builder.v1.entity.FabricDefaultAttributeRegistry;
 import net.fabricmc.fabric.api.resource.ResourceManagerHelper;
 import games.brennan.playermob.compat.RegistryCompat;
+//? if >=26 {
+/*import net.fabricmc.fabric.api.menu.v1.ExtendedMenuType;
+*///?} else {
 import net.fabricmc.fabric.api.screenhandler.v1.ExtendedScreenHandlerType;
+//?}
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
+//? if >=26 {
+/*import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
+*///?}
 //? if >=1.21.1 {
 import net.minecraft.network.codec.ByteBufCodecs;
 //?}
+//? if <26 {
 import net.minecraft.resources.ResourceLocation;
+//?}
 import net.minecraft.server.packs.PackType;
 import net.minecraft.world.entity.EntityType;
+//? if >=26 {
+/*import net.minecraft.world.item.CreativeModeTab;
+*///?}
 import net.minecraft.world.item.CreativeModeTabs;
 
 /**
@@ -39,9 +57,17 @@ public final class PlayerMobFabric implements ModInitializer {
     @Override
     public void onInitialize() {
         // Entity type — common builder, fabric registration.
+        //? if >=26 {
+        /*// 26.x: EntityType.Builder.build takes a ResourceKey<EntityType<?>> rather than the
+        // legacy String id, so wrap the entity Identifier in the registry's ResourceKey.
+        EntityType<PlayerMobEntity> entityType =
+            PlayerMobRegistry.entityTypeBuilder()
+                .build(ResourceKey.create(Registries.ENTITY_TYPE, PlayerMobRegistry.PLAYER_MOB_ID));
+        *///?} else {
         EntityType<PlayerMobEntity> entityType =
             PlayerMobRegistry.entityTypeBuilder()
                 .build(PlayerMobRegistry.PLAYER_MOB_ID.toString());
+        //?}
         PlayerMobRegistry.PLAYER_MOB = Registry.register(
             BuiltInRegistries.ENTITY_TYPE,
             PlayerMobRegistry.PLAYER_MOB_ID,
@@ -68,6 +94,24 @@ public final class PlayerMobFabric implements ModInitializer {
         }
 
         // Drop every egg into the Spawn Eggs creative tab.
+        //? if >=26 {
+        /*// 26.x reworked the item-group event into CreativeModeTabEvents.modifyOutputEvent,
+        // keyed by a ResourceKey<CreativeModeTab> (CreativeModeTabs.SPAWN_EGGS is now private,
+        // so build the vanilla "spawn_eggs" key directly). The output sink accepts ItemStacks
+        // (via getDefaultInstance) with a TabVisibility, and BuiltInRegistries.ITEM.get now
+        // returns an Optional<Holder> — getValue is the direct-value lookup.
+        ResourceKey<CreativeModeTab> spawnEggsTab =
+            ResourceKey.create(Registries.CREATIVE_MODE_TAB, Identifier.withDefaultNamespace("spawn_eggs"));
+        CreativeModeTabEvents.modifyOutputEvent(spawnEggsTab).register(output -> {
+            output.accept(PlayerMobRegistry.PLAYER_MOB_SPAWN_EGG.getDefaultInstance(),
+                CreativeModeTab.TabVisibility.PARENT_AND_SEARCH_TABS);
+            for (Archetype archetype : Archetype.values()) {
+                output.accept(BuiltInRegistries.ITEM.getValue(
+                        PlayerMobRegistry.archetypeSpawnEggId(archetype)).getDefaultInstance(),
+                    CreativeModeTab.TabVisibility.PARENT_AND_SEARCH_TABS);
+            }
+        });
+        *///?} else {
         ItemGroupEvents.modifyEntriesEvent(CreativeModeTabs.SPAWN_EGGS).register(entries -> {
             entries.accept(PlayerMobRegistry.PLAYER_MOB_SPAWN_EGG);
             for (Archetype archetype : Archetype.values()) {
@@ -75,13 +119,21 @@ public final class PlayerMobFabric implements ModInitializer {
                     PlayerMobRegistry.archetypeSpawnEggId(archetype)));
             }
         });
+        //?}
 
         // Inventory menu — the extended type carries the target mob's entity id
         // to the client via the VarInt StreamCodec.
         PlayerMobRegistry.PLAYER_MOB_MENU = Registry.register(
             BuiltInRegistries.MENU,
             PlayerMobRegistry.PLAYER_MOB_MENU_ID,
-            //? if >=1.21.1 {
+            //? if >=26 {
+            /*// 26.x renamed the extended-screen-handler API to the menu API. ExtendedMenuType
+            // keeps the same (factory, StreamCodec) shape and still extends MenuType, so the
+            // VarInt-synced entity-id factory is wired identically.
+            new ExtendedMenuType<>(
+                (syncId, inv, entityId) -> PlayerMobMenu.fromEntityId(syncId, inv, entityId),
+                ByteBufCodecs.VAR_INT));
+            *///?} else if >=1.21.1 {
             new ExtendedScreenHandlerType<>(
                 (syncId, inv, entityId) -> PlayerMobMenu.fromEntityId(syncId, inv, entityId),
                 ByteBufCodecs.VAR_INT));
@@ -100,8 +152,13 @@ public final class PlayerMobFabric implements ModInitializer {
         // Datapack-extensible skin pack — loads data/<ns>/playermob_skins/*.json
         // into PlayerMobSkinRegistry. Fabric's ResourceManagerHelper is the loader-
         // native equivalent of vanilla's addReloadListener on the server data type.
+        //? if >=26 {
+        /*Identifier skinListenerId =
+            RegistryCompat.id(PlayerMob.MOD_ID, "skins");
+        *///?} else {
         ResourceLocation skinListenerId =
             RegistryCompat.id(PlayerMob.MOD_ID, "skins");
+        //?}
         ResourceManagerHelper.get(PackType.SERVER_DATA)
             .registerReloadListener(
                 new games.brennan.playermob.fabric.SkinReloadListenerWrapper(skinListenerId));

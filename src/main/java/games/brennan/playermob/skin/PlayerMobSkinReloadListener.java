@@ -1,10 +1,15 @@
 package games.brennan.playermob.skin;
 
+//? if >=26 {
+/*import net.minecraft.resources.FileToIdConverter;
+import net.minecraft.resources.Identifier;
+*///?} else {
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
-import com.mojang.logging.LogUtils;
 import com.mojang.serialization.JsonOps;
 import net.minecraft.resources.ResourceLocation;
+//?}
+import com.mojang.logging.LogUtils;
 import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.server.packs.resources.SimpleJsonResourceReloadListener;
 import net.minecraft.util.profiling.ProfilerFiller;
@@ -21,25 +26,51 @@ import java.util.Map;
  *
  * <p>Datapack authors can ship additional skin entries by dropping JSON files
  * matching {@link PlayerMobSkin#CODEC} into their datapack's
- * {@code data/<modid-or-pack-id>/playermob_skins/} directory. The {@code id}
- * of each entry is derived from the file path (vanilla
- * {@link SimpleJsonResourceReloadListener} convention) and is currently used
- * only for log lines — no lookup-by-id today.</p>
+ * {@code data/<modid-or-pack-id>/playermob_skins/} directory.</p>
+ *
+ * <p>MC 26.x reworked {@link SimpleJsonResourceReloadListener} from a raw-Gson base
+ * ({@code apply(Map<ResourceLocation, JsonElement>)} — the subclass parses each element
+ * itself) into a codec-typed base ({@code SimpleJsonResourceReloadListener<T>}, constructed
+ * with the {@code Codec<T>} so {@code apply(Map<Identifier, T>)} hands back already-decoded
+ * objects). The {@code >=26} branch wires {@link PlayerMobSkin#CODEC} into the base and just
+ * collects the decoded values; pre-26 keeps the hand-parse loop.</p>
  */
+//? if >=26 {
+/*public class PlayerMobSkinReloadListener extends SimpleJsonResourceReloadListener<PlayerMobSkin> {
+*///?} else {
 public class PlayerMobSkinReloadListener extends SimpleJsonResourceReloadListener {
+//?}
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
     /** Folder under {@code data/&lt;namespace&gt;/} the listener scans. */
     private static final String FOLDER = "playermob_skins";
 
+    //? if <26 {
     /** Vanilla Gson instance is fine — we go straight through the codec from there. */
     private static final Gson GSON = new Gson();
+    //?}
 
     public PlayerMobSkinReloadListener() {
+        //? if >=26 {
+        /*super(PlayerMobSkin.CODEC, FileToIdConverter.json(FOLDER));
+        *///?} else {
         super(GSON, FOLDER);
+        //?}
     }
 
+    //? if >=26 {
+    /*@Override
+    protected void apply(Map<Identifier, PlayerMobSkin> resources,
+                         ResourceManager resourceManager,
+                         ProfilerFiller profiler) {
+        // The base already decoded each entry through PlayerMobSkin.CODEC and dropped any
+        // that failed, so the surviving values are the valid skins.
+        List<PlayerMobSkin> parsed = new ArrayList<>(resources.values());
+        PlayerMobSkinRegistry.replaceAll(parsed);
+        LOGGER.info("[playermob] loaded {} skin(s)", parsed.size());
+    }
+    *///?} else {
     @Override
     protected void apply(Map<ResourceLocation, JsonElement> resources,
                          ResourceManager resourceManager,
@@ -60,4 +91,5 @@ public class PlayerMobSkinReloadListener extends SimpleJsonResourceReloadListene
         PlayerMobSkinRegistry.replaceAll(parsed);
         LOGGER.info("[playermob] loaded {} skin(s) ({} rejected)", parsed.size(), rejected);
     }
+    //?}
 }

@@ -7,7 +7,11 @@ import games.brennan.playermob.compat.RegistryCompat;
 import games.brennan.playermob.menu.PlayerMobMenu;
 import games.brennan.playermob.menu.PlayerMobMenuOpener;
 import net.minecraft.nbt.CompoundTag;
+//? if >=26 {
+/*import net.minecraft.resources.Identifier;
+*///?} else {
 import net.minecraft.resources.ResourceLocation;
+//?}
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.MobCategory;
@@ -37,6 +41,16 @@ public final class PlayerMobRegistry {
     public static final String PLAYER_MOB_SPAWN_EGG_PATH = "player_mob_spawn_egg";
     public static final String PLAYER_MOB_MENU_PATH = "player_mob_menu";
 
+    //? if >=26 {
+    /*public static final net.minecraft.resources.Identifier PLAYER_MOB_ID =
+        RegistryCompat.id(PlayerMob.MOD_ID, PLAYER_MOB_PATH);
+
+    public static final net.minecraft.resources.Identifier PLAYER_MOB_SPAWN_EGG_ID =
+        RegistryCompat.id(PlayerMob.MOD_ID, PLAYER_MOB_SPAWN_EGG_PATH);
+
+    public static final net.minecraft.resources.Identifier PLAYER_MOB_MENU_ID =
+        RegistryCompat.id(PlayerMob.MOD_ID, PLAYER_MOB_MENU_PATH);
+    *///?} else {
     public static final ResourceLocation PLAYER_MOB_ID =
         RegistryCompat.id(PlayerMob.MOD_ID, PLAYER_MOB_PATH);
 
@@ -45,6 +59,7 @@ public final class PlayerMobRegistry {
 
     public static final ResourceLocation PLAYER_MOB_MENU_ID =
         RegistryCompat.id(PlayerMob.MOD_ID, PLAYER_MOB_MENU_PATH);
+    //?}
 
     /**
      * The registered {@link EntityType}. Populated by each loader entry class
@@ -101,9 +116,15 @@ public final class PlayerMobRegistry {
         return "player_mob_" + archetype.name().toLowerCase(Locale.ROOT) + "_spawn_egg";
     }
 
+    //? if >=26 {
+    /*public static net.minecraft.resources.Identifier archetypeSpawnEggId(Archetype archetype) {
+        return RegistryCompat.id(PlayerMob.MOD_ID, archetypeSpawnEggPath(archetype));
+    }
+    *///?} else {
     public static ResourceLocation archetypeSpawnEggId(Archetype archetype) {
         return RegistryCompat.id(PlayerMob.MOD_ID, archetypeSpawnEggPath(archetype));
     }
+    //?}
 
     /**
      * The {@code entity_data} an archetype egg stamps onto the mob it spawns —
@@ -122,7 +143,16 @@ public final class PlayerMobRegistry {
 
     /** The fully-random spawn egg (the original default egg). */
     public static SpawnEggItem createRandomSpawnEgg(EntityType<? extends Mob> type) {
+        //? if >=26 {
+        /*// 26.x: the spawn egg's entity type rides the ENTITY_DATA component; egg colours are
+        // data-driven from the item model rather than constructor args. The data tag is empty
+        // (a fully-random egg pins nothing) but still names the type via TypedEntityData.
+        return new SpawnEggItem(new Item.Properties().component(
+            net.minecraft.core.component.DataComponents.ENTITY_DATA,
+            net.minecraft.world.item.component.TypedEntityData.of(type, new CompoundTag())));
+        *///?} else {
         return new SpawnEggItem(type, SPAWN_EGG_PRIMARY, SPAWN_EGG_SECONDARY, new Item.Properties());
+        //?}
     }
 
     /**

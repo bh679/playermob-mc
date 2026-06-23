@@ -36,9 +36,16 @@ public final class HuntForFoodGoal extends NearestAttackableTargetGoal<Animal> {
     public HuntForFoodGoal(PlayerMobEntity mob) {
         // Mirrors the hostile-targeting goal wiring in PlayerMobEntity#registerGoals:
         // randomInterval 10, mustSee true, mustReach false, single-arg selector.
+        // 26.x changed the target selector from Predicate<LivingEntity> to a two-arg
+        // TargetingConditions.Selector (entity, ServerLevel); the level is unused here.
         super(mob, Animal.class, 10, true, false,
+            //? if >=26 {
+            /*(candidate, serverLevel) -> ForagePolicy.isHuntableFoodAnimal(candidate)
+                && TrainConfinement.allowsTarget(mob, candidate));
+            *///?} else {
             candidate -> ForagePolicy.isHuntableFoodAnimal(candidate)
                 && TrainConfinement.allowsTarget(mob, candidate));
+            //?}
         this.playerMob = mob;
     }
 

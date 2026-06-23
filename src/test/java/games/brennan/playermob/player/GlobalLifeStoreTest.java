@@ -1,5 +1,6 @@
 package games.brennan.playermob.player;
 
+import games.brennan.playermob.compat.NbtCompat;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.player.GlobalLifeStore.DeathRecord;
 import net.minecraft.nbt.CompoundTag;
@@ -59,7 +60,7 @@ class GlobalLifeStoreTest {
         assertEquals(uuid(2), back.get(1).uuid());
         assertEquals("P2", back.get(1).name());
         assertEquals(25, back.get(1).carriage());
-        assertEquals("b", back.get(1).snapshot().getString("Marker"));
+        assertEquals("b", NbtCompat.getStringOr(back.get(1).snapshot(), "Marker", ""));
         assertEquals(-40, back.get(2).carriage());
     }
 
@@ -79,8 +80,8 @@ class GlobalLifeStoreTest {
 
         List<CompoundTag> friends = back.get(0).friendSnapshots();
         assertEquals(2, friends.size());
-        assertEquals("Alice", friends.get(0).getString(GlobalLifeStore.FRIEND_LABEL_KEY));
-        assertEquals("bob", friends.get(1).getString("Marker"));
+        assertEquals("Alice", NbtCompat.getStringOr(friends.get(0), GlobalLifeStore.FRIEND_LABEL_KEY, ""));
+        assertEquals("bob", NbtCompat.getStringOr(friends.get(1), "Marker", ""));
         // No friends -> no "Friends" tag written -> reads back empty (the path an older lives.dat takes).
         assertTrue(back.get(1).friendSnapshots().isEmpty());
     }
@@ -91,7 +92,7 @@ class GlobalLifeStoreTest {
         CompoundTag tag = new CompoundTag();
         ListTag lives = new ListTag();
         CompoundTag e = new CompoundTag();
-        e.putUUID("UUID", uuid(7));
+        NbtCompat.putUUID(e, "UUID", uuid(7));
         e.putString("Name", "Old");
         e.put("Snapshot", snap("legacy"));
         lives.add(e);
@@ -102,7 +103,7 @@ class GlobalLifeStoreTest {
 
         assertEquals(1, back.size());
         assertEquals(NONE, back.get(0).carriage());
-        assertEquals("legacy", back.get(0).snapshot().getString("Marker"));
+        assertEquals("legacy", NbtCompat.getStringOr(back.get(0).snapshot(), "Marker", ""));
         assertTrue(back.get(0).id() >= 1L);
         assertTrue(nextId > back.get(0).id());
     }
@@ -133,7 +134,7 @@ class GlobalLifeStoreTest {
         store.append(uuid(4), "D", NONE, snap("offTrain"));
 
         assertEquals(List.of("here", "edge"),
-            store.recordsInBand(0).stream().map(r -> r.snapshot().getString("Marker")).toList());
+            store.recordsInBand(0).stream().map(r -> NbtCompat.getStringOr(r.snapshot(), "Marker", "")).toList());
         // No spawn carriage -> nothing to compare depth against.
         assertTrue(store.recordsInBand(NONE).isEmpty());
     }
@@ -146,7 +147,7 @@ class GlobalLifeStoreTest {
         store.append(uuid(1), "A", 0, snap("a2"));
 
         assertEquals(List.of("a1", "a2"),
-            store.recordsForPlayer(uuid(1)).stream().map(r -> r.snapshot().getString("Marker")).toList());
+            store.recordsForPlayer(uuid(1)).stream().map(r -> NbtCompat.getStringOr(r.snapshot(), "Marker", "")).toList());
         assertTrue(store.recordsForPlayer(uuid(42)).isEmpty());
     }
 
@@ -158,9 +159,9 @@ class GlobalLifeStoreTest {
         store.append(uuid(3), "C", 0, snap("c"));
 
         assertEquals(List.of("a", "b", "c"),
-            store.allRecords().stream().map(r -> r.snapshot().getString("Marker")).toList());
+            store.allRecords().stream().map(r -> NbtCompat.getStringOr(r.snapshot(), "Marker", "")).toList());
         assertEquals(List.of("c", "b"),
-            store.recent(2).stream().map(r -> r.snapshot().getString("Marker")).toList());
+            store.recent(2).stream().map(r -> NbtCompat.getStringOr(r.snapshot(), "Marker", "")).toList());
         assertEquals(3, store.recent(10).size()); // limit beyond size -> whole log
     }
 
@@ -170,7 +171,7 @@ class GlobalLifeStoreTest {
         store.append(uuid(1), "A", 0, snap("first"));
         store.append(uuid(2), "B", 0, snap("other"));
         store.append(uuid(1), "A", 0, snap("second"));
-        assertEquals("second", store.mostRecentForPlayer(uuid(1)).getString("Marker"));
+        assertEquals("second", NbtCompat.getStringOr(store.mostRecentForPlayer(uuid(1)), "Marker", ""));
         assertTrue(store.hasAnyForPlayer(uuid(1)));
         assertNull(store.mostRecentForPlayer(uuid(42)));
     }

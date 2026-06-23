@@ -5,7 +5,11 @@ import java.util.function.ToIntFunction;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.Minecraft;
+//? if >=26 {
+/*import net.minecraft.client.gui.GuiGraphicsExtractor;
+*///?} else {
 import net.minecraft.client.gui.GuiGraphics;
+//?}
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.TitleScreen;
 
@@ -109,12 +113,20 @@ public final class VersionHudRenderer {
      * release ({@code main}) build. Pushed down by {@link #extraTopOffsetPx()}
      * when a loader installed an offset (Dungeon Train's HUD sharing the corner).
      */
+    //? if >=26 {
+    /*public static void render(GuiGraphicsExtractor graphics) {
+        // 26.x removed Options.hideGui (the F1 HUD-hide flag); the in-world dev HUD draws
+        // regardless of F1 here. Cosmetic only — verify in-game whether F1 should hide it.
+        draw(graphics, MARGIN + extraTopOffsetPx());
+    }
+    *///?} else {
     public static void render(GuiGraphics graphics) {
         if (Minecraft.getInstance().options.hideGui) {
             return;
         }
         draw(graphics, MARGIN + extraTopOffsetPx());
     }
+    //?}
 
     /**
      * Screen render pass — draws on the main menu ({@link TitleScreen}) only;
@@ -123,18 +135,31 @@ public final class VersionHudRenderer {
      * in-world setting). Dropped below another mod's title-screen widget via
      * {@link #menuTopFor(Screen)} (Dungeon Train's version button); else {@link #MARGIN}.
      */
+    //? if >=26 {
+    /*public static void renderOnScreen(GuiGraphicsExtractor graphics, Screen screen) {
+    *///?} else {
     public static void renderOnScreen(GuiGraphics graphics, Screen screen) {
+    //?}
         if (screen instanceof TitleScreen) {
             draw(graphics, menuTopFor(screen));
         }
     }
 
     /** Shared draw: the {@code main}-branch gate plus the actual text at top inset {@code top}. */
+    //? if >=26 {
+    /*private static void draw(GuiGraphicsExtractor graphics, int top) {
+    *///?} else {
     private static void draw(GuiGraphics graphics, int top) {
+    //?}
         if (!shouldDisplay(VersionInfo.BRANCH)) {
             return;
         }
         Minecraft mc = Minecraft.getInstance();
+        //? if >=26 {
+        /*// 26.x renamed GuiGraphics.drawString → GuiGraphicsExtractor.text (same arg order).
+        graphics.text(mc.font, VersionInfo.DISPLAY, MARGIN, top, TEXT_ARGB, true);
+        *///?} else {
         graphics.drawString(mc.font, VersionInfo.DISPLAY, MARGIN, top, TEXT_ARGB, true);
+        //?}
     }
 }

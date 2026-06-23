@@ -1,6 +1,7 @@
 package games.brennan.playermob.entity;
 
 import games.brennan.playermob.compat.ItemDataCompat;
+import games.brennan.playermob.compat.ItemKindCompat;
 import net.minecraft.tags.ItemTags;
 import net.minecraft.world.Container;
 import net.minecraft.world.item.ArrowItem;
@@ -8,12 +9,9 @@ import net.minecraft.world.item.AxeItem;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.BowItem;
 import net.minecraft.world.item.CrossbowItem;
-import net.minecraft.world.item.Equipable;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.item.PickaxeItem;
-import net.minecraft.world.item.SwordItem;
 
 import java.util.Set;
 
@@ -156,8 +154,8 @@ public final class ItemPickupPolicy {
      */
     public static WeaponCategory weaponCategory(ItemStack stack) {
         Item item = stack.getItem();
-        if (item instanceof SwordItem) return WeaponCategory.SWORD;
-        if (item instanceof PickaxeItem) return WeaponCategory.PICKAXE;
+        if (ItemKindCompat.isSword(stack)) return WeaponCategory.SWORD;
+        if (ItemKindCompat.isPickaxe(stack)) return WeaponCategory.PICKAXE;
         if (item instanceof AxeItem) return WeaponCategory.AXE;
         if (item instanceof BowItem || item instanceof CrossbowItem) return WeaponCategory.RANGED;
         return null;
@@ -165,7 +163,7 @@ public final class ItemPickupPolicy {
 
     /** Wearable gear handled by the equip-upgrade path: armor + shields, but not weapons. */
     public static boolean isArmorOrShield(ItemStack stack) {
-        return weaponCategory(stack) == null && Equipable.get(stack) != null;
+        return weaponCategory(stack) == null && ItemKindCompat.isEquippable(stack);
     }
 
     /**

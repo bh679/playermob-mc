@@ -2,7 +2,11 @@ package games.brennan.playermob.fabric;
 
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.menu.PlayerMobMenu;
+//? if >=26 {
+/*import net.fabricmc.fabric.api.menu.v1.ExtendedMenuProvider;
+*///?} else {
 import net.fabricmc.fabric.api.screenhandler.v1.ExtendedScreenHandlerFactory;
+//?}
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Inventory;
@@ -27,7 +31,9 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
  * <p>Lives in the fabric source set — {@code fabric-api} is not on the common compile
  * classpath, so this can't live alongside {@code PlayerMobMenu}.</p>
  */
-//? if >=1.21.1 {
+//? if >=26 {
+/*public final class PlayerMobMenuProvider implements ExtendedMenuProvider<Integer> {
+*///?} else if >=1.21.1 {
 public final class PlayerMobMenuProvider implements ExtendedScreenHandlerFactory<Integer> {
 //?} else {
 /*public final class PlayerMobMenuProvider implements ExtendedScreenHandlerFactory {

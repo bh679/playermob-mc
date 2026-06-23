@@ -1,6 +1,7 @@
 package games.brennan.playermob.player;
 
 import com.mojang.logging.LogUtils;
+import games.brennan.playermob.compat.NbtCompat;
 import games.brennan.playermob.compat.TrainConfinement;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -248,7 +249,7 @@ public final class GlobalLifeStore {
         for (DeathRecord r : history) {
             CompoundTag entry = new CompoundTag();
             entry.putLong(TAG_ID, r.id());
-            entry.putUUID(TAG_UUID, r.uuid());
+            NbtCompat.putUUID(entry, TAG_UUID, r.uuid());
             if (r.name() != null) {
                 entry.putString(TAG_NAME, r.name());
             }
@@ -273,48 +274,48 @@ public final class GlobalLifeStore {
         long maxId = 0L;
         long fallbackId = 1L;
         // Current format.
-        ListTag deaths = tag.getList(TAG_DEATHS, Tag.TAG_COMPOUND);
+        ListTag deaths = NbtCompat.getListOfType(tag, TAG_DEATHS, Tag.TAG_COMPOUND);
         for (int i = 0; i < deaths.size(); i++) {
-            CompoundTag entry = deaths.getCompound(i);
-            if (!entry.hasUUID(TAG_UUID)) {
+            CompoundTag entry = NbtCompat.compoundAt(deaths, i);
+            if (!NbtCompat.hasUUID(entry, TAG_UUID)) {
                 continue;
             }
-            long id = entry.contains(TAG_ID, Tag.TAG_ANY_NUMERIC) ? entry.getLong(TAG_ID) : fallbackId;
+            long id = NbtCompat.getLongOr(entry, TAG_ID, fallbackId);
             fallbackId = Math.max(fallbackId, id) + 1;
             maxId = Math.max(maxId, id);
-            int carriage = entry.contains(TAG_CARRIAGE, Tag.TAG_ANY_NUMERIC)
-                ? entry.getInt(TAG_CARRIAGE) : NO_CARRIAGE;
-            String name = entry.contains(TAG_NAME, Tag.TAG_STRING) ? entry.getString(TAG_NAME) : null;
-            out.add(new DeathRecord(id, entry.getUUID(TAG_UUID), name, carriage,
-                entry.getCompound(TAG_SNAPSHOT), readFriendList(entry)));
+            int carriage = NbtCompat.getIntOr(entry, TAG_CARRIAGE, NO_CARRIAGE);
+            String name = NbtCompat.getStringOr(entry, TAG_NAME, null);
+            out.add(new DeathRecord(id, NbtCompat.getUUID(entry, TAG_UUID), name, carriage,
+                NbtCompat.getCompoundOrEmpty(entry, TAG_SNAPSHOT), readFriendList(entry)));
         }
         // Back-compat: the pre-death-log global format stored one snapshot per player under "Lives".
-        if (out.isEmpty() && tag.contains(TAG_LEGACY_LIVES, Tag.TAG_LIST)) {
-            ListTag lives = tag.getList(TAG_LEGACY_LIVES, Tag.TAG_COMPOUND);
+        if (out.isEmpty() && NbtCompat.containsOfType(tag, TAG_LEGACY_LIVES, Tag.TAG_LIST)) {
+            ListTag lives = NbtCompat.getListOfType(tag, TAG_LEGACY_LIVES, Tag.TAG_COMPOUND);
             for (int i = 0; i < lives.size(); i++) {
-                CompoundTag entry = lives.getCompound(i);
-                if (!entry.hasUUID(TAG_UUID)) {
+                CompoundTag entry = NbtCompat.compoundAt(lives, i);
+                if (!NbtCompat.hasUUID(entry, TAG_UUID)) {
                     continue;
                 }
                 long id = fallbackId++;
                 maxId = Math.max(maxId, id);
-                String name = entry.contains(TAG_NAME, Tag.TAG_STRING) ? entry.getString(TAG_NAME) : null;
-                out.add(new DeathRecord(id, entry.getUUID(TAG_UUID), name, NO_CARRIAGE, entry.getCompound(TAG_SNAPSHOT)));
+                String name = NbtCompat.getStringOr(entry, TAG_NAME, null);
+                out.add(new DeathRecord(id, NbtCompat.getUUID(entry, TAG_UUID), name, NO_CARRIAGE,
+                    NbtCompat.getCompoundOrEmpty(entry, TAG_SNAPSHOT)));
             }
         }
-        long storedNext = tag.contains(TAG_NEXT_ID, Tag.TAG_ANY_NUMERIC) ? tag.getLong(TAG_NEXT_ID) : 0L;
+        long storedNext = NbtCompat.getLongOr(tag, TAG_NEXT_ID, 0L);
         return Math.max(storedNext, maxId + 1);
     }
 
     /** Friend snapshots stored under {@code entry}, or empty — a missing key (every older record) reads as none. */
     private static List<CompoundTag> readFriendList(CompoundTag entry) {
-        if (!entry.contains(TAG_FRIENDS, Tag.TAG_LIST)) {
+        if (!NbtCompat.containsOfType(entry, TAG_FRIENDS, Tag.TAG_LIST)) {
             return List.of();
         }
-        ListTag list = entry.getList(TAG_FRIENDS, Tag.TAG_COMPOUND);
+        ListTag list = NbtCompat.getListOfType(entry, TAG_FRIENDS, Tag.TAG_COMPOUND);
         List<CompoundTag> out = new ArrayList<>(list.size());
         for (int i = 0; i < list.size(); i++) {
-            out.add(list.getCompound(i));
+            out.add(NbtCompat.compoundAt(list, i));
         }
         return out;
     }

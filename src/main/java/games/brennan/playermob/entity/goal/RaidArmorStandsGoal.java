@@ -1,11 +1,11 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.compat.GameRuleCompat;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.decoration.ArmorStand;
-import net.minecraft.world.level.GameRules;
 import net.minecraft.world.phys.AABB;
 
 import java.util.EnumSet;
@@ -81,7 +81,7 @@ public final class RaidArmorStandsGoal extends Goal implements DescribableGoal {
             return false;
         }
         if (mob.getTarget() != null) return false;
-        if (!mob.level().getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)) return false;
+        if (!GameRuleCompat.mobGriefing(mob.level())) return false;
 
         ArmorStand found = findClosestArmorStand();
         if (found == null) {

@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity;
 
+import games.brennan.playermob.compat.NbtCompat;
 import net.minecraft.SharedConstants;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -70,7 +71,7 @@ class FeelingLedgerTest {
         ledger.encounter(UUID.randomUUID()); // neutral "met" entry
         CompoundTag tag = new CompoundTag();
         ledger.save(tag);
-        ListTag list = tag.getList(FeelingLedger.TAG_FEELINGS, Tag.TAG_COMPOUND);
+        ListTag list = NbtCompat.getListOfType(tag, FeelingLedger.TAG_FEELINGS, Tag.TAG_COMPOUND);
         assertEquals(1, list.size(), "Phase B persists met entries (the roster)");
     }
 
@@ -181,7 +182,7 @@ class FeelingLedgerTest {
         CompoundTag tag = new CompoundTag();
         ListTag list = new ListTag();
         CompoundTag entry = new CompoundTag();
-        entry.putUUID(FeelingLedger.TAG_UUID, id);
+        NbtCompat.putUUID(entry, FeelingLedger.TAG_UUID, id);
         entry.putFloat(FeelingLedger.TAG_FEELING, 3.0f);
         list.add(entry);
         tag.put(FeelingLedger.TAG_FEELINGS, list);

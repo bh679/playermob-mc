@@ -1,6 +1,7 @@
 package games.brennan.playermob.player;
 
 import games.brennan.playermob.PlayerMob;
+import games.brennan.playermob.compat.NbtCompat;
 import games.brennan.playermob.compat.ReincarnationQuery;
 import games.brennan.playermob.compat.ReincarnationRecord;
 import games.brennan.playermob.compat.ReincarnationSource;
@@ -62,7 +63,7 @@ public final class GlobalLifeReincarnationSource implements ReincarnationSource 
 
     private static ReincarnationRecord toRecord(GlobalLifeStore.DeathRecord r) {
         CompoundTag snapshot = r.snapshot().copy();
-        String skinUrl = SourceProfileSkin.decode(snapshot.getString(SKIN_TEXTURE_URL_KEY))
+        String skinUrl = SourceProfileSkin.decode(NbtCompat.getStringOr(snapshot, SKIN_TEXTURE_URL_KEY, ""))
             .map(SourceProfileSkin.Ref::url)
             .orElse("");
         return new ReincarnationRecord(

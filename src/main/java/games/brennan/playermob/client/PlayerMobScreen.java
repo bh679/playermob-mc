@@ -8,13 +8,18 @@ import games.brennan.playermob.menu.PlayerMobMenu;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.Minecraft;
+//? if >=26 {
+/*import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.resources.Identifier;
+*///?} else {
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.PlayerFaceRenderer;
+import net.minecraft.resources.ResourceLocation;
+//?}
+import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.Slot;
@@ -128,10 +133,17 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     private final List<Button> traitButtons = new ArrayList<>();
 
     public PlayerMobScreen(PlayerMobMenu menu, Inventory playerInv, Component title) {
+        //? if >=26 {
+        /*// 26.x made imageWidth/imageHeight final — they're passed through the 5-arg super ctor.
+        // (176 inventory + disposition panel + objectives column; height 186.)
+        super(menu, playerInv, title,
+            INVENTORY_WIDTH + DISPOSITION_WIDTH + OBJECTIVES_GUTTER, 186);
+        *///?} else {
         super(menu, playerInv, title);
         // 176 inventory + disposition panel + objectives column.
         this.imageWidth = INVENTORY_WIDTH + DISPOSITION_WIDTH + OBJECTIVES_GUTTER;
         this.imageHeight = 186;
+        //?}
         // Recompute since the field initialiser used the default height.
         this.inventoryLabelY = this.imageHeight - 94;
     }
@@ -302,12 +314,30 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
         return clusterLeft() + BUTTON_SIZE + BUTTON_GAP + VALUE_FIELD_W / 2;
     }
 
+    //? if >=26 {
+    /*// 26.x collapsed render/renderBg/renderLabels into a single extractRenderState override.
+    // super draws the dimmed background, slot cells, and items; tooltips are handled
+    // automatically by the base class now (no renderTooltip call). We then layer all the
+    // custom drawing on top: the programmatic panel (renderBg), the disposition panel, and
+    // the objectives column (renderLabels).
+    // NOTE: on 26 the custom panel is drawn AFTER super (so it sits over the slot cells),
+    // which differs from the pre-26 order (panel was behind slots) — verify panel layering
+    // in-game on 26.
+    @Override
+    public void extractRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
+        super.extractRenderState(g, mouseX, mouseY, partialTick);
+        renderBg(g, partialTick, mouseX, mouseY);
+        drawDispositionPanel(g);
+        renderLabels(g, mouseX, mouseY);
+    }
+    *///?} else {
     @Override
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
         super.render(guiGraphics, mouseX, mouseY, partialTick);
         drawDispositionPanel(guiGraphics);
         this.renderTooltip(guiGraphics, mouseX, mouseY);
     }
+    //?}
 
     /**
      * Draws the Creative objectives column to the right of the inventory: the
@@ -316,9 +346,14 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
      * as the mob's goals change. Drawn in {@code renderLabels} so it's in the
      * window-local coordinate space (origin at the top-left of the panel).
      */
+    //? if >=26 {
+    /*// Called from extractRenderState on 26 (no base renderLabels to override — no @Override, no super).
+    protected void renderLabels(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY) {
+    *///?} else {
     @Override
     protected void renderLabels(GuiGraphics guiGraphics, int mouseX, int mouseY) {
         super.renderLabels(guiGraphics, mouseX, mouseY);
+    //?}
 
         PlayerMobEntity mob = this.menu.getMob();
         if (mob == null) {
@@ -326,7 +361,11 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
         }
 
         int gx = OBJECTIVES_X + 7;
+        //? if >=26 {
+        /*guiGraphics.text(this.font, "Objectives", gx, 6, OBJECTIVES_HEADER_COLOR, false);
+        *///?} else {
         guiGraphics.drawString(this.font, "Objectives", gx, 6, OBJECTIVES_HEADER_COLOR, false);
+        //?}
 
         String readout = mob.getObjectivesReadout();
         if (readout == null || readout.isEmpty()) {
@@ -337,21 +376,40 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
         for (String entry : readout.split("\n")) {
             int sep = entry.indexOf(" — ");
             if (sep >= 0) {
+                //? if >=26 {
+                /*guiGraphics.text(this.font, entry.substring(0, sep),
+                    gx, y, OBJECTIVES_TEXT_COLOR, false);
+                *///?} else {
                 guiGraphics.drawString(this.font, entry.substring(0, sep),
                     gx, y, OBJECTIVES_TEXT_COLOR, false);
+                //?}
                 y += this.font.lineHeight + 1;
+                //? if >=26 {
+                /*guiGraphics.text(this.font, "  " + entry.substring(sep + 3),
+                    gx, y, OBJECTIVES_SUB_COLOR, false);
+                *///?} else {
                 guiGraphics.drawString(this.font, "  " + entry.substring(sep + 3),
                     gx, y, OBJECTIVES_SUB_COLOR, false);
+                //?}
                 y += this.font.lineHeight + 3;
             } else {
+                //? if >=26 {
+                /*guiGraphics.text(this.font, entry, gx, y, OBJECTIVES_TEXT_COLOR, false);
+                *///?} else {
                 guiGraphics.drawString(this.font, entry, gx, y, OBJECTIVES_TEXT_COLOR, false);
+                //?}
                 y += this.font.lineHeight + 3;
             }
         }
     }
 
+    //? if >=26 {
+    /*// Called from extractRenderState on 26 (renderBg is no longer a base override — no @Override).
+    protected void renderBg(GuiGraphicsExtractor guiGraphics, float partialTick, int mouseX, int mouseY) {
+    *///?} else {
     @Override
     protected void renderBg(GuiGraphics guiGraphics, float partialTick, int mouseX, int mouseY) {
+    //?}
         int x = this.leftPos;
         int y = this.topPos;
 
@@ -378,7 +436,11 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     }
 
     /** Draws an 18×18 recessed cell whose 16×16 interior sits at ({@code sx},{@code sy}). */
+    //? if >=26 {
+    /*private void drawSlotRecess(GuiGraphicsExtractor g, int sx, int sy) {
+    *///?} else {
     private void drawSlotRecess(GuiGraphics g, int sx, int sy) {
+    //?}
         int x0 = sx - 1;
         int y0 = sy - 1;
         g.fill(x0, y0, x0 + 18, y0 + 18, SLOT_BG);
@@ -390,25 +452,45 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
 
     // ---- Disposition panel ------------------------------------------------
 
+    //? if >=26 {
+    /*private void drawDispositionPanel(GuiGraphicsExtractor g) {
+    *///?} else {
     private void drawDispositionPanel(GuiGraphics g) {
+    //?}
         int x = this.leftPos + PANEL_X;
         int top = this.topPos + PANEL_TOP;
         PlayerMobEntity mob = this.menu.getMob();
         if (mob == null) {
+            //? if >=26 {
+            /*g.text(this.font, Component.literal("(no data)"), x, top, MUTED_COLOR, false);
+            *///?} else {
             g.drawString(this.font, Component.literal("(no data)"), x, top, MUTED_COLOR, false);
+            //?}
             return;
         }
 
+        //? if >=26 {
+        /*g.text(this.font, Component.literal("Traits"), x, top + TRAITS_HEADER_DY, LABEL_COLOR, false);
+        *///?} else {
         g.drawString(this.font, Component.literal("Traits"), x, top + TRAITS_HEADER_DY, LABEL_COLOR, false);
+        //?}
         drawTrait(g, x, top + FF_LABEL_DY, top + FF_BAR_DY, "Fight/Flight", mob.getSyncedFightFlight());
         drawTrait(g, x, top + FRIEND_LABEL_DY, top + FRIEND_BAR_DY, "Friendliness", mob.getSyncedFriendliness());
 
+        //? if >=26 {
+        /*g.text(this.font, Component.literal("Relationships"), x, top + REL_HEADER_DY, LABEL_COLOR, false);
+        *///?} else {
         g.drawString(this.font, Component.literal("Relationships"), x, top + REL_HEADER_DY, LABEL_COLOR, false);
+        //?}
         int y = top + REL_ROWS_DY;
 
         Map<UUID, Float> feelings = mob.getSyncedFeelings();
         if (feelings.isEmpty()) {
+            //? if >=26 {
+            /*g.text(this.font, Component.literal("none yet"), x, y, MUTED_COLOR, false);
+            *///?} else {
             g.drawString(this.font, Component.literal("none yet"), x, y, MUTED_COLOR, false);
+            //?}
             return;
         }
         // Same stable UUID order as the edit buttons and the server mapping, so each
@@ -421,8 +503,13 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
             y += ROW_HEIGHT;
         }
         if (order.size() > shown) {
+            //? if >=26 {
+            /*g.text(this.font, Component.literal("+" + (order.size() - shown) + " more"),
+                x, y, MUTED_COLOR, false);
+            *///?} else {
             g.drawString(this.font, Component.literal("+" + (order.size() - shown) + " more"),
                 x, y, MUTED_COLOR, false);
+            //?}
         }
     }
 
@@ -431,16 +518,46 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
      * {@code [-]}/{@code [+]} edit buttons (those are widgets added in
      * {@link #init()}), and a 0–10 fill bar below.
      */
+    //? if >=26 {
+    /*private void drawTrait(GuiGraphicsExtractor g, int x, int labelY, int barY, String label, int value) {
+    *///?} else {
     private void drawTrait(GuiGraphics g, int x, int labelY, int barY, String label, int value) {
+    //?}
+        //? if >=26 {
+        /*g.text(this.font, Component.literal(label), x, labelY, VALUE_COLOR, false);
+        *///?} else {
         g.drawString(this.font, Component.literal(label), x, labelY, VALUE_COLOR, false);
+        //?}
         String text = String.valueOf(value);
+        //? if >=26 {
+        /*g.text(this.font, Component.literal(text),
+            valueCenterX() - this.font.width(text) / 2, labelY, VALUE_COLOR, false);
+        *///?} else {
         g.drawString(this.font, Component.literal(text),
             valueCenterX() - this.font.width(text) / 2, labelY, VALUE_COLOR, false);
+        //?}
         g.fill(x, barY, x + BAR_WIDTH, barY + 3, 0xFF555555);
         int filled = Math.round(BAR_WIDTH * clamp01(value / 10f));
         g.fill(x, barY, x + filled, barY + 3, 0xFF4060C0);
     }
 
+    //? if >=26 {
+    /*private void drawRelationshipRow(GuiGraphicsExtractor g, int x, int y, UUID id, float feeling) {
+        // PlayerFaceRenderer is gone in 26.2 with no replacement. Draw the 8x8 face directly
+        // from the 64x64 skin: base face region at uv (8,8), hat overlay at uv (40,8). The
+        // 9-arg blit overload is (Identifier, x, y, blitW, blitH, u, v, regionW, regionH);
+        // region size stays 8x8 even if FACE_SIZE scales the drawn size.
+        // NOTE: face blit (region/scaling) needs in-game visual verification on 26.
+        var faceTexture = resolveFaceTexture(id);
+        g.blit(faceTexture, x, y, FACE_SIZE, FACE_SIZE, 8f, 8f, 8f, 8f);
+        g.blit(faceTexture, x, y, FACE_SIZE, FACE_SIZE, 40f, 8f, 8f, 8f);
+        String name = nameCache.computeIfAbsent(id, this::computeName);
+        g.text(this.font, Component.literal(trim(name)), x + FACE_SIZE + 3, y, VALUE_COLOR, false);
+        String value = String.format(Locale.ROOT, "%.1f", feeling);
+        int vx = relMinusX() - 2 - this.font.width(value); // just left of the [-] button
+        g.text(this.font, Component.literal(value), vx, y, feelingColor(feeling), false);
+    }
+    *///?} else {
     private void drawRelationshipRow(GuiGraphics g, int x, int y, UUID id, float feeling) {
         PlayerFaceRenderer.draw(g, resolveFaceTexture(id), x, y, FACE_SIZE, true, false);
         String name = nameCache.computeIfAbsent(id, this::computeName);
@@ -449,6 +566,7 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
         int vx = relMinusX() - 2 - this.font.width(value); // just left of the [-] button
         g.drawString(this.font, Component.literal(value), vx, y, feelingColor(feeling), false);
     }
+    //?}
 
     // ---- Identity / face resolution (client-side) -------------------------
 
@@ -457,7 +575,11 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
         if (mc.getConnection() != null) {
             PlayerInfo info = mc.getConnection().getPlayerInfo(id);
             if (info != null) {
+                //? if >=26 {
+                /*return info.getProfile().name(); // authlib 9: GameProfile.getName() → name()
+                *///?} else {
                 return info.getProfile().getName();
+                //?}
             }
         }
         if (mc.level != null) {
@@ -475,12 +597,17 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
      * loaded PlayerMob's skin, else a generic Steve/Alex default. Re-resolved
      * each frame so async-loading player skins flip in once cached.
      */
+    //? if >=26 {
+    /*private Identifier resolveFaceTexture(UUID id) {
+    *///?} else {
     private ResourceLocation resolveFaceTexture(UUID id) {
+    //?}
         Minecraft mc = Minecraft.getInstance();
         if (mc.getConnection() != null) {
             PlayerInfo info = mc.getConnection().getPlayerInfo(id);
             if (info != null) {
-                ResourceLocation texture = SkinCompat.playerInfoTexture(info);
+                // var: SkinCompat.playerInfoTexture returns Identifier on 26, ResourceLocation pre-26.
+                var texture = SkinCompat.playerInfoTexture(info);
                 if (texture != null) {
                     return texture;
                 }

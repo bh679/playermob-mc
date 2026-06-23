@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity;
 
+import games.brennan.playermob.compat.NbtCompat;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.util.RandomSource;
 
@@ -96,10 +97,10 @@ public final class DispositionTraits {
      */
     public void load(CompoundTag tag) {
         if (tag.contains(TAG_FIGHT_FLIGHT)) {
-            setFightFlight(tag.getInt(TAG_FIGHT_FLIGHT));
+            setFightFlight(NbtCompat.getIntOr(tag, TAG_FIGHT_FLIGHT, DEFAULT));
         }
         if (tag.contains(TAG_FRIENDLINESS)) {
-            setFriendliness(tag.getInt(TAG_FRIENDLINESS));
+            setFriendliness(NbtCompat.getIntOr(tag, TAG_FRIENDLINESS, DEFAULT));
         }
     }
 

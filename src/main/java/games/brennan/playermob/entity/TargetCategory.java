@@ -3,7 +3,11 @@ package games.brennan.playermob.entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.animal.Animal;
 import net.minecraft.world.entity.monster.Enemy;
+//? if >=26 {
+/*import net.minecraft.world.entity.npc.villager.AbstractVillager;
+*///?} else {
 import net.minecraft.world.entity.npc.AbstractVillager;
+//?}
 import net.minecraft.world.entity.player.Player;
 
 /**

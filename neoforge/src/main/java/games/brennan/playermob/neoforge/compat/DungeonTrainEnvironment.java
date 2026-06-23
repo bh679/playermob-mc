@@ -1,5 +1,34 @@
 package games.brennan.playermob.neoforge.compat;
 
+//? if >=26 {
+/*// Dungeon Train ({@code dungeontrain}) is a NeoForge-1.21.1-only optional compile dependency
+// (see neoforge/build.gradle.kts: the modCompileOnly + JOML deps attach on `mc == "1.21.1"` only).
+// It does not exist for MC 26.x, so the real DT-backed environment below cannot compile there.
+// On >=26 this becomes a harmless, never-instantiated stub: PlayerMobNeoForge.installDungeonTrain()
+// is itself guarded to <26 (DT can never load on 26 anyway), so nothing references this class at
+// runtime on 26. It still has to be a compilable TrainEnvironment in the source set, so the full
+// interface is implemented with "not on a train" answers — identical behaviour to TrainEnvironment.ABSENT.
+// Line comments only inside this >=26 block (no block comments — they cannot nest).
+import games.brennan.playermob.compat.TrainEnvironment;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
+
+public final class DungeonTrainEnvironment implements TrainEnvironment {
+    @Override public boolean isOnTrain(Entity self) { return false; }
+    @Override public boolean sameTrain(Entity self, Entity candidate) { return false; }
+    @Override public boolean sameTrain(Entity self, BlockPos candidatePos) { return false; }
+    @Override public ReboardTarget nearestCarriage(Entity self, double radius) { return null; }
+    @Override public int carriageIndex(Entity self) { return NO_CARRIAGE; }
+    @Override public int spawnCarriageIndex(Entity self) { return NO_CARRIAGE; }
+    @Override public Vec3 nextCarriageTarget(Entity self, int dir) { return null; }
+    @Override public Vec3 nextGroupTarget(Entity self, int dir) { return null; }
+    @Override public void openBlockingDoor(Entity self) {}
+    @Override public boolean digObstructingBlock(Entity self) { return false; }
+    @Override public Vec3 boardingSpot(Entity self, AABB carriageBox) { return null; }
+}
+*///?} else {
 import games.brennan.dungeontrain.ship.ManagedShip;
 import games.brennan.dungeontrain.ship.Shipyards;
 import games.brennan.dungeontrain.train.Trains;
@@ -922,3 +951,4 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         return Math.max(low, Math.min(high, p));
     }
 }
+//?}

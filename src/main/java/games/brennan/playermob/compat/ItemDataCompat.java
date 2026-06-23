@@ -63,15 +63,36 @@ public final class ItemDataCompat {
     }
 
     /**
-     * Roll the food's effects against {@code random} and apply the winners to
-     * {@code target} — the heal itself is the caller's job. Mirrors the
-     * probability-gated effect loop both vanilla versions run on eat; centralised
-     * here because the effect-list shape differs (1.21.1 {@code PossibleEffect}
-     * record vs 1.20.1 {@code Pair<MobEffectInstance, Float>}).
+     * Roll the {@code stack}'s eat-effects against {@code random} and apply the
+     * winners to {@code target} — the heal itself is the caller's job. Mirrors the
+     * probability-gated effect loop every vanilla version runs on eat; centralised
+     * here because the effect carrier differs across versions:
+     * <ul>
+     *   <li>1.20.1 — {@code FoodProperties.getEffects()} ({@code Pair<MobEffectInstance, Float>});</li>
+     *   <li>1.21.1 — {@code FoodProperties.effects()} ({@code PossibleEffect} records);</li>
+     *   <li>26.x — the effects moved off {@code FoodProperties} entirely onto the
+     *       {@code CONSUMABLE} data component's {@code ApplyStatusEffectsConsumeEffect}
+     *       entries, so they're read from the {@link ItemStack} instead.</li>
+     * </ul>
+     * The {@code food} argument is the already-resolved {@link FoodProperties} for
+     * {@code stack} (the &lt;26 branches read it; the 26 branch reads {@code stack}).
      */
-    public static void applyFoodEffects(FoodProperties food, LivingEntity target,
+    public static void applyFoodEffects(ItemStack stack, FoodProperties food, LivingEntity target,
                                         net.minecraft.util.RandomSource random) {
-        //? if >=1.21.1 {
+        //? if >=26 {
+        /*net.minecraft.world.item.component.Consumable consumable =
+            stack.get(DataComponents.CONSUMABLE);
+        if (consumable == null) return;
+        for (net.minecraft.world.item.consume_effects.ConsumeEffect effect : consumable.onConsumeEffects()) {
+            if (effect instanceof net.minecraft.world.item.consume_effects.ApplyStatusEffectsConsumeEffect apply
+                    && random.nextFloat() < apply.probability()) {
+                for (MobEffectInstance instance : apply.effects()) {
+                    // Defensive copy — the component returns shared instances.
+                    target.addEffect(new MobEffectInstance(instance));
+                }
+            }
+        }
+        *///?} else if >=1.21.1 {
         for (FoodProperties.PossibleEffect possible : food.effects()) {
             if (random.nextFloat() < possible.probability()) {
                 // Defensive copy — the supplier returns the same instance across calls.
@@ -84,6 +105,27 @@ public final class ItemDataCompat {
                 target.addEffect(new MobEffectInstance(possible.getFirst()));
             }
         }*/
+        //?}
+    }
+
+    /**
+     * The sound played while eating {@code stack}. Pre-26 the eating sound came from the
+     * entity ({@code LivingEntity.getEatingSound(stack)}); 26.x moved it onto the
+     * {@code CONSUMABLE} data component ({@code Consumable.sound()}). The {@code fallback} is
+     * the entity's generic eating sound, used on 26.x when the stack carries no consumable
+     * sound (and is the whole answer pre-26).
+     */
+    public static net.minecraft.sounds.SoundEvent eatingSound(ItemStack stack,
+                                                              net.minecraft.sounds.SoundEvent fallback) {
+        //? if >=26 {
+        /*net.minecraft.world.item.component.Consumable consumable =
+            stack.get(DataComponents.CONSUMABLE);
+        if (consumable != null) {
+            return consumable.sound().value();
+        }
+        return fallback;
+        *///?} else {
+        return fallback;
         //?}
     }
 
@@ -147,11 +189,25 @@ public final class ItemDataCompat {
     // so the whole method body is guarded.
 
     //? if >=1.21.1 {
+    /**
+     * The item's default attribute-modifier set (the fallback armor/weapon stats).
+     * 1.21.1 exposes {@code Item.getDefaultAttributeModifiers()}; 26.x removed that
+     * getter, so the defaults are read straight off the item's component map.
+     */
+    private static ItemAttributeModifiers defaultModifiers(ItemStack stack) {
+        //? if >=26 {
+        /*return stack.getItem().components()
+            .getOrDefault(DataComponents.ATTRIBUTE_MODIFIERS, ItemAttributeModifiers.EMPTY);
+        *///?} else {
+        return stack.getItem().getDefaultAttributeModifiers();
+        //?}
+    }
+
     private static double sumAddValueWithDefault(ItemStack stack, EquipmentSlot slot, Holder<Attribute> attribute) {
         ItemAttributeModifiers modifiers =
             stack.getOrDefault(DataComponents.ATTRIBUTE_MODIFIERS, ItemAttributeModifiers.EMPTY);
         if (modifiers.modifiers().isEmpty()) {
-            modifiers = stack.getItem().getDefaultAttributeModifiers();
+            modifiers = defaultModifiers(stack);
         }
         double total = 0;
         for (ItemAttributeModifiers.Entry entry : modifiers.modifiers()) {

@@ -31,7 +31,10 @@ import games.brennan.playermob.player.PlayerReincarnation;
 import games.brennan.playermob.skin.PlayerMobSkin;
 import games.brennan.playermob.skin.PlayerMobSkinRegistry;
 import games.brennan.playermob.skin.SkinModel;
+import games.brennan.playermob.compat.GameRuleCompat;
 import games.brennan.playermob.compat.ItemDataCompat;
+import games.brennan.playermob.compat.ItemKindCompat;
+import games.brennan.playermob.compat.NbtCompat;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.particles.ItemParticleOption;
@@ -63,7 +66,11 @@ import net.minecraft.world.level.block.entity.ShulkerBoxBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
+//? if >=26 {
+/*import net.minecraft.world.entity.EntitySpawnReason;
+*///?} else {
 import net.minecraft.world.entity.MobSpawnType;
+//?}
 import net.minecraft.world.entity.PathfinderMob;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.SpawnGroupData;
@@ -82,7 +89,11 @@ import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.monster.RangedAttackMob;
 import net.minecraft.world.entity.npc.InventoryCarrier;
 import net.minecraft.world.entity.player.Player;
+//? if >=26 {
+/*import net.minecraft.world.entity.projectile.arrow.AbstractArrow;
+*///?} else {
 import net.minecraft.world.entity.projectile.AbstractArrow;
+//?}
 import net.minecraft.world.entity.projectile.ProjectileUtil;
 import net.minecraft.world.item.AxeItem;
 import net.minecraft.world.item.BowItem;
@@ -92,13 +103,14 @@ import net.minecraft.world.item.Items;
 //? if >=1.21.1 {
 import net.minecraft.world.item.MaceItem;
 //?}
+//? if <26 {
 import net.minecraft.world.item.SwordItem;
+//?}
 import net.minecraft.world.item.TridentItem;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.entity.item.ItemEntity;
-import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.ServerLevelAccessor;
 import net.minecraft.world.phys.AABB;
@@ -498,6 +510,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // Enable vanilla's passive proximity pickup (Mob.aiStep). The active
         // CollectFloorItemsGoal does the seeking; this catches items underfoot.
         this.setCanPickUpLoot(true);
+        //? if >=26 {
+        /*// 26.x: guaranteed gear drops are per-slot drop-chance state (no getEquipmentDropChance
+        // override); stamp them here. Pre-26 the override below does the same job per-call.
+        applyGuaranteedDrops();
+        *///?}
         // Route pathfinding through closed wooden doors (passing through *open*
         // doors is already on by default). PlayerMobDoorGoal does the opening;
         // without this flag DoorInteractGoal.canUse() never fires.
@@ -639,10 +656,19 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             10,
             true,
             false,
+            // 26.x: the target selector is a two-arg TargetingConditions.Selector
+            // (entity, ServerLevel); the level is unused here.
+            //? if >=26 {
+            /*(candidate, serverLevel) -> !recovering
+                && !this.crossingGap
+                && reactionToward(candidate) == Reaction.FIGHT
+                && TrainConfinement.allowsTarget(this, candidate)));
+            *///?} else {
             candidate -> !recovering
                 && !this.crossingGap
                 && reactionToward(candidate) == Reaction.FIGHT
                 && TrainConfinement.allowsTarget(this, candidate)));
+            //?}
         // Hunt food animals only while hungry, and below the hostile-targeting
         // goal (2) so defending against a zombie always beats chasing a cow.
         this.targetSelector.addGoal(3, new HuntForFoodGoal(this));
@@ -667,8 +693,13 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * </ul>
      */
     @Override
+    //? if >=26 {
+    /*protected void customServerAiStep(ServerLevel level) {
+        super.customServerAiStep(level);
+    *///?} else {
     protected void customServerAiStep() {
         super.customServerAiStep();
+    //?}
         LivingEntity target = getTarget();
         if (target != null
                 && (recovering || isIgnoredPlayer(target) || !TrainConfinement.allowsTarget(this, target))) {
@@ -1134,7 +1165,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         setItemSlot(EquipmentSlot.MAINHAND, tool);
         if (!previous.isEmpty()) {
             ItemStack leftover = EquipmentEvaluator.addToContainer(inventory, previous);
-            if (!leftover.isEmpty()) spawnAtLocation(leftover);
+            if (!leftover.isEmpty()) dropAtLocation(leftover);
         }
         return true;
     }
@@ -1167,7 +1198,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     @Override
     public SpawnGroupData finalizeSpawn(ServerLevelAccessor world,
                                         DifficultyInstance difficulty,
+                                        //? if >=26 {
+                                        /*EntitySpawnReason reason,
+                                        *///?} else {
                                         MobSpawnType reason,
+                                        //?}
                                         SpawnGroupData data
                                         //? if <1.21.1 {
                                         /*, net.minecraft.nbt.CompoundTag dataTag
@@ -1178,11 +1213,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // snapshot here (before the rolls) pins skin + traits explicit, so the rolls below
         // skip — same path as the reincarnation egg. Skipped when a skin is already loaded
         // (egg / Skin* summon), so it never clobbers an explicit identity.
-        ReincarnationRecord echo = reason == MobSpawnType.EVENT && !skinExplicit
+        ReincarnationRecord echo = isEventSpawn(reason) && !skinExplicit
             ? PlayerReincarnation.maybeReincarnateOnSpawn(this, world) : null;
         rollSpawnDefaults(world.getRandom(), echo != null);
         boolean companion = maybeSpawnFriendPair(world, reason, echo);
-        if (reason == MobSpawnType.EVENT) {
+        if (isEventSpawn(reason)) {
             DtSpawnDebug.report(world.getLevel(), this, echo != null, companion);
         }
         //? if >=1.21.1 {
@@ -1250,9 +1285,28 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * @return whether a companion (friend or friend-echo) actually spawned — used by the
      *     {@link DtSpawnDebug} readout to colour the spawn message.
      */
-    private boolean maybeSpawnFriendPair(ServerLevelAccessor world, MobSpawnType reason,
+    /**
+     * Whether {@code reason} is the Dungeon-Train {@code EVENT} spawn. Centralises the
+     * spawn-reason enum, which MC 26.x renamed {@code MobSpawnType} → {@code EntitySpawnReason}.
+     */
+    //? if >=26 {
+    /*private static boolean isEventSpawn(EntitySpawnReason reason) {
+        return reason == EntitySpawnReason.EVENT;
+    }
+    *///?} else {
+    private static boolean isEventSpawn(MobSpawnType reason) {
+        return reason == MobSpawnType.EVENT;
+    }
+    //?}
+
+    private boolean maybeSpawnFriendPair(ServerLevelAccessor world,
+                                         //? if >=26 {
+                                         /*EntitySpawnReason reason,
+                                         *///?} else {
+                                         MobSpawnType reason,
+                                         //?}
                                          ReincarnationRecord echo) {
-        if (reason != MobSpawnType.EVENT) {
+        if (!isEventSpawn(reason)) {
             return false;                             // only natural Dungeon-Train spawns pair up
         }
         RandomSource random = world.getRandom();
@@ -1269,10 +1323,25 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         return false;
     }
 
+    /**
+     * Build a fresh {@code PlayerMobEntity} for {@code level}. MC 26.x dropped the
+     * single-argument {@code EntityType.create(Level)} in favour of
+     * {@code create(Level, EntitySpawnReason)} — a {@code MOB_SUMMONED} reason matches the
+     * pre-26 behaviour for these programmatically-created companions (which skip
+     * {@code finalizeSpawn} either way).
+     */
+    private static PlayerMobEntity createCompanion(ServerLevel level) {
+        //? if >=26 {
+        /*return PlayerMobRegistry.PLAYER_MOB.create(level, EntitySpawnReason.MOB_SUMMONED);
+        *///?} else {
+        return PlayerMobRegistry.PLAYER_MOB.create(level);
+        //?}
+    }
+
     /** Spawn a fresh random max-friends buddy beside this mob (the non-echo pair); {@code true} if one spawned. */
     private boolean spawnRandomFriend(ServerLevelAccessor world) {
         ServerLevel level = world.getLevel();
-        PlayerMobEntity friend = PlayerMobRegistry.PLAYER_MOB.create(level);
+        PlayerMobEntity friend = createCompanion(level);
         if (friend == null) {
             return false;
         }
@@ -1294,13 +1363,13 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      */
     private boolean spawnFriendEcho(ServerLevelAccessor world, CompoundTag friendSnapshot) {
         ServerLevel level = world.getLevel();
-        PlayerMobEntity friend = PlayerMobRegistry.PLAYER_MOB.create(level);
+        PlayerMobEntity friend = createCompanion(level);
         if (friend == null) {
             return false;
         }
         placeCompanion(friend);
-        friend.readAdditionalSaveData(friendSnapshot.copy());
-        String label = friendSnapshot.getString(GlobalLifeStore.FRIEND_LABEL_KEY);
+        friend.applyCustomData(friendSnapshot.copy());
+        String label = NbtCompat.getStringOr(friendSnapshot, GlobalLifeStore.FRIEND_LABEL_KEY, "");
         friend.setCustomName(Component.literal("Echo of " + (label.isBlank() ? "a friend" : label)));
         friend.setCustomNameVisible(true);
         linkAsFriends(friend);
@@ -1313,7 +1382,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * tick. Avoids clipping the companion into a carriage wall by guessing an offset.
      */
     private void placeCompanion(PlayerMobEntity friend) {
+        //? if >=26 {
+        /*friend.snapTo(getX(), getY(), getZ(), getYRot(), 0.0F);
+        *///?} else {
         friend.moveTo(getX(), getY(), getZ(), getYRot(), 0.0F);
+        //?}
     }
 
     /**
@@ -1649,7 +1722,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     }
 
     private static boolean isWeapon(ItemStack stack) {
-        return stack.getItem() instanceof SwordItem
+        return ItemKindCompat.isSword(stack)
             || stack.getItem() instanceof AxeItem
             || stack.getItem() instanceof TridentItem
             || stack.getItem() instanceof BowItem
@@ -1658,6 +1731,22 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             || stack.getItem() instanceof MaceItem;
             //?} else {
             /*;*///?}
+    }
+
+    /**
+     * Drop {@code stack} into the world at this mob's feet. MC 26.x added a leading
+     * {@code ServerLevel} argument to {@code Entity.spawnAtLocation}; every call here runs
+     * server-side (drops, swaps, death loot), so {@code level()} is a {@code ServerLevel}.
+     * No-op for an empty stack, matching vanilla {@code spawnAtLocation}.
+     */
+    public void dropAtLocation(ItemStack stack) {
+        //? if >=26 {
+        /*if (level() instanceof ServerLevel server) {
+            spawnAtLocation(server, stack);
+        }
+        *///?} else {
+        spawnAtLocation(stack);
+        //?}
     }
 
     /**
@@ -1926,7 +2015,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
 
     /** Whether world-griefing (and thus chest raiding) is permitted here. */
     public boolean canRaid() {
-        return level().getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING);
+        return GameRuleCompat.mobGriefing(level());
     }
 
     /**
@@ -2133,7 +2222,13 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
                     && PlayerMobRegistry.MENU_OPENER != null) {
                 PlayerMobRegistry.MENU_OPENER.open(serverPlayer, this);
             }
+            //? if >=26 {
+            /*// 26.x folded sided-success into the new sealed InteractionResult.SUCCESS,
+            // which swings the arm client-side and is a no-op server-side automatically.
+            return InteractionResult.SUCCESS;
+            *///?} else {
             return InteractionResult.sidedSuccess(this.level().isClientSide);
+            //?}
         }
         return super.mobInteract(player, hand);
     }
@@ -2152,7 +2247,12 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * the raid goals' explicit {@link #wouldTakeFromContainer} calls.</p>
      */
     @Override
+    //? if >=26 {
+    /*protected boolean canReplaceCurrentItem(ItemStack candidate, ItemStack existing,
+                                            EquipmentSlot slot) {
+    *///?} else {
     protected boolean canReplaceCurrentItem(ItemStack candidate, ItemStack existing) {
+    //?}
         return EquipmentEvaluator.shouldReplace(candidate, existing);
     }
 
@@ -2194,14 +2294,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
 
         EquipmentSlot slot = getEquipmentSlotForItem(candidate);
         ItemStack current = getItemBySlot(slot);
-        if (!canReplaceCurrentItem(candidate, current)) return false;
+        if (!EquipmentEvaluator.shouldReplace(candidate, current)) return false;
 
         setItemSlot(slot, candidate.copy());
         source.setItem(slotIdx, ItemStack.EMPTY);
         source.setChanged();
         if (!current.isEmpty()) {
             ItemStack leftover = EquipmentEvaluator.addToContainer(source, current.copy());
-            if (!leftover.isEmpty()) spawnAtLocation(leftover);
+            if (!leftover.isEmpty()) dropAtLocation(leftover);
         }
         return true;
     }
@@ -2275,7 +2375,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (candidate.isEmpty()) return false;
         EquipmentSlot mobSlot = getEquipmentSlotForItem(candidate);
         ItemStack current = getItemBySlot(mobSlot);
-        if (!canReplaceCurrentItem(candidate, current)) return false;
+        if (!EquipmentEvaluator.shouldReplace(candidate, current)) return false;
 
         setItemSlot(mobSlot, candidate.copy());
         stand.setItemSlot(fromSlot, current);
@@ -2307,7 +2407,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         }
         EquipmentSlot slot = getEquipmentSlotForItem(candidate);
         ItemStack current = getItemBySlot(slot);
-        return canReplaceCurrentItem(candidate, current);
+        return EquipmentEvaluator.shouldReplace(candidate, current);
     }
 
     /** Pre-check variant of {@link #tryReplaceFromArmorStand}. */
@@ -2316,7 +2416,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (candidate.isEmpty()) return false;
         EquipmentSlot mobSlot = getEquipmentSlotForItem(candidate);
         ItemStack current = getItemBySlot(mobSlot);
-        return canReplaceCurrentItem(candidate, current);
+        return EquipmentEvaluator.shouldReplace(candidate, current);
     }
 
     // ---- Floor item pickup (CollectFloorItemsGoal + vanilla aiStep) -------
@@ -2329,7 +2429,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * then hoardable ammo / valuables / consumables, then building blocks.
      */
     @Override
+    //? if >=26 {
+    /*public boolean wantsToPickUp(ServerLevel level, ItemStack stack) {
+    *///?} else {
     public boolean wantsToPickUp(ItemStack stack) {
+    //?}
         ItemPickupPolicy.WeaponCategory cat = ItemPickupPolicy.weaponCategory(stack);
         if (cat != null) {
             Located best = bestOfCategory(cat);
@@ -2349,7 +2453,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * logic the active goal uses.
      */
     @Override
+    //? if >=26 {
+    /*protected void pickUpItem(ServerLevel level, ItemEntity itemEntity) {
+    *///?} else {
     protected void pickUpItem(ItemEntity itemEntity) {
+    //?}
         tryPickUpFloorItem(itemEntity);
     }
 
@@ -2394,7 +2502,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
                 || ItemPickupPolicy.isValuable(stack)
                 || ItemPickupPolicy.isConsumable(stack)) {
             // InventoryCarrier.pickUpItem handles its own want-check, take, and discard.
+            //? if >=26 {
+            /*// 26.x added a leading ServerLevel argument; pickup only runs server-side.
+            if (level() instanceof ServerLevel server) {
+                InventoryCarrier.pickUpItem(server, this, this, itemEntity);
+            }
+            *///?} else {
             InventoryCarrier.pickUpItem(this, this, itemEntity);
+            //?}
             return true;
         }
         if (ItemPickupPolicy.isBuildingBlock(stack)) {
@@ -2465,7 +2580,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private boolean wouldEquipArmor(ItemStack stack) {
         if (!ItemPickupPolicy.isArmorOrShield(stack)) return false;
         EquipmentSlot slot = getEquipmentSlotForItem(stack);
-        return canReplaceCurrentItem(stack, getItemBySlot(slot));
+        return EquipmentEvaluator.shouldReplace(stack, getItemBySlot(slot));
     }
 
     /**
@@ -2478,14 +2593,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private int equipArmorUpgrade(ItemStack found) {
         EquipmentSlot slot = getEquipmentSlotForItem(found);
         ItemStack current = getItemBySlot(slot);
-        if (!canReplaceCurrentItem(found, current)) return 0;
+        if (!EquipmentEvaluator.shouldReplace(found, current)) return 0;
 
         ItemStack toEquip = found.copy();
         toEquip.setCount(1); // equipment slots hold a single piece
         setItemSlot(slot, toEquip);
         if (!current.isEmpty()) {
             ItemStack leftover = EquipmentEvaluator.addToContainer(this.inventory, current);
-            if (!leftover.isEmpty()) spawnAtLocation(leftover);
+            if (!leftover.isEmpty()) dropAtLocation(leftover);
         }
         return 1;
     }
@@ -2541,12 +2656,12 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         }
         if (best != null) {
             removeLocated(best);
-            spawnAtLocation(best.stack()); // drop the worse duplicate
+            dropAtLocation(best.stack()); // drop the worse duplicate
         }
         ItemStack one = picked.copy();
         one.setCount(1);
         ItemStack leftover = EquipmentEvaluator.addToContainer(this.inventory, one);
-        if (!leftover.isEmpty()) spawnAtLocation(leftover);
+        if (!leftover.isEmpty()) dropAtLocation(leftover);
 
         if (getTarget() == null || getMainHandItem().isEmpty()) {
             equipBestMeleeInHand();
@@ -2613,7 +2728,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         setItemSlot(EquipmentSlot.MAINHAND, desired.stack());
         if (!current.isEmpty()) {
             ItemStack leftover = EquipmentEvaluator.addToContainer(this.inventory, current);
-            if (!leftover.isEmpty()) spawnAtLocation(leftover);
+            if (!leftover.isEmpty()) dropAtLocation(leftover);
         }
     }
 
@@ -2633,7 +2748,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             if (found.getCount() <= smallest.getCount()) return 0;
             // Trade up: free the smallest stack, then fall through to the add below.
             this.inventory.setItem(smallestSlot, ItemStack.EMPTY);
-            spawnAtLocation(smallest);
+            dropAtLocation(smallest);
             carried = ItemPickupPolicy.countBuildingBlocks(this.inventory);
         }
         int room = ItemPickupPolicy.BUILDING_BLOCK_CAP - carried;
@@ -2740,7 +2855,13 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // particle fires — and an empty ItemStack fails to encode ("Empty
         // ItemStack not allowed"), which can disconnect an integrated-server
         // client. Copying decouples the particle from that mutation.
+        //? if >=26 {
+        /*// 26.x: ItemParticleOption takes an ItemStackTemplate, not a bare ItemStack.
+        ItemParticleOption particle = new ItemParticleOption(ParticleTypes.ITEM,
+            net.minecraft.world.item.ItemStackTemplate.fromStack(food.copy()));
+        *///?} else {
         ItemParticleOption particle = new ItemParticleOption(ParticleTypes.ITEM, food.copy());
+        //?}
         serverLevel.sendParticles(
             particle,
             getX(),
@@ -2799,10 +2920,98 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     }
 
     // ---- Save / load -----------------------------------------------------
+    //
+    // MC 26.x moved the entity save format from raw CompoundTag onto the abstract
+    // ValueInput / ValueOutput stream interfaces, so the override SIGNATURES differ by
+    // version. To keep the (large, behaviour-sensitive) field logic in one place, the
+    // custom data is read/written through version-agnostic CompoundTag helpers
+    // (writeCustomTag / readCustomTag, NbtCompat-bridged); the thin per-version overrides
+    // only differ in how they obtain that CompoundTag and where they push the inventory.
+    //
+    // For 26.x the flat custom keys are nested under a single TAG_CUSTOM child (the on-disk
+    // layout only matters within a single MC version, and 26.x is a fresh target with no
+    // legacy 26.x saves to remain byte-compatible with).
 
+    /** NBT key the 26.x save nests all PlayerMob custom keys under (see class note above). */
+    private static final String TAG_CUSTOM = "PlayerMobData";
+
+    //? if >=26 {
+    /*@Override
+    public void addAdditionalSaveData(net.minecraft.world.level.storage.ValueOutput out) {
+        super.addAdditionalSaveData(out);
+        CompoundTag custom = new CompoundTag();
+        writeCustomTag(custom);
+        out.store(TAG_CUSTOM, CompoundTag.CODEC, custom);
+        writeInventoryToTag(out);
+    }
+
+    @Override
+    public void readAdditionalSaveData(net.minecraft.world.level.storage.ValueInput in) {
+        super.readAdditionalSaveData(in);
+        readCustomTag(in.read(TAG_CUSTOM, CompoundTag.CODEC).orElseGet(CompoundTag::new));
+        readInventoryFromTag(in);
+    }
+    *///?} else {
     @Override
     public void addAdditionalSaveData(CompoundTag tag) {
         super.addAdditionalSaveData(tag);
+        writeCustomTag(tag);
+        // Inventory persistence — InventoryCarrier helper handles slot encoding.
+        // registryAccess() is a HolderLookup.Provider on Entity in 1.21.1+; the
+        // 1.20.1 overload takes no provider.
+        //? if >=1.21.1 {
+        writeInventoryToTag(tag, this.registryAccess());
+        //?} else {
+        /*writeInventoryToTag(tag);*///?}
+    }
+
+    @Override
+    public void readAdditionalSaveData(CompoundTag tag) {
+        super.readAdditionalSaveData(tag);
+        readCustomTag(tag);
+        //? if >=1.21.1 {
+        readInventoryFromTag(tag, this.registryAccess());
+        //?} else {
+        /*readInventoryFromTag(tag);*///?}
+    }
+    //?}
+
+    /**
+     * Capture this mob's full additional save data (custom fields + inventory) into a
+     * {@link CompoundTag} — the reincarnation / friend-echo snapshot. Version-neutral: on
+     * 26.x it bridges the {@code ValueOutput} stream through a {@code TagValueOutput}.
+     */
+    public CompoundTag captureCustomData() {
+        //? if >=26 {
+        /*net.minecraft.world.level.storage.TagValueOutput out =
+            net.minecraft.world.level.storage.TagValueOutput.createWithContext(
+                net.minecraft.util.ProblemReporter.DISCARDING, this.registryAccess());
+        addAdditionalSaveData(out);
+        return out.buildResult();
+        *///?} else {
+        CompoundTag tag = new CompoundTag();
+        addAdditionalSaveData(tag);
+        return tag;
+        //?}
+    }
+
+    /**
+     * Restore additional save data from a {@code captureCustomData()} snapshot. Version-neutral;
+     * on 26.x bridges through a {@code TagValueInput}.
+     */
+    public void applyCustomData(CompoundTag tag) {
+        //? if >=26 {
+        /*net.minecraft.world.level.storage.ValueInput in =
+            net.minecraft.world.level.storage.TagValueInput.create(
+                net.minecraft.util.ProblemReporter.DISCARDING, this.registryAccess(), tag);
+        readAdditionalSaveData(in);
+        *///?} else {
+        readAdditionalSaveData(tag);
+        //?}
+    }
+
+    /** Write every PlayerMob custom field to {@code tag}. Version-agnostic (CompoundTag + NbtCompat). */
+    private void writeCustomTag(CompoundTag tag) {
         traits.save(tag);
         feelings.save(tag);
         tag.putInt(TAG_SKIN_INDEX, getSkinIndex());
@@ -2820,7 +3029,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // unpaired mob round-trips no key. Survives the rare save in the few ticks before
         // both partners have latched their shared march direction.
         if (this.trainPairPartner != null) {
-            tag.putUUID(TAG_TRAIN_PAIR_PARTNER, this.trainPairPartner);
+            NbtCompat.putUUID(tag, TAG_TRAIN_PAIR_PARTNER, this.trainPairPartner);
         }
         // URL skin tags are purely additive on top of v1 (SkinIndex). Only
         // write the URL key when set, so 0.2.0-loaded mobs that never had a
@@ -2829,13 +3038,6 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (!url.isEmpty()) {
             tag.putString(TAG_SKIN_TEXTURE_URL, url);
         }
-        // Inventory persistence — InventoryCarrier helper handles slot encoding.
-        // registryAccess() is a HolderLookup.Provider on Entity in 1.21.1+; the
-        // 1.20.1 overload takes no provider.
-        //? if >=1.21.1 {
-        writeInventoryToTag(tag, this.registryAccess());
-        //?} else {
-        /*writeInventoryToTag(tag);*///?}
 
         // Recently-explored maps — ListTag of {pos:long, tick:long} compounds.
         ListTag blocks = new ListTag();
@@ -2850,65 +3052,62 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         ListTag entities = new ListTag();
         for (Map.Entry<UUID, Long> e : recentlyExploredEntities.entrySet()) {
             CompoundTag entry = new CompoundTag();
-            entry.putUUID(TAG_UUID, e.getKey());
+            NbtCompat.putUUID(entry, TAG_UUID, e.getKey());
             entry.putLong(TAG_TICK, e.getValue());
             entities.add(entry);
         }
         tag.put(TAG_EXPLORED_ENTITIES, entities);
     }
 
-    @Override
-    public void readAdditionalSaveData(CompoundTag tag) {
-        super.readAdditionalSaveData(tag);
+    /** Read every PlayerMob custom field from {@code tag}. Version-agnostic (CompoundTag + NbtCompat). */
+    private void readCustomTag(CompoundTag tag) {
         // Traits + feelings; missing keys keep defaults. Legacy *Personality keys ignored.
         traits.load(tag);
         feelings.load(tag);
         pushDispositionToClient();
         // Only mark the skin explicit when a key is really present — a trait-only
         // egg (archetype) carries no Skin* keys and must still roll a skin at spawn.
-        if (tag.contains(TAG_SKIN_INDEX, Tag.TAG_ANY_NUMERIC)) {
-            setSkinIndex(tag.getInt(TAG_SKIN_INDEX));
+        if (NbtCompat.containsOfType(tag, TAG_SKIN_INDEX, NbtCompat.ANY_NUMERIC)) {
+            setSkinIndex(NbtCompat.getIntOr(tag, TAG_SKIN_INDEX, 0));
             // #73: restore the per-mob arm model for index-path mobs too. Missing key
             // (pre-per-mob-slim saves) ⇒ false ⇒ wide, so old bundled mobs keep their
             // wide look. A URL mob re-applies its authored model in the block below.
-            setSkinSlim(tag.getBoolean(TAG_SKIN_SLIM));
+            setSkinSlim(NbtCompat.getBooleanOr(tag, TAG_SKIN_SLIM, false));
             skinExplicit = true;
         }
         // Missing key (pre-door-feature saves) ⇒ false ⇒ leave-open. Additive.
-        this.closesDoors = tag.getBoolean(TAG_CLOSES_DOORS);
+        this.closesDoors = NbtCompat.getBooleanOr(tag, TAG_CLOSES_DOORS, false);
         // Missing key ⇒ 0 ⇒ unlatched ⇒ re-derived on the next train boarding. Additive.
-        this.trainExploreDir = tag.getInt(TAG_TRAIN_EXPLORE_DIR);
+        this.trainExploreDir = NbtCompat.getIntOr(tag, TAG_TRAIN_EXPLORE_DIR, 0);
         // Missing key ⇒ null ⇒ no pair (every pre-pair-feature mob). Additive.
         this.trainPairPartner =
-            tag.hasUUID(TAG_TRAIN_PAIR_PARTNER) ? tag.getUUID(TAG_TRAIN_PAIR_PARTNER) : null;
+            NbtCompat.hasUUID(tag, TAG_TRAIN_PAIR_PARTNER) ? NbtCompat.getUUID(tag, TAG_TRAIN_PAIR_PARTNER) : null;
         // Backward compat: 0.2.0 saves have no SkinTextureUrl tag. Missing key
         // ⇒ URL stays the default "" ⇒ renderer uses the legacy bundled-
         // vanilla path keyed off SkinIndex. New v2 mobs round-trip the URL.
-        if (tag.contains(TAG_SKIN_TEXTURE_URL, Tag.TAG_STRING)) {
-            setSkinTextureUrl(tag.getString(TAG_SKIN_TEXTURE_URL));
-            setSkinSlim(tag.getBoolean(TAG_SKIN_SLIM));
+        if (NbtCompat.containsOfType(tag, TAG_SKIN_TEXTURE_URL, Tag.TAG_STRING)) {
+            setSkinTextureUrl(NbtCompat.getStringOr(tag, TAG_SKIN_TEXTURE_URL, ""));
+            setSkinSlim(NbtCompat.getBooleanOr(tag, TAG_SKIN_SLIM, false));
             skinExplicit = true;
         }
-        //? if >=1.21.1 {
-        readInventoryFromTag(tag, this.registryAccess());
-        //?} else {
-        /*readInventoryFromTag(tag);*///?}
 
         recentlyExploredBlocks.clear();
-        if (tag.contains(TAG_EXPLORED_BLOCKS, Tag.TAG_LIST)) {
-            ListTag blocks = tag.getList(TAG_EXPLORED_BLOCKS, Tag.TAG_COMPOUND);
+        if (NbtCompat.containsOfType(tag, TAG_EXPLORED_BLOCKS, Tag.TAG_LIST)) {
+            ListTag blocks = NbtCompat.getListOfType(tag, TAG_EXPLORED_BLOCKS, Tag.TAG_COMPOUND);
             for (int i = 0; i < blocks.size(); i++) {
-                CompoundTag entry = blocks.getCompound(i);
-                recentlyExploredBlocks.put(entry.getLong(TAG_POS), entry.getLong(TAG_TICK));
+                CompoundTag entry = NbtCompat.compoundAt(blocks, i);
+                recentlyExploredBlocks.put(NbtCompat.getLongOr(entry, TAG_POS, 0L),
+                    NbtCompat.getLongOr(entry, TAG_TICK, 0L));
             }
         }
         recentlyExploredEntities.clear();
-        if (tag.contains(TAG_EXPLORED_ENTITIES, Tag.TAG_LIST)) {
-            ListTag entities = tag.getList(TAG_EXPLORED_ENTITIES, Tag.TAG_COMPOUND);
+        if (NbtCompat.containsOfType(tag, TAG_EXPLORED_ENTITIES, Tag.TAG_LIST)) {
+            ListTag entities = NbtCompat.getListOfType(tag, TAG_EXPLORED_ENTITIES, Tag.TAG_COMPOUND);
             for (int i = 0; i < entities.size(); i++) {
-                CompoundTag entry = entities.getCompound(i);
-                if (entry.hasUUID(TAG_UUID)) {
-                    recentlyExploredEntities.put(entry.getUUID(TAG_UUID), entry.getLong(TAG_TICK));
+                CompoundTag entry = NbtCompat.compoundAt(entities, i);
+                if (NbtCompat.hasUUID(entry, TAG_UUID)) {
+                    recentlyExploredEntities.put(NbtCompat.getUUID(entry, TAG_UUID),
+                        NbtCompat.getLongOr(entry, TAG_TICK, 0L));
                 }
             }
         }
@@ -2943,7 +3142,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         for (int i = 0; i < this.inventory.getContainerSize(); i++) {
             ItemStack stack = this.inventory.getItem(i);
             if (!stack.isEmpty()) {
-                this.spawnAtLocation(stack);
+                this.dropAtLocation(stack);
             }
         }
         this.inventory.clearContent();
@@ -2959,10 +3158,18 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * a flighty mob drops the retaliation target so {@link FleeFromCategoryGoal}
      * takes over. Creative/spectator attackers are ignored entirely.
      */
+    //? if >=26 {
+    /*@Override
+    public boolean hurtServer(ServerLevel level, DamageSource source, float amount) {
+        boolean result = super.hurtServer(level, source, amount);
+        // hurtServer only ever runs server-side, so the pre-26 !isClientSide guard is implicit.
+        if (result && source.getEntity() instanceof LivingEntity attacker) {
+    *///?} else {
     @Override
     public boolean hurt(DamageSource source, float amount) {
         boolean result = super.hurt(source, amount);
         if (result && !level().isClientSide && source.getEntity() instanceof LivingEntity attacker) {
+    //?}
             // Creative/Spectator players are ignored: take the hit (they can still
             // kill the mob) but never retaliate or flip personality toward them.
             // super.hurt() already set lastHurtByMob — clear it so the vanilla
@@ -3025,10 +3232,22 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * fields are left at their vanilla defaults, so the XP-reward and
      * item-pickup logic that reads those fields directly is unaffected.</p>
      */
+    //? if <26 {
     @Override
     protected float getEquipmentDropChance(EquipmentSlot slot) {
         return GUARANTEED_EQUIPMENT_DROP_CHANCE;
     }
+    //?}
+    //? if >=26 {
+    /*// 26.x removed the overridable getEquipmentDropChance; drop chances are now per-slot state
+    // set via setDropChance. applyGuaranteedDrops() (called from the constructor) stamps every
+    // equipment slot with the guaranteed-drop sentinel, matching the <26 override behaviour.
+    private void applyGuaranteedDrops() {
+        for (EquipmentSlot slot : EquipmentSlot.values()) {
+            setDropChance(slot, GUARANTEED_EQUIPMENT_DROP_CHANCE);
+        }
+    }
+    *///?}
 
     /**
      * Death hook with two responsibilities:
@@ -3078,7 +3297,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (this.dead || this.isRemoved() || !(this.level() instanceof ServerLevel serverLevel)) {
             return null;
         }
-        if (!serverLevel.getGameRules().getBoolean(GameRules.RULE_SHOWDEATHMESSAGES)) {
+        if (!GameRuleCompat.showDeathMessages(serverLevel)) {
             return null;
         }
         return this.getCombatTracker().getDeathMessage();

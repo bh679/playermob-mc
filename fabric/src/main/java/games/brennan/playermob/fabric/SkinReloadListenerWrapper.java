@@ -2,7 +2,11 @@ package games.brennan.playermob.fabric;
 
 import games.brennan.playermob.skin.PlayerMobSkinReloadListener;
 import net.fabricmc.fabric.api.resource.IdentifiableResourceReloadListener;
+//? if >=26 {
+/*import net.minecraft.resources.Identifier;
+*///?} else {
 import net.minecraft.resources.ResourceLocation;
+//?}
 
 /**
  * Fabric-side wrapper around {@link PlayerMobSkinReloadListener}. Fabric's
@@ -16,6 +20,18 @@ public final class SkinReloadListenerWrapper
         extends PlayerMobSkinReloadListener
         implements IdentifiableResourceReloadListener {
 
+    //? if >=26 {
+    /*private final Identifier id;
+
+    public SkinReloadListenerWrapper(Identifier id) {
+        this.id = id;
+    }
+
+    @Override
+    public Identifier getFabricId() {
+        return id;
+    }
+    *///?} else {
     private final ResourceLocation id;
 
     public SkinReloadListenerWrapper(ResourceLocation id) {
@@ -26,4 +42,5 @@ public final class SkinReloadListenerWrapper
     public ResourceLocation getFabricId() {
         return id;
     }
+    //?}
 }

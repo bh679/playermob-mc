@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity;
 
+import games.brennan.playermob.compat.NbtCompat;
 import net.minecraft.SharedConstants;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
@@ -46,10 +47,10 @@ class SkinUrlNbtTest {
         CompoundTag v1 = new CompoundTag();
         v1.putInt("Stance", 0);
         v1.putInt("SkinIndex", 3);
-        assertTrue(v1.contains("SkinIndex", Tag.TAG_INT));
-        assertFalse(v1.contains("SkinTextureUrl", Tag.TAG_STRING),
+        assertTrue(NbtCompat.containsOfType(v1, "SkinIndex", Tag.TAG_INT));
+        assertFalse(NbtCompat.containsOfType(v1, "SkinTextureUrl", Tag.TAG_STRING),
             "v1 tag should have no SkinTextureUrl key");
-        assertFalse(v1.contains("SkinSlim", Tag.TAG_BYTE),
+        assertFalse(NbtCompat.containsOfType(v1, "SkinSlim", Tag.TAG_BYTE),
             "v1 tag should have no SkinSlim key");
     }
 
@@ -63,10 +64,10 @@ class SkinUrlNbtTest {
         v2.putInt("SkinIndex", 5);
         v2.putString("SkinTextureUrl", "http://textures.minecraft.net/texture/abc");
         v2.putBoolean("SkinSlim", true);
-        assertEquals(5, v2.getInt("SkinIndex"));
+        assertEquals(5, NbtCompat.getIntOr(v2, "SkinIndex", 0));
         assertEquals("http://textures.minecraft.net/texture/abc",
-            v2.getString("SkinTextureUrl"));
-        assertTrue(v2.getBoolean("SkinSlim"));
+            NbtCompat.getStringOr(v2, "SkinTextureUrl", ""));
+        assertTrue(NbtCompat.getBooleanOr(v2, "SkinSlim", false));
     }
 
     @Test
@@ -81,9 +82,9 @@ class SkinUrlNbtTest {
             out.putString("SkinTextureUrl", url);
             out.putBoolean("SkinSlim", false);
         }
-        assertFalse(out.contains("SkinTextureUrl", Tag.TAG_STRING),
+        assertFalse(NbtCompat.containsOfType(out, "SkinTextureUrl", Tag.TAG_STRING),
             "Empty URL must not be written to NBT");
-        assertFalse(out.contains("SkinSlim", Tag.TAG_BYTE),
+        assertFalse(NbtCompat.containsOfType(out, "SkinSlim", Tag.TAG_BYTE),
             "SkinSlim only round-trips alongside a non-empty URL");
     }
 
@@ -97,8 +98,8 @@ class SkinUrlNbtTest {
             out.putString("SkinTextureUrl", url);
             out.putBoolean("SkinSlim", true);
         }
-        assertTrue(out.contains("SkinTextureUrl", Tag.TAG_STRING));
-        assertEquals(url, out.getString("SkinTextureUrl"));
-        assertTrue(out.getBoolean("SkinSlim"));
+        assertTrue(NbtCompat.containsOfType(out, "SkinTextureUrl", Tag.TAG_STRING));
+        assertEquals(url, NbtCompat.getStringOr(out, "SkinTextureUrl", ""));
+        assertTrue(NbtCompat.getBooleanOr(out, "SkinSlim", false));
     }
 }

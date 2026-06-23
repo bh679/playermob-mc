@@ -2,11 +2,19 @@ package games.brennan.playermob.compat;
 
 //? if >=1.21.1 {
 import net.minecraft.core.component.DataComponents;
+//?}
+//? if >=26 {
+/*import net.minecraft.world.item.component.TypedEntityData;
+*///?} else if >=1.21.1 {
 import net.minecraft.world.item.component.CustomData;
 //?}
 
 import net.minecraft.nbt.CompoundTag;
+//? if >=26 {
+/*import net.minecraft.resources.Identifier;
+*///?} else {
 import net.minecraft.resources.ResourceLocation;
+//?}
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.item.Item;
@@ -23,7 +31,12 @@ public final class RegistryCompat {
 
     private RegistryCompat() {}
 
-    /** Build a namespaced id. 1.21.1's {@code fromNamespaceAndPath}; 1.20.1's constructor. */
+    /** Build a namespaced id. 26.x's {@code Identifier}; 1.21.1's {@code fromNamespaceAndPath}; 1.20.1's constructor. */
+    //? if >=26 {
+    /*public static net.minecraft.resources.Identifier id(String namespace, String path) {
+        return net.minecraft.resources.Identifier.fromNamespaceAndPath(namespace, path);
+    }
+    *///?} else {
     public static ResourceLocation id(String namespace, String path) {
         //? if >=1.21.1 {
         return ResourceLocation.fromNamespaceAndPath(namespace, path);
@@ -31,6 +44,7 @@ public final class RegistryCompat {
         /*return new ResourceLocation(namespace, path);*/
         //?}
     }
+    //?}
 
     /**
      * A spawn egg that stamps {@code entityData} onto the mob it spawns. On 1.21.1
@@ -44,7 +58,13 @@ public final class RegistryCompat {
      */
     public static SpawnEggItem archetypeSpawnEgg(EntityType<? extends Mob> type, int background, int highlight,
                                                  CompoundTag entityData) {
-        //? if >=1.21.1 {
+        //? if >=26 {
+        /*// 26.x dropped the (type, bgColor, hlColor, Properties) ctor — the egg's entity type now
+        // rides the ENTITY_DATA component (TypedEntityData), and the two egg colours are
+        // data-driven from the item model/texture rather than constructor args.
+        return new SpawnEggItem(
+            new Item.Properties().component(DataComponents.ENTITY_DATA, TypedEntityData.of(type, entityData)));
+        *///?} else if >=1.21.1 {
         return new SpawnEggItem(type, background, highlight,
             new Item.Properties().component(DataComponents.ENTITY_DATA, CustomData.of(entityData)));
         //?} else {
@@ -66,7 +86,17 @@ public final class RegistryCompat {
      * {@code entityData} must contain an {@code "id"} naming the entity type.
      */
     public static void applyEntityData(ItemStack stack, CompoundTag entityData) {
-        //? if >=1.21.1 {
+        //? if >=26 {
+        /*// The ENTITY_DATA component is now TypedEntityData<EntityType<?>>, so resolve the
+        // entity type from the snapshot's "id" key (vanilla requires it; the caller sets it).
+        net.minecraft.world.entity.EntityType<?> type = entityData.getString("id")
+            .map(net.minecraft.resources.Identifier::tryParse)
+            .map(net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE::getValue)
+            .orElse(null);
+        if (type != null) {
+            stack.set(DataComponents.ENTITY_DATA, TypedEntityData.of(type, entityData));
+        }
+        *///?} else if >=1.21.1 {
         stack.set(DataComponents.ENTITY_DATA, CustomData.of(entityData));
         //?} else {
         /*stack.getOrCreateTag().put("EntityTag", entityData.copy());*///?}

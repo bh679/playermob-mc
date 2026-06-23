@@ -1,16 +1,15 @@
 package games.brennan.playermob.entity;
 
 import games.brennan.playermob.compat.ItemDataCompat;
+import games.brennan.playermob.compat.ItemKindCompat;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.EquipmentSlot;
-import net.minecraft.world.item.ArmorItem;
 import net.minecraft.world.item.AxeItem;
 import net.minecraft.world.item.BowItem;
 import net.minecraft.world.item.CrossbowItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.ShieldItem;
-import net.minecraft.world.item.SwordItem;
 
 /**
  * Equipment comparison helpers for the raid goals.
@@ -68,12 +67,12 @@ public final class EquipmentEvaluator {
      */
     private static boolean isRecognizedEquipment(ItemStack stack) {
         Item item = stack.getItem();
-        return item instanceof SwordItem
+        return ItemKindCompat.isSword(stack)
             || item instanceof AxeItem
             || item instanceof BowItem
             || item instanceof CrossbowItem
             || item instanceof ShieldItem
-            || item instanceof ArmorItem;
+            || ItemKindCompat.isArmor(stack);
     }
 
     /**
@@ -122,10 +121,7 @@ public final class EquipmentEvaluator {
      * right 1.20.1 default-modifier map (armor populates per-slot defaults).
      */
     private static EquipmentSlot equipmentSlotFor(ItemStack stack) {
-        if (stack.getItem() instanceof ArmorItem armor) {
-            return armor.getEquipmentSlot();
-        }
-        return EquipmentSlot.MAINHAND;
+        return ItemKindCompat.armorSlotOrMainhand(stack);
     }
 
     /**

@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity;
 
+import games.brennan.playermob.compat.NbtCompat;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
@@ -240,7 +241,7 @@ public final class FeelingLedger {
         for (Map.Entry<UUID, FeelingRecord> e : feelings.entrySet()) {
             FeelingRecord r = e.getValue();
             CompoundTag entry = new CompoundTag();
-            entry.putUUID(TAG_UUID, e.getKey());
+            NbtCompat.putUUID(entry, TAG_UUID, e.getKey());
             entry.putFloat(TAG_FEELING, r.feeling());
             if (r.crouchBudgetUsed() != 0.0F) {
                 entry.putFloat(TAG_CROUCH_USED, r.crouchBudgetUsed());
@@ -269,24 +270,20 @@ public final class FeelingLedger {
      */
     public void load(CompoundTag tag) {
         feelings.clear();
-        if (tag.contains(TAG_FEELINGS, Tag.TAG_LIST)) {
-            ListTag list = tag.getList(TAG_FEELINGS, Tag.TAG_COMPOUND);
+        if (NbtCompat.containsOfType(tag, TAG_FEELINGS, Tag.TAG_LIST)) {
+            ListTag list = NbtCompat.getListOfType(tag, TAG_FEELINGS, Tag.TAG_COMPOUND);
             for (int i = 0; i < list.size(); i++) {
-                CompoundTag entry = list.getCompound(i);
-                if (!entry.hasUUID(TAG_UUID)) {
+                CompoundTag entry = NbtCompat.compoundAt(list, i);
+                if (!NbtCompat.hasUUID(entry, TAG_UUID)) {
                     continue;
                 }
-                float feeling = FeelingRecord.clamp(entry.getFloat(TAG_FEELING));
-                float crouchUsed = entry.contains(TAG_CROUCH_USED)
-                    ? entry.getFloat(TAG_CROUCH_USED) : 0.0F;
-                float crouchCap = entry.contains(TAG_CROUCH_CAP)
-                    ? entry.getFloat(TAG_CROUCH_CAP) : FeelingRecord.CROUCH_CAP_BASE;
-                int defendCount = entry.contains(TAG_DEFEND_COUNT)
-                    ? entry.getInt(TAG_DEFEND_COUNT) : 0;
-                int lastCarriage = entry.contains(TAG_LAST_CARRIAGE)
-                    ? entry.getInt(TAG_LAST_CARRIAGE) : FeelingRecord.NO_CARRIAGE;
+                float feeling = FeelingRecord.clamp(NbtCompat.getFloatOr(entry, TAG_FEELING, 0.0F));
+                float crouchUsed = NbtCompat.getFloatOr(entry, TAG_CROUCH_USED, 0.0F);
+                float crouchCap = NbtCompat.getFloatOr(entry, TAG_CROUCH_CAP, FeelingRecord.CROUCH_CAP_BASE);
+                int defendCount = NbtCompat.getIntOr(entry, TAG_DEFEND_COUNT, 0);
+                int lastCarriage = NbtCompat.getIntOr(entry, TAG_LAST_CARRIAGE, FeelingRecord.NO_CARRIAGE);
                 // lastWitnessTick resets to 0 on load — session-scoped debounce, not persisted.
-                feelings.put(entry.getUUID(TAG_UUID), new FeelingRecord(
+                feelings.put(NbtCompat.getUUID(entry, TAG_UUID), new FeelingRecord(
                     feeling, crouchUsed, crouchCap, defendCount, lastCarriage, 0));
             }
         }

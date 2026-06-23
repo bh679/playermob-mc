@@ -1,5 +1,6 @@
 package games.brennan.playermob.player;
 
+import games.brennan.playermob.compat.NbtCompat;
 import games.brennan.playermob.entity.DispositionTraits;
 import net.minecraft.nbt.CompoundTag;
 
@@ -146,10 +147,10 @@ public final class PlayerLifeRecord {
     /** Read a record back; missing keys default to zero (forward/backward compatible). */
     public static PlayerLifeRecord load(CompoundTag tag) {
         return new PlayerLifeRecord(
-            tag.getFloat(TAG_DAMAGE),
-            tag.getInt(TAG_KILLS),
-            tag.getFloat(TAG_KINDNESS),
-            tag.getInt(TAG_HARMS),
-            tag.getInt(TAG_ATTACKS));
+            NbtCompat.getFloatOr(tag, TAG_DAMAGE, 0f),
+            NbtCompat.getIntOr(tag, TAG_KILLS, 0),
+            NbtCompat.getFloatOr(tag, TAG_KINDNESS, 0f),
+            NbtCompat.getIntOr(tag, TAG_HARMS, 0),
+            NbtCompat.getIntOr(tag, TAG_ATTACKS, 0));
     }
 }

@@ -25,7 +25,13 @@ import net.neoforged.fml.loading.FMLEnvironment;
 import net.neoforged.fml.loading.FMLPaths;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.common.extensions.IMenuTypeExtension;
+//? if >=26 {
+/*import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
+import net.neoforged.neoforge.event.AddServerReloadListenersEvent;
+*///?} else {
 import net.neoforged.neoforge.event.AddReloadListenerEvent;
+//?}
 import net.neoforged.neoforge.event.BuildCreativeModeTabContentsEvent;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.entity.EntityAttributeCreationEvent;
@@ -56,7 +62,12 @@ public final class PlayerMobNeoForge {
 
     public static final DeferredHolder<EntityType<?>, EntityType<PlayerMobEntity>> PLAYER_MOB =
         ENTITY_TYPES.register(PlayerMobRegistry.PLAYER_MOB_PATH, () ->
+            //? if >=26 {
+            /*PlayerMobRegistry.entityTypeBuilder().build(
+                ResourceKey.create(Registries.ENTITY_TYPE, PlayerMobRegistry.PLAYER_MOB_ID)));
+            *///?} else {
             PlayerMobRegistry.entityTypeBuilder().build(PlayerMobRegistry.PLAYER_MOB_PATH));
+            //?}
 
     public static final DeferredItem<Item> PLAYER_MOB_SPAWN_EGG =
         ITEMS.register(PlayerMobRegistry.PLAYER_MOB_SPAWN_EGG_PATH, () ->
@@ -89,7 +100,12 @@ public final class PlayerMobNeoForge {
         NeoForge.EVENT_BUS.addListener(PlayerMobNeoForge::onAddReloadListeners);
         NeoForge.EVENT_BUS.addListener(PlayerMobNeoForge::onRegisterCommands);
 
+        //? if >=26 {
+        /*// 26.x replaced the FMLEnvironment.dist public field with the FMLEnvironment.getDist() accessor.
+        if (FMLEnvironment.getDist() == Dist.CLIENT) {
+        *///?} else {
         if (FMLEnvironment.dist == Dist.CLIENT) {
+        //?}
             games.brennan.playermob.neoforge.client.PlayerMobNeoForgeClient.register(modBus);
         }
     }
@@ -98,9 +114,21 @@ public final class PlayerMobNeoForge {
      * Wire the skin-pack reload listener — datapack hook for adding skins via
      * {@code data/<ns>/playermob_skins/*.json}.
      */
+    //? if >=26 {
+    /*// 26.x renamed AddReloadListenerEvent → AddServerReloadListenersEvent, and addListener now
+    // takes an explicit Identifier id alongside the listener (it's a dependency-sortable registry,
+    // like Fabric's IdentifiableResourceReloadListener). Reuse the same `playermob:skins` id the
+    // Fabric wrapper registers under, via the loader-agnostic RegistryCompat.id (Identifier on 26).
+    private static void onAddReloadListeners(AddServerReloadListenersEvent event) {
+        event.addListener(
+            games.brennan.playermob.compat.RegistryCompat.id(PlayerMob.MOD_ID, "skins"),
+            new PlayerMobSkinReloadListener());
+    }
+    *///?} else {
     private static void onAddReloadListeners(AddReloadListenerEvent event) {
         event.addListener(new PlayerMobSkinReloadListener());
     }
+    //?}
 
     private static void onRegisterCommands(RegisterCommandsEvent event) {
         ReincarnateCommand.register(event.getDispatcher());
@@ -114,8 +142,16 @@ public final class PlayerMobNeoForge {
         if (event.getTabKey() == CreativeModeTabs.SPAWN_EGGS) {
             event.accept(PLAYER_MOB_SPAWN_EGG.get());
             for (Archetype archetype : Archetype.values()) {
+                //? if >=26 {
+                /*// 26.x: Registry.get(Identifier) now returns Optional<Holder.Reference<Item>>;
+                // getValue(Identifier) is the direct "give me the Item" accessor the tab's
+                // accept(ItemLike) wants (the archetype egg is always registered, so it's non-null).
+                event.accept(BuiltInRegistries.ITEM.getValue(
+                    PlayerMobRegistry.archetypeSpawnEggId(archetype)));
+                *///?} else {
                 event.accept(BuiltInRegistries.ITEM.get(
                     PlayerMobRegistry.archetypeSpawnEggId(archetype)));
+                //?}
             }
         }
     }
@@ -151,6 +187,14 @@ public final class PlayerMobNeoForge {
      * classloaded when DT is absent.
      */
     private static void installDungeonTrain() {
+        //? if <26 {
+        // Dungeon Train is a NeoForge-1.21.1-only optional dependency (see build.gradle.kts) and
+        // can never load on MC 26.x — so on >=26 this method is an empty no-op and never installs a
+        // train environment. The runtime ModList.isLoaded("dungeontrain") guard at the call site
+        // already keeps it from running, but the compile reference to DungeonTrainEnvironment is
+        // dropped on 26 too. With no environment installed, TrainConfinement stays on its ABSENT
+        // default — the same path every non-DT world already runs, so the mod still functions.
         TrainConfinement.install(new games.brennan.playermob.neoforge.compat.DungeonTrainEnvironment());
+        //?}
     }
 }

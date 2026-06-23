@@ -1,9 +1,15 @@
 package games.brennan.playermob.menu;
 
+//? if <26 {
 import com.mojang.datafixers.util.Pair;
+//?}
 import games.brennan.playermob.PlayerMobRegistry;
 import games.brennan.playermob.entity.PlayerMobEntity;
+//? if >=26 {
+/*import net.minecraft.resources.Identifier;
+*///?} else {
 import net.minecraft.resources.ResourceLocation;
+//?}
 import net.minecraft.world.Container;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.Entity;
@@ -118,6 +124,18 @@ public class PlayerMobMenu extends AbstractContainerMenu {
         addEquipmentSlot(5, 30, 18, null);                                     // main-hand
     }
 
+    //? if >=26 {
+    /*private void addEquipmentSlot(int index, int x, int y, Identifier emptyIcon) {
+        // 26.x: Slot.getNoItemIcon() returns a single sprite Identifier (the atlas is implicit);
+        // InventoryMenu.EMPTY_ARMOR_SLOT_* are already Identifiers, and BLOCK_ATLAS is gone.
+        addSlot(new Slot(equipment, index, x, y) {
+            @Override
+            public Identifier getNoItemIcon() {
+                return emptyIcon == null ? super.getNoItemIcon() : emptyIcon;
+            }
+        });
+    }
+    *///?} else {
     private void addEquipmentSlot(int index, int x, int y, ResourceLocation emptyIcon) {
         // 1.21.1 has no Slot.setBackground — the empty-slot icon is supplied by
         // overriding getNoItemIcon(), which AbstractContainerScreen blits when
@@ -131,6 +149,7 @@ public class PlayerMobMenu extends AbstractContainerMenu {
             }
         });
     }
+    //?}
 
     private void addBackpackSlots() {
         // 4×2 grid on the right.

@@ -1,10 +1,10 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.compat.GameRuleCompat;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.item.ItemEntity;
-import net.minecraft.world.level.GameRules;
 import net.minecraft.world.phys.AABB;
 
 import java.util.EnumSet;
@@ -72,7 +72,7 @@ public final class CollectFloorItemsGoal extends Goal implements DescribableGoal
             return false;
         }
         if (mob.getTarget() != null) return false; // combat preempts
-        if (!mob.level().getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)) return false;
+        if (!GameRuleCompat.mobGriefing(mob.level())) return false;
 
         ItemEntity found = findClosestWantedItem();
         if (found == null) {
@@ -140,8 +140,16 @@ public final class CollectFloorItemsGoal extends Goal implements DescribableGoal
         AABB box = mob.getBoundingBox().inflate(scanRadius);
         List<ItemEntity> nearby = mob.level().getEntitiesOfClass(
             ItemEntity.class, box,
+            //? if >=26 {
+            /*// 26.x added a leading ServerLevel arg to Mob.wantsToPickUp; the scan runs server-side.
+            e -> e.isAlive() && !e.hasPickUpDelay()
+                && mob.level() instanceof net.minecraft.server.level.ServerLevel sl
+                && mob.wantsToPickUp(sl, e.getItem())
+                && TrainConfinement.allowsTarget(mob, e));
+            *///?} else {
             e -> e.isAlive() && !e.hasPickUpDelay() && mob.wantsToPickUp(e.getItem())
                 && TrainConfinement.allowsTarget(mob, e));
+            //?}
         ItemEntity closest = null;
         double closestDistSq = Double.MAX_VALUE;
         for (ItemEntity e : nearby) {
