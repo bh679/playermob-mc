@@ -59,6 +59,14 @@ tasks.test {
     useJUnitPlatform()
 }
 
+// The mixin compatibility level must match the per-version Java level — 1.20.1's
+// bundled Mixin (Java 17) rejects a JAVA_21 compatibilityLevel at load time.
+tasks.processResources {
+    expandProps(listOf("playermob.mixins.json"),
+        "mixin_compat" to if (java17) "JAVA_17" else "JAVA_21",
+    )
+}
+
 // ---------------------------------------------------------------------------
 // Bake mod_version + the current git branch into a resource so the client-side
 // version HUD (VersionInfo / VersionHudRenderer) can display them. Lives in

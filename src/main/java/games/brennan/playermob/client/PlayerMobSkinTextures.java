@@ -2,11 +2,10 @@ package games.brennan.playermob.client;
 
 import com.mojang.authlib.GameProfile;
 import com.mojang.authlib.properties.Property;
+import games.brennan.playermob.compat.PlayerSkinInfo;
+import games.brennan.playermob.compat.SkinCompat;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.resources.DefaultPlayerSkin;
-import net.minecraft.client.resources.PlayerSkin;
 import net.minecraft.resources.ResourceLocation;
 
 import java.nio.charset.StandardCharsets;
@@ -47,7 +46,7 @@ public final class PlayerMobSkinTextures {
 
     /**
      * Cache of texture URL → resolved (or fallback) ResourceLocation.
-     * Polled from {@link Minecraft#getSkinManager()} on every renderer
+     * Polled from {@code Minecraft.getSkinManager()} on every renderer
      * frame so the in-flight default flips to the real texture as soon as
      * the async fetch completes — no event subscription needed.
      */
@@ -72,19 +71,19 @@ public final class PlayerMobSkinTextures {
      * Resolve a real player's skin (texture + model) through vanilla
      * {@link net.minecraft.client.resources.SkinManager} — the same path the client
      * uses to render that player. Yields the player's actual skin in production, or
-     * their UUID-derived {@link DefaultPlayerSkin} offline/in dev (the very skin the
+     * their UUID-derived {@code DefaultPlayerSkin} offline/in dev (the very skin the
      * player themselves renders with), so a reincarnated PlayerMob always matches.
      * Never returns {@code null} — {@code getInsecureSkin} falls back internally.
      */
-    public static PlayerSkin playerSkin(UUID uuid, String name) {
+    public static PlayerSkinInfo playerSkin(UUID uuid, String name) {
         GameProfile profile = PLAYER_PROFILES.computeIfAbsent(uuid + ";" + name,
             key -> new GameProfile(uuid, (name == null || name.isEmpty()) ? "PlayerMob" : name));
-        return Minecraft.getInstance().getSkinManager().getInsecureSkin(profile);
+        return SkinCompat.insecureSkin(profile);
     }
 
     /**
      * Resolve a texture URL to a renderable ResourceLocation. Never returns
-     * {@code null}; falls back to {@link DefaultPlayerSkin#getDefaultTexture}
+     * {@code null}; falls back to the generic default skin
      * if the SkinManager hands us nothing.
      *
      * @param textureUrl the Mojang CDN texture URL (or any URL the client
@@ -95,7 +94,7 @@ public final class PlayerMobSkinTextures {
      */
     public static ResourceLocation lookup(String textureUrl, boolean slim) {
         if (textureUrl == null || textureUrl.isEmpty()) {
-            return DefaultPlayerSkin.getDefaultTexture();
+            return SkinCompat.defaultTexture();
         }
         // Each render frame: ask the SkinManager. It returns the default
         // (matching the profile's UUID) while the fetch is in flight, then
@@ -103,13 +102,12 @@ public final class PlayerMobSkinTextures {
         // cache to short-circuit subsequent frames after success.
         GameProfile profile = PROFILES.computeIfAbsent(textureUrl,
             url -> buildFakeProfile(url, slim));
-        PlayerSkin skin = Minecraft.getInstance().getSkinManager().getInsecureSkin(profile);
-        ResourceLocation resolved = skin.texture();
+        ResourceLocation resolved = SkinCompat.insecureSkin(profile).texture();
         if (resolved != null) {
             CACHE.put(textureUrl, resolved);
             return resolved;
         }
-        return CACHE.getOrDefault(textureUrl, DefaultPlayerSkin.getDefaultTexture());
+        return CACHE.getOrDefault(textureUrl, SkinCompat.defaultTexture());
     }
 
     /**

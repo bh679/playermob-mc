@@ -7,10 +7,11 @@ import games.brennan.playermob.compat.PlayerMobSpawnHooks;
 import games.brennan.playermob.compat.ReincarnationQuery;
 import games.brennan.playermob.compat.ReincarnationRecord;
 import games.brennan.playermob.compat.ReincarnationSources;
+import games.brennan.playermob.compat.ItemDataCompat;
+import games.brennan.playermob.compat.RegistryCompat;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.DispositionResolver;
 import games.brennan.playermob.entity.PlayerMobEntity;
-import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
@@ -20,7 +21,6 @@ import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.level.ServerLevelAccessor;
 import org.slf4j.Logger;
 
@@ -114,9 +114,9 @@ public final class PlayerReincarnation {
             return ItemStack.EMPTY;
         }
         ItemStack egg = new ItemStack(PlayerMobRegistry.PLAYER_MOB_SPAWN_EGG);
-        egg.set(DataComponents.ENTITY_DATA, CustomData.of(snapshot));
+        RegistryCompat.applyEntityData(egg, snapshot);
         String name = store.mostRecentNameForPlayer(playerId);
-        egg.set(DataComponents.CUSTOM_NAME,
+        ItemDataCompat.setCustomName(egg,
             Component.literal("Echo of " + (name != null ? name : "a Lost Soul")));
         return egg;
     }
@@ -227,8 +227,15 @@ public final class PlayerReincarnation {
     private static void applySkin(PlayerMobEntity ghost, ServerPlayer player) {
         String url = "";
         try {
+            //? if >=1.21.1 {
             MinecraftProfileTexture skin = player.getServer().getSessionService()
                 .getTextures(player.getGameProfile()).skin();
+            //?} else {
+            /*// 1.20.1 authlib returns a Type->texture Map (no MinecraftProfileTextures record).
+            MinecraftProfileTexture skin = player.getServer().getSessionService()
+                .getTextures(player.getGameProfile(), false)
+                .get(MinecraftProfileTexture.Type.SKIN);*/
+            //?}
             if (skin != null) {
                 url = skin.getUrl();
                 ghost.setSkinSlim("slim".equals(skin.getMetadata("model")));
@@ -269,7 +276,7 @@ public final class PlayerReincarnation {
             if (stack.isEmpty()) {
                 continue;
             }
-            (stack.has(DataComponents.FOOD) ? foods : other).add(stack.copy());
+            (ItemDataCompat.isFood(stack) ? foods : other).add(stack.copy());
         }
 
         SimpleContainer backpack = ghost.getInventory();

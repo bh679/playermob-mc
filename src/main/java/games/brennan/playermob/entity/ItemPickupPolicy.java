@@ -1,10 +1,8 @@
 package games.brennan.playermob.entity;
 
-import net.minecraft.core.component.DataComponents;
+import games.brennan.playermob.compat.ItemDataCompat;
 import net.minecraft.tags.ItemTags;
 import net.minecraft.world.Container;
-import net.minecraft.world.entity.EquipmentSlot;
-import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.item.ArrowItem;
 import net.minecraft.world.item.AxeItem;
 import net.minecraft.world.item.BlockItem;
@@ -16,7 +14,6 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.PickaxeItem;
 import net.minecraft.world.item.SwordItem;
-import net.minecraft.world.item.component.ItemAttributeModifiers;
 
 import java.util.Set;
 
@@ -107,8 +104,12 @@ public final class ItemPickupPolicy {
         Items.DEEPSLATE, Items.COBBLED_DEEPSLATE, Items.POLISHED_DEEPSLATE,
         Items.DEEPSLATE_BRICKS, Items.CRACKED_DEEPSLATE_BRICKS,
         Items.DEEPSLATE_TILES, Items.CRACKED_DEEPSLATE_TILES, Items.CHISELED_DEEPSLATE,
+        //? if >=1.21.1 {
         Items.TUFF, Items.POLISHED_TUFF, Items.TUFF_BRICKS,
         Items.CHISELED_TUFF, Items.CHISELED_TUFF_BRICKS,
+        //?} else {
+        /*Items.TUFF, // polished/brick/chiseled tuff variants don't exist in 1.20.1
+        *///?}
         Items.BLACKSTONE, Items.POLISHED_BLACKSTONE, Items.POLISHED_BLACKSTONE_BRICKS,
         Items.CRACKED_POLISHED_BLACKSTONE_BRICKS, Items.CHISELED_POLISHED_BLACKSTONE,
         Items.GILDED_BLACKSTONE
@@ -174,22 +175,12 @@ public final class ItemPickupPolicy {
      * carry no such modifier and return 0.
      */
     public static double meleeAttackDamage(ItemStack stack) {
-        ItemAttributeModifiers mods =
-            stack.getOrDefault(DataComponents.ATTRIBUTE_MODIFIERS, ItemAttributeModifiers.EMPTY);
-        double[] damage = {0.0};
-        mods.forEach(EquipmentSlot.MAINHAND, (attribute, modifier) -> {
-            // Holder.equals (identity for registry attributes) avoids the deprecated
-            // Holder.is(Holder<T>) overload; mirrors EquipmentEvaluator.sumAddValue.
-            if (attribute.equals(Attributes.ATTACK_DAMAGE)) {
-                damage[0] += modifier.amount();
-            }
-        });
-        return damage[0];
+        return ItemDataCompat.mainhandAttackDamage(stack);
     }
 
     /** Count of distinct enchantments — the tie-breaker when base quality is equal. */
     public static int enchantmentScore(ItemStack stack) {
-        return stack.getEnchantments().size();
+        return ItemDataCompat.enchantmentCount(stack);
     }
 
     /**
@@ -228,7 +219,7 @@ public final class ItemPickupPolicy {
 
     /** Food (carries a FOOD component) or a potion of any flavour. */
     public static boolean isConsumable(ItemStack stack) {
-        if (stack.has(DataComponents.FOOD)) return true;
+        if (ItemDataCompat.isFood(stack)) return true;
         return stack.is(Items.POTION)
             || stack.is(Items.SPLASH_POTION)
             || stack.is(Items.LINGERING_POTION);

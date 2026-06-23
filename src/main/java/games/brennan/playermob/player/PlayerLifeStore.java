@@ -55,9 +55,14 @@ public final class PlayerLifeStore extends SavedData {
     /** Fetch (or create) the single store, always from the overworld's storage. */
     public static PlayerLifeStore get(ServerLevel level) {
         DimensionDataStorage storage = level.getServer().overworld().getDataStorage();
+        //? if >=1.21.1 {
         return storage.computeIfAbsent(
             new SavedData.Factory<>(PlayerLifeStore::new, PlayerLifeStore::load, null),
             DATA_NAME);
+        //?} else {
+        /*// 1.20.1 computeIfAbsent takes (loader, factory, name) directly — no SavedData.Factory.
+        return storage.computeIfAbsent(PlayerLifeStore::load, PlayerLifeStore::new, DATA_NAME);*/
+        //?}
     }
 
     // ---- reads ------------------------------------------------------------
@@ -112,8 +117,13 @@ public final class PlayerLifeStore extends SavedData {
 
     // ---- persistence ------------------------------------------------------
 
+    //? if >=1.21.1 {
     @Override
     public CompoundTag save(CompoundTag tag, HolderLookup.Provider registries) {
+    //?} else {
+    /*@Override
+    public CompoundTag save(CompoundTag tag) {
+    *///?}
         ListTag currentList = new ListTag();
         for (Map.Entry<UUID, PlayerLifeRecord> e : current.entrySet()) {
             if (e.getValue().isEmpty()) {
@@ -145,7 +155,11 @@ public final class PlayerLifeStore extends SavedData {
         return tag;
     }
 
+    //? if >=1.21.1 {
     public static PlayerLifeStore load(CompoundTag tag, HolderLookup.Provider registries) {
+    //?} else {
+    /*public static PlayerLifeStore load(CompoundTag tag) {
+    *///?}
         PlayerLifeStore store = new PlayerLifeStore();
 
         ListTag currentList = tag.getList(TAG_CURRENT, Tag.TAG_COMPOUND);

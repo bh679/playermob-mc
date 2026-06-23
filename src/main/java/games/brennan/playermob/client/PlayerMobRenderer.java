@@ -15,16 +15,18 @@ import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.entity.HumanoidMobRenderer;
 import net.minecraft.client.renderer.entity.layers.HumanoidArmorLayer;
 import net.minecraft.client.renderer.entity.layers.ItemInHandLayer;
-import net.minecraft.client.resources.PlayerSkin;
-import net.minecraft.core.component.DataComponents;
+import games.brennan.playermob.compat.CrossbowCompat;
+import games.brennan.playermob.compat.RegistryCompat;
+import games.brennan.playermob.compat.SkinCompat;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.InteractionHand;
+//? if >=1.21.1 {
 import net.minecraft.world.entity.EntityAttachment;
+//?}
 import net.minecraft.world.entity.HumanoidArm;
 import net.minecraft.world.item.CrossbowItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.UseAnim;
-import net.minecraft.world.item.component.ChargedProjectiles;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
 
@@ -201,11 +203,20 @@ public final class PlayerMobRenderer
         String[] lines = readout.split("\n");
         int count = focused ? lines.length : 1;
 
+        //? if >=1.21.1 {
         Vec3 anchor = entity.getAttachments()
             .getNullable(EntityAttachment.NAME_TAG, 0, entity.getViewYRot(partialTick));
         if (anchor == null) {
             return;
         }
+        //?} else {
+        /*// 1.20.1 has no entity-attachment system. The poseStack here is already at
+        // the entity's render origin (this runs inside the entity render call), so
+        // the name-tag anchor is entity-LOCAL: straight up by getNameTagOffsetY()
+        // (= bbHeight + 0.5), exactly the offset vanilla EntityRenderer.renderNameTag
+        // translates by. x/z are 0 (the 1.21.1 NAME_TAG attachment resolves the same).
+        Vec3 anchor = new Vec3(0.0, entity.getNameTagOffsetY(), 0.0);
+        *///?}
 
         Font font = this.getFont();
         int bgColor = (int) (mc.options.getBackgroundOpacity(0.25F) * 255.0F) << 24;
@@ -282,10 +293,9 @@ public final class PlayerMobRenderer
         return HumanoidModel.ArmPose.ITEM;
     }
 
-    /** 1.21.1 charged-crossbow test via the CHARGED_PROJECTILES component (see PlayerMobCrossbowAttackGoal). */
+    /** Charged-crossbow test — CHARGED_PROJECTILES component on 1.21.1, the NBT flag on 1.20.1 (see CrossbowCompat). */
     private static boolean isChargedCrossbow(ItemStack stack) {
-        ChargedProjectiles charged = stack.get(DataComponents.CHARGED_PROJECTILES);
-        return charged != null && !charged.isEmpty();
+        return CrossbowCompat.isCharged(stack);
     }
 
     @Override
@@ -344,8 +354,7 @@ public final class PlayerMobRenderer
             if (!source.get().url().isEmpty()) {
                 return entity.isSkinSlim();
             }
-            return PlayerMobSkinTextures.playerSkin(source.get().uuid(), source.get().name()).model()
-                == PlayerSkin.Model.SLIM;
+            return PlayerMobSkinTextures.playerSkin(source.get().uuid(), source.get().name()).slim();
         }
         return entity.isSkinSlim();
     }
@@ -363,7 +372,7 @@ public final class PlayerMobRenderer
         }
         ResourceLocation[] arr = new ResourceLocation[SKIN_NAMES.length];
         for (int i = 0; i < SKIN_NAMES.length; i++) {
-            arr[i] = ResourceLocation.fromNamespaceAndPath(
+            arr[i] = RegistryCompat.id(
                 "minecraft",
                 "textures/entity/player/" + folder + "/" + SKIN_NAMES[i] + ".png");
         }

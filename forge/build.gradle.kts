@@ -16,6 +16,15 @@ val forgeVersion = when (mc) {
     "1.20.1" -> "1.20.1-47.4.20"
     else     -> "1.21.1-52.1.14"
 }
+// mods.toml metadata ranges, per MC version.
+val minecraftRange = when (mc) {
+    "1.20.1" -> "[1.20.1]"
+    else     -> "[1.21.1]"
+}
+val forgeLoaderRange = when (mc) {
+    "1.20.1" -> "[47,)"
+    else     -> "[51,)"
+}
 
 version = "${common.mod.version}+$mc"
 base {
@@ -108,6 +117,8 @@ tasks.processResources {
     expandProps(listOf("META-INF/mods.toml"),
         "version" to common.mod.version,
         "forge_version" to forgeVersion,
+        "minecraft_range" to minecraftRange,
+        "forge_loader_range" to forgeLoaderRange,
         "mod_license" to common.mod.license,
         "mod_name" to common.mod.name,
         "mod_description" to common.mod.description,

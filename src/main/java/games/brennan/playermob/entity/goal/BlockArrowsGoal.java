@@ -1,9 +1,9 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.compat.CrossbowCompat;
 import games.brennan.playermob.entity.AimCone;
 import games.brennan.playermob.entity.ArrowThreat;
 import games.brennan.playermob.entity.PlayerMobEntity;
-import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.ai.goal.Goal;
@@ -12,7 +12,6 @@ import net.minecraft.world.item.BowItem;
 import net.minecraft.world.item.CrossbowItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.item.component.ChargedProjectiles;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
@@ -221,9 +220,9 @@ public final class BlockArrowsGoal extends Goal {
 
     private static boolean isChargedCrossbow(ItemStack stack) {
         if (!(stack.getItem() instanceof CrossbowItem)) return false;
-        // 1.21.1: charged state is the CHARGED_PROJECTILES component (see PlayerMobCrossbowAttackGoal).
-        ChargedProjectiles charged = stack.get(DataComponents.CHARGED_PROJECTILES);
-        return charged != null && !charged.isEmpty();
+        // Charged state: CHARGED_PROJECTILES component on 1.21.1, the NBT charged
+        // flag on 1.20.1 (see CrossbowCompat / PlayerMobCrossbowAttackGoal).
+        return CrossbowCompat.isCharged(stack);
     }
 
     /**

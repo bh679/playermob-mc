@@ -3,9 +3,9 @@ package games.brennan.playermob;
 import games.brennan.playermob.entity.Archetype;
 import games.brennan.playermob.entity.DispositionTraits;
 import games.brennan.playermob.entity.PlayerMobEntity;
+import games.brennan.playermob.compat.RegistryCompat;
 import games.brennan.playermob.menu.PlayerMobMenu;
 import games.brennan.playermob.menu.PlayerMobMenuOpener;
-import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.EntityType;
@@ -14,7 +14,6 @@ import net.minecraft.world.entity.MobCategory;
 import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.SpawnEggItem;
-import net.minecraft.world.item.component.CustomData;
 
 import java.util.Locale;
 
@@ -39,13 +38,13 @@ public final class PlayerMobRegistry {
     public static final String PLAYER_MOB_MENU_PATH = "player_mob_menu";
 
     public static final ResourceLocation PLAYER_MOB_ID =
-        ResourceLocation.fromNamespaceAndPath(PlayerMob.MOD_ID, PLAYER_MOB_PATH);
+        RegistryCompat.id(PlayerMob.MOD_ID, PLAYER_MOB_PATH);
 
     public static final ResourceLocation PLAYER_MOB_SPAWN_EGG_ID =
-        ResourceLocation.fromNamespaceAndPath(PlayerMob.MOD_ID, PLAYER_MOB_SPAWN_EGG_PATH);
+        RegistryCompat.id(PlayerMob.MOD_ID, PLAYER_MOB_SPAWN_EGG_PATH);
 
     public static final ResourceLocation PLAYER_MOB_MENU_ID =
-        ResourceLocation.fromNamespaceAndPath(PlayerMob.MOD_ID, PLAYER_MOB_MENU_PATH);
+        RegistryCompat.id(PlayerMob.MOD_ID, PLAYER_MOB_MENU_PATH);
 
     /**
      * The registered {@link EntityType}. Populated by each loader entry class
@@ -103,7 +102,7 @@ public final class PlayerMobRegistry {
     }
 
     public static ResourceLocation archetypeSpawnEggId(Archetype archetype) {
-        return ResourceLocation.fromNamespaceAndPath(PlayerMob.MOD_ID, archetypeSpawnEggPath(archetype));
+        return RegistryCompat.id(PlayerMob.MOD_ID, archetypeSpawnEggPath(archetype));
     }
 
     /**
@@ -132,10 +131,7 @@ public final class PlayerMobRegistry {
      * rolls nothing further.
      */
     public static SpawnEggItem createArchetypeSpawnEgg(EntityType<? extends Mob> type, Archetype archetype) {
-        return new SpawnEggItem(
-            type,
-            SPAWN_EGG_PRIMARY,
-            archetype.eggColor,
-            new Item.Properties().component(DataComponents.ENTITY_DATA, CustomData.of(archetypeEggData(archetype))));
+        return RegistryCompat.archetypeSpawnEgg(
+            type, SPAWN_EGG_PRIMARY, archetype.eggColor, archetypeEggData(archetype));
     }
 }

@@ -1,12 +1,8 @@
 package games.brennan.playermob.entity;
 
-import it.unimi.dsi.fastutil.objects.Object2IntMap;
-import net.minecraft.core.Holder;
-import net.minecraft.core.component.DataComponents;
+import games.brennan.playermob.compat.ItemDataCompat;
 import net.minecraft.world.Container;
-import net.minecraft.world.entity.ai.attributes.Attribute;
-import net.minecraft.world.entity.ai.attributes.AttributeModifier;
-import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ArmorItem;
 import net.minecraft.world.item.AxeItem;
 import net.minecraft.world.item.BowItem;
@@ -15,9 +11,6 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.ShieldItem;
 import net.minecraft.world.item.SwordItem;
-import net.minecraft.world.item.component.ItemAttributeModifiers;
-import net.minecraft.world.item.enchantment.Enchantment;
-import net.minecraft.world.item.enchantment.ItemEnchantments;
 
 /**
  * Equipment comparison helpers for the raid goals.
@@ -106,18 +99,16 @@ public final class EquipmentEvaluator {
      * {@code getDefaultAttributeModifiers} override instead — so without the
      * fallback we'd read 0 for every armor piece.</p>
      */
-    @SuppressWarnings("deprecation") // Item.getDefaultAttributeModifiers — see Javadoc below.
     private static double baseStat(ItemStack stack) {
-        ItemAttributeModifiers modifiers = stack.getOrDefault(
-            DataComponents.ATTRIBUTE_MODIFIERS, ItemAttributeModifiers.EMPTY);
-        if (modifiers.modifiers().isEmpty()) {
-            modifiers = stack.getItem().getDefaultAttributeModifiers();
-        }
+        // Weapons/shields carry MAINHAND modifiers; armor carries slot-scoped ones.
+        // On 1.20.1 the slot selects the right default-modifier map; on 1.21.1 it
+        // only matters for the item-default fallback (armor) and is harmless otherwise.
+        EquipmentSlot slot = equipmentSlotFor(stack);
 
-        double attackDamage = sumAddValue(modifiers, Attributes.ATTACK_DAMAGE);
+        double attackDamage = ItemDataCompat.attackDamageAddValue(stack);
         if (attackDamage > 0) return attackDamage;
 
-        double armor = sumAddValue(modifiers, Attributes.ARMOR);
+        double armor = ItemDataCompat.armorAddValue(stack, slot);
         if (armor > 0) return armor;
 
         Item item = stack.getItem();
@@ -126,20 +117,15 @@ public final class EquipmentEvaluator {
     }
 
     /**
-     * Sum of all {@code ADD_VALUE} modifiers for the given attribute holder.
-     * Multiply / multiply-base modifiers are intentionally ignored — they're
-     * almost never used for gear damage/armor and would require knowing the
-     * base value to apply correctly.
+     * The slot whose attribute modifiers describe this stack's gear value — the
+     * item's natural armor slot for armor, else the main hand. Used to read the
+     * right 1.20.1 default-modifier map (armor populates per-slot defaults).
      */
-    private static double sumAddValue(ItemAttributeModifiers modifiers, Holder<Attribute> attribute) {
-        double total = 0;
-        for (ItemAttributeModifiers.Entry entry : modifiers.modifiers()) {
-            if (entry.attribute().equals(attribute)
-                    && entry.modifier().operation() == AttributeModifier.Operation.ADD_VALUE) {
-                total += entry.modifier().amount();
-            }
+    private static EquipmentSlot equipmentSlotFor(ItemStack stack) {
+        if (stack.getItem() instanceof ArmorItem armor) {
+            return armor.getEquipmentSlot();
         }
-        return total;
+        return EquipmentSlot.MAINHAND;
     }
 
     /**
@@ -148,12 +134,7 @@ public final class EquipmentEvaluator {
      * directly.
      */
     static int totalEnchantmentLevels(ItemStack stack) {
-        ItemEnchantments enchantments = stack.getEnchantments();
-        int total = 0;
-        for (Object2IntMap.Entry<Holder<Enchantment>> entry : enchantments.entrySet()) {
-            total += entry.getIntValue();
-        }
-        return total;
+        return ItemDataCompat.enchantmentLevelsTotal(stack);
     }
 
     /**
@@ -166,7 +147,7 @@ public final class EquipmentEvaluator {
         if (source == null) return false;
         ItemStack candidate = source.getItem(slotIdx);
         if (candidate.isEmpty()) return false;
-        if (candidate.get(DataComponents.FOOD) == null) return false;
+        if (!ItemDataCompat.isFood(candidate)) return false;
         return hasRoomFor(destination, candidate);
     }
 
@@ -183,7 +164,7 @@ public final class EquipmentEvaluator {
         if (source == null) return false;
         ItemStack candidate = source.getItem(slotIdx);
         if (candidate.isEmpty()) return false;
-        if (candidate.get(DataComponents.FOOD) == null) return false;
+        if (!ItemDataCompat.isFood(candidate)) return false;
 
         int before = candidate.getCount();
         ItemStack leftover = addToContainer(destination, candidate.copy());
@@ -209,7 +190,7 @@ public final class EquipmentEvaluator {
         for (int i = 0; i < container.getContainerSize(); i++) {
             ItemStack slot = container.getItem(i);
             if (slot.isEmpty()) return true;
-            if (ItemStack.isSameItemSameComponents(slot, stack)
+            if (ItemDataCompat.isSameItemSameData(slot, stack)
                     && slot.getCount() < slot.getMaxStackSize()) {
                 return true;
             }
@@ -227,7 +208,7 @@ public final class EquipmentEvaluator {
         for (int i = 0; i < container.getContainerSize() && !remaining.isEmpty(); i++) {
             ItemStack slot = container.getItem(i);
             if (!slot.isEmpty()
-                    && ItemStack.isSameItemSameComponents(slot, remaining)
+                    && ItemDataCompat.isSameItemSameData(slot, remaining)
                     && slot.getCount() < slot.getMaxStackSize()) {
                 int space = slot.getMaxStackSize() - slot.getCount();
                 int toMove = Math.min(space, remaining.getCount());

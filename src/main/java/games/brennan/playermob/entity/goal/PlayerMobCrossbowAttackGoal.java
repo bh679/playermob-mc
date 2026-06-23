@@ -1,7 +1,7 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.compat.CrossbowCompat;
 import games.brennan.playermob.entity.PlayerMobEntity;
-import net.minecraft.core.component.DataComponents;
 import net.minecraft.util.TimeUtil;
 import net.minecraft.util.valueproviders.UniformInt;
 import net.minecraft.world.entity.LivingEntity;
@@ -10,7 +10,6 @@ import net.minecraft.world.entity.projectile.ProjectileUtil;
 import net.minecraft.world.item.CrossbowItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.item.component.ChargedProjectiles;
 
 import java.util.EnumSet;
 
@@ -75,10 +74,9 @@ public final class PlayerMobCrossbowAttackGoal extends Goal {
         if (this.mob.isUsingItem()) {
             this.mob.stopUsingItem();
             this.mob.setChargingCrossbow(false);
-            // 1.21.1: charged state lives in the CHARGED_PROJECTILES component
-            // (vanilla's CrossbowItem.setCharged(stack, false) was removed).
-            // Clearing it to EMPTY is the equivalent of "uncharged".
-            this.mob.getUseItem().set(DataComponents.CHARGED_PROJECTILES, ChargedProjectiles.EMPTY);
+            // Reset the crossbow to uncharged — component-clear on 1.21.1, the
+            // CrossbowItem.setCharged(false) NBT flag on 1.20.1 (see CrossbowCompat).
+            CrossbowCompat.clearCharged(this.mob.getUseItem());
         }
     }
 
@@ -134,7 +132,7 @@ public final class PlayerMobCrossbowAttackGoal extends Goal {
             }
             int ticksUsing = this.mob.getTicksUsingItem();
             ItemStack inUse = this.mob.getUseItem();
-            if (ticksUsing >= CrossbowItem.getChargeDuration(inUse, this.mob)) {
+            if (ticksUsing >= CrossbowCompat.chargeDuration(inUse, this.mob)) {
                 this.mob.releaseUsingItem();
                 this.crossbowState = CrossbowState.CHARGED;
                 this.attackDelay = 20 + this.mob.getRandom().nextInt(20);
@@ -147,11 +145,11 @@ public final class PlayerMobCrossbowAttackGoal extends Goal {
             }
         } else if (this.crossbowState == CrossbowState.READY_TO_ATTACK && canSee) {
             this.mob.performRangedAttack(target, 1.0F);
-            // The shooting path already empties CHARGED_PROJECTILES; clear it
-            // again defensively so the state machine and item agree on uncharged.
+            // The shooting path already empties the charge; clear it again
+            // defensively so the state machine and item agree on uncharged.
             ItemStack fired = this.mob.getItemInHand(
                 ProjectileUtil.getWeaponHoldingHand(this.mob, Items.CROSSBOW));
-            fired.set(DataComponents.CHARGED_PROJECTILES, ChargedProjectiles.EMPTY);
+            CrossbowCompat.clearCharged(fired);
             this.crossbowState = CrossbowState.UNCHARGED;
         }
     }

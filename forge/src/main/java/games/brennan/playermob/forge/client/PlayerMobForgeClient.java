@@ -5,15 +5,20 @@ import games.brennan.playermob.client.PlayerMobRenderer;
 import games.brennan.playermob.client.PlayerMobScreen;
 import games.brennan.playermob.client.VersionHudRenderer;
 import games.brennan.playermob.forge.PlayerMobForge;
-import net.minecraft.client.gui.LayeredDraw;
 import net.minecraft.client.gui.screens.MenuScreens;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraftforge.client.event.AddGuiOverlayLayersEvent;
 import net.minecraftforge.client.event.EntityRenderersEvent;
 import net.minecraftforge.client.event.ScreenEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
+//? if >=1.21.1 {
+import net.minecraft.client.gui.LayeredDraw;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraftforge.client.event.AddGuiOverlayLayersEvent;
+//?}
+//? if <1.21.1 {
+/*import net.minecraftforge.client.event.RegisterGuiOverlaysEvent;
+*///?}
 
 /**
  * Forge client-side wiring. On the mod event bus, registers
@@ -36,7 +41,11 @@ public final class PlayerMobForgeClient {
     public static void register(IEventBus modBus) {
         modBus.addListener(PlayerMobForgeClient::onRegisterRenderers);
         modBus.addListener(PlayerMobForgeClient::onClientSetup);
+        //? if >=1.21.1 {
         modBus.addListener(PlayerMobForgeClient::onAddGuiOverlayLayers);
+        //?} else {
+        /*modBus.addListener(PlayerMobForgeClient::onRegisterGuiOverlays);*/
+        //?}
         // Screen render events fire on the game bus, not the mod bus.
         MinecraftForge.EVENT_BUS.addListener(PlayerMobForgeClient::onScreenRender);
     }
@@ -55,11 +64,20 @@ public final class PlayerMobForgeClient {
             MenuScreens.register(PlayerMobForge.PLAYER_MOB_MENU.get(), PlayerMobScreen::new));
     }
 
+    //? if >=1.21.1 {
     private static void onAddGuiOverlayLayers(AddGuiOverlayLayersEvent event) {
         LayeredDraw.Layer layer = (graphics, deltaTracker) -> VersionHudRenderer.render(graphics);
         event.getLayeredDraw().add(
             ResourceLocation.fromNamespaceAndPath(PlayerMob.MOD_ID, "version_hud"), layer);
     }
+    //?} else {
+    /*// Forge 47.x (1.20.1) registers an in-world HUD via the legacy IGuiOverlay system,
+    // before the Mojang LayeredDraw stack existed. Drawn above every vanilla overlay.
+    private static void onRegisterGuiOverlays(RegisterGuiOverlaysEvent event) {
+        event.registerAboveAll("version_hud",
+            (forgeGui, graphics, partialTick, screenWidth, screenHeight) ->
+                VersionHudRenderer.render(graphics));
+    }*///?}
 
     private static void onScreenRender(ScreenEvent.Render.Post event) {
         VersionHudRenderer.renderOnScreen(event.getGuiGraphics(), event.getScreen());

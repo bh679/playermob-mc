@@ -31,9 +31,9 @@ import games.brennan.playermob.player.PlayerReincarnation;
 import games.brennan.playermob.skin.PlayerMobSkin;
 import games.brennan.playermob.skin.PlayerMobSkinRegistry;
 import games.brennan.playermob.skin.SkinModel;
+import games.brennan.playermob.compat.ItemDataCompat;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.particles.ItemParticleOption;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.util.Mth;
@@ -89,7 +89,9 @@ import net.minecraft.world.item.BowItem;
 import net.minecraft.world.item.CrossbowItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+//? if >=1.21.1 {
 import net.minecraft.world.item.MaceItem;
+//?}
 import net.minecraft.world.item.SwordItem;
 import net.minecraft.world.item.TridentItem;
 import net.minecraft.world.Container;
@@ -521,6 +523,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             .add(Attributes.FOLLOW_RANGE, 32.0);
     }
 
+    //? if >=1.21.1 {
     @Override
     protected void defineSynchedData(SynchedEntityData.Builder builder) {
         super.defineSynchedData(builder);
@@ -533,6 +536,19 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         builder.define(DATA_FEELINGS, "");
         builder.define(DATA_OBJECTIVES, "");
     }
+    //?} else {
+    /*@Override
+    protected void defineSynchedData() {
+        super.defineSynchedData();
+        this.entityData.define(DATA_IS_CHARGING_CROSSBOW, false);
+        this.entityData.define(DATA_SKIN_INDEX, 0);
+        this.entityData.define(DATA_SKIN_TEXTURE_URL, "");
+        this.entityData.define(DATA_SKIN_SLIM, false);
+        this.entityData.define(DATA_FIGHT_FLIGHT, DispositionTraits.DEFAULT);
+        this.entityData.define(DATA_FRIENDLINESS, DispositionTraits.DEFAULT);
+        this.entityData.define(DATA_FEELINGS, "");
+        this.entityData.define(DATA_OBJECTIVES, "");
+    }*///?}
 
     /**
      * The current objective readout — one line per running goal ("Objective —
@@ -1152,7 +1168,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     public SpawnGroupData finalizeSpawn(ServerLevelAccessor world,
                                         DifficultyInstance difficulty,
                                         MobSpawnType reason,
-                                        SpawnGroupData data) {
+                                        SpawnGroupData data
+                                        //? if <1.21.1 {
+                                        /*, net.minecraft.nbt.CompoundTag dataTag
+                                        *///?}
+                                        ) {
         // Dungeon Train spawns PlayerMobs via finalizeSpawn(..., EVENT, ...); give those
         // a chance to embody a stored past life instead of a fresh random mob. Applying the
         // snapshot here (before the rolls) pins skin + traits explicit, so the rolls below
@@ -1165,7 +1185,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (reason == MobSpawnType.EVENT) {
             DtSpawnDebug.report(world.getLevel(), this, echo != null, companion);
         }
+        //? if >=1.21.1 {
         return super.finalizeSpawn(world, difficulty, reason, data);
+        //?} else {
+        /*return super.finalizeSpawn(world, difficulty, reason, data, dataTag);*///?}
     }
 
     /**
@@ -1631,7 +1654,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             || stack.getItem() instanceof TridentItem
             || stack.getItem() instanceof BowItem
             || stack.getItem() instanceof CrossbowItem
+            //? if >=1.21.1 {
             || stack.getItem() instanceof MaceItem;
+            //?} else {
+            /*;*///?}
     }
 
     /**
@@ -1819,7 +1845,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         int total = 0;
         for (int i = 0; i < inventory.getContainerSize(); i++) {
             ItemStack stack = inventory.getItem(i);
-            if (!stack.isEmpty() && stack.get(DataComponents.FOOD) != null) {
+            if (!stack.isEmpty() && ItemDataCompat.isFood(stack)) {
                 total += stack.getCount();
             }
         }
@@ -1833,9 +1859,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         for (int i = 0; i < inventory.getContainerSize(); i++) {
             ItemStack stack = inventory.getItem(i);
             if (stack.isEmpty()) continue;
-            FoodProperties food = stack.get(DataComponents.FOOD);
-            if (food != null && food.nutrition() < lowest) {
-                lowest = food.nutrition();
+            FoodProperties food = ItemDataCompat.foodProperties(stack);
+            if (food != null && ItemDataCompat.nutrition(food) < lowest) {
+                lowest = ItemDataCompat.nutrition(food);
                 slot = i;
             }
         }
@@ -1880,7 +1906,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // Attribute the toss so a PlayerMob recipient credits it as a gift (and the
         // giver never self-credits picking its own toss back up). Pickup delay is
         // independent of the thrower, so this doesn't change re-collection timing.
+        //? if >=1.21.1 {
         thrown.setThrower(this);
+        //?} else {
+        /*thrown.setThrower(this.getUUID());*///?}
         level().addFreshEntity(thrown);
         // Announce a gift to a player so an optional mod (e.g. Dungeon Train's befriended
         // advancement) can credit it by subscribing to PlayerMobSocialHooks — no mixin into
@@ -2153,7 +2182,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // (e.g. enchanted golden apple) but the food/heal path is the more
         // useful behaviour. The slot the equipment path would route this to
         // would be MAINHAND, which would drop the mob's weapon mid-raid.
-        if (candidate.get(DataComponents.FOOD) != null) {
+        if (ItemDataCompat.isFood(candidate)) {
             return EquipmentEvaluator.tryCollectFood(source, slotIdx, this.inventory);
         }
 
@@ -2263,7 +2292,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (source == null) return false;
         ItemStack candidate = source.getItem(slotIdx);
         if (candidate.isEmpty()) return false;
-        if (candidate.get(DataComponents.FOOD) != null) {
+        if (ItemDataCompat.isFood(candidate)) {
             return EquipmentEvaluator.canCollectFood(source, slotIdx, this.inventory);
         }
         // Wood/stone pre-check — kept exactly in sync with takeBlockResourceCapped's decision.
@@ -2621,7 +2650,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     /**
      * Returns the inventory slot of the highest-nutrition food currently
      * carried, or {@code -1} if no edible item is present. "Edible" means the
-     * item has a non-null {@link DataComponents#FOOD} component — same
+     * item carries food data (see {@link ItemDataCompat#isFood}) — same
      * definition vanilla uses for items players can right-click to eat.
      */
     public int findBestFoodSlot() {
@@ -2630,10 +2659,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         for (int i = 0; i < inventory.getContainerSize(); i++) {
             ItemStack stack = inventory.getItem(i);
             if (stack.isEmpty()) continue;
-            FoodProperties food = stack.get(DataComponents.FOOD);
+            FoodProperties food = ItemDataCompat.foodProperties(stack);
             if (food == null) continue;
-            if (food.nutrition() > bestNutrition) {
-                bestNutrition = food.nutrition();
+            if (ItemDataCompat.nutrition(food) > bestNutrition) {
+                bestNutrition = ItemDataCompat.nutrition(food);
                 bestSlot = i;
             }
         }
@@ -2659,8 +2688,8 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         for (int i = 0; i < inventory.getContainerSize(); i++) {
             ItemStack stack = inventory.getItem(i);
             if (stack.isEmpty()) continue;
-            FoodProperties food = stack.get(DataComponents.FOOD);
-            if (food != null) total += food.nutrition() * stack.getCount();
+            FoodProperties food = ItemDataCompat.foodProperties(stack);
+            if (food != null) total += ItemDataCompat.nutrition(food) * stack.getCount();
         }
         return total;
     }
@@ -2801,8 +2830,12 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             tag.putString(TAG_SKIN_TEXTURE_URL, url);
         }
         // Inventory persistence — InventoryCarrier helper handles slot encoding.
-        // registryAccess() is a HolderLookup.Provider on Entity in 1.21.1+.
+        // registryAccess() is a HolderLookup.Provider on Entity in 1.21.1+; the
+        // 1.20.1 overload takes no provider.
+        //? if >=1.21.1 {
         writeInventoryToTag(tag, this.registryAccess());
+        //?} else {
+        /*writeInventoryToTag(tag);*///?}
 
         // Recently-explored maps — ListTag of {pos:long, tick:long} compounds.
         ListTag blocks = new ListTag();
@@ -2856,7 +2889,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             setSkinSlim(tag.getBoolean(TAG_SKIN_SLIM));
             skinExplicit = true;
         }
+        //? if >=1.21.1 {
         readInventoryFromTag(tag, this.registryAccess());
+        //?} else {
+        /*readInventoryFromTag(tag);*///?}
 
         recentlyExploredBlocks.clear();
         if (tag.contains(TAG_EXPLORED_BLOCKS, Tag.TAG_LIST)) {
@@ -2895,9 +2931,15 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * drops everything it was carrying, just like a player. Mirrors
      * {@code Pillager.dropCustomDeathLoot} for the backpack half.
      */
+    //? if >=1.21.1 {
     @Override
     protected void dropCustomDeathLoot(ServerLevel level, DamageSource source, boolean recentlyHit) {
         super.dropCustomDeathLoot(level, source, recentlyHit);
+    //?} else {
+    /*@Override
+    protected void dropCustomDeathLoot(DamageSource source, int looting, boolean recentlyHit) {
+        super.dropCustomDeathLoot(source, looting, recentlyHit);
+    *///?}
         for (int i = 0; i < this.inventory.getContainerSize(); i++) {
             ItemStack stack = this.inventory.getItem(i);
             if (!stack.isEmpty()) {
@@ -3138,6 +3180,18 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         this.noActionTime = 0;
     }
 
+    //? if <1.21.1 {
+    /*// CrossbowAttackMob declares shootCrossbowProjectile abstract in 1.20.1 (it became a
+    // private helper inside performCrossbowAttack in 1.21.1, so the interface no longer
+    // exposes it). Delegate to the interface's 5-arg default exactly as vanilla Monster /
+    // Pillager do — projectile speed 1.6 matches the standard crossbow bolt.
+    @Override
+    public void shootCrossbowProjectile(LivingEntity target, ItemStack crossbow,
+                                        net.minecraft.world.entity.projectile.Projectile projectile, float angle) {
+        this.shootCrossbowProjectile(this, target, projectile, angle, 1.6F);
+    }
+    *///?}
+
     // ---- RangedAttackMob (bow path) --------------------------------------
 
     /**
@@ -3154,7 +3208,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             return;
         }
         ItemStack arrowStack = this.getProjectile(mainhand);
+        //? if >=1.21.1 {
         AbstractArrow arrow = ProjectileUtil.getMobArrow(this, arrowStack, velocity, mainhand);
+        //?} else {
+        /*AbstractArrow arrow = ProjectileUtil.getMobArrow(this, arrowStack, velocity);*///?}
 
         double dx = target.getX() - this.getX();
         double dy = target.getY(0.3333) - arrow.getY();

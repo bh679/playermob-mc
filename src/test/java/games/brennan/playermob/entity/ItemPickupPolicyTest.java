@@ -172,7 +172,11 @@ class ItemPickupPolicyTest {
         assertTrue(ItemPickupPolicy.isStone(new ItemStack(Items.STONE_BRICKS)), "stone bricks");
         assertTrue(ItemPickupPolicy.isStone(new ItemStack(Items.DEEPSLATE_TILES)), "deepslate tiles");
         assertTrue(ItemPickupPolicy.isStone(new ItemStack(Items.BLACKSTONE)), "blackstone");
+        //? if >=1.21.1 {
         assertTrue(ItemPickupPolicy.isStone(new ItemStack(Items.TUFF_BRICKS)), "tuff bricks");
+        //?} else {
+        /*assertTrue(ItemPickupPolicy.isStone(new ItemStack(Items.TUFF)), "tuff");*/
+        //?}
         assertFalse(ItemPickupPolicy.isStone(new ItemStack(Items.OAK_PLANKS)), "planks are not stone");
         assertFalse(ItemPickupPolicy.isStone(new ItemStack(Items.DIRT)), "dirt is not stone");
         assertFalse(ItemPickupPolicy.isStone(new ItemStack(Items.DIAMOND)), "diamond is not stone");

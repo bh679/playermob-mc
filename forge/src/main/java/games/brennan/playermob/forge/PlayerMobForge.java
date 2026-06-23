@@ -121,12 +121,19 @@ public final class PlayerMobForge {
         PlayerMobRegistry.PLAYER_MOB = PLAYER_MOB.get();
         PlayerMobRegistry.PLAYER_MOB_SPAWN_EGG = PLAYER_MOB_SPAWN_EGG.get();
         PlayerMobRegistry.PLAYER_MOB_MENU = PLAYER_MOB_MENU.get();
-        PlayerMobRegistry.MENU_OPENER = (serverPlayer, mob) ->
-            serverPlayer.openMenu(
-                new SimpleMenuProvider(
-                    (id, inv, player) -> new PlayerMobMenu(id, inv, mob),
-                    Component.translatable("container.playermob.player_mob")),
-                buf -> buf.writeVarInt(mob.getId()));
+        PlayerMobRegistry.MENU_OPENER = (serverPlayer, mob) -> {
+            SimpleMenuProvider provider = new SimpleMenuProvider(
+                (id, inv, player) -> new PlayerMobMenu(id, inv, mob),
+                Component.translatable("container.playermob.player_mob"));
+            //? if >=1.21.1 {
+            serverPlayer.openMenu(provider, buf -> buf.writeVarInt(mob.getId()));
+            //?} else {
+            /*// Forge 47.x (1.20.1) ServerPlayer.openMenu takes no extra-data writer;
+            // the buffer-carrying open goes through NetworkHooks.openScreen.
+            net.minecraftforge.network.NetworkHooks.openScreen(
+                serverPlayer, provider, buf -> buf.writeVarInt(mob.getId()));*/
+            //?}
+        };
         PlayerMob.init(FMLPaths.CONFIGDIR.get());
     }
 }

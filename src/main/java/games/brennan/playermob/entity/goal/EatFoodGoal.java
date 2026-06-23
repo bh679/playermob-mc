@@ -1,9 +1,8 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.compat.ItemDataCompat;
 import games.brennan.playermob.entity.PlayerMobEntity;
-import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.SimpleContainer;
-import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.food.FoodProperties;
@@ -133,16 +132,12 @@ public final class EatFoodGoal extends Goal implements DescribableGoal {
      * inventory.
      */
     private void finishEating(ItemStack food) {
-        FoodProperties props = food.get(DataComponents.FOOD);
+        FoodProperties props = ItemDataCompat.foodProperties(food);
         if (props != null) {
-            mob.heal((float) props.nutrition());
-            for (FoodProperties.PossibleEffect possible : props.effects()) {
-                if (mob.getRandom().nextFloat() < possible.probability()) {
-                    // Defensive copy — the supplier returns the same instance
-                    // across calls, so addEffect must not retain it.
-                    mob.addEffect(new MobEffectInstance(possible.effect()));
-                }
-            }
+            mob.heal((float) ItemDataCompat.nutrition(props));
+            // Defensive copies of each effect happen inside the shim — the
+            // supplier returns the same instance across calls.
+            ItemDataCompat.applyFoodEffects(props, mob, mob.getRandom());
         }
 
         food.shrink(1);

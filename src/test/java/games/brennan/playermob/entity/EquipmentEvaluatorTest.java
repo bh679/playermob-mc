@@ -206,6 +206,7 @@ class EquipmentEvaluatorTest {
             protected_, new ItemStack(Items.IRON_CHESTPLATE)));
     }
 
+    //? if >=1.21.1 {
     private static Holder<Enchantment> sharpness() {
         return registryAccess.lookupOrThrow(Registries.ENCHANTMENT).getOrThrow(Enchantments.SHARPNESS);
     }
@@ -213,4 +214,14 @@ class EquipmentEvaluatorTest {
     private static Holder<Enchantment> protection() {
         return registryAccess.lookupOrThrow(Registries.ENCHANTMENT).getOrThrow(Enchantments.PROTECTION);
     }
+    //?} else {
+    /*// 1.20.1 enchantments are raw Enchantment singletons; ItemStack.enchant takes one directly.
+    private static Enchantment sharpness() {
+        return Enchantments.SHARPNESS;
+    }
+
+    private static Enchantment protection() {
+        return Enchantments.ALL_DAMAGE_PROTECTION; // 1.20.1's field name for Protection
+    }*/
+    //?}
 }

@@ -18,6 +18,10 @@ val fabricApiVersion = when (mc) {
     "1.20.1" -> "0.92.9+1.20.1"
     else     -> "0.103.0+1.21.1"
 }
+val minecraftRange = when (mc) {
+    "1.20.1" -> "~1.20.1"
+    else     -> "~1.21.1"
+}
 
 version = "${common.mod.version}+$mc"
 base {
@@ -96,6 +100,7 @@ tasks.processResources {
     expandProps(listOf("fabric.mod.json"),
         "version" to common.mod.version,
         "fabric_loader_version" to prop("fabric_loader_version")!!,
+        "minecraft_range" to minecraftRange,
         "mod_name" to common.mod.name,
         "mod_description" to common.mod.description,
         "mod_authors" to common.mod.authors,

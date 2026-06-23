@@ -99,7 +99,11 @@ public final class GlobalLifeStore {
         if (cached != null && cachedServer == server) {
             return cached;
         }
+        //? if >=1.21.1 {
         GlobalLifeStore store = new GlobalLifeStore(server.getServerDirectory().resolve(DIR).resolve(FILE));
+        //?} else {
+        /*GlobalLifeStore store = new GlobalLifeStore(server.getServerDirectory().toPath().resolve(DIR).resolve(FILE));*/
+        //?}
         store.load();
         cachedServer = server;
         cached = store;
@@ -320,7 +324,11 @@ public final class GlobalLifeStore {
             return;
         }
         try {
+            //? if >=1.21.1 {
             CompoundTag tag = NbtIo.readCompressed(path, NbtAccounter.unlimitedHeap());
+            //?} else {
+            /*CompoundTag tag = NbtIo.readCompressed(path.toFile());*/
+            //?}
             if (tag != null) {
                 nextId = read(tag, history);
             }
@@ -337,7 +345,11 @@ public final class GlobalLifeStore {
             Files.createDirectories(path.getParent());
             CompoundTag tag = new CompoundTag();
             write(tag, history, nextId);
+            //? if >=1.21.1 {
             NbtIo.writeCompressed(tag, path);
+            //?} else {
+            /*NbtIo.writeCompressed(tag, path.toFile());*/
+            //?}
         } catch (IOException | RuntimeException e) {
             LOGGER.error("[playermob] failed to save global lives to {}", path, e);
         }

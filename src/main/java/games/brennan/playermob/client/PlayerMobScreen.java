@@ -1,5 +1,6 @@
 package games.brennan.playermob.client;
 
+import games.brennan.playermob.compat.SkinCompat;
 import games.brennan.playermob.entity.FeelingEditButtons;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.entity.TraitEditButtons;
@@ -12,7 +13,6 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.PlayerFaceRenderer;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.multiplayer.PlayerInfo;
-import net.minecraft.client.resources.DefaultPlayerSkin;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.Entity;
@@ -480,7 +480,7 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
         if (mc.getConnection() != null) {
             PlayerInfo info = mc.getConnection().getPlayerInfo(id);
             if (info != null) {
-                ResourceLocation texture = info.getSkin().texture();
+                ResourceLocation texture = SkinCompat.playerInfoTexture(info);
                 if (texture != null) {
                     return texture;
                 }
@@ -493,7 +493,7 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
                 }
             }
         }
-        return DefaultPlayerSkin.get(id).texture();
+        return SkinCompat.defaultTextureFor(id);
     }
 
     // ---- helpers ----------------------------------------------------------
