@@ -1,13 +1,31 @@
 import org.gradle.language.jvm.tasks.ProcessResources
+import net.fabricmc.loom.api.LoomGradleExtensionAPI
 
 plugins {
-    id("dev.architectury.loom")
     id("architectury-plugin")
     id("maven-publish")
 }
 
 val mc = stonecutter.current.version
-val java17 = stonecutter.eval(mc, "<1.20.5") // 1.20.1 → Java 17, 1.21.1 → Java 21
+val obfuscated = stonecutter.eval(mc, "<26")
+// Deobfuscated MC 26.x uses the no-remap Loom variant (same jar, no mappings step). The Loom
+// plugin is applied via apply() because the plugins{} block can't branch on the version — so
+// Loom-specific calls below use typed APIs (configure<LoomGradleExtensionAPI>/the<>/"minecraft"/
+// "mappings") since apply() doesn't generate the Kotlin DSL accessors.
+apply(plugin = if (obfuscated) "dev.architectury.loom" else "dev.architectury.loom-no-remap")
+
+// Mod-dependency configuration name. Obfuscated Loom creates the remapping configs
+// (modImplementation/modCompileOnly/…); the no-remap variant (deobfuscated 26.x) skips
+// them entirely — mods need no remap there, so they go on the plain implementation/
+// compileOnly configs instead.
+val modImpl = if (obfuscated) "modImplementation" else "implementation"
+
+// Per-MC Java level: 1.20.1 → 17, 1.21.1 → 21, 26.2 → 25 (MC 26.x requires Java 25).
+val javaLevel = when {
+    stonecutter.eval(mc, ">=26")     -> 25
+    stonecutter.eval(mc, ">=1.20.5") -> 21
+    else                             -> 17
+}
 
 version = "${mod.version}+$mc"
 group = mod.group
@@ -18,8 +36,12 @@ base {
 // Architectury 'common' module — bytecode is transformed per loader at build time.
 architectury.common("fabric", "forge", "neoforge")
 
-loom {
-    silentMojangMappingsLicense()
+// MC 26.x ships deobfuscated (no Mojang mappings exist) — the mappings line + license
+// accept must be omitted there. Obfuscated versions (1.20.1/1.21.1) still need them.
+if (obfuscated) {
+    configure<LoomGradleExtensionAPI> {
+        silentMojangMappingsLicense()
+    }
 }
 
 repositories {
@@ -28,12 +50,17 @@ repositories {
 }
 
 dependencies {
-    minecraft("com.mojang:minecraft:$mc")
-    mappings(loom.officialMojangMappings())
+    "minecraft"("com.mojang:minecraft:$mc")
+    if (obfuscated) {
+        // project.the<>() — inside dependencies{} the implicit ExtensionAware receiver is the
+        // DependencyHandler (whose only extension is ext), so qualify to the Project to reach Loom.
+        "mappings"(project.the<LoomGradleExtensionAPI>().officialMojangMappings())
+    }
 
     // Fabric loader provides the mixin/annotation deps + @Environment annotations used
-    // by common code. We do NOT use other Fabric loader classes here.
-    modImplementation("net.fabricmc:fabric-loader:${prop("fabric_loader_version")}")
+    // by common code. We do NOT use other Fabric loader classes here. String-form config
+    // name because Loom's accessors aren't generated when it's applied via apply().
+    modImpl("net.fabricmc:fabric-loader:${prop("fabric_loader_version")}")
 
     testImplementation(platform("org.junit:junit-bom:5.10.2"))
     testImplementation("org.junit.jupiter:junit-jupiter")
@@ -42,17 +69,20 @@ dependencies {
 
 java {
     withSourcesJar()
-    val javaVersion = if (java17) JavaVersion.VERSION_17 else JavaVersion.VERSION_21
-    sourceCompatibility = javaVersion
-    targetCompatibility = javaVersion
+    val compat = JavaVersion.toVersion(javaLevel)
+    sourceCompatibility = compat
+    targetCompatibility = compat
     toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
+        // 1.20.1/1.21.1 stay on the validated JDK 21 toolchain (the release flag caps
+        // bytecode at 17/21); 26.2 needs a JDK 25 toolchain (provisioned via the foojay
+        // resolver in settings.gradle.kts).
+        languageVersion = JavaLanguageVersion.of(if (javaLevel >= 25) 25 else 21)
     }
 }
 
 tasks.withType<JavaCompile>().configureEach {
     options.encoding = "UTF-8"
-    options.release = if (java17) 17 else 21
+    options.release = javaLevel
 }
 
 tasks.test {
@@ -63,7 +93,7 @@ tasks.test {
 // bundled Mixin (Java 17) rejects a JAVA_21 compatibilityLevel at load time.
 tasks.processResources {
     expandProps(listOf("playermob.mixins.json"),
-        "mixin_compat" to if (java17) "JAVA_17" else "JAVA_21",
+        "mixin_compat" to "JAVA_$javaLevel",
     )
 }
 
