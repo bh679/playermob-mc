@@ -130,17 +130,22 @@ public final class PlayerMobSkinTextures {
     private static GameProfile buildFakeProfile(String textureUrl, boolean slim) {
         // Stable UUID per URL ⇒ two mobs with the same skin share the cache.
         UUID uuid = UUID.nameUUIDFromBytes(("playermob:" + textureUrl).getBytes(StandardCharsets.UTF_8));
-        GameProfile profile = new GameProfile(uuid, "PlayerMob");
         String json = textureJson(textureUrl, slim);
         String base64 = Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
-        //? if >=26 {
-        /*// authlib 9 (MC 26.x) renamed GameProfile.getProperties() → properties().
         // (Third Property arg is the signature — null for our unsigned synthetic profile.)
-        profile.properties().put("textures", new Property("textures", base64, null));
+        Property texture = new Property("textures", base64, /* signature */ null);
+        //? if >=26 {
+        /*// authlib 9 (MC 26.x): GameProfile.properties() is immutable (rejects put()), and
+        // PropertyMap has no no-arg ctor — so build the backing multimap WITH the texture, then
+        // hand it to the 3-arg GameProfile constructor instead of mutating after construction.
+        com.google.common.collect.Multimap<String, Property> backing = com.google.common.collect.LinkedHashMultimap.create();
+        backing.put("textures", texture);
+        return new GameProfile(uuid, "PlayerMob", new com.mojang.authlib.properties.PropertyMap(backing));
         *///?} else {
-        profile.getProperties().put("textures", new Property("textures", base64, /* signature */ null));
-        //?}
+        GameProfile profile = new GameProfile(uuid, "PlayerMob");
+        profile.getProperties().put("textures", texture);
         return profile;
+        //?}
     }
 
     /**
