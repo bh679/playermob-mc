@@ -116,6 +116,23 @@
       "released": true,
       "released_in": "v0.47.0",
       "released_at": "2026-06-21T07:59:08Z"
+    },
+    {
+      "id": "minecraft-1201-support",
+      "version": "0.48.0",
+      "type": "feat",
+      "title": "PlayerMob now runs on Minecraft 1.20.1",
+      "summary": "PlayerMob now ships a build for Minecraft 1.20.1 (Fabric and Forge), alongside the existing 1.21.1 build. It's the same player-shaped, weapon-aware mob \u2014 now playable on 1.20.1 worlds.",
+      "highlights": [
+        "New 1.20.1 build for Fabric and Forge.",
+        "NeoForge 1.20.1 users: the Forge jar works on NeoForge 1.20.1.",
+        "1.21.1 builds (Fabric, Forge, NeoForge) are unchanged \u2014 grab the jar matching your Minecraft version + loader."
+      ],
+      "pr": 104,
+      "date": "2026-06-23",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
