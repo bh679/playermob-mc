@@ -32,6 +32,10 @@ val javaLevel = when {
     stonecutter.eval(mc, ">=1.20.5") -> 21
     else                             -> 17
 }
+val minecraftRange = when (mc) {
+    "26.2" -> "[26.2,)"
+    else   -> "[1.21.1]"
+}
 
 version = "${common.mod.version}+$mc"
 base {
@@ -155,6 +159,7 @@ tasks.processResources {
     expandProps(listOf("META-INF/neoforge.mods.toml"),
         "version" to common.mod.version,
         "neoforge_version" to neoforgeVersion,
+        "minecraft_range" to minecraftRange,
         "mod_license" to common.mod.license,
         "mod_name" to common.mod.name,
         "mod_description" to common.mod.description,

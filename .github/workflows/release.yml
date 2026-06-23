@@ -106,10 +106,11 @@ jobs:
             -exec cp {} release-artifacts/ \;
           echo "=== release-artifacts contents ==="
           ls -la release-artifacts/
-          # Sanity check: exactly 5 jars — Fabric+Forge @1.20.1, Fabric+Forge+NeoForge @1.21.1.
+          # Sanity check: exactly 7 jars — Fabric+Forge @1.20.1, Fabric+Forge+NeoForge @1.21.1,
+          # Fabric+NeoForge @26.2 (Forge dropped on 26.x).
           COUNT=$(ls release-artifacts/*.jar | wc -l)
-          if [ "$COUNT" -ne 5 ]; then
-            echo "::error::Expected 5 loader/version jars in release-artifacts/, found $COUNT"
+          if [ "$COUNT" -ne 7 ]; then
+            echo "::error::Expected 7 loader/version jars in release-artifacts/, found $COUNT"
             exit 1
           fi
 
@@ -286,6 +287,48 @@ jobs:
           # NeoForge file since DT cannot load on Fabric/Forge.
           dependencies: |
             dungeon-train(optional){curseforge:dungeon-train}{modrinth:dungeon-train}
+          retry-attempts: 2
+          retry-delay: 10000
+          fail-mode: warn
+
+      - name: Publish Fabric 26.2 to Modrinth + CurseForge
+        id: publish_fabric_262
+        if: steps.publish_check.outputs.modrinth == 'true' || steps.publish_check.outputs.curseforge == 'true'
+        uses: Kir-Antipov/mc-publish@v3.3
+        with:
+          modrinth-id: ${{ steps.publish_check.outputs.modrinth == 'true' && vars.MODRINTH_PROJECT_ID || '' }}
+          modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
+          curseforge-id: ${{ steps.publish_check.outputs.curseforge == 'true' && vars.CURSEFORGE_PROJECT_ID || '' }}
+          curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
+          files: release-artifacts/playermob-fabric-${{ env.MOD_VERSION }}+26.2.jar
+          name: PlayerMob ${{ env.RELEASE_TAG }} (Fabric 26.2)
+          version: ${{ env.RELEASE_TAG }}+fabric-26.2
+          version-type: ${{ steps.release_type.outputs.type }}
+          changelog-file: release-notes.md
+          loaders: fabric
+          game-versions: "26.2"
+          java: 25
+          retry-attempts: 2
+          retry-delay: 10000
+          fail-mode: warn
+
+      - name: Publish NeoForge 26.2 to Modrinth + CurseForge
+        id: publish_neoforge_262
+        if: steps.publish_check.outputs.modrinth == 'true' || steps.publish_check.outputs.curseforge == 'true'
+        uses: Kir-Antipov/mc-publish@v3.3
+        with:
+          modrinth-id: ${{ steps.publish_check.outputs.modrinth == 'true' && vars.MODRINTH_PROJECT_ID || '' }}
+          modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
+          curseforge-id: ${{ steps.publish_check.outputs.curseforge == 'true' && vars.CURSEFORGE_PROJECT_ID || '' }}
+          curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
+          files: release-artifacts/playermob-neoforge-${{ env.MOD_VERSION }}+26.2.jar
+          name: PlayerMob ${{ env.RELEASE_TAG }} (NeoForge 26.2)
+          version: ${{ env.RELEASE_TAG }}+neoforge-26.2
+          version-type: ${{ steps.release_type.outputs.type }}
+          changelog-file: release-notes.md
+          loaders: neoforge
+          game-versions: "26.2"
+          java: 25
           retry-attempts: 2
           retry-delay: 10000
           fail-mode: warn
