@@ -164,9 +164,9 @@
       ],
       "pr": 109,
       "date": "2026-06-24",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.50.0",
+      "released_at": "2026-06-24T05:27:00Z"
     },
     {
       "id": "natural-spawning",
@@ -181,6 +181,7 @@
         "Villages: ~1/4 of villagers (and structure iron golems) get a PlayerMob companion.",
         "Tune it live without a restart: /playermob naturalspawn on|off, /playermob naturalspawn <mob> on|off|<chance>, and /playermob naturalspawn group <group> on|off|<chance>."
       ],
+      "pr": 110,
       "date": "2026-06-24",
       "released": false,
       "released_in": null,
