@@ -75,8 +75,21 @@ class PlayerMobConfigTest {
         var v = PlayerMobConfig.parse(new Properties());
         assertFalse(v.naturalSpawnEnabled(), "natural spawning ships off");
         assertFalse(PlayerMobConfig.DEFAULT_NATURAL_SPAWN_ENABLED);
-        assertEquals(0.05F, v.naturalSpawnDefaultScale(), 1e-6);
+        assertEquals(0.8F, v.naturalSpawnDefaultScale(), 1e-6);
         assertTrue(v.naturalSpawnScales().isEmpty(), "no per-mob overrides parsed from an empty file");
+    }
+
+    @Test
+    void waterMobsDefaultToZeroLandMobsToDefaultScale() {
+        // listed land mob -> default scale; listed water mob -> 0; unlisted -> 0
+        assertEquals(0.8F, PlayerMobConfig.resolveScale(true, 0.8F, Map.of(), "minecraft:zombie"), 1e-6);
+        assertEquals(0.0F, PlayerMobConfig.resolveScale(true, 0.8F, Map.of(), "minecraft:cod"), 1e-6);
+        assertEquals(0.0F, PlayerMobConfig.resolveScale(true, 0.8F, Map.of(), "minecraft:guardian"), 1e-6);
+        // an explicit override still wins for a water mob
+        assertEquals(0.3F, PlayerMobConfig.resolveScale(true, 0.8F,
+            Map.of("minecraft:cod", 0.3F), "minecraft:cod"), 1e-6);
+        assertTrue(PlayerMobConfig.WATER_SPAWN_MOBS.stream().allMatch(PlayerMobConfig.NATURAL_SPAWN_MOBS::contains),
+            "every water mob is also in the natural-spawn list");
     }
 
     @Test

@@ -47,8 +47,12 @@ public final class PlayerMobConfig {
     public static final boolean DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER = true;
     /** Natural spawning ships OFF — PlayerMobs only appear via egg, {@code /summon}, or Dungeon Train until enabled. */
     public static final boolean DEFAULT_NATURAL_SPAWN_ENABLED = false;
-    /** When natural spawning is on, the chance a PlayerMob replaces a listed mob lacking an explicit override. */
-    public static final float DEFAULT_NATURAL_SPAWN_SCALE = 0.05F;
+    /**
+     * When natural spawning is on, the chance a PlayerMob replaces a listed <em>land</em> mob lacking an
+     * explicit override. Water mobs ({@link #WATER_SPAWN_MOBS}) default to {@code 0} instead — a
+     * player-shaped pillager standing in for a fish/squid underwater is rarely wanted.
+     */
+    public static final float DEFAULT_NATURAL_SPAWN_SCALE = 0.8F;
 
     /**
      * The vanilla mobs that spawn naturally — each gets a generated {@code naturalSpawnScale.<id>} line in
@@ -80,6 +84,16 @@ public final class PlayerMobConfig {
 
     /** Membership view of {@link #NATURAL_SPAWN_MOBS} for the default-scale fallback in {@link #naturalSpawnScale}. */
     private static final Set<String> NATURAL_SPAWN_SET = Set.copyOf(NATURAL_SPAWN_MOBS);
+
+    /**
+     * The water-dwelling subset of {@link #NATURAL_SPAWN_MOBS} that defaults to a {@code 0} replacement
+     * chance (the rest default to {@link #DEFAULT_NATURAL_SPAWN_SCALE}). Users can still raise these via
+     * an explicit {@code naturalSpawnScale.<id>} line or the {@code /playermob naturalspawn} command.
+     */
+    public static final Set<String> WATER_SPAWN_MOBS = Set.of(
+        "minecraft:squid", "minecraft:glow_squid", "minecraft:dolphin", "minecraft:axolotl",
+        "minecraft:cod", "minecraft:salmon", "minecraft:pufferfish", "minecraft:tropical_fish",
+        "minecraft:guardian");
 
     private static volatile float echoFriendChance = DEFAULT_ECHO_FRIEND_CHANCE;
     private static volatile boolean debugSpawnLog = DEFAULT_DEBUG_SPAWN_LOG;
@@ -151,7 +165,20 @@ public final class PlayerMobConfig {
         if (override != null) {
             return override;
         }
-        return NATURAL_SPAWN_SET.contains(typeId) ? defaultScale : 0.0F;
+        return listedDefault(typeId, defaultScale);
+    }
+
+    /**
+     * The generated/fallback chance for a listed mob with no explicit override: {@code defaultScale} for a
+     * land mob, {@code 0} for a {@link #WATER_SPAWN_MOBS water} mob, and {@code 0} for anything unlisted.
+     * Shared by {@link #resolveScale} and {@link #writeDefault} so the default file matches the runtime
+     * fallback exactly.
+     */
+    static float listedDefault(String typeId, float defaultScale) {
+        if (!NATURAL_SPAWN_SET.contains(typeId)) {
+            return 0.0F;
+        }
+        return WATER_SPAWN_MOBS.contains(typeId) ? 0.0F : defaultScale;
     }
 
     /** The default replacement chance applied to a listed mob with no explicit override (config / commands). */
@@ -315,8 +342,9 @@ public final class PlayerMobConfig {
             .append("# naturalSpawnEnabled: master switch. When false (default), PlayerMobs only appear\n")
             .append("#   via spawn egg, /summon, or Dungeon Train — never naturally. Set true to let the\n")
             .append("#   per-mob chances below take effect.\n")
-            .append("# naturalSpawnDefaultScale: the chance (0.0-1.0) used for any mob below whose line is\n")
-            .append("#   deleted. Default 0.05.\n")
+            .append("# naturalSpawnDefaultScale: the chance (0.0-1.0) used for any land mob below whose line\n")
+            .append("#   is deleted. Default 0.8. Water mobs (fish, squid, dolphin, axolotl, guardian, …)\n")
+            .append("#   default to 0.0 instead — raise their line to spawn PlayerMobs underwater.\n")
             .append("#\n")
             .append("# naturalSpawnScale.<id>: chance (0.0-1.0) a PlayerMob spawns INSTEAD of that mob on a\n")
             .append("#   natural spawn (the mob itself is then suppressed). 0.0 = never replace it; 1.0 =\n")
@@ -326,7 +354,7 @@ public final class PlayerMobConfig {
             .append(KEY_NATURAL_SPAWN_DEFAULT_SCALE).append("=").append(DEFAULT_NATURAL_SPAWN_SCALE).append("\n");
         for (String id : NATURAL_SPAWN_MOBS) {
             body.append(NATURAL_SPAWN_SCALE_PREFIX).append(id).append("=")
-                .append(DEFAULT_NATURAL_SPAWN_SCALE).append("\n");
+                .append(listedDefault(id, DEFAULT_NATURAL_SPAWN_SCALE)).append("\n");
         }
         Files.writeString(file, body.toString());
     }

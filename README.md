@@ -18,8 +18,10 @@ stance at spawn (`HOSTILE_TO_PLAYERS`, `NEUTRAL`, etc.) without re-architecting.
 **opt-in natural spawning**. Natural spawning ships **off** — enable it in
 `config/playermob.properties` with `naturalSpawnEnabled=true`, then give each vanilla mob a
 `naturalSpawnScale.<id>` chance (0.0–1.0) that a PlayerMob spawns **instead of** that mob on a
-natural spawn (e.g. `naturalSpawnScale.minecraft:zombie=0.1`). Mobs without an explicit line use
-`naturalSpawnDefaultScale` (default 0.05). No raid participation.
+natural spawn (e.g. `naturalSpawnScale.minecraft:zombie=0.1`). Land mobs without an explicit line
+use `naturalSpawnDefaultScale` (default **0.8**); water mobs (fish, squid, dolphin, axolotl,
+guardian, …) default to **0**. Toggle it live with `/playermob naturalspawn on|off` and
+`/playermob naturalspawn <mob> on|off|<chance>` (op, session-only). No raid participation.
 
 ## Build
 
