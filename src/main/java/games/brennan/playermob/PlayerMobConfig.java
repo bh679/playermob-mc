@@ -154,12 +154,36 @@ public final class PlayerMobConfig {
         return NATURAL_SPAWN_SET.contains(typeId) ? defaultScale : 0.0F;
     }
 
+    /** The default replacement chance applied to a listed mob with no explicit override (config / commands). */
+    public static float naturalSpawnDefaultScale() {
+        return naturalSpawnDefaultScale;
+    }
+
     /**
      * Toggle the DT-spawn debug log at runtime (e.g. from {@code /playermob debug spawnlog}). A session
      * override — not written back to the file, which stays the startup default.
      */
     public static void setDebugSpawnLog(boolean enabled) {
         debugSpawnLog = enabled;
+    }
+
+    /**
+     * Flip the natural-spawn master switch at runtime (e.g. from {@code /playermob naturalspawn on|off}).
+     * A session override — not written back to the file, which stays the startup default.
+     */
+    public static void setNaturalSpawnEnabled(boolean enabled) {
+        naturalSpawnEnabled = enabled;
+    }
+
+    /**
+     * Set a single mob's replacement chance at runtime (e.g. from {@code /playermob naturalspawn <mob> ...}).
+     * Copies the immutable override map with the clamped value added/replaced, so concurrent spawn-thread
+     * reads always see a complete map. A session override — not written back to the file.
+     */
+    public static void setNaturalSpawnScale(String typeId, float chance) {
+        Map<String, Float> next = new HashMap<>(naturalSpawnScales);
+        next.put(typeId, clamp01(chance));
+        naturalSpawnScales = Map.copyOf(next);
     }
 
     /**

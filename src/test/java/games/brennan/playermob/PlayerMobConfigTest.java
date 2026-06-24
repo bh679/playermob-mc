@@ -121,6 +121,40 @@ class PlayerMobConfigTest {
     }
 
     @Test
+    void setNaturalSpawnEnabledTogglesAtRuntime() {
+        try {
+            PlayerMobConfig.setNaturalSpawnEnabled(true);
+            assertTrue(PlayerMobConfig.naturalSpawnEnabled());
+            PlayerMobConfig.setNaturalSpawnEnabled(false);
+            assertFalse(PlayerMobConfig.naturalSpawnEnabled());
+        } finally {
+            PlayerMobConfig.setNaturalSpawnEnabled(PlayerMobConfig.DEFAULT_NATURAL_SPAWN_ENABLED);
+        }
+    }
+
+    @Test
+    void setNaturalSpawnScaleOverridesLookupAndClamps() {
+        try {
+            PlayerMobConfig.setNaturalSpawnEnabled(true);
+            PlayerMobConfig.setNaturalSpawnScale("minecraft:zombie", 0.5F);
+            assertEquals(0.5F, PlayerMobConfig.naturalSpawnScale("minecraft:zombie"), 1e-6);
+            // a command can enable a mob not in the default list — the explicit override wins
+            PlayerMobConfig.setNaturalSpawnScale("minecraft:warden", 1.0F);
+            assertEquals(1.0F, PlayerMobConfig.naturalSpawnScale("minecraft:warden"), 1e-6);
+            // off -> 0, and out-of-range clamps
+            PlayerMobConfig.setNaturalSpawnScale("minecraft:zombie", 0.0F);
+            assertEquals(0.0F, PlayerMobConfig.naturalSpawnScale("minecraft:zombie"), 1e-6);
+            PlayerMobConfig.setNaturalSpawnScale("minecraft:zombie", 9.0F);
+            assertEquals(1.0F, PlayerMobConfig.naturalSpawnScale("minecraft:zombie"), 1e-6);
+        } finally {
+            // reset session state so it can't leak into other tests
+            PlayerMobConfig.setNaturalSpawnScale("minecraft:zombie", PlayerMobConfig.DEFAULT_NATURAL_SPAWN_SCALE);
+            PlayerMobConfig.setNaturalSpawnScale("minecraft:warden", 0.0F);
+            PlayerMobConfig.setNaturalSpawnEnabled(PlayerMobConfig.DEFAULT_NATURAL_SPAWN_ENABLED);
+        }
+    }
+
+    @Test
     void setDebugSpawnLogTogglesAtRuntime() {
         try {
             PlayerMobConfig.setDebugSpawnLog(true);

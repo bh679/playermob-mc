@@ -2,13 +2,21 @@ package games.brennan.playermob.player;
 
 import com.mojang.authlib.GameProfile;
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.entity.DispositionTraits;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.commands.arguments.GameProfileArgument;
+//? if >=26 {
+/*// 26.x renamed ResourceLocation → Identifier, so the namespaced-id argument is IdentifierArgument
+// (same id()/getId() shape). Referenced fully-qualified at the two call sites below.
+*///?} else {
+import net.minecraft.commands.arguments.ResourceLocationArgument;
+//?}
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -28,7 +36,14 @@ import java.util.Collection;
  *       traits it would currently distil to (verify tracking without dying).</li>
  *   <li>{@code /playermob debug spawnlog [on|off]} — toggle (or report) the colour-coded
  *       Dungeon-Train auto-spawn chat log for this session.</li>
+ *   <li>{@code /playermob naturalspawn [on|off]} — toggle (or report) the natural-spawn master
+ *       switch for this session.</li>
+ *   <li>{@code /playermob naturalspawn <mob> on|off|<chance>} — set a mob's replacement chance
+ *       (the chance a PlayerMob spawns instead of it on a natural spawn) for this session.</li>
  * </ul>
+ *
+ * <p>Like {@code spawnlog}, the {@code naturalspawn} edits are session overrides — they take effect
+ * immediately without a restart but are not written back to {@code config/playermob.properties}.</p>
  */
 public final class ReincarnateCommand {
 
@@ -54,7 +69,26 @@ public final class ReincarnateCommand {
                     .then(Commands.literal("spawnlog")
                         .executes(ReincarnateCommand::querySpawnLog)
                         .then(Commands.literal("on").executes(ctx -> setSpawnLog(ctx, true)))
-                        .then(Commands.literal("off").executes(ctx -> setSpawnLog(ctx, false))))));
+                        .then(Commands.literal("off").executes(ctx -> setSpawnLog(ctx, false)))))
+                .then(Commands.literal("naturalspawn")
+                    .executes(ReincarnateCommand::reportNaturalSpawn)
+                    .then(Commands.literal("on").executes(ctx -> setNaturalSpawnMaster(ctx, true)))
+                    .then(Commands.literal("off").executes(ctx -> setNaturalSpawnMaster(ctx, false)))
+                    // Literals bind before the argument, so `on`/`off` above are unambiguous.
+                    .then(Commands.argument("mob",
+                            //? if >=26 {
+                            /*net.minecraft.commands.arguments.IdentifierArgument.id()*///?} else {
+                            ResourceLocationArgument.id()
+                            //?}
+                            )
+                        .suggests((ctx, builder) ->
+                            SharedSuggestionProvider.suggest(PlayerMobConfig.NATURAL_SPAWN_MOBS, builder))
+                        .then(Commands.literal("on")
+                            .executes(ctx -> setMobScale(ctx, PlayerMobConfig.naturalSpawnDefaultScale())))
+                        .then(Commands.literal("off")
+                            .executes(ctx -> setMobScale(ctx, 0.0F)))
+                        .then(Commands.argument("chance", FloatArgumentType.floatArg(0.0F, 1.0F))
+                            .executes(ctx -> setMobScale(ctx, FloatArgumentType.getFloat(ctx, "chance")))))));
     }
 
     /** {@code /playermob debug spawnlog} — report whether the DT-spawn debug log is on. */
@@ -71,6 +105,41 @@ public final class ReincarnateCommand {
         ctx.getSource().sendSuccess(
             () -> Component.literal("PlayerMob DT-spawn debug log " + (enabled ? "enabled" : "disabled")
                 + " for this session."), false);
+        return 1;
+    }
+
+    /** {@code /playermob naturalspawn} — report the master switch + how many per-mob overrides are set. */
+    private static int reportNaturalSpawn(CommandContext<CommandSourceStack> ctx) {
+        boolean on = PlayerMobConfig.naturalSpawnEnabled();
+        ctx.getSource().sendSuccess(() -> Component.literal(
+            "PlayerMob natural spawning is " + (on ? "ON" : "OFF") + " (default chance "
+                + PlayerMobConfig.naturalSpawnDefaultScale() + ")."), false);
+        return 1;
+    }
+
+    /** {@code /playermob naturalspawn on|off} — flip the natural-spawn master switch for this session. */
+    private static int setNaturalSpawnMaster(CommandContext<CommandSourceStack> ctx, boolean enabled) {
+        PlayerMobConfig.setNaturalSpawnEnabled(enabled);
+        ctx.getSource().sendSuccess(() -> Component.literal(
+            "PlayerMob natural spawning " + (enabled ? "enabled" : "disabled") + " for this session."), false);
+        return 1;
+    }
+
+    /**
+     * {@code /playermob naturalspawn <mob> on|off|<chance>} — set one mob's replacement chance for this
+     * session. Notes when the master switch is off (so the change won't take effect until it's turned on).
+     */
+    private static int setMobScale(CommandContext<CommandSourceStack> ctx, float chance) {
+        String mob =
+            //? if >=26 {
+            /*net.minecraft.commands.arguments.IdentifierArgument.getId(ctx, "mob").toString();*///?} else {
+            ResourceLocationArgument.getId(ctx, "mob").toString();
+            //?}
+        PlayerMobConfig.setNaturalSpawnScale(mob, chance);
+        String suffix = PlayerMobConfig.naturalSpawnEnabled()
+            ? "" : " (natural spawning is OFF — /playermob naturalspawn on to apply)";
+        ctx.getSource().sendSuccess(() -> Component.literal(
+            "PlayerMob replacement chance for " + mob + " set to " + chance + suffix + "."), false);
         return 1;
     }
 
