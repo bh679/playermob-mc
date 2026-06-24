@@ -21,7 +21,9 @@ stance at spawn (`HOSTILE_TO_PLAYERS`, `NEUTRAL`, etc.) without re-architecting.
 natural spawn (e.g. `naturalSpawnScale.minecraft:zombie=0.1`). Land mobs without an explicit line
 use `naturalSpawnDefaultScale` (default **0.8**); water mobs (fish, squid, dolphin, axolotl,
 guardian, …) default to **0**. Toggle it live with `/playermob naturalspawn on|off` and
-`/playermob naturalspawn <mob> on|off|<chance>` (op, session-only). No raid participation.
+`/playermob naturalspawn <mob> on|off|<chance>` (op, session-only). While natural spawning is on,
+each villager a village generates also has a `villageCompanionChance` (default **0.25**) to spawn a
+PlayerMob **beside** it (additive — the villager is not replaced). No raid participation.
 
 ## Build
 

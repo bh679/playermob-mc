@@ -36,6 +36,7 @@ public final class PlayerMobConfig {
     private static final String KEY_NATURAL_SPAWN_DEFAULT_SCALE = "naturalSpawnDefaultScale";
     /** Prefix for per-mob replacement-chance keys, e.g. {@code naturalSpawnScale.minecraft:zombie}. */
     private static final String NATURAL_SPAWN_SCALE_PREFIX = "naturalSpawnScale.";
+    private static final String KEY_VILLAGE_COMPANION_CHANCE = "villageCompanionChance";
 
     /** Default chance a Dungeon-Train echo with logged friends also brings back a friend-echo. */
     public static final float DEFAULT_ECHO_FRIEND_CHANCE = 0.40F;
@@ -53,6 +54,11 @@ public final class PlayerMobConfig {
      * player-shaped pillager standing in for a fish/squid underwater is rarely wanted.
      */
     public static final float DEFAULT_NATURAL_SPAWN_SCALE = 0.8F;
+    /**
+     * When natural spawning is on, the chance each villager generated with a village also spawns a
+     * PlayerMob <em>beside</em> it (additive — the villager is not replaced). {@code 0} disables it.
+     */
+    public static final float DEFAULT_VILLAGE_COMPANION_CHANCE = 0.25F;
 
     /**
      * The vanilla mobs that spawn naturally — each gets a generated {@code naturalSpawnScale.<id>} line in
@@ -103,6 +109,7 @@ public final class PlayerMobConfig {
     private static volatile float naturalSpawnDefaultScale = DEFAULT_NATURAL_SPAWN_SCALE;
     /** Per-mob explicit overrides (id → clamped 0–1 chance); immutable, replaced wholesale on {@link #load}. */
     private static volatile Map<String, Float> naturalSpawnScales = Map.of();
+    private static volatile float villageCompanionChance = DEFAULT_VILLAGE_COMPANION_CHANCE;
 
     private PlayerMobConfig() {}
 
@@ -187,6 +194,14 @@ public final class PlayerMobConfig {
     }
 
     /**
+     * Chance (0–1), when natural spawning is on, that each villager generated with a village also spawns a
+     * PlayerMob beside it (additive — see {@code NaturalSpawnReplacer.maybeSpawnVillageCompanion}).
+     */
+    public static float villageCompanionChance() {
+        return villageCompanionChance;
+    }
+
+    /**
      * Toggle the DT-spawn debug log at runtime (e.g. from {@code /playermob debug spawnlog}). A session
      * override — not written back to the file, which stays the startup default.
      */
@@ -235,13 +250,15 @@ public final class PlayerMobConfig {
             naturalSpawnEnabled = v.naturalSpawnEnabled();
             naturalSpawnDefaultScale = v.naturalSpawnDefaultScale();
             naturalSpawnScales = v.naturalSpawnScales();
-            LOGGER.info("[{}] config: {}={}, {}={}, {}={}, {}={}, {}={}, {}={} ({} per-mob override(s))",
+            villageCompanionChance = v.villageCompanionChance();
+            LOGGER.info("[{}] config: {}={}, {}={}, {}={}, {}={}, {}={}, {}={} ({} per-mob override(s)), {}={}",
                 PlayerMob.MOD_ID,
                 KEY_ECHO_FRIEND_CHANCE, echoFriendChance, KEY_DEBUG_SPAWN_LOG, debugSpawnLog,
                 KEY_TRAIN_DIG_THROUGH, trainDigThrough,
                 KEY_TRAIN_FOLLOW_LOVED_PLAYER, trainFollowLovedPlayer,
                 KEY_NATURAL_SPAWN_ENABLED, naturalSpawnEnabled,
-                KEY_NATURAL_SPAWN_DEFAULT_SCALE, naturalSpawnDefaultScale, naturalSpawnScales.size());
+                KEY_NATURAL_SPAWN_DEFAULT_SCALE, naturalSpawnDefaultScale, naturalSpawnScales.size(),
+                KEY_VILLAGE_COMPANION_CHANCE, villageCompanionChance);
         } catch (IOException | RuntimeException e) {
             LOGGER.warn("[{}] failed to load {}; using defaults", PlayerMob.MOD_ID, FILE, e);
         }
@@ -250,7 +267,8 @@ public final class PlayerMobConfig {
     /** Parsed, validated values — split out (pure, no I/O) so the parsing rules are unit-tested. */
     record Values(float echoFriendChance, boolean debugSpawnLog, boolean trainDigThrough,
                   boolean trainFollowLovedPlayer, boolean naturalSpawnEnabled,
-                  float naturalSpawnDefaultScale, Map<String, Float> naturalSpawnScales) {}
+                  float naturalSpawnDefaultScale, Map<String, Float> naturalSpawnScales,
+                  float villageCompanionChance) {}
 
     static Values parse(Properties props) {
         return new Values(
@@ -260,7 +278,8 @@ public final class PlayerMobConfig {
             parseBool(props.getProperty(KEY_TRAIN_FOLLOW_LOVED_PLAYER), DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER),
             parseBool(props.getProperty(KEY_NATURAL_SPAWN_ENABLED), DEFAULT_NATURAL_SPAWN_ENABLED),
             clamp01(parseFloat(props.getProperty(KEY_NATURAL_SPAWN_DEFAULT_SCALE), DEFAULT_NATURAL_SPAWN_SCALE)),
-            parseScales(props));
+            parseScales(props),
+            clamp01(parseFloat(props.getProperty(KEY_VILLAGE_COMPANION_CHANCE), DEFAULT_VILLAGE_COMPANION_CHANCE)));
     }
 
     /**
@@ -350,8 +369,13 @@ public final class PlayerMobConfig {
             .append("#   natural spawn (the mob itself is then suppressed). 0.0 = never replace it; 1.0 =\n")
             .append("#   always. Delete a line to fall back to naturalSpawnDefaultScale. Only takes effect\n")
             .append("#   while naturalSpawnEnabled=true.\n")
+            .append("#\n")
+            .append("# villageCompanionChance: chance (0.0-1.0), while naturalSpawnEnabled=true, that each\n")
+            .append("#   villager generated with a village ALSO spawns a PlayerMob beside it (additive — the\n")
+            .append("#   villager is not replaced). Default 0.25. 0.0 disables it.\n")
             .append(KEY_NATURAL_SPAWN_ENABLED).append("=").append(DEFAULT_NATURAL_SPAWN_ENABLED).append("\n")
-            .append(KEY_NATURAL_SPAWN_DEFAULT_SCALE).append("=").append(DEFAULT_NATURAL_SPAWN_SCALE).append("\n");
+            .append(KEY_NATURAL_SPAWN_DEFAULT_SCALE).append("=").append(DEFAULT_NATURAL_SPAWN_SCALE).append("\n")
+            .append(KEY_VILLAGE_COMPANION_CHANCE).append("=").append(DEFAULT_VILLAGE_COMPANION_CHANCE).append("\n");
         for (String id : NATURAL_SPAWN_MOBS) {
             body.append(NATURAL_SPAWN_SCALE_PREFIX).append(id).append("=")
                 .append(listedDefault(id, DEFAULT_NATURAL_SPAWN_SCALE)).append("\n");

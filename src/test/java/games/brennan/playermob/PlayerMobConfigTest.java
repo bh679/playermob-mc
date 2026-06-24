@@ -80,6 +80,17 @@ class PlayerMobConfigTest {
     }
 
     @Test
+    void villageCompanionChanceDefaultsAndClamps() {
+        assertEquals(0.25F, PlayerMobConfig.parse(new Properties()).villageCompanionChance(), 1e-6);
+        assertEquals(0.25F, PlayerMobConfig.DEFAULT_VILLAGE_COMPANION_CHANCE, 1e-6);
+        assertEquals(0.5F, PlayerMobConfig.parse(props("villageCompanionChance", "0.5")).villageCompanionChance(), 1e-6);
+        assertEquals(1.0F, PlayerMobConfig.parse(props("villageCompanionChance", "3")).villageCompanionChance(), 1e-6);
+        assertEquals(0.0F, PlayerMobConfig.parse(props("villageCompanionChance", "-1")).villageCompanionChance(), 1e-6);
+        // unparseable -> default
+        assertEquals(0.25F, PlayerMobConfig.parse(props("villageCompanionChance", "x")).villageCompanionChance(), 1e-6);
+    }
+
+    @Test
     void waterMobsDefaultToZeroLandMobsToDefaultScale() {
         // listed land mob -> default scale; listed water mob -> 0; unlisted -> 0
         assertEquals(0.8F, PlayerMobConfig.resolveScale(true, 0.8F, Map.of(), "minecraft:zombie"), 1e-6);

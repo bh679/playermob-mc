@@ -5,6 +5,7 @@ import games.brennan.playermob.PlayerMobRegistry;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.DifficultyInstance;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.level.ServerLevelAccessor;
 //? if >=26 {
@@ -70,24 +71,69 @@ public final class NaturalSpawnReplacer {
                                MobSpawnType reason
                                //?}
                                ) {
+        if (materialise(world, difficulty, reason, original.getX(), original.getY(), original.getZ(),
+                original.getYRot(), original.getXRot())) {
+            original.discard();
+        }
+    }
+
+    /** The spawn reason the village companion (and any non-replacement PlayerMob) is finalized under. */
+    //? if >=26 {
+    /*private static final EntitySpawnReason COMPANION_REASON = EntitySpawnReason.NATURAL;
+    *///?} else {
+    private static final MobSpawnType COMPANION_REASON = MobSpawnType.NATURAL;
+    //?}
+
+    /**
+     * When natural spawning is on, give {@code villager} a {@link PlayerMobConfig#villageCompanionChance}
+     * chance to spawn a PlayerMob <em>beside</em> it — additive, the villager is untouched. Called from
+     * {@code WorldGenRegionMixin} for every villager a village places at world generation, so each villager
+     * rolls independently (a large village can gain several). Runs on the worldgen worker thread; like
+     * {@link #replace} it draws from {@code world}'s (the region's) random, so it stays thread-safe.
+     */
+    public static void maybeSpawnVillageCompanion(ServerLevelAccessor world, Entity villager) {
+        if (!PlayerMobConfig.naturalSpawnEnabled()) {
+            return;
+        }
+        float chance = PlayerMobConfig.villageCompanionChance();
+        if (chance <= 0.0F || !rolls(chance, world.getRandom().nextFloat())) {
+            return;
+        }
+        DifficultyInstance difficulty = world.getLevel().getCurrentDifficultyAt(villager.blockPosition());
+        materialise(world, difficulty, COMPANION_REASON, villager.getX(), villager.getY(), villager.getZ(),
+            villager.getYRot(), villager.getXRot());
+    }
+
+    /**
+     * Create a PlayerMob at the given pose, run its normal spawn rolls under {@code reason} via {@code world}
+     * (the spawn accessor — thread-correct random), and add it. {@code true} once it's added; {@code false}
+     * if the entity couldn't be created. Shared by {@link #replace} and {@link #maybeSpawnVillageCompanion}.
+     */
+    private static boolean materialise(ServerLevelAccessor world, DifficultyInstance difficulty,
+                                       //? if >=26 {
+                                       /*EntitySpawnReason reason,
+                                       *///?} else {
+                                       MobSpawnType reason,
+                                       //?}
+                                       double x, double y, double z, float yRot, float xRot) {
         PlayerMobEntity mob = create(world.getLevel()
             //? if >=26 {
             /*, reason*///?}
             );
         if (mob == null) {
-            return;
+            return false;
         }
         //? if >=26 {
-        /*mob.snapTo(original.getX(), original.getY(), original.getZ(), original.getYRot(), original.getXRot());
+        /*mob.snapTo(x, y, z, yRot, xRot);
         *///?} else {
-        mob.moveTo(original.getX(), original.getY(), original.getZ(), original.getYRot(), original.getXRot());
+        mob.moveTo(x, y, z, yRot, xRot);
         //?}
         //? if >=1.21.1 {
         mob.finalizeSpawn(world, difficulty, reason, null);
         //?} else {
         /*mob.finalizeSpawn(world, difficulty, reason, null, null);*///?}
         world.addFreshEntity(mob);
-        original.discard();
+        return true;
     }
 
     /**
