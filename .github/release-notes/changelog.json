@@ -186,6 +186,18 @@
       "released": true,
       "released_in": "v0.51.0",
       "released_at": "2026-06-24T05:43:55Z"
+    },
+    {
+      "id": "ain-metadata-dependency",
+      "version": "0.52.0",
+      "type": "chore",
+      "title": "Adventure Item Names: switch from bundled to suggested dependency",
+      "summary": "Adventure Item Names is no longer bundled inside PlayerMob's jar. It is now declared as a suggested dependency in the mod metadata, letting launchers and users manage the AIN version themselves. Existing users upgrading from a JiJ version will need to install AIN separately if they want its item-naming features.",
+      "highlights": [],
+      "date": "2026-06-24",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }

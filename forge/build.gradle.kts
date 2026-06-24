@@ -43,11 +43,6 @@ loom {
 repositories {
     mavenCentral()
     maven("https://maven.minecraftforge.net/")
-    // Modrinth maven — source of the bundled Adventure Item Names jar (Jar-in-Jar).
-    exclusiveContent {
-        forRepository { maven("https://api.modrinth.com/maven") { name = "Modrinth" } }
-        filter { includeGroup("maven.modrinth") }
-    }
 }
 
 val commonBundle: Configuration by configurations.creating {
@@ -81,18 +76,6 @@ dependencies {
     commonBundle(project(common.path, "namedElements")) { isTransitive = false }
     shadowBundle(project(common.path, "transformProductionForge")) { isTransitive = false }
 
-    // --- Bundle Adventure Item Names (Jar-in-Jar) ---
-    // Nest AIN's published Forge 1.21.1 jar so it auto-installs alongside PlayerMob.
-    // `include` is Loom's JiJ config (Forge jarJar). Pinned via ain_version; 1.21.1-only.
-    // Users disable it via AIN's own config or by removing the nested jar.
-    if (mc == "1.21.1") {
-        val ain = "maven.modrinth:adventureitemnames:${prop("ain_version")}+forge-1.21.1"
-        "include"(ain) { isTransitive = false }
-        // `include` nests AIN in the production jar but does NOT add it to the dev run
-        // classpath, so also load it at dev runtime to verify the bundle in `runClient`.
-        // Dev-only — modRuntimeOnly never affects the published jar.
-        "modRuntimeOnly"(ain) { isTransitive = false }
-    }
 }
 
 loom {
