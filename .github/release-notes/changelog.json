@@ -233,6 +233,23 @@
       "released": true,
       "released_in": "v0.54.0",
       "released_at": "2026-06-24T12:41:37Z"
+    },
+    {
+      "id": "latest-262-rendering-fixes",
+      "version": "0.55.0",
+      "type": "fix",
+      "title": "Fixed PlayerMob rendering on the \"latest\" (MC 26.2) build",
+      "summary": "The \"latest\" (Minecraft 26.2) build is now usable. Previously every PlayerMob rendered as the default Steve skin, the spawn-egg icons were missing (the purple-and-black \"missing texture\" checkerboard), the client could crash the moment a PlayerMob came into view, and the right-click editor menu in Creative was garbled. All four are fixed: PlayerMobs show their real, varied skins again, the spawn eggs show their proper coloured icons, rendering no longer crashes, and the editor menu lays out correctly. MC 1.20.1 and 1.21.1 were never affected.",
+      "highlights": [
+        "PlayerMobs on MC 26.2 show their real, varied skins again instead of all looking like Steve",
+        "Spawn-egg icons show their proper colours instead of the missing-texture checkerboard",
+        "Fixed a client crash that could fire when a PlayerMob came into view on 26.2",
+        "The right-click editor menu (Creative) renders correctly again on 26.2 \u2014 relationship portraits show as placeholder squares there for now"
+      ],
+      "date": "2026-06-24",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
