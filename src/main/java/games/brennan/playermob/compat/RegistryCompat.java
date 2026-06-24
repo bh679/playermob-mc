@@ -79,8 +79,25 @@ public final class RegistryCompat {
             @Override
             public ItemStack getDefaultInstance() {
                 ItemStack stack = super.getDefaultInstance();
-                stack.getOrCreateTag().put("EntityTag", entityData.copy());
+                ensureArchetypeEntityTag(stack, entityData);
                 return stack;
+            }
+            // A stack built with new ItemStack(item) — the creative tab, a bare /give, or
+            // pick-block — skips getDefaultInstance, so it carries no EntityTag. Inject it
+            // (only when absent, never clobbering an explicit one) before vanilla reads the
+            // stack tag at spawn, so the archetype pins its traits however the egg was made.
+            @Override
+            public net.minecraft.world.InteractionResult useOn(net.minecraft.world.item.context.UseOnContext context) {
+                ensureArchetypeEntityTag(context.getItemInHand(), entityData);
+                return super.useOn(context);
+            }
+            @Override
+            public net.minecraft.world.InteractionResultHolder<ItemStack> use(
+                    net.minecraft.world.level.Level level,
+                    net.minecraft.world.entity.player.Player player,
+                    net.minecraft.world.InteractionHand hand) {
+                ensureArchetypeEntityTag(player.getItemInHand(hand), entityData);
+                return super.use(level, player, hand);
             }
         };*/
         //?}
@@ -108,4 +125,19 @@ public final class RegistryCompat {
         //?} else {
         /*stack.getOrCreateTag().put("EntityTag", entityData.copy());*///?}
     }
+
+    //? if <1.21.1 {
+    /*// 1.20.1 has no default-NBT mechanism: a stack built with new ItemStack(item)
+    // (creative tab, bare /give, pick-block) skips getDefaultInstance and so carries no
+    // EntityTag. Inject the archetype's tag when the stack has none — never overwriting an
+    // explicit map-maker EntityTag — so the egg pins its traits however the stack was built.
+    // The tag includes "id", so vanilla's EntityType.updateCustomEntityTag resolves the
+    // type and merges the traits via entity.load at spawn time.
+    public static void ensureArchetypeEntityTag(ItemStack stack, CompoundTag entityData) {
+        CompoundTag tag = stack.getTag();
+        if (tag == null || !tag.contains("EntityTag")) {
+            stack.getOrCreateTag().put("EntityTag", entityData.copy());
+        }
+    }
+    *///?}
 }
