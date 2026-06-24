@@ -5,7 +5,7 @@
   "compatibilityLevel": "${mixin_compat}",
   "mixins": [
     "MobTargetSelectorAccessor",
-    "NaturalSpawnReplacerMixin",
+    "NaturalSpawnCompanionMixin",
     "PlayerDeathMixin",
     "RaiderTargetsPlayerMobMixin",
     "LivingHurtWitnessMixin",

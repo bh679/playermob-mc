@@ -16,14 +16,23 @@ stance at spawn (`HOSTILE_TO_PLAYERS`, `NEUTRAL`, etc.) without re-architecting.
 
 **Spawning:** Spawn egg + `/summon playermob:player_mob`, the Dungeon-Train event path, and
 **opt-in natural spawning**. Natural spawning ships **off** — enable it in
-`config/playermob.properties` with `naturalSpawnEnabled=true`, then give each vanilla mob a
-`naturalSpawnScale.<id>` chance (0.0–1.0) that a PlayerMob spawns **instead of** that mob on a
-natural spawn (e.g. `naturalSpawnScale.minecraft:zombie=0.1`). Land mobs without an explicit line
-use `naturalSpawnDefaultScale` (default **0.8**); water mobs (fish, squid, dolphin, axolotl,
-guardian, …) default to **0**. Toggle it live with `/playermob naturalspawn on|off` and
-`/playermob naturalspawn <mob> on|off|<chance>` (op, session-only). While natural spawning is on,
-each villager a village generates also has a `villageCompanionChance` (default **0.25**) to spawn a
-PlayerMob **beside** it (additive — the villager is not replaced). No raid participation.
+`config/playermob.properties` with `naturalSpawnEnabled=true`. When on, each vanilla mob has a
+`naturalSpawnScale.<id>` chance (0.0–1.0) that a PlayerMob spawns **beside** it on a natural spawn
+(additive — the mob is **not** replaced; villages spawn PlayerMobs among their villagers too). Each
+mob's line defaults to its group:
+
+| Group | Default | Examples |
+|---|---|---|
+| Hostile | 0.0 | zombie, skeleton, creeper, … |
+| Nether | 0.05 | blaze, piglin, ghast, … |
+| Animals | 0.15 | cow, pig, sheep, … |
+| Friendly | 0.15 | wolf, fox, bee, … |
+| Water | 0.0 | cod, squid, dolphin, … |
+| Villager | 0.25 | villager, iron_golem |
+
+Tune it live (op, session-only): `/playermob naturalspawn on|off`,
+`/playermob naturalspawn <mob> on|off|<chance>`, and
+`/playermob naturalspawn group <group> on|off|<chance>`. No raid participation.
 
 ## Build
 

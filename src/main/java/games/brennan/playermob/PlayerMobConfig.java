@@ -11,7 +11,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
-import java.util.Set;
 
 /**
  * The mod's lone config file — {@code config/playermob.properties}, loaded once at startup from
@@ -33,10 +32,8 @@ public final class PlayerMobConfig {
     private static final String KEY_TRAIN_DIG_THROUGH = "trainDigThrough";
     private static final String KEY_TRAIN_FOLLOW_LOVED_PLAYER = "trainFollowLovedPlayer";
     private static final String KEY_NATURAL_SPAWN_ENABLED = "naturalSpawnEnabled";
-    private static final String KEY_NATURAL_SPAWN_DEFAULT_SCALE = "naturalSpawnDefaultScale";
-    /** Prefix for per-mob replacement-chance keys, e.g. {@code naturalSpawnScale.minecraft:zombie}. */
+    /** Prefix for per-mob companion-chance keys, e.g. {@code naturalSpawnScale.minecraft:zombie}. */
     private static final String NATURAL_SPAWN_SCALE_PREFIX = "naturalSpawnScale.";
-    private static final String KEY_VILLAGE_COMPANION_CHANCE = "villageCompanionChance";
 
     /** Default chance a Dungeon-Train echo with logged friends also brings back a friend-echo. */
     public static final float DEFAULT_ECHO_FRIEND_CHANCE = 0.40F;
@@ -48,68 +45,97 @@ public final class PlayerMobConfig {
     public static final boolean DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER = true;
     /** Natural spawning ships OFF — PlayerMobs only appear via egg, {@code /summon}, or Dungeon Train until enabled. */
     public static final boolean DEFAULT_NATURAL_SPAWN_ENABLED = false;
-    /**
-     * When natural spawning is on, the chance a PlayerMob replaces a listed <em>land</em> mob lacking an
-     * explicit override. Water mobs ({@link #WATER_SPAWN_MOBS}) default to {@code 0} instead — a
-     * player-shaped pillager standing in for a fish/squid underwater is rarely wanted.
-     */
-    public static final float DEFAULT_NATURAL_SPAWN_SCALE = 0.8F;
-    /**
-     * When natural spawning is on, the chance each villager generated with a village also spawns a
-     * PlayerMob <em>beside</em> it (additive — the villager is not replaced). {@code 0} disables it.
-     */
-    public static final float DEFAULT_VILLAGE_COMPANION_CHANCE = 0.25F;
 
     /**
-     * The vanilla mobs that spawn naturally — each gets a generated {@code naturalSpawnScale.<id>} line in
-     * the default config and, when natural spawning is on, may be replaced by a PlayerMob at
-     * {@link #DEFAULT_NATURAL_SPAWN_SCALE} unless overridden. Ids absent from a given MC version (e.g.
-     * {@code bogged} pre-1.21) simply never match a real spawn, so listing them is harmless across versions.
-     * Order is preserved for the generated config block (grouped: overworld hostile, nether/end, passive).
+     * The mob groups natural spawning understands. Each carries the default chance that, when natural
+     * spawning is on, a PlayerMob spawns <em>beside</em> a member mob (additive — the mob is never
+     * replaced), plus the member entity ids. {@link #NATURAL_SPAWN_MOBS} and {@link #MOB_GROUP} are
+     * derived from these lists so the catalogue and the grouping can't drift. Ids absent from a given MC
+     * version (e.g. {@code bogged} pre-1.21) simply never match a real spawn, so listing them is harmless.
      */
-    public static final List<String> NATURAL_SPAWN_MOBS = List.of(
-        // Overworld hostile
-        "minecraft:zombie", "minecraft:zombie_villager", "minecraft:husk", "minecraft:drowned",
-        "minecraft:skeleton", "minecraft:stray", "minecraft:bogged", "minecraft:creeper",
-        "minecraft:spider", "minecraft:cave_spider", "minecraft:witch", "minecraft:slime",
-        "minecraft:enderman", "minecraft:endermite", "minecraft:silverfish", "minecraft:phantom",
-        "minecraft:pillager", "minecraft:vindicator", "minecraft:evoker", "minecraft:ravager",
-        "minecraft:guardian",
-        // Nether / End
-        "minecraft:blaze", "minecraft:ghast", "minecraft:magma_cube", "minecraft:wither_skeleton",
-        "minecraft:piglin", "minecraft:piglin_brute", "minecraft:hoglin", "minecraft:zombified_piglin",
-        "minecraft:strider",
-        // Passive / ambient
-        "minecraft:cow", "minecraft:mooshroom", "minecraft:pig", "minecraft:sheep", "minecraft:chicken",
-        "minecraft:rabbit", "minecraft:horse", "minecraft:donkey", "minecraft:llama", "minecraft:wolf",
-        "minecraft:fox", "minecraft:goat", "minecraft:frog", "minecraft:turtle", "minecraft:panda",
-        "minecraft:ocelot", "minecraft:parrot", "minecraft:bat", "minecraft:polar_bear",
-        "minecraft:squid", "minecraft:glow_squid", "minecraft:dolphin", "minecraft:axolotl",
-        "minecraft:cod", "minecraft:salmon", "minecraft:pufferfish", "minecraft:tropical_fish",
-        "minecraft:bee");
+    public enum SpawnGroup {
+        HOSTILE(0.0F, List.of(
+            "minecraft:zombie", "minecraft:zombie_villager", "minecraft:husk", "minecraft:drowned",
+            "minecraft:skeleton", "minecraft:stray", "minecraft:bogged", "minecraft:creeper",
+            "minecraft:spider", "minecraft:cave_spider", "minecraft:witch", "minecraft:slime",
+            "minecraft:enderman", "minecraft:endermite", "minecraft:silverfish", "minecraft:phantom",
+            "minecraft:pillager", "minecraft:vindicator", "minecraft:evoker", "minecraft:ravager",
+            "minecraft:guardian")),
+        NETHER(0.05F, List.of(
+            "minecraft:blaze", "minecraft:ghast", "minecraft:magma_cube", "minecraft:wither_skeleton",
+            "minecraft:piglin", "minecraft:piglin_brute", "minecraft:hoglin", "minecraft:zombified_piglin",
+            "minecraft:strider")),
+        ANIMALS(0.15F, List.of(
+            "minecraft:cow", "minecraft:mooshroom", "minecraft:pig", "minecraft:sheep", "minecraft:chicken",
+            "minecraft:rabbit", "minecraft:horse", "minecraft:donkey", "minecraft:llama", "minecraft:goat",
+            "minecraft:frog", "minecraft:turtle", "minecraft:panda", "minecraft:polar_bear")),
+        FRIENDLY(0.15F, List.of(
+            "minecraft:wolf", "minecraft:fox", "minecraft:ocelot", "minecraft:parrot", "minecraft:bat",
+            "minecraft:bee")),
+        WATER(0.0F, List.of(
+            "minecraft:squid", "minecraft:glow_squid", "minecraft:dolphin", "minecraft:axolotl",
+            "minecraft:cod", "minecraft:salmon", "minecraft:pufferfish", "minecraft:tropical_fish")),
+        VILLAGER(0.25F, List.of(
+            "minecraft:villager", "minecraft:iron_golem"));
 
-    /** Membership view of {@link #NATURAL_SPAWN_MOBS} for the default-scale fallback in {@link #naturalSpawnScale}. */
-    private static final Set<String> NATURAL_SPAWN_SET = Set.copyOf(NATURAL_SPAWN_MOBS);
+        public final float defaultScale;
+        public final List<String> mobs;
+
+        SpawnGroup(float defaultScale, List<String> mobs) {
+            this.defaultScale = defaultScale;
+            this.mobs = mobs;
+        }
+
+        /** Case-insensitive lookup for the {@code /playermob naturalspawn group <name>} command; null if unknown. */
+        public static SpawnGroup byName(String name) {
+            for (SpawnGroup g : values()) {
+                if (g.name().equalsIgnoreCase(name)) {
+                    return g;
+                }
+            }
+            return null;
+        }
+    }
 
     /**
-     * The water-dwelling subset of {@link #NATURAL_SPAWN_MOBS} that defaults to a {@code 0} replacement
-     * chance (the rest default to {@link #DEFAULT_NATURAL_SPAWN_SCALE}). Users can still raise these via
-     * an explicit {@code naturalSpawnScale.<id>} line or the {@code /playermob naturalspawn} command.
+     * Every natural-spawn mob id, in group order — each gets a generated {@code naturalSpawnScale.<id>}
+     * line in the default config (at its group default). Derived from {@link SpawnGroup}.
      */
-    public static final Set<String> WATER_SPAWN_MOBS = Set.of(
-        "minecraft:squid", "minecraft:glow_squid", "minecraft:dolphin", "minecraft:axolotl",
-        "minecraft:cod", "minecraft:salmon", "minecraft:pufferfish", "minecraft:tropical_fish",
-        "minecraft:guardian");
+    public static final List<String> NATURAL_SPAWN_MOBS = buildMobList();
+
+    /** {@code id → group} for the default + group-membership lookups. Derived from {@link SpawnGroup}. */
+    private static final Map<String, SpawnGroup> MOB_GROUP = buildMobGroups();
+
+    private static List<String> buildMobList() {
+        List<String> all = new java.util.ArrayList<>();
+        for (SpawnGroup g : SpawnGroup.values()) {
+            all.addAll(g.mobs);
+        }
+        return List.copyOf(all);
+    }
+
+    private static Map<String, SpawnGroup> buildMobGroups() {
+        Map<String, SpawnGroup> map = new HashMap<>();
+        for (SpawnGroup g : SpawnGroup.values()) {
+            for (String id : g.mobs) {
+                map.put(id, g);
+            }
+        }
+        return Map.copyOf(map);
+    }
+
+    /** The group {@code typeId} belongs to, or {@code null} if it isn't a natural-spawn mob. */
+    public static SpawnGroup groupOf(String typeId) {
+        return MOB_GROUP.get(typeId);
+    }
 
     private static volatile float echoFriendChance = DEFAULT_ECHO_FRIEND_CHANCE;
     private static volatile boolean debugSpawnLog = DEFAULT_DEBUG_SPAWN_LOG;
     private static volatile boolean trainDigThrough = DEFAULT_TRAIN_DIG_THROUGH;
     private static volatile boolean trainFollowLovedPlayer = DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER;
     private static volatile boolean naturalSpawnEnabled = DEFAULT_NATURAL_SPAWN_ENABLED;
-    private static volatile float naturalSpawnDefaultScale = DEFAULT_NATURAL_SPAWN_SCALE;
     /** Per-mob explicit overrides (id → clamped 0–1 chance); immutable, replaced wholesale on {@link #load}. */
     private static volatile Map<String, Float> naturalSpawnScales = Map.of();
-    private static volatile float villageCompanionChance = DEFAULT_VILLAGE_COMPANION_CHANCE;
 
     private PlayerMobConfig() {}
 
@@ -141,30 +167,31 @@ public final class PlayerMobConfig {
         return trainFollowLovedPlayer;
     }
 
-    /** Master switch for natural spawning — when false (default) no mob is ever replaced by a PlayerMob. */
+    /** Master switch for natural spawning — when false (default) no PlayerMob ever spawns alongside a mob. */
     public static boolean naturalSpawnEnabled() {
         return naturalSpawnEnabled;
     }
 
     /**
-     * The chance (0–1) a PlayerMob spawns <em>instead of</em> {@code typeId} on a natural spawn.
+     * The chance (0–1) a PlayerMob spawns <em>alongside</em> {@code typeId} on a natural spawn (additive —
+     * the mob is never replaced).
      *
      * <p>Returns {@code 0} when natural spawning is off. Otherwise an explicit
-     * {@code naturalSpawnScale.<typeId>} override wins; failing that, any mob in
-     * {@link #NATURAL_SPAWN_MOBS} falls back to {@link #naturalSpawnDefaultScale}; anything else is {@code 0}.
-     * Keyed by the entity-type id string (e.g. {@code "minecraft:zombie"}) so it stays free of the
+     * {@code naturalSpawnScale.<typeId>} override wins; failing that, a grouped mob falls back to its
+     * {@link SpawnGroup#defaultScale group default}; anything ungrouped is {@code 0}. Keyed by the
+     * entity-type id string (e.g. {@code "minecraft:zombie"}) so it stays free of the
      * {@code ResourceLocation}/{@code Identifier} split across MC versions.</p>
      */
     public static float naturalSpawnScale(String typeId) {
-        return resolveScale(naturalSpawnEnabled, naturalSpawnDefaultScale, naturalSpawnScales, typeId);
+        return resolveScale(naturalSpawnEnabled, naturalSpawnScales, typeId);
     }
 
     /**
-     * Pure resolution of a mob's replacement chance — extracted from {@link #naturalSpawnScale} so the
-     * master-off / explicit-override / listed-default / unlisted rules are unit-tested without touching
+     * Pure resolution of a mob's companion chance — extracted from {@link #naturalSpawnScale} so the
+     * master-off / explicit-override / group-default / ungrouped rules are unit-tested without touching
      * the static state or the filesystem.
      */
-    static float resolveScale(boolean enabled, float defaultScale, Map<String, Float> overrides, String typeId) {
+    static float resolveScale(boolean enabled, Map<String, Float> overrides, String typeId) {
         if (!enabled) {
             return 0.0F;
         }
@@ -172,33 +199,17 @@ public final class PlayerMobConfig {
         if (override != null) {
             return override;
         }
-        return listedDefault(typeId, defaultScale);
+        return listedDefault(typeId);
     }
 
     /**
-     * The generated/fallback chance for a listed mob with no explicit override: {@code defaultScale} for a
-     * land mob, {@code 0} for a {@link #WATER_SPAWN_MOBS water} mob, and {@code 0} for anything unlisted.
-     * Shared by {@link #resolveScale} and {@link #writeDefault} so the default file matches the runtime
-     * fallback exactly.
+     * The generated/fallback chance for a grouped mob with no explicit override — its
+     * {@link SpawnGroup#defaultScale group default}, or {@code 0} if ungrouped. Shared by
+     * {@link #resolveScale} and {@link #writeDefault} so the default file matches the runtime fallback.
      */
-    static float listedDefault(String typeId, float defaultScale) {
-        if (!NATURAL_SPAWN_SET.contains(typeId)) {
-            return 0.0F;
-        }
-        return WATER_SPAWN_MOBS.contains(typeId) ? 0.0F : defaultScale;
-    }
-
-    /** The default replacement chance applied to a listed mob with no explicit override (config / commands). */
-    public static float naturalSpawnDefaultScale() {
-        return naturalSpawnDefaultScale;
-    }
-
-    /**
-     * Chance (0–1), when natural spawning is on, that each villager generated with a village also spawns a
-     * PlayerMob beside it (additive — see {@code NaturalSpawnReplacer.maybeSpawnVillageCompanion}).
-     */
-    public static float villageCompanionChance() {
-        return villageCompanionChance;
+    static float listedDefault(String typeId) {
+        SpawnGroup group = MOB_GROUP.get(typeId);
+        return group == null ? 0.0F : group.defaultScale;
     }
 
     /**
@@ -229,6 +240,20 @@ public final class PlayerMobConfig {
     }
 
     /**
+     * Set every mob in {@code group} to {@code chance} at runtime (e.g. from
+     * {@code /playermob naturalspawn group <group> ...}). One copy-on-write of the override map, so spawn
+     * reads always see a complete map. A session override — not written back to the file.
+     */
+    public static void setGroupScale(SpawnGroup group, float chance) {
+        float clamped = clamp01(chance);
+        Map<String, Float> next = new HashMap<>(naturalSpawnScales);
+        for (String id : group.mobs) {
+            next.put(id, clamped);
+        }
+        naturalSpawnScales = Map.copyOf(next);
+    }
+
+    /**
      * Load {@code <configDir>/playermob.properties} into the static fields, writing a commented
      * default file first if none exists. Never throws — any failure logs and keeps the defaults.
      */
@@ -248,17 +273,13 @@ public final class PlayerMobConfig {
             trainDigThrough = v.trainDigThrough();
             trainFollowLovedPlayer = v.trainFollowLovedPlayer();
             naturalSpawnEnabled = v.naturalSpawnEnabled();
-            naturalSpawnDefaultScale = v.naturalSpawnDefaultScale();
             naturalSpawnScales = v.naturalSpawnScales();
-            villageCompanionChance = v.villageCompanionChance();
-            LOGGER.info("[{}] config: {}={}, {}={}, {}={}, {}={}, {}={}, {}={} ({} per-mob override(s)), {}={}",
+            LOGGER.info("[{}] config: {}={}, {}={}, {}={}, {}={}, {}={} ({} per-mob override(s))",
                 PlayerMob.MOD_ID,
                 KEY_ECHO_FRIEND_CHANCE, echoFriendChance, KEY_DEBUG_SPAWN_LOG, debugSpawnLog,
                 KEY_TRAIN_DIG_THROUGH, trainDigThrough,
                 KEY_TRAIN_FOLLOW_LOVED_PLAYER, trainFollowLovedPlayer,
-                KEY_NATURAL_SPAWN_ENABLED, naturalSpawnEnabled,
-                KEY_NATURAL_SPAWN_DEFAULT_SCALE, naturalSpawnDefaultScale, naturalSpawnScales.size(),
-                KEY_VILLAGE_COMPANION_CHANCE, villageCompanionChance);
+                KEY_NATURAL_SPAWN_ENABLED, naturalSpawnEnabled, naturalSpawnScales.size());
         } catch (IOException | RuntimeException e) {
             LOGGER.warn("[{}] failed to load {}; using defaults", PlayerMob.MOD_ID, FILE, e);
         }
@@ -267,8 +288,7 @@ public final class PlayerMobConfig {
     /** Parsed, validated values — split out (pure, no I/O) so the parsing rules are unit-tested. */
     record Values(float echoFriendChance, boolean debugSpawnLog, boolean trainDigThrough,
                   boolean trainFollowLovedPlayer, boolean naturalSpawnEnabled,
-                  float naturalSpawnDefaultScale, Map<String, Float> naturalSpawnScales,
-                  float villageCompanionChance) {}
+                  Map<String, Float> naturalSpawnScales) {}
 
     static Values parse(Properties props) {
         return new Values(
@@ -277,15 +297,13 @@ public final class PlayerMobConfig {
             parseBool(props.getProperty(KEY_TRAIN_DIG_THROUGH), DEFAULT_TRAIN_DIG_THROUGH),
             parseBool(props.getProperty(KEY_TRAIN_FOLLOW_LOVED_PLAYER), DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER),
             parseBool(props.getProperty(KEY_NATURAL_SPAWN_ENABLED), DEFAULT_NATURAL_SPAWN_ENABLED),
-            clamp01(parseFloat(props.getProperty(KEY_NATURAL_SPAWN_DEFAULT_SCALE), DEFAULT_NATURAL_SPAWN_SCALE)),
-            parseScales(props),
-            clamp01(parseFloat(props.getProperty(KEY_VILLAGE_COMPANION_CHANCE), DEFAULT_VILLAGE_COMPANION_CHANCE)));
+            parseScales(props));
     }
 
     /**
      * Collect every {@code naturalSpawnScale.<id>} key into an immutable id → clamped-chance map. Only
      * keys with a parseable float are kept; a blank id or unparseable value is dropped so the mob falls
-     * through to {@link #naturalSpawnDefaultScale} (or 0 if unlisted) at lookup time.
+     * through to its group default (or 0 if ungrouped) at lookup time.
      */
     static Map<String, Float> parseScales(Properties props) {
         Map<String, Float> map = new HashMap<>();
@@ -361,24 +379,23 @@ public final class PlayerMobConfig {
             .append("# naturalSpawnEnabled: master switch. When false (default), PlayerMobs only appear\n")
             .append("#   via spawn egg, /summon, or Dungeon Train — never naturally. Set true to let the\n")
             .append("#   per-mob chances below take effect.\n")
-            .append("# naturalSpawnDefaultScale: the chance (0.0-1.0) used for any land mob below whose line\n")
-            .append("#   is deleted. Default 0.8. Water mobs (fish, squid, dolphin, axolotl, guardian, …)\n")
-            .append("#   default to 0.0 instead — raise their line to spawn PlayerMobs underwater.\n")
             .append("#\n")
-            .append("# naturalSpawnScale.<id>: chance (0.0-1.0) a PlayerMob spawns INSTEAD of that mob on a\n")
-            .append("#   natural spawn (the mob itself is then suppressed). 0.0 = never replace it; 1.0 =\n")
-            .append("#   always. Delete a line to fall back to naturalSpawnDefaultScale. Only takes effect\n")
-            .append("#   while naturalSpawnEnabled=true.\n")
-            .append("#\n")
-            .append("# villageCompanionChance: chance (0.0-1.0), while naturalSpawnEnabled=true, that each\n")
-            .append("#   villager generated with a village ALSO spawns a PlayerMob beside it (additive — the\n")
-            .append("#   villager is not replaced). Default 0.25. 0.0 disables it.\n")
-            .append(KEY_NATURAL_SPAWN_ENABLED).append("=").append(DEFAULT_NATURAL_SPAWN_ENABLED).append("\n")
-            .append(KEY_NATURAL_SPAWN_DEFAULT_SCALE).append("=").append(DEFAULT_NATURAL_SPAWN_SCALE).append("\n")
-            .append(KEY_VILLAGE_COMPANION_CHANCE).append("=").append(DEFAULT_VILLAGE_COMPANION_CHANCE).append("\n");
-        for (String id : NATURAL_SPAWN_MOBS) {
-            body.append(NATURAL_SPAWN_SCALE_PREFIX).append(id).append("=")
-                .append(listedDefault(id, DEFAULT_NATURAL_SPAWN_SCALE)).append("\n");
+            .append("# naturalSpawnScale.<id>: chance (0.0-1.0) that, when that mob spawns naturally, a\n")
+            .append("#   PlayerMob ALSO spawns beside it (additive — the mob is NOT replaced). 0.0 = never;\n")
+            .append("#   1.0 = always. Each line below defaults to its group's chance:\n")
+            .append("#     Hostile 0.0   Nether 0.05   Animals 0.15   Friendly 0.15   Water 0.0   Villager 0.25\n")
+            .append("#   Edit individual lines, or set a whole group live with\n")
+            .append("#   /playermob naturalspawn group <group> <chance>. Delete a line to fall back to its\n")
+            .append("#   group default. Only takes effect while naturalSpawnEnabled=true.\n")
+            .append(KEY_NATURAL_SPAWN_ENABLED).append("=").append(DEFAULT_NATURAL_SPAWN_ENABLED).append("\n");
+        for (SpawnGroup group : SpawnGroup.values()) {
+            body.append("# --- ").append(group.name().charAt(0))
+                .append(group.name().substring(1).toLowerCase(java.util.Locale.ROOT))
+                .append(" (").append(group.defaultScale).append(") ---\n");
+            for (String id : group.mobs) {
+                body.append(NATURAL_SPAWN_SCALE_PREFIX).append(id).append("=")
+                    .append(group.defaultScale).append("\n");
+            }
         }
         Files.writeString(file, body.toString());
     }

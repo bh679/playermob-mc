@@ -3,6 +3,7 @@ package games.brennan.playermob.player;
 import com.mojang.authlib.GameProfile;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.FloatArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import games.brennan.playermob.PlayerMobConfig;
@@ -38,8 +39,10 @@ import java.util.Collection;
  *       Dungeon-Train auto-spawn chat log for this session.</li>
  *   <li>{@code /playermob naturalspawn [on|off]} — toggle (or report) the natural-spawn master
  *       switch for this session.</li>
- *   <li>{@code /playermob naturalspawn <mob> on|off|<chance>} — set a mob's replacement chance
- *       (the chance a PlayerMob spawns instead of it on a natural spawn) for this session.</li>
+ *   <li>{@code /playermob naturalspawn <mob> on|off|<chance>} — set a mob's companion chance
+ *       (the chance a PlayerMob spawns <em>beside</em> it on a natural spawn) for this session.</li>
+ *   <li>{@code /playermob naturalspawn group <group> on|off|<chance>} — set every mob in a group
+ *       (hostile / nether / animals / friendly / water / villager) for this session.</li>
  * </ul>
  *
  * <p>Like {@code spawnlog}, the {@code naturalspawn} edits are session overrides — they take effect
@@ -84,11 +87,29 @@ public final class ReincarnateCommand {
                         .suggests((ctx, builder) ->
                             SharedSuggestionProvider.suggest(PlayerMobConfig.NATURAL_SPAWN_MOBS, builder))
                         .then(Commands.literal("on")
-                            .executes(ctx -> setMobScale(ctx, PlayerMobConfig.naturalSpawnDefaultScale())))
+                            .executes(ReincarnateCommand::setMobOn))
                         .then(Commands.literal("off")
                             .executes(ctx -> setMobScale(ctx, 0.0F)))
                         .then(Commands.argument("chance", FloatArgumentType.floatArg(0.0F, 1.0F))
-                            .executes(ctx -> setMobScale(ctx, FloatArgumentType.getFloat(ctx, "chance")))))));
+                            .executes(ctx -> setMobScale(ctx, FloatArgumentType.getFloat(ctx, "chance")))))
+                    .then(Commands.literal("group")
+                        .then(Commands.argument("group", StringArgumentType.word())
+                            .suggests((ctx, builder) -> SharedSuggestionProvider.suggest(GROUP_NAMES, builder))
+                            .then(Commands.literal("on").executes(ctx -> setGroup(ctx, null)))
+                            .then(Commands.literal("off").executes(ctx -> setGroup(ctx, 0.0F)))
+                            .then(Commands.argument("chance", FloatArgumentType.floatArg(0.0F, 1.0F))
+                                .executes(ctx -> setGroup(ctx, FloatArgumentType.getFloat(ctx, "chance"))))))));
+    }
+
+    /** Lower-case group names for {@code /playermob naturalspawn group <group>} tab-completion. */
+    private static final java.util.List<String> GROUP_NAMES = groupNames();
+
+    private static java.util.List<String> groupNames() {
+        java.util.List<String> names = new java.util.ArrayList<>();
+        for (PlayerMobConfig.SpawnGroup g : PlayerMobConfig.SpawnGroup.values()) {
+            names.add(g.name().toLowerCase(java.util.Locale.ROOT));
+        }
+        return java.util.List.copyOf(names);
     }
 
     /** {@code /playermob debug spawnlog} — report whether the DT-spawn debug log is on. */
@@ -108,12 +129,18 @@ public final class ReincarnateCommand {
         return 1;
     }
 
-    /** {@code /playermob naturalspawn} — report the master switch + how many per-mob overrides are set. */
+    /** {@code /playermob naturalspawn} — report the master switch + the group defaults. */
     private static int reportNaturalSpawn(CommandContext<CommandSourceStack> ctx) {
         boolean on = PlayerMobConfig.naturalSpawnEnabled();
+        StringBuilder groups = new StringBuilder();
+        for (PlayerMobConfig.SpawnGroup g : PlayerMobConfig.SpawnGroup.values()) {
+            if (groups.length() > 0) {
+                groups.append(", ");
+            }
+            groups.append(g.name().toLowerCase(java.util.Locale.ROOT)).append(' ').append(g.defaultScale);
+        }
         ctx.getSource().sendSuccess(() -> Component.literal(
-            "PlayerMob natural spawning is " + (on ? "ON" : "OFF") + " (default chance "
-                + PlayerMobConfig.naturalSpawnDefaultScale() + ")."), false);
+            "PlayerMob natural spawning is " + (on ? "ON" : "OFF") + ". Group defaults: " + groups + "."), false);
         return 1;
     }
 
@@ -125,21 +152,54 @@ public final class ReincarnateCommand {
         return 1;
     }
 
+    /** Resolve the {@code "mob"} resource-location argument to its id string (26.x renames the arg type). */
+    private static String mobArg(CommandContext<CommandSourceStack> ctx) {
+        //? if >=26 {
+        /*return net.minecraft.commands.arguments.IdentifierArgument.getId(ctx, "mob").toString();*///?} else {
+        return ResourceLocationArgument.getId(ctx, "mob").toString();
+        //?}
+    }
+
+    /** {@code /playermob naturalspawn <mob> on} — set one mob to its group default for this session. */
+    private static int setMobOn(CommandContext<CommandSourceStack> ctx) {
+        String mob = mobArg(ctx);
+        PlayerMobConfig.SpawnGroup group = PlayerMobConfig.groupOf(mob);
+        return setMobScale(ctx, group == null ? 0.0F : group.defaultScale);
+    }
+
     /**
-     * {@code /playermob naturalspawn <mob> on|off|<chance>} — set one mob's replacement chance for this
-     * session. Notes when the master switch is off (so the change won't take effect until it's turned on).
+     * {@code /playermob naturalspawn <mob> off|<chance>} — set one mob's companion chance for this session.
+     * Notes when the master switch is off (so the change won't take effect until it's turned on).
      */
     private static int setMobScale(CommandContext<CommandSourceStack> ctx, float chance) {
-        String mob =
-            //? if >=26 {
-            /*net.minecraft.commands.arguments.IdentifierArgument.getId(ctx, "mob").toString();*///?} else {
-            ResourceLocationArgument.getId(ctx, "mob").toString();
-            //?}
+        String mob = mobArg(ctx);
         PlayerMobConfig.setNaturalSpawnScale(mob, chance);
         String suffix = PlayerMobConfig.naturalSpawnEnabled()
             ? "" : " (natural spawning is OFF — /playermob naturalspawn on to apply)";
         ctx.getSource().sendSuccess(() -> Component.literal(
-            "PlayerMob replacement chance for " + mob + " set to " + chance + suffix + "."), false);
+            "PlayerMob companion chance for " + mob + " set to " + chance + suffix + "."), false);
+        return 1;
+    }
+
+    /**
+     * {@code /playermob naturalspawn group <group> on|off|<chance>} — set every mob in a group for this
+     * session. {@code chance == null} means "on" → the group's default. Fails on an unknown group name.
+     */
+    private static int setGroup(CommandContext<CommandSourceStack> ctx, Float chance) {
+        String name = StringArgumentType.getString(ctx, "group");
+        PlayerMobConfig.SpawnGroup group = PlayerMobConfig.SpawnGroup.byName(name);
+        if (group == null) {
+            ctx.getSource().sendFailure(Component.literal(
+                "Unknown group '" + name + "'. Valid: " + String.join(", ", GROUP_NAMES) + "."));
+            return 0;
+        }
+        float applied = chance != null ? chance : group.defaultScale;
+        PlayerMobConfig.setGroupScale(group, applied);
+        String suffix = PlayerMobConfig.naturalSpawnEnabled()
+            ? "" : " (natural spawning is OFF — /playermob naturalspawn on to apply)";
+        ctx.getSource().sendSuccess(() -> Component.literal(
+            "PlayerMob companion chance for group " + name.toLowerCase(java.util.Locale.ROOT)
+                + " (" + group.mobs.size() + " mobs) set to " + applied + suffix + "."), false);
         return 1;
     }
 
