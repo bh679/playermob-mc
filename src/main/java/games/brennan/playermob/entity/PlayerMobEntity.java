@@ -1208,6 +1208,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
                                         /*, net.minecraft.nbt.CompoundTag dataTag
                                         *///?}
                                         ) {
+        // Resolve any datapack skin entries that named a player (off-thread, cached, idempotent),
+        // so this and later spawns can draw the resolved skins. Cheap no-op once all are resolved.
+        PlayerMobSkinRegistry.ensureResolved(world.getLevel().getServer());
         // Dungeon Train spawns PlayerMobs via finalizeSpawn(..., EVENT, ...); give those
         // a chance to embody a stored past life instead of a fresh random mob. Applying the
         // snapshot here (before the rolls) pins skin + traits explicit, so the rolls below
@@ -1421,6 +1424,22 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     }
 
     // ---- Disposition accessors + behaviour helpers ------------------------
+
+    /**
+     * Pin one or both locked traits <em>before</em> {@code finalizeSpawn}, so the spawn roll keeps
+     * them instead of randomising (each setter marks the trait explicit — see
+     * {@link DispositionTraits#rollIfUnset}). A {@code null} leaves that trait to the normal random
+     * roll. Used by {@code /playermob summon} to honour its optional trait arguments. Values clamp
+     * to {@code [0, 10]}.
+     */
+    public void setExplicitTraits(Integer fightFlight, Integer friendliness) {
+        if (fightFlight != null) {
+            traits.setFightFlight(fightFlight);
+        }
+        if (friendliness != null) {
+            traits.setFriendliness(friendliness);
+        }
+    }
 
     public int fightFlight() {
         return traits.fightFlight();

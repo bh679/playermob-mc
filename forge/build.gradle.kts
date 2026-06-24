@@ -75,6 +75,7 @@ dependencies {
 
     commonBundle(project(common.path, "namedElements")) { isTransitive = false }
     shadowBundle(project(common.path, "transformProductionForge")) { isTransitive = false }
+
 }
 
 loom {

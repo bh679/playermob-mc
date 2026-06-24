@@ -14,8 +14,25 @@ attacker.
 A `Stance` enum is wired in from v1 — future versions will let each mob pick a
 stance at spawn (`HOSTILE_TO_PLAYERS`, `NEUTRAL`, etc.) without re-architecting.
 
-**v1 scope:** Spawn egg + `/summon playermob:player_mob` only. No natural spawns,
-no raid participation.
+**Spawning:** Spawn egg + `/summon playermob:player_mob`, the Dungeon-Train event path, and
+**opt-in natural spawning**. Natural spawning ships **off** — enable it in
+`config/playermob.properties` with `naturalSpawnEnabled=true`. When on, each vanilla mob has a
+`naturalSpawnScale.<id>` chance (0.0–1.0) that a PlayerMob spawns **beside** it on a natural spawn
+(additive — the mob is **not** replaced; villages spawn PlayerMobs among their villagers too). Each
+mob's line defaults to its group:
+
+| Group | Default | Examples |
+|---|---|---|
+| Hostile | 0.0 | zombie, skeleton, creeper, … |
+| Nether | 0.05 | blaze, piglin, ghast, … |
+| Animals | 0.15 | cow, pig, sheep, … |
+| Friendly | 0.15 | wolf, fox, bee, … |
+| Water | 0.0 | cod, squid, dolphin, … |
+| Villager | 0.25 | villager, iron_golem |
+
+Tune it live (op, session-only): `/playermob naturalspawn on|off`,
+`/playermob naturalspawn <mob> on|off|<chance>`, and
+`/playermob naturalspawn group <group> on|off|<chance>`. No raid participation.
 
 ## Build
 
@@ -31,6 +48,43 @@ Built jars land in:
 - `fabric/build/libs/playermob-fabric-<version>.jar`
 - `forge/build/libs/playermob-forge-<version>.jar`
 - `neoforge/build/libs/playermob-neoforge-<version>.jar`
+
+## Bundled mod — Adventure Item Names
+
+On **Minecraft 1.21.1** (Fabric, Forge, and NeoForge), PlayerMob ships with
+[Adventure Item Names](https://modrinth.com/mod/adventureitemnames) bundled inside its jar
+(Jar-in-Jar). AIN procedurally names naturally-spawned swords, tools, shields, and armor, and
+PlayerMob coordinates with its naming so reincarnated "echo" mobs keep their own names. You get
+the combined experience automatically — no separate download.
+
+**Turning it off.** AIN is a normal, self-contained nested mod; it isn't forced on:
+
+- Set AIN's naming probability to **0** in its in-game config screen (or its config file) to stop
+  the naming while keeping the mod loaded, **or**
+- Remove the bundled AIN jar from PlayerMob (most launchers let you disable individual
+  Jar-in-Jar mods; otherwise delete `adventureitemnames-*.jar` from PlayerMob's nested
+  `META-INF/jars/` — Fabric — or `META-INF/jarjar/` — Forge/NeoForge).
+
+The bundle is pinned via `ain_version` in `gradle.properties`. The 1.20.1 and 26.2 PlayerMob
+builds do **not** bundle AIN.
+
+## Custom skins & skin packs
+
+About 40% of PlayerMobs wear a real player's skin, drawn from a datapack-extensible pool. Mob-pack
+authors can grow that pool **without hunting down texture URLs** — just name a player and PlayerMob
+resolves their skin automatically:
+
+```json
+// data/<your_pack>/playermob_skins/notch.json
+{ "displayName": "Notch", "playerName": "Notch" }
+```
+
+You can also pin a specific skin in-game: `/playermob summon <player> [<pos>] [<friendliness>] [<fightFlight>]`
+spawns a PlayerMob wearing that player's skin (traits optional, default random). Mods can inject
+skins programmatically via the `SkinSources` seam.
+
+See the wiki for the full format, the resolution/offline caveats, and the modder API:
+**[Custom Skins](https://github.com/bh679/playermob-mc/wiki/Custom-Skins)**.
 
 ## External integration — reincarnation sources
 

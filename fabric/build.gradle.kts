@@ -79,6 +79,10 @@ configurations {
     get("developmentFabric").extendsFrom(commonBundle)
 }
 
+repositories {
+    mavenCentral()
+}
+
 dependencies {
     "minecraft"("com.mojang:minecraft:$mc")
     if (obfuscated) {

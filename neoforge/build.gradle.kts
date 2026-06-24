@@ -100,6 +100,7 @@ dependencies {
         // resolve at compile time even though we call none of those methods.
         compileOnly("org.joml:joml:1.10.5")
         compileOnly("org.joml:joml-primitives:1.10.0")
+
     }
 
     // `namedElements` is Loom's remap-namespace classpath variant — it only exists in the

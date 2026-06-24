@@ -19,8 +19,9 @@ import static org.junit.jupiter.api.Assertions.fail;
 /**
  * Sanity-checks the default skin pack shipped at
  * {@code data/playermob/playermob_skins/*.json}: every file parses through
- * {@link PlayerMobSkin#CODEC} and points at a {@code textures.minecraft.net}
- * URL. Guards against typo'd or broken-format JSON sneaking into a release.
+ * {@link PlayerMobSkinEntry#CODEC} (the codec the reload listener uses) and ships a
+ * {@code textures.minecraft.net} URL. Guards against typo'd or broken-format JSON
+ * sneaking into a release.
  */
 class DefaultSkinPackTest {
 
@@ -35,16 +36,17 @@ class DefaultSkinPackTest {
         try (Stream<Path> files = Files.list(skinsDir)) {
             for (Path file : (Iterable<Path>) files.filter(p -> p.toString().endsWith(".json"))::iterator) {
                 String body = Files.readString(file, StandardCharsets.UTF_8);
-                var result = PlayerMobSkin.CODEC.parse(
+                var result = PlayerMobSkinEntry.CODEC.parse(
                     JsonOps.INSTANCE, JsonParser.parseString(body));
                 if (result.error().isPresent()) {
                     fail("Failed to parse " + file.getFileName() + ": "
                          + result.error().get().message());
                 }
-                PlayerMobSkin skin = result.result().orElseThrow();
-                assertTrue(skin.textureUrl().startsWith(EXPECTED_URL_PREFIX),
+                PlayerMobSkinEntry entry = result.result().orElseThrow();
+                String url = entry.textureUrl().orElse("");
+                assertTrue(url.startsWith(EXPECTED_URL_PREFIX),
                     file.getFileName() + ": texture URL must start with "
-                    + EXPECTED_URL_PREFIX + " (got: " + skin.textureUrl() + ")");
+                    + EXPECTED_URL_PREFIX + " (got: " + url + ")");
                 parsed++;
             }
         }

@@ -30,9 +30,9 @@ import net.minecraftforge.client.event.AddGuiOverlayLayersEvent;
  * favour of Mojang's layered draw system, so the in-world HUD is added to the
  * {@code ForgeLayeredDraw} stack rather than registered as an overlay.</p>
  *
- * <p>Instantiated from {@link PlayerMobForge#PlayerMobForge(IEventBus)} only
- * inside the {@code FMLEnvironment.dist == Dist.CLIENT} guard — never loads
- * on a dedicated server boot.</p>
+ * <p>Instantiated from {@link PlayerMobForge} only inside the
+ * {@code FMLEnvironment.dist == Dist.CLIENT} guard — never loads on a
+ * dedicated server boot.</p>
  */
 public final class PlayerMobForgeClient {
 

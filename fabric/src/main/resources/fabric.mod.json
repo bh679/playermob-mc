@@ -24,5 +24,8 @@
     "minecraft": "${minecraft_range}",
     "java": ">=${java_min}",
     "fabric-api": "*"
+  },
+  "suggests": {
+    "adventureitemnames": "*"
   }
 }

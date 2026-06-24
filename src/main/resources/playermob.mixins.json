@@ -5,9 +5,11 @@
   "compatibilityLevel": "${mixin_compat}",
   "mixins": [
     "MobTargetSelectorAccessor",
+    "NaturalSpawnCompanionMixin",
     "PlayerDeathMixin",
     "RaiderTargetsPlayerMobMixin",
-    "LivingHurtWitnessMixin"
+    "LivingHurtWitnessMixin",
+    "WorldGenRegionMixin"
   ],
   "client": [],
   "server": [],
