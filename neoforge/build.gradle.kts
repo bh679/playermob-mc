@@ -100,6 +100,18 @@ dependencies {
         // resolve at compile time even though we call none of those methods.
         compileOnly("org.joml:joml:1.10.5")
         compileOnly("org.joml:joml-primitives:1.10.0")
+
+        // --- Bundle Adventure Item Names (Jar-in-Jar) ---
+        // Nest AIN's published NeoForge 1.21.1 jar so it auto-installs alongside PlayerMob.
+        // `include` is Loom's JiJ config (jarJar metadata on NeoForge). Pinned via ain_version;
+        // 1.21.1-only, matching where the PlayerMob↔AIN naming integration is verified. Users
+        // disable it via AIN's own config (naming probability → 0) or by removing the nested jar.
+        val ain = "maven.modrinth:adventureitemnames:${prop("ain_version")}+neoforge-1.21.1"
+        "include"(ain) { isTransitive = false }
+        // `include` nests AIN in the production jar but does NOT add it to the dev run
+        // classpath, so also load it at dev runtime to verify the bundle in `runClient`.
+        // Dev-only — modRuntimeOnly never affects the published jar.
+        "modRuntimeOnly"(ain) { isTransitive = false }
     }
 
     // `namedElements` is Loom's remap-namespace classpath variant — it only exists in the

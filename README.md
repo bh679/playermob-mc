@@ -49,6 +49,25 @@ Built jars land in:
 - `forge/build/libs/playermob-forge-<version>.jar`
 - `neoforge/build/libs/playermob-neoforge-<version>.jar`
 
+## Bundled mod — Adventure Item Names
+
+On **Minecraft 1.21.1** (Fabric, Forge, and NeoForge), PlayerMob ships with
+[Adventure Item Names](https://modrinth.com/mod/adventureitemnames) bundled inside its jar
+(Jar-in-Jar). AIN procedurally names naturally-spawned swords, tools, shields, and armor, and
+PlayerMob coordinates with its naming so reincarnated "echo" mobs keep their own names. You get
+the combined experience automatically — no separate download.
+
+**Turning it off.** AIN is a normal, self-contained nested mod; it isn't forced on:
+
+- Set AIN's naming probability to **0** in its in-game config screen (or its config file) to stop
+  the naming while keeping the mod loaded, **or**
+- Remove the bundled AIN jar from PlayerMob (most launchers let you disable individual
+  Jar-in-Jar mods; otherwise delete `adventureitemnames-*.jar` from PlayerMob's nested
+  `META-INF/jars/` — Fabric — or `META-INF/jarjar/` — Forge/NeoForge).
+
+The bundle is pinned via `ain_version` in `gradle.properties`. The 1.20.1 and 26.2 PlayerMob
+builds do **not** bundle AIN.
+
 ## External integration — reincarnation sources
 
 When a player dies, PlayerMob snapshots their life (skin, gear, traits, feelings, where they
