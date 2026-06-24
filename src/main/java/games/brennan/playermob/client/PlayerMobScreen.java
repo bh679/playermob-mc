@@ -315,20 +315,22 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     }
 
     //? if >=26 {
-    /*// 26.x collapsed render/renderBg/renderLabels into a single extractRenderState override.
-    // super draws the dimmed background, slot cells, and items; tooltips are handled
-    // automatically by the base class now (no renderTooltip call). We then layer all the
-    // custom drawing on top: the programmatic panel (renderBg), the disposition panel, and
-    // the objectives column (renderLabels).
-    // NOTE: on 26 the custom panel is drawn AFTER super (so it sits over the slot cells),
-    // which differs from the pre-26 order (panel was behind slots) — verify panel layering
-    // in-game on 26.
+    /*// 26.x renders screens via extractRenderState → extractContents → extractLabels, and the base
+    // translates the pose to (leftPos, topPos) and calls extractLabels BEFORE extractSlots. So
+    // extractLabels is the right hook for all our custom drawing: the panel + slot recesses land
+    // BEHIND the slot items, and tooltips are handled by the base automatically (no renderTooltip).
+    // renderBg and drawDispositionPanel use absolute (leftPos+) coords and must line up with the
+    // absolute edit-button widgets, so pop back to screen space for them; the objectives column is
+    // window-local, so it stays in the translated space.
     @Override
-    public void extractRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
-        super.extractRenderState(g, mouseX, mouseY, partialTick);
-        renderBg(g, partialTick, mouseX, mouseY);
+    protected void extractLabels(GuiGraphicsExtractor g, int mouseX, int mouseY) {
+        super.extractLabels(g, mouseX, mouseY);
+        g.pose().pushMatrix();
+        g.pose().translate(-this.leftPos, -this.topPos);
+        renderBg(g, 0f, mouseX, mouseY);
         drawDispositionPanel(g);
-        renderLabels(g, mouseX, mouseY);
+        g.pose().popMatrix();
+        drawObjectivesColumn(g, mouseX, mouseY);
     }
     *///?} else {
     @Override
@@ -339,20 +341,27 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     }
     //?}
 
+    // pre-26: the base window-local label hook. On 26.x there is no renderLabels override —
+    // extractLabels (above) calls drawObjectivesColumn directly in the same window-local space.
+    //? if <26 {
+    @Override
+    protected void renderLabels(GuiGraphics guiGraphics, int mouseX, int mouseY) {
+        super.renderLabels(guiGraphics, mouseX, mouseY);
+        drawObjectivesColumn(guiGraphics, mouseX, mouseY);
+    }
+    //?}
+
     /**
      * Draws the Creative objectives column to the right of the inventory: the
      * mob's live goal stack ("Objective" then an indented phase), read from the
      * synced {@link PlayerMobEntity#getObjectivesReadout()}. Refreshes each frame
-     * as the mob's goals change. Drawn in {@code renderLabels} so it's in the
-     * window-local coordinate space (origin at the top-left of the panel).
+     * as the mob's goals change. Drawn in window-local coordinate space (origin at
+     * the top-left of the panel) — pre-26 from renderLabels, on 26.x from extractLabels.
      */
     //? if >=26 {
-    /*// Called from extractRenderState on 26 (no base renderLabels to override — no @Override, no super).
-    protected void renderLabels(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY) {
+    /*private void drawObjectivesColumn(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY) {
     *///?} else {
-    @Override
-    protected void renderLabels(GuiGraphics guiGraphics, int mouseX, int mouseY) {
-        super.renderLabels(guiGraphics, mouseX, mouseY);
+    private void drawObjectivesColumn(GuiGraphics guiGraphics, int mouseX, int mouseY) {
     //?}
 
         PlayerMobEntity mob = this.menu.getMob();
