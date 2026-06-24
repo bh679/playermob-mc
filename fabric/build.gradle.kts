@@ -79,6 +79,15 @@ configurations {
     get("developmentFabric").extendsFrom(commonBundle)
 }
 
+repositories {
+    mavenCentral()
+    // Modrinth maven — source of the bundled Adventure Item Names jar (Jar-in-Jar).
+    exclusiveContent {
+        forRepository { maven("https://api.modrinth.com/maven") { name = "Modrinth" } }
+        filter { includeGroup("maven.modrinth") }
+    }
+}
+
 dependencies {
     "minecraft"("com.mojang:minecraft:$mc")
     if (obfuscated) {
@@ -88,6 +97,14 @@ dependencies {
     }
     modImpl("net.fabricmc:fabric-loader:$fabricLoaderVersion")
     modImpl("net.fabricmc.fabric-api:fabric-api:$fabricApiVersion")
+
+    // --- Bundle Adventure Item Names (Jar-in-Jar) ---
+    // Nest AIN's published Fabric 1.21.1 jar so it auto-installs alongside PlayerMob.
+    // `include` is Loom's JiJ config (fabric.mod.json `jars` entry). Pinned via ain_version;
+    // 1.21.1-only. Users disable it via AIN's own config or by removing the nested jar.
+    if (mc == "1.21.1") {
+        "include"("maven.modrinth:adventureitemnames:${prop("ain_version")}+fabric-1.21.1") { isTransitive = false }
+    }
 
     // `namedElements` is Loom's remap-namespace classpath variant — it only exists in the
     // obfuscated build. Under no-remap (deobfuscated 26.x) there's no remap namespace, so we
