@@ -76,9 +76,9 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     // Editable relationship rows shown; shared with FeelingEditButtons so the row
     // index ↔ button id mapping covers exactly the rows that have buttons.
     private static final int MAX_RELATIONSHIP_ROWS = FeelingEditButtons.MAX_ROWS;
-    private static final int LABEL_COLOR = 0x404040;
-    private static final int VALUE_COLOR = 0x202020;
-    private static final int MUTED_COLOR = 0x808080;
+    private static final int LABEL_COLOR = 0xFF404040;
+    private static final int VALUE_COLOR = 0xFF202020;
+    private static final int MUTED_COLOR = 0xFF808080;
     // Wide enough for the bars + the right-aligned edit buttons before the objectives divider.
     private static final int DISPOSITION_WIDTH = 136;
 
@@ -109,9 +109,9 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     // ---- Creative objectives column — right of the disposition panel ----
     private static final int OBJECTIVES_X = INVENTORY_WIDTH + DISPOSITION_WIDTH;
     private static final int OBJECTIVES_GUTTER = 124; // width reserved for the objectives column
-    private static final int OBJECTIVES_HEADER_COLOR = 0x404040;
-    private static final int OBJECTIVES_TEXT_COLOR = 0x404040;
-    private static final int OBJECTIVES_SUB_COLOR = 0x707070;
+    private static final int OBJECTIVES_HEADER_COLOR = 0xFF404040;
+    private static final int OBJECTIVES_TEXT_COLOR = 0xFF404040;
+    private static final int OBJECTIVES_SUB_COLOR = 0xFF707070;
 
     /** Names are stable for a session — resolve once per UUID. */
     private final Map<UUID, String> nameCache = new HashMap<>();
@@ -315,28 +315,32 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     }
 
     //? if >=26 {
-    /*// 26.x renders screens via extractRenderState → extractContents → extractLabels, and the base
-    // translates the pose to (leftPos, topPos) and calls extractLabels BEFORE extractSlots. So
-    // extractLabels is the right hook for all our custom drawing: the panel + slot recesses land
-    // BEHIND the slot items, and tooltips are handled by the base automatically (no renderTooltip).
-    // renderBg and drawDispositionPanel use absolute (leftPos+) coords and must line up with the
-    // absolute edit-button widgets, so pop back to screen space for them; the objectives column is
-    // window-local, so it stays in the translated space.
+    /*// 26.x renders screens via extractRenderState → extractContents → extractLabels. extractContents
+    // runs Screen.extractRenderState (which extracts the renderable WIDGETS) FIRST, then translates
+    // the pose to (leftPos, topPos) and calls extractLabels (before extractSlots). So we split it:
+    //  - the panel + slot recesses go in extractContents BEFORE super, in absolute coords, so they
+    //    sit behind BOTH the edit-button widgets and the slot items;
+    //  - the disposition panel + objectives column go in extractLabels (window-local), on top.
+    // Tooltips are handled by the base automatically (no renderTooltip).
+    @Override
+    public void extractContents(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
+        renderBg(g, partialTick, mouseX, mouseY); // absolute coords, BEFORE widgets + slots
+        super.extractContents(g, mouseX, mouseY, partialTick);
+    }
+
     @Override
     protected void extractLabels(GuiGraphicsExtractor g, int mouseX, int mouseY) {
         super.extractLabels(g, mouseX, mouseY);
-        // extractLabels runs with the pose already translated to (leftPos, topPos). renderBg,
-        // drawDispositionPanel, and the coord helpers all ADD leftPos/topPos for absolute space, so
-        // zero them for the duration: every coordinate resolves window-local, the base translate
-        // puts it back on screen, and value text still lines up with the absolute edit-button
-        // widgets. We must NOT touch g.pose() here — the extractor batches draw commands, so a
-        // mid-extract pushMatrix/translate corrupts the slot rendering.
+        // extractLabels runs pose-translated to (leftPos, topPos). drawDispositionPanel and the coord
+        // helpers all ADD leftPos/topPos for absolute space, so zero them for the duration: every
+        // coordinate resolves window-local, the base translate puts it back, and value text still
+        // lines up with the absolute edit-button widgets. (No g.pose() manipulation — the extractor
+        // batches draws, so a mid-extract translate corrupts the slot rendering.)
         int lp = this.leftPos;
         int tp = this.topPos;
         this.leftPos = 0;
         this.topPos = 0;
         try {
-            renderBg(g, 0f, mouseX, mouseY);
             drawDispositionPanel(g);
             drawObjectivesColumn(g, mouseX, mouseY);
         } finally {
