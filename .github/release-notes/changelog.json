@@ -167,6 +167,24 @@
       "released": false,
       "released_in": null,
       "released_at": null
+    },
+    {
+      "id": "natural-spawning",
+      "version": "0.51.0",
+      "type": "feat",
+      "title": "Natural spawning \u2014 PlayerMobs appear in the wild",
+      "summary": "PlayerMobs can now spawn naturally in your world, off by default. When enabled, a PlayerMob has a configurable chance to appear alongside a normally-spawning mob (the mob is never replaced), with sensible per-group defaults \u2014 and villages can be settled by PlayerMobs among their villagers.",
+      "highlights": [
+        "Opt-in: set naturalSpawnEnabled=true in config/playermob.properties (ships off).",
+        "Spawns BESIDE the mob, never replacing it \u2014 works for hostiles, nether mobs, animals, water, and villages.",
+        "Per-group default chances: Hostile 0.0, Nether 0.05, Animals 0.15, Friendly 0.15, Water 0.0, Villager 0.25 \u2014 each mob also tunable individually.",
+        "Villages: ~1/4 of villagers (and structure iron golems) get a PlayerMob companion.",
+        "Tune it live without a restart: /playermob naturalspawn on|off, /playermob naturalspawn <mob> on|off|<chance>, and /playermob naturalspawn group <group> on|off|<chance>."
+      ],
+      "date": "2026-06-24",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
