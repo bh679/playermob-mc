@@ -103,7 +103,12 @@ dependencies {
     // `include` is Loom's JiJ config (fabric.mod.json `jars` entry). Pinned via ain_version;
     // 1.21.1-only. Users disable it via AIN's own config or by removing the nested jar.
     if (mc == "1.21.1") {
-        "include"("maven.modrinth:adventureitemnames:${prop("ain_version")}+fabric-1.21.1") { isTransitive = false }
+        val ain = "maven.modrinth:adventureitemnames:${prop("ain_version")}+fabric-1.21.1"
+        "include"(ain) { isTransitive = false }
+        // `include` nests AIN in the production jar but does NOT add it to the dev run
+        // classpath, so also load it at dev runtime to verify the bundle in `runClient`.
+        // Dev-only — modRuntimeOnly never affects the published jar.
+        "modRuntimeOnly"(ain) { isTransitive = false }
     }
 
     // `namedElements` is Loom's remap-namespace classpath variant — it only exists in the

@@ -150,6 +150,23 @@
       "released": true,
       "released_in": "v0.49.0",
       "released_at": "2026-06-23T09:48:32Z"
+    },
+    {
+      "id": "bundle-adventure-item-names",
+      "version": "0.50.0",
+      "type": "feat",
+      "title": "Adventure Item Names now bundled in",
+      "summary": "PlayerMob now ships with Adventure Item Names built in on Minecraft 1.21.1 (Fabric, Forge, and NeoForge) \u2014 no separate download. Naturally-spawned swords, tools, shields, and armor get procedural names out of the box, and the two mods coordinate so reincarnated echo mobs keep their own names.",
+      "highlights": [
+        "Auto-installs alongside PlayerMob on MC 1.21.1 \u2014 no extra file to grab",
+        "Turn it off anytime: set Adventure Item Names' naming chance to 0 in its config, or remove the bundled mod",
+        "1.20.1 and 26.2 builds are unaffected (not bundled there yet)"
+      ],
+      "pr": 109,
+      "date": "2026-06-24",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
