@@ -3,15 +3,22 @@ package games.brennan.playermob.player;
 import com.mojang.authlib.GameProfile;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.FloatArgumentType;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.entity.DispositionTraits;
+import games.brennan.playermob.entity.PlayerMobEntity;
+import games.brennan.playermob.entity.PlayerMobSummon;
+import games.brennan.playermob.skin.PlayerSkinResolver;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.commands.arguments.GameProfileArgument;
+import net.minecraft.commands.arguments.coordinates.Vec3Argument;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.world.phys.Vec3;
 //? if >=26 {
 /*// 26.x renamed ResourceLocation → Identifier, so the namespaced-id argument is IdentifierArgument
 // (same id()/getId() shape). Referenced fully-qualified at the two call sites below.
@@ -35,6 +42,9 @@ import java.util.Collection;
  *       stamped with that player's last completed life.</li>
  *   <li>{@code /playermob life <player>} — read the in-progress life tally and the
  *       traits it would currently distil to (verify tracking without dying).</li>
+ *   <li>{@code /playermob summon <displayName> [<pos>] [<friendliness>] [<fightFlight>]} — spawn a
+ *       PlayerMob wearing that player's resolved skin, at an optional position (default: the command
+ *       source), with optional locked traits (default: random).</li>
  *   <li>{@code /playermob debug spawnlog [on|off]} — toggle (or report) the colour-coded
  *       Dungeon-Train auto-spawn chat log for this session.</li>
  *   <li>{@code /playermob naturalspawn [on|off]} — toggle (or report) the natural-spawn master
@@ -68,6 +78,20 @@ public final class ReincarnateCommand {
                 .then(Commands.literal("life")
                     .then(Commands.argument("player", GameProfileArgument.gameProfile())
                         .executes(ReincarnateCommand::life)))
+                .then(Commands.literal("summon")
+                    .then(Commands.argument("displayName", StringArgumentType.word())
+                        .executes(ctx -> summon(ctx, null, null, null))
+                        // Position chains before the traits (and a number alone would be ambiguous with
+                        // a vec3 coord), so use `~ ~ ~` to set traits "here" — mirrors /summon's [pos].
+                        .then(Commands.argument("pos", Vec3Argument.vec3())
+                            .executes(ctx -> summon(ctx, Vec3Argument.getVec3(ctx, "pos"), null, null))
+                            .then(Commands.argument("friendliness", IntegerArgumentType.integer(0, 10))
+                                .executes(ctx -> summon(ctx, Vec3Argument.getVec3(ctx, "pos"),
+                                    IntegerArgumentType.getInteger(ctx, "friendliness"), null))
+                                .then(Commands.argument("fightFlight", IntegerArgumentType.integer(0, 10))
+                                    .executes(ctx -> summon(ctx, Vec3Argument.getVec3(ctx, "pos"),
+                                        IntegerArgumentType.getInteger(ctx, "friendliness"),
+                                        IntegerArgumentType.getInteger(ctx, "fightFlight"))))))))
                 .then(Commands.literal("debug")
                     .then(Commands.literal("spawnlog")
                         .executes(ReincarnateCommand::querySpawnLog)
@@ -244,6 +268,41 @@ public final class ReincarnateCommand {
             traits.fightFlight(), traits.friendliness(),
             hasPast ? " (has a stored past life)" : "");
         source.sendSuccess(() -> Component.literal(summary), false);
+        return 1;
+    }
+
+    /**
+     * {@code /playermob summon <displayName> [<pos>] [<friendliness>] [<fightFlight>]} — spawn a
+     * PlayerMob wearing the named player's skin. The mob appears immediately (with a rolled skin)
+     * at {@code pos} (or the command source); the named player's real skin is resolved off-thread
+     * and applied a moment later, falling back to the rolled skin if the name can't be resolved
+     * (unknown name / offline server). Traits are pinned when supplied, else rolled.
+     */
+    private static int summon(CommandContext<CommandSourceStack> ctx, Vec3 pos,
+                              Integer friendliness, Integer fightFlight) {
+        CommandSourceStack source = ctx.getSource();
+        String name = StringArgumentType.getString(ctx, "displayName");
+        ServerLevel level = source.getLevel();
+        Vec3 at = pos != null ? pos : source.getPosition();
+        float yRot = source.getRotation().y;
+        PlayerMobEntity mob = PlayerMobSummon.summon(level, at.x, at.y, at.z, yRot, fightFlight, friendliness);
+        if (mob == null) {
+            source.sendFailure(Component.literal("Could not create a PlayerMob."));
+            return 0;
+        }
+        // Resolve the named player's skin off-thread; apply on the server thread when it lands.
+        MinecraftServer server = source.getServer();
+        PlayerSkinResolver.resolveAsync(server, name, opt -> {
+            if (mob.isRemoved()) {
+                return;
+            }
+            opt.ifPresent(resolved -> {
+                mob.setSkinTextureUrl(resolved.url());
+                mob.setSkinSlim(resolved.slim());
+            });
+        });
+        source.sendSuccess(() -> Component.literal("Summoned a PlayerMob for " + name
+            + " — resolving skin…"), true);
         return 1;
     }
 

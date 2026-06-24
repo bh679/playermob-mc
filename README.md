@@ -68,6 +68,24 @@ the combined experience automatically — no separate download.
 The bundle is pinned via `ain_version` in `gradle.properties`. The 1.20.1 and 26.2 PlayerMob
 builds do **not** bundle AIN.
 
+## Custom skins & skin packs
+
+About 40% of PlayerMobs wear a real player's skin, drawn from a datapack-extensible pool. Mob-pack
+authors can grow that pool **without hunting down texture URLs** — just name a player and PlayerMob
+resolves their skin automatically:
+
+```json
+// data/<your_pack>/playermob_skins/notch.json
+{ "displayName": "Notch", "playerName": "Notch" }
+```
+
+You can also pin a specific skin in-game: `/playermob summon <player> [<pos>] [<friendliness>] [<fightFlight>]`
+spawns a PlayerMob wearing that player's skin (traits optional, default random). Mods can inject
+skins programmatically via the `SkinSources` seam.
+
+See the wiki for the full format, the resolution/offline caveats, and the modder API:
+**[Custom Skins](https://github.com/bh679/playermob-mc/wiki/Custom-Skins)**.
+
 ## External integration — reincarnation sources
 
 When a player dies, PlayerMob snapshots their life (skin, gear, traits, feelings, where they

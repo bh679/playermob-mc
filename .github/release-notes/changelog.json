@@ -188,8 +188,26 @@
       "released_at": "2026-06-24T05:43:55Z"
     },
     {
-      "id": "ain-metadata-dependency",
+      "id": "skins-by-player-name",
       "version": "0.52.0",
+      "type": "feat",
+      "title": "Custom skins by player name",
+      "summary": "Mob-pack authors can now add a PlayerMob skin by simply naming a player \u2014 PlayerMob looks up that player's real skin (and arm model) automatically, so you no longer need to hunt down a texture URL. You can also summon a PlayerMob wearing a specific player's skin in-game, and mods can feed skins in through a new API.",
+      "highlights": [
+        "Datapack skins accept \"playerName\" instead of a \"textureUrl\" \u2014 the skin is resolved for you on /reload.",
+        "New command: /playermob summon <player> [<pos>] [<friendliness>] [<fightFlight>] spawns a PlayerMob wearing that player's skin (traits optional, default random).",
+        "Modders can add skins via the new SkinSources API.",
+        "Name lookups need internet and are cached; unknown names or an offline server fall back to a bundled skin. Pre-resolved textureUrl entries still work offline."
+      ],
+      "pr": 111,
+      "date": "2026-06-24",
+      "released": false,
+      "released_in": null,
+      "released_at": null
+    },
+    {
+      "id": "ain-metadata-dependency",
+      "version": "0.53.0",
       "type": "chore",
       "title": "Adventure Item Names: switch from bundled to suggested dependency",
       "summary": "Adventure Item Names is no longer bundled inside PlayerMob's jar. It is now declared as a suggested dependency in the mod metadata, letting launchers and users manage the AIN version themselves. Existing users upgrading from a JiJ version will need to install AIN separately if they want its item-naming features.",
