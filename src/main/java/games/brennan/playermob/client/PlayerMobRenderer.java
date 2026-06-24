@@ -243,9 +243,13 @@ public final class PlayerMobRenderer
         // default (Steve). Build the resolved skin onto state.skin itself, the vanilla way.
         Identifier pmResolved = resolveSkin(entity);
         boolean pmSlim = isSlimModel(entity);
-        // args: body, cape (none), elytra (none), arm model, secure(false ⇒ insecure)
+        // args: body, cape (none), elytra (none), arm model, secure(false ⇒ insecure).
+        // body uses verbatimTexture, NOT ClientAsset.ResourceTexture: resolveSkin already returns a
+        // fully-registered texture path (bundled "textures/.../name.png" or a SkinManager dynamic
+        // "skins/<hash>" id), whereas ResourceTexture re-wraps id → "textures/<id>.png" and would
+        // double it (textures/textures/.../steve.png.png).
         state.skin = new net.minecraft.world.entity.player.PlayerSkin(
-            new net.minecraft.core.ClientAsset.ResourceTexture(pmResolved),
+            verbatimTexture(pmResolved),
             null, null,
             pmSlim ? net.minecraft.world.entity.player.PlayerModelType.SLIM
                    : net.minecraft.world.entity.player.PlayerModelType.WIDE,
@@ -283,6 +287,16 @@ public final class PlayerMobRenderer
         // directly), but it's an abstract override we must supply — return the same source so the
         // two can never disagree, with the generic default as a null-guard.
         return state.skin != null ? state.skin.body().texturePath() : SkinCompat.defaultTexture();
+    }
+
+    // A ClientAsset.Texture that binds the given Identifier as-is. resolveSkin already hands back a
+    // fully-registered texture path, so the body must pass it through unchanged — unlike vanilla's
+    // ClientAsset.ResourceTexture, which maps id → "textures/<id>.png" (and would double the path).
+    private static net.minecraft.core.ClientAsset.Texture verbatimTexture(Identifier path) {
+        return new net.minecraft.core.ClientAsset.Texture() {
+            @Override public Identifier id() { return path; }
+            @Override public Identifier texturePath() { return path; }
+        };
     }
 
     // Draws the name tag plus, for a Creative observer, the billboarded objective readout
