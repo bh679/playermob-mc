@@ -7,7 +7,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 
 /**
  * The mod's lone config file — {@code config/playermob.properties}, loaded once at startup from
@@ -28,6 +32,10 @@ public final class PlayerMobConfig {
     private static final String KEY_DEBUG_SPAWN_LOG = "debugSpawnLog";
     private static final String KEY_TRAIN_DIG_THROUGH = "trainDigThrough";
     private static final String KEY_TRAIN_FOLLOW_LOVED_PLAYER = "trainFollowLovedPlayer";
+    private static final String KEY_NATURAL_SPAWN_ENABLED = "naturalSpawnEnabled";
+    private static final String KEY_NATURAL_SPAWN_DEFAULT_SCALE = "naturalSpawnDefaultScale";
+    /** Prefix for per-mob replacement-chance keys, e.g. {@code naturalSpawnScale.minecraft:zombie}. */
+    private static final String NATURAL_SPAWN_SCALE_PREFIX = "naturalSpawnScale.";
 
     /** Default chance a Dungeon-Train echo with logged friends also brings back a friend-echo. */
     public static final float DEFAULT_ECHO_FRIEND_CHANCE = 0.40F;
@@ -37,11 +45,50 @@ public final class PlayerMobConfig {
     public static final boolean DEFAULT_TRAIN_DIG_THROUGH = true;
     /** On a Dungeon Train, a PlayerMob that loves a player aboard heads to that player's carriage; on by default. */
     public static final boolean DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER = true;
+    /** Natural spawning ships OFF — PlayerMobs only appear via egg, {@code /summon}, or Dungeon Train until enabled. */
+    public static final boolean DEFAULT_NATURAL_SPAWN_ENABLED = false;
+    /** When natural spawning is on, the chance a PlayerMob replaces a listed mob lacking an explicit override. */
+    public static final float DEFAULT_NATURAL_SPAWN_SCALE = 0.05F;
+
+    /**
+     * The vanilla mobs that spawn naturally — each gets a generated {@code naturalSpawnScale.<id>} line in
+     * the default config and, when natural spawning is on, may be replaced by a PlayerMob at
+     * {@link #DEFAULT_NATURAL_SPAWN_SCALE} unless overridden. Ids absent from a given MC version (e.g.
+     * {@code bogged} pre-1.21) simply never match a real spawn, so listing them is harmless across versions.
+     * Order is preserved for the generated config block (grouped: overworld hostile, nether/end, passive).
+     */
+    public static final List<String> NATURAL_SPAWN_MOBS = List.of(
+        // Overworld hostile
+        "minecraft:zombie", "minecraft:zombie_villager", "minecraft:husk", "minecraft:drowned",
+        "minecraft:skeleton", "minecraft:stray", "minecraft:bogged", "minecraft:creeper",
+        "minecraft:spider", "minecraft:cave_spider", "minecraft:witch", "minecraft:slime",
+        "minecraft:enderman", "minecraft:endermite", "minecraft:silverfish", "minecraft:phantom",
+        "minecraft:pillager", "minecraft:vindicator", "minecraft:evoker", "minecraft:ravager",
+        "minecraft:guardian",
+        // Nether / End
+        "minecraft:blaze", "minecraft:ghast", "minecraft:magma_cube", "minecraft:wither_skeleton",
+        "minecraft:piglin", "minecraft:piglin_brute", "minecraft:hoglin", "minecraft:zombified_piglin",
+        "minecraft:strider",
+        // Passive / ambient
+        "minecraft:cow", "minecraft:mooshroom", "minecraft:pig", "minecraft:sheep", "minecraft:chicken",
+        "minecraft:rabbit", "minecraft:horse", "minecraft:donkey", "minecraft:llama", "minecraft:wolf",
+        "minecraft:fox", "minecraft:goat", "minecraft:frog", "minecraft:turtle", "minecraft:panda",
+        "minecraft:ocelot", "minecraft:parrot", "minecraft:bat", "minecraft:polar_bear",
+        "minecraft:squid", "minecraft:glow_squid", "minecraft:dolphin", "minecraft:axolotl",
+        "minecraft:cod", "minecraft:salmon", "minecraft:pufferfish", "minecraft:tropical_fish",
+        "minecraft:bee");
+
+    /** Membership view of {@link #NATURAL_SPAWN_MOBS} for the default-scale fallback in {@link #naturalSpawnScale}. */
+    private static final Set<String> NATURAL_SPAWN_SET = Set.copyOf(NATURAL_SPAWN_MOBS);
 
     private static volatile float echoFriendChance = DEFAULT_ECHO_FRIEND_CHANCE;
     private static volatile boolean debugSpawnLog = DEFAULT_DEBUG_SPAWN_LOG;
     private static volatile boolean trainDigThrough = DEFAULT_TRAIN_DIG_THROUGH;
     private static volatile boolean trainFollowLovedPlayer = DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER;
+    private static volatile boolean naturalSpawnEnabled = DEFAULT_NATURAL_SPAWN_ENABLED;
+    private static volatile float naturalSpawnDefaultScale = DEFAULT_NATURAL_SPAWN_SCALE;
+    /** Per-mob explicit overrides (id → clamped 0–1 chance); immutable, replaced wholesale on {@link #load}. */
+    private static volatile Map<String, Float> naturalSpawnScales = Map.of();
 
     private PlayerMobConfig() {}
 
@@ -73,6 +120,40 @@ public final class PlayerMobConfig {
         return trainFollowLovedPlayer;
     }
 
+    /** Master switch for natural spawning — when false (default) no mob is ever replaced by a PlayerMob. */
+    public static boolean naturalSpawnEnabled() {
+        return naturalSpawnEnabled;
+    }
+
+    /**
+     * The chance (0–1) a PlayerMob spawns <em>instead of</em> {@code typeId} on a natural spawn.
+     *
+     * <p>Returns {@code 0} when natural spawning is off. Otherwise an explicit
+     * {@code naturalSpawnScale.<typeId>} override wins; failing that, any mob in
+     * {@link #NATURAL_SPAWN_MOBS} falls back to {@link #naturalSpawnDefaultScale}; anything else is {@code 0}.
+     * Keyed by the entity-type id string (e.g. {@code "minecraft:zombie"}) so it stays free of the
+     * {@code ResourceLocation}/{@code Identifier} split across MC versions.</p>
+     */
+    public static float naturalSpawnScale(String typeId) {
+        return resolveScale(naturalSpawnEnabled, naturalSpawnDefaultScale, naturalSpawnScales, typeId);
+    }
+
+    /**
+     * Pure resolution of a mob's replacement chance — extracted from {@link #naturalSpawnScale} so the
+     * master-off / explicit-override / listed-default / unlisted rules are unit-tested without touching
+     * the static state or the filesystem.
+     */
+    static float resolveScale(boolean enabled, float defaultScale, Map<String, Float> overrides, String typeId) {
+        if (!enabled) {
+            return 0.0F;
+        }
+        Float override = overrides.get(typeId);
+        if (override != null) {
+            return override;
+        }
+        return NATURAL_SPAWN_SET.contains(typeId) ? defaultScale : 0.0F;
+    }
+
     /**
      * Toggle the DT-spawn debug log at runtime (e.g. from {@code /playermob debug spawnlog}). A session
      * override — not written back to the file, which stays the startup default.
@@ -100,10 +181,16 @@ public final class PlayerMobConfig {
             debugSpawnLog = v.debugSpawnLog();
             trainDigThrough = v.trainDigThrough();
             trainFollowLovedPlayer = v.trainFollowLovedPlayer();
-            LOGGER.info("[{}] config: {}={}, {}={}, {}={}, {}={}", PlayerMob.MOD_ID,
+            naturalSpawnEnabled = v.naturalSpawnEnabled();
+            naturalSpawnDefaultScale = v.naturalSpawnDefaultScale();
+            naturalSpawnScales = v.naturalSpawnScales();
+            LOGGER.info("[{}] config: {}={}, {}={}, {}={}, {}={}, {}={}, {}={} ({} per-mob override(s))",
+                PlayerMob.MOD_ID,
                 KEY_ECHO_FRIEND_CHANCE, echoFriendChance, KEY_DEBUG_SPAWN_LOG, debugSpawnLog,
                 KEY_TRAIN_DIG_THROUGH, trainDigThrough,
-                KEY_TRAIN_FOLLOW_LOVED_PLAYER, trainFollowLovedPlayer);
+                KEY_TRAIN_FOLLOW_LOVED_PLAYER, trainFollowLovedPlayer,
+                KEY_NATURAL_SPAWN_ENABLED, naturalSpawnEnabled,
+                KEY_NATURAL_SPAWN_DEFAULT_SCALE, naturalSpawnDefaultScale, naturalSpawnScales.size());
         } catch (IOException | RuntimeException e) {
             LOGGER.warn("[{}] failed to load {}; using defaults", PlayerMob.MOD_ID, FILE, e);
         }
@@ -111,14 +198,41 @@ public final class PlayerMobConfig {
 
     /** Parsed, validated values — split out (pure, no I/O) so the parsing rules are unit-tested. */
     record Values(float echoFriendChance, boolean debugSpawnLog, boolean trainDigThrough,
-                  boolean trainFollowLovedPlayer) {}
+                  boolean trainFollowLovedPlayer, boolean naturalSpawnEnabled,
+                  float naturalSpawnDefaultScale, Map<String, Float> naturalSpawnScales) {}
 
     static Values parse(Properties props) {
         return new Values(
             clamp01(parseFloat(props.getProperty(KEY_ECHO_FRIEND_CHANCE), DEFAULT_ECHO_FRIEND_CHANCE)),
             parseBool(props.getProperty(KEY_DEBUG_SPAWN_LOG), DEFAULT_DEBUG_SPAWN_LOG),
             parseBool(props.getProperty(KEY_TRAIN_DIG_THROUGH), DEFAULT_TRAIN_DIG_THROUGH),
-            parseBool(props.getProperty(KEY_TRAIN_FOLLOW_LOVED_PLAYER), DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER));
+            parseBool(props.getProperty(KEY_TRAIN_FOLLOW_LOVED_PLAYER), DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER),
+            parseBool(props.getProperty(KEY_NATURAL_SPAWN_ENABLED), DEFAULT_NATURAL_SPAWN_ENABLED),
+            clamp01(parseFloat(props.getProperty(KEY_NATURAL_SPAWN_DEFAULT_SCALE), DEFAULT_NATURAL_SPAWN_SCALE)),
+            parseScales(props));
+    }
+
+    /**
+     * Collect every {@code naturalSpawnScale.<id>} key into an immutable id → clamped-chance map. Only
+     * keys with a parseable float are kept; a blank id or unparseable value is dropped so the mob falls
+     * through to {@link #naturalSpawnDefaultScale} (or 0 if unlisted) at lookup time.
+     */
+    static Map<String, Float> parseScales(Properties props) {
+        Map<String, Float> map = new HashMap<>();
+        for (String name : props.stringPropertyNames()) {
+            if (!name.startsWith(NATURAL_SPAWN_SCALE_PREFIX)) {
+                continue;
+            }
+            String id = name.substring(NATURAL_SPAWN_SCALE_PREFIX.length()).trim();
+            if (id.isEmpty()) {
+                continue;
+            }
+            float parsed = parseFloat(props.getProperty(name), Float.NaN);
+            if (!Float.isNaN(parsed)) {
+                map.put(id, clamp01(parsed));
+            }
+        }
+        return Map.copyOf(map);
     }
 
     private static float parseFloat(String raw, float fallback) {
@@ -154,24 +268,42 @@ public final class PlayerMobConfig {
         if (file.getParent() != null) {
             Files.createDirectories(file.getParent());
         }
-        String body =
-            "# PlayerMob configuration.\n"
-            + "#\n"
-            + "# echoFriendChance: chance (0.0-1.0) that a Dungeon-Train echo which had logged\n"
-            + "#   friends also brings back a friend-echo of one of them. Default 0.4.\n"
-            + "# debugSpawnLog: when true, broadcasts a colour-coded chat message (and logs a line)\n"
-            + "#   on every Dungeon-Train PlayerMob auto-spawn — yellow=friend, purple=echo,\n"
-            + "#   green=echo+friend. Default false.\n"
-            + "# trainDigThrough: when true, a PlayerMob riding a Dungeon Train mines soft fill\n"
-            + "#   (ice, dirt, mud, moss, logs) blocking its march once it's stuck against it, to\n"
-            + "#   pass through a packed carriage. Default true.\n"
-            + "# trainFollowLovedPlayer: when true, a PlayerMob on a Dungeon Train that loves a player\n"
-            + "#   aboard the same train abandons its fixed march to head to that player's carriage,\n"
-            + "#   idling once it's in the same carriage. Default true.\n"
-            + KEY_ECHO_FRIEND_CHANCE + "=" + DEFAULT_ECHO_FRIEND_CHANCE + "\n"
-            + KEY_DEBUG_SPAWN_LOG + "=" + DEFAULT_DEBUG_SPAWN_LOG + "\n"
-            + KEY_TRAIN_DIG_THROUGH + "=" + DEFAULT_TRAIN_DIG_THROUGH + "\n"
-            + KEY_TRAIN_FOLLOW_LOVED_PLAYER + "=" + DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER + "\n";
-        Files.writeString(file, body);
+        StringBuilder body = new StringBuilder()
+            .append("# PlayerMob configuration.\n")
+            .append("#\n")
+            .append("# echoFriendChance: chance (0.0-1.0) that a Dungeon-Train echo which had logged\n")
+            .append("#   friends also brings back a friend-echo of one of them. Default 0.4.\n")
+            .append("# debugSpawnLog: when true, broadcasts a colour-coded chat message (and logs a line)\n")
+            .append("#   on every Dungeon-Train PlayerMob auto-spawn — yellow=friend, purple=echo,\n")
+            .append("#   green=echo+friend. Default false.\n")
+            .append("# trainDigThrough: when true, a PlayerMob riding a Dungeon Train mines soft fill\n")
+            .append("#   (ice, dirt, mud, moss, logs) blocking its march once it's stuck against it, to\n")
+            .append("#   pass through a packed carriage. Default true.\n")
+            .append("# trainFollowLovedPlayer: when true, a PlayerMob on a Dungeon Train that loves a player\n")
+            .append("#   aboard the same train abandons its fixed march to head to that player's carriage,\n")
+            .append("#   idling once it's in the same carriage. Default true.\n")
+            .append(KEY_ECHO_FRIEND_CHANCE).append("=").append(DEFAULT_ECHO_FRIEND_CHANCE).append("\n")
+            .append(KEY_DEBUG_SPAWN_LOG).append("=").append(DEFAULT_DEBUG_SPAWN_LOG).append("\n")
+            .append(KEY_TRAIN_DIG_THROUGH).append("=").append(DEFAULT_TRAIN_DIG_THROUGH).append("\n")
+            .append(KEY_TRAIN_FOLLOW_LOVED_PLAYER).append("=").append(DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER).append("\n")
+            .append("#\n")
+            .append("# --- Natural spawning (opt-in) ------------------------------------------------\n")
+            .append("# naturalSpawnEnabled: master switch. When false (default), PlayerMobs only appear\n")
+            .append("#   via spawn egg, /summon, or Dungeon Train — never naturally. Set true to let the\n")
+            .append("#   per-mob chances below take effect.\n")
+            .append("# naturalSpawnDefaultScale: the chance (0.0-1.0) used for any mob below whose line is\n")
+            .append("#   deleted. Default 0.05.\n")
+            .append("#\n")
+            .append("# naturalSpawnScale.<id>: chance (0.0-1.0) a PlayerMob spawns INSTEAD of that mob on a\n")
+            .append("#   natural spawn (the mob itself is then suppressed). 0.0 = never replace it; 1.0 =\n")
+            .append("#   always. Delete a line to fall back to naturalSpawnDefaultScale. Only takes effect\n")
+            .append("#   while naturalSpawnEnabled=true.\n")
+            .append(KEY_NATURAL_SPAWN_ENABLED).append("=").append(DEFAULT_NATURAL_SPAWN_ENABLED).append("\n")
+            .append(KEY_NATURAL_SPAWN_DEFAULT_SCALE).append("=").append(DEFAULT_NATURAL_SPAWN_SCALE).append("\n");
+        for (String id : NATURAL_SPAWN_MOBS) {
+            body.append(NATURAL_SPAWN_SCALE_PREFIX).append(id).append("=")
+                .append(DEFAULT_NATURAL_SPAWN_SCALE).append("\n");
+        }
+        Files.writeString(file, body.toString());
     }
 }

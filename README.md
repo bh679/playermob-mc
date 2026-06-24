@@ -14,8 +14,12 @@ attacker.
 A `Stance` enum is wired in from v1 — future versions will let each mob pick a
 stance at spawn (`HOSTILE_TO_PLAYERS`, `NEUTRAL`, etc.) without re-architecting.
 
-**v1 scope:** Spawn egg + `/summon playermob:player_mob` only. No natural spawns,
-no raid participation.
+**Spawning:** Spawn egg + `/summon playermob:player_mob`, the Dungeon-Train event path, and
+**opt-in natural spawning**. Natural spawning ships **off** — enable it in
+`config/playermob.properties` with `naturalSpawnEnabled=true`, then give each vanilla mob a
+`naturalSpawnScale.<id>` chance (0.0–1.0) that a PlayerMob spawns **instead of** that mob on a
+natural spawn (e.g. `naturalSpawnScale.minecraft:zombie=0.1`). Mobs without an explicit line use
+`naturalSpawnDefaultScale` (default 0.05). No raid participation.
 
 ## Build
 

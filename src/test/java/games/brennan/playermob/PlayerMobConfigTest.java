@@ -2,6 +2,7 @@ package games.brennan.playermob;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.Map;
 import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -67,6 +68,56 @@ class PlayerMobConfigTest {
         var v = PlayerMobConfig.parse(props("echoFriendChance", "abc", "debugSpawnLog", "yes"));
         assertEquals(PlayerMobConfig.DEFAULT_ECHO_FRIEND_CHANCE, v.echoFriendChance(), 1e-6);
         assertFalse(v.debugSpawnLog()); // "yes" is neither true nor false -> default (false)
+    }
+
+    @Test
+    void naturalSpawnDefaultsOffWithDefaultScale() {
+        var v = PlayerMobConfig.parse(new Properties());
+        assertFalse(v.naturalSpawnEnabled(), "natural spawning ships off");
+        assertFalse(PlayerMobConfig.DEFAULT_NATURAL_SPAWN_ENABLED);
+        assertEquals(0.05F, v.naturalSpawnDefaultScale(), 1e-6);
+        assertTrue(v.naturalSpawnScales().isEmpty(), "no per-mob overrides parsed from an empty file");
+    }
+
+    @Test
+    void naturalSpawnScaleOverridesParsedAndClamped() {
+        var v = PlayerMobConfig.parse(props(
+            "naturalSpawnEnabled", "true",
+            "naturalSpawnDefaultScale", "0.2",
+            "naturalSpawnScale.minecraft:zombie", "0.5",
+            "naturalSpawnScale.minecraft:creeper", "5",      // clamps to 1.0
+            "naturalSpawnScale.minecraft:cow", "-1",         // clamps to 0.0
+            "naturalSpawnScale.minecraft:pig", "abc",        // unparseable -> dropped
+            "naturalSpawnScale.", "0.9"));                   // blank id -> dropped
+        assertTrue(v.naturalSpawnEnabled());
+        assertEquals(0.2F, v.naturalSpawnDefaultScale(), 1e-6);
+        Map<String, Float> scales = v.naturalSpawnScales();
+        assertEquals(0.5F, scales.get("minecraft:zombie"), 1e-6);
+        assertEquals(1.0F, scales.get("minecraft:creeper"), 1e-6);
+        assertEquals(0.0F, scales.get("minecraft:cow"), 1e-6);
+        assertFalse(scales.containsKey("minecraft:pig"), "unparseable value is dropped");
+        assertEquals(3, scales.size(), "only zombie, creeper, cow survive (pig + blank-id dropped)");
+    }
+
+    @Test
+    void resolveScaleHonoursMasterOverrideAndDefault() {
+        Map<String, Float> overrides = Map.of("minecraft:zombie", 0.5F);
+        // master off -> always 0, even for an explicit override
+        assertEquals(0.0F, PlayerMobConfig.resolveScale(false, 0.05F, overrides, "minecraft:zombie"), 1e-6);
+        // explicit override wins
+        assertEquals(0.5F, PlayerMobConfig.resolveScale(true, 0.05F, overrides, "minecraft:zombie"), 1e-6);
+        // listed mob without override falls back to the default scale
+        assertEquals(0.05F, PlayerMobConfig.resolveScale(true, 0.05F, overrides, "minecraft:creeper"), 1e-6);
+        // unlisted mob -> 0 (never replaced)
+        assertEquals(0.0F, PlayerMobConfig.resolveScale(true, 0.05F, overrides, "minecraft:warden"), 1e-6);
+    }
+
+    @Test
+    void naturalSpawnMobListIsNonEmptyAndNamespaced() {
+        assertFalse(PlayerMobConfig.NATURAL_SPAWN_MOBS.isEmpty());
+        assertTrue(PlayerMobConfig.NATURAL_SPAWN_MOBS.contains("minecraft:zombie"));
+        assertTrue(PlayerMobConfig.NATURAL_SPAWN_MOBS.stream().allMatch(id -> id.contains(":")),
+            "every listed mob id is fully namespaced");
     }
 
     @Test
