@@ -84,7 +84,7 @@ spawns a PlayerMob wearing that player's skin (traits optional, default random).
 skins programmatically via the `SkinSources` seam.
 
 See the wiki for the full format, the resolution/offline caveats, and the modder API:
-**[Custom Skins & Skin Packs](https://github.com/bh679/playermob-mc/wiki/Custom-Skins-and-Skin-Packs)**.
+**[Custom Skins](https://github.com/bh679/playermob-mc/wiki/Custom-Skins)**.
 
 ## External integration — reincarnation sources
 
