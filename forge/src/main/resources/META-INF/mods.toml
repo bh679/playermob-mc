@@ -27,3 +27,10 @@ config="playermob.mixins.json"
     versionRange="${minecraft_range}"
     ordering="NONE"
     side="BOTH"
+
+[[dependencies.playermob]]
+    modId="adventureitemnames"
+    mandatory=false
+    versionRange="*"
+    ordering="NONE"
+    side="BOTH"
