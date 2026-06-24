@@ -216,6 +216,23 @@
       "released": true,
       "released_in": "v0.53.0",
       "released_at": "2026-06-24T11:30:25Z"
+    },
+    {
+      "id": "forge-1201-load-fix",
+      "version": "0.54.0",
+      "type": "fix",
+      "title": "Fixed PlayerMob crashing on startup on Forge 1.20.1",
+      "summary": "PlayerMob now loads on Forge 1.20.1. Previously the mod crashed the game on startup the instant it loaded, making it unusable on that version. The startup crash \u2014 and a second crash that surfaced right after it, where the spawn eggs failed to register \u2014 are both fixed. PlayerMob now loads, summons, and all six spawn eggs work on Forge 1.20.1. Forge 1.21.1, NeoForge, and Fabric were never affected.",
+      "highlights": [
+        "Forge 1.20.1 no longer crashes on startup when PlayerMob is installed",
+        "The PlayerMob spawn egg and the five archetype eggs now register and work on Forge 1.20.1",
+        "No change to Forge 1.21.1, NeoForge, or Fabric"
+      ],
+      "pr": 115,
+      "date": "2026-06-24",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
