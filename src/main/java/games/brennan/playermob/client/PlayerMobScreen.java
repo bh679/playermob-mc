@@ -325,12 +325,24 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     @Override
     protected void extractLabels(GuiGraphicsExtractor g, int mouseX, int mouseY) {
         super.extractLabels(g, mouseX, mouseY);
-        g.pose().pushMatrix();
-        g.pose().translate(-this.leftPos, -this.topPos);
-        renderBg(g, 0f, mouseX, mouseY);
-        drawDispositionPanel(g);
-        g.pose().popMatrix();
-        drawObjectivesColumn(g, mouseX, mouseY);
+        // extractLabels runs with the pose already translated to (leftPos, topPos). renderBg,
+        // drawDispositionPanel, and the coord helpers all ADD leftPos/topPos for absolute space, so
+        // zero them for the duration: every coordinate resolves window-local, the base translate
+        // puts it back on screen, and value text still lines up with the absolute edit-button
+        // widgets. We must NOT touch g.pose() here — the extractor batches draw commands, so a
+        // mid-extract pushMatrix/translate corrupts the slot rendering.
+        int lp = this.leftPos;
+        int tp = this.topPos;
+        this.leftPos = 0;
+        this.topPos = 0;
+        try {
+            renderBg(g, 0f, mouseX, mouseY);
+            drawDispositionPanel(g);
+            drawObjectivesColumn(g, mouseX, mouseY);
+        } finally {
+            this.leftPos = lp;
+            this.topPos = tp;
+        }
     }
     *///?} else {
     @Override
@@ -552,14 +564,13 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
 
     //? if >=26 {
     /*private void drawRelationshipRow(GuiGraphicsExtractor g, int x, int y, UUID id, float feeling) {
-        // PlayerFaceRenderer is gone in 26.2 with no replacement. Draw the 8x8 face directly
-        // from the 64x64 skin: base face region at uv (8,8), hat overlay at uv (40,8). The
-        // 9-arg blit overload is (Identifier, x, y, blitW, blitH, u, v, regionW, regionH);
-        // region size stays 8x8 even if FACE_SIZE scales the drawn size.
-        // NOTE: face blit (region/scaling) needs in-game visual verification on 26.
-        var faceTexture = resolveFaceTexture(id);
-        g.blit(faceTexture, x, y, FACE_SIZE, FACE_SIZE, 8f, 8f, 8f, 8f);
-        g.blit(faceTexture, x, y, FACE_SIZE, FACE_SIZE, 40f, 8f, 8f, 8f);
+        // PlayerFaceRenderer is gone in 26.2 and the 9-arg blit's UV-rect semantics differ from the
+        // pre-26 (u,v,regionW,regionH) form, so the per-skin 8x8 face is deferred on 26.x. Draw a
+        // small recessed placeholder square instead; the name + value still identify the row.
+        // TODO(26.2): restore the real face once the GuiGraphicsExtractor.blit UV rect is confirmed.
+        g.fill(x, y, x + FACE_SIZE, y + FACE_SIZE, 0xFF8B8B8B);
+        g.fill(x, y, x + FACE_SIZE, y + 1, 0xFF373737);
+        g.fill(x, y, x + 1, y + FACE_SIZE, 0xFF373737);
         String name = nameCache.computeIfAbsent(id, this::computeName);
         g.text(this.font, Component.literal(trim(name)), x + FACE_SIZE + 3, y, VALUE_COLOR, false);
         String value = String.format(Locale.ROOT, "%.1f", feeling);
