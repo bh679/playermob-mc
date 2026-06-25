@@ -266,6 +266,22 @@
       "released": true,
       "released_in": "v0.56.0",
       "released_at": "2026-06-25T00:40:16Z"
+    },
+    {
+      "id": "relationship-face-262",
+      "version": "0.57.0",
+      "type": "fix",
+      "title": "Relationship faces render again on the latest MC build",
+      "summary": "On the newest Minecraft build, the PlayerMob editor's relationship list was drawing a blank grey square instead of each remembered individual's face. Real faces are back \u2014 every row shows the actual skin (head + hat overlay) again, matching the 1.20.1 and 1.21.1 versions.",
+      "highlights": [
+        "Real per-skin faces restored in the relationship list on the latest MC build",
+        "Head and hat-overlay both render, identical to older versions"
+      ],
+      "pr": 122,
+      "date": "2026-06-25",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
