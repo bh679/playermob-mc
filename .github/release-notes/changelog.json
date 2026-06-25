@@ -370,6 +370,21 @@
       "released": true,
       "released_in": "v0.62.0",
       "released_at": "2026-06-25T09:54:10Z"
+    },
+    {
+      "id": "playermob-swing-animation",
+      "version": "0.63.1",
+      "type": "fix",
+      "title": "PlayerMobs now visibly swing their arms",
+      "summary": "PlayerMobs weren't playing their arm-swing animation \u2014 punches, attacks, and the /playermob order actions looked static. They now swing like a real player, and an ordered punchat throws 2\u20136 punch motions facing you.",
+      "highlights": [
+        "arm swings now animate in combat and for every order action",
+        "punchat faces you and throws 2\u20136 visible punches"
+      ],
+      "date": "2026-06-25",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
