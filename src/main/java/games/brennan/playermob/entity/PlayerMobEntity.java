@@ -3486,6 +3486,15 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             return;
         }
         ItemStack arrowStack = this.getProjectile(mainhand);
+        if (arrowStack.isEmpty()) {
+            // getProjectile() only sees the vanilla hand/equipment slots, never this mob's backpack
+            // inventory, so a bow PlayerMob whose arrows live in its pack resolves to an empty stack.
+            // getMobArrow would then build an arrow with an empty pickupItemStack, which crashes on the
+            // next world save (AbstractArrow#addAdditionalSaveData → ItemStack#save rejects an empty
+            // stack). Fall back to a plain arrow so the fired projectile always has a valid pickup item
+            // — the mob fires skeleton-style (no ammo consumed) regardless.
+            arrowStack = new ItemStack(Items.ARROW);
+        }
         //? if >=1.21.1 {
         AbstractArrow arrow = ProjectileUtil.getMobArrow(this, arrowStack, velocity, mainhand);
         //?} else {
