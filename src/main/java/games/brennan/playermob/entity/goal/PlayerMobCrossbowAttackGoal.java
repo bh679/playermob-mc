@@ -49,14 +49,15 @@ public final class PlayerMobCrossbowAttackGoal extends Goal {
 
     @Override
     public boolean canUse() {
-        return this.isValidTarget() && this.isHoldingCrossbow();
+        return this.isValidTarget() && this.isHoldingCrossbow() && this.mob.hasRangedAmmo();
     }
 
     @Override
     public boolean canContinueToUse() {
         return this.isValidTarget()
             && (this.canUse() || !this.mob.getNavigation().isDone())
-            && this.isHoldingCrossbow();
+            && this.isHoldingCrossbow()
+            && this.mob.hasRangedAmmo();
     }
 
     private boolean isHoldingCrossbow() {
@@ -121,7 +122,9 @@ public final class PlayerMobCrossbowAttackGoal extends Goal {
         this.mob.getLookControl().setLookAt(target, 30.0F, 30.0F);
 
         if (this.crossbowState == CrossbowState.UNCHARGED) {
-            if (!shouldClose) {
+            // Only begin a charge with arrows to load — otherwise the cycle would charge and fire a blank.
+            // (canUse/canContinueToUse already gate on this; the guard keeps the state machine honest.)
+            if (!shouldClose && this.mob.hasRangedAmmo()) {
                 this.mob.startUsingItem(ProjectileUtil.getWeaponHoldingHand(this.mob, Items.CROSSBOW));
                 this.crossbowState = CrossbowState.CHARGING;
                 this.mob.setChargingCrossbow(true);
@@ -145,6 +148,9 @@ public final class PlayerMobCrossbowAttackGoal extends Goal {
             }
         } else if (this.crossbowState == CrossbowState.READY_TO_ATTACK && canSee) {
             this.mob.performRangedAttack(target, 1.0F);
+            // The bolt has left the crossbow — consume one real arrow from the backpack. (getProjectile hands
+            // vanilla only a copy, so this is the single, deterministic depletion for the crossbow path.)
+            this.mob.consumeArrowForShot();
             // The shooting path already empties the charge; clear it again
             // defensively so the state machine and item agree on uncharged.
             ItemStack fired = this.mob.getItemInHand(

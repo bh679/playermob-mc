@@ -21,6 +21,7 @@ import games.brennan.playermob.entity.goal.HuntForFoodGoal;
 import games.brennan.playermob.entity.goal.PlayerMobDoorGoal;
 import games.brennan.playermob.entity.goal.RaidArmorStandsGoal;
 import games.brennan.playermob.entity.goal.RaidContainersGoal;
+import games.brennan.playermob.entity.goal.SeekArrowsGoal;
 import games.brennan.playermob.entity.goal.SkepticalWatchGoal;
 import games.brennan.playermob.entity.goal.TrainRecoveryGoal;
 import games.brennan.playermob.entity.goal.WeaponAwareAttackGoal;
@@ -103,6 +104,7 @@ import net.minecraft.world.item.Items;
 //? if >=1.21.1 {
 import net.minecraft.world.item.MaceItem;
 //?}
+import net.minecraft.world.item.ProjectileWeaponItem;
 //? if <26 {
 import net.minecraft.world.item.SwordItem;
 //?}
@@ -611,6 +613,12 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // mines fill blocking the march. No flags (like PlayerMobDoorGoal) so it never evicts the
         // advance goal — the mob keeps stepping into the gap as the wall clears. No-op off a train.
         this.goalSelector.addGoal(1, new DigThroughGoal(this));
+        // Out of arrows mid-fight? Fetch a nearby dropped arrow before fighting — registered BEFORE the
+        // attack goal at the same priority so its narrow canUse() (ranged weapon owned, no ammo, enemy not
+        // too close, an arrow within reach) wins the MOVE slot; otherwise the attack goal runs. After a
+        // restock its canUse() goes false and the attack goal re-draws ranged. No-op when seekArrowsWhenEmpty
+        // is off or requireArrows is off (the mob just melees instead).
+        this.goalSelector.addGoal(2, new SeekArrowsGoal(this, /* speed */ 1.0, /* scanRadius */ 10.0));
         this.goalSelector.addGoal(2, new WeaponAwareAttackGoal(this, 1.0, 8.0f));
         // Follow the one it loves (a player or another PlayerMob): priority 2 so it
         // deprioritises every own-task (raid 3, harvest 6, train-advance 7, stroll 8) to tag
@@ -2629,9 +2637,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     /** A located toolkit item: {@code slot == -1} means the main hand, else a backpack slot index. */
     private record Located(ItemStack stack, int slot) {}
 
-    /** Distance² thresholds for the combat weapon switch; the band between them prevents flicker. */
-    private static final double SWITCH_TO_MELEE_SQR = 16.0;  // within 4 blocks → draw melee
-    private static final double SWITCH_TO_RANGED_SQR = 64.0; // beyond 8 blocks → draw ranged
+    /** {@code d²} — squares an engage distance for comparison against {@code distanceToSqr}. */
+    private static double sq(double d) {
+        return d * d;
+    }
 
     /** Best item of {@code cat} across main hand + backpack, or null if the mob holds none. */
     private Located bestOfCategory(ItemPickupPolicy.WeaponCategory cat) {
@@ -2648,6 +2657,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             }
         }
         return best;
+    }
+
+    /** True if the mob carries a bow or crossbow anywhere (main hand or backpack) — used by {@link SeekArrowsGoal}. */
+    public boolean ownsRangedWeapon() {
+        return bestOfCategory(ItemPickupPolicy.WeaponCategory.RANGED) != null;
     }
 
     /** Best melee weapon — the harder-hitting of the best sword and best axe. */
@@ -2711,27 +2725,38 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * Combat weapon switch: draw the best ranged weapon when {@code target} is
      * far and the best melee when it's close, with a hysteresis band in between
      * so the mob doesn't flicker at the boundary. Pickaxes are never drawn for
-     * combat. Called every combat tick by {@link WeaponAwareAttackGoal} — a
-     * cheap no-op when the right weapon is already in hand.
+     * combat. The ranged weapon is only a candidate when the mob actually has
+     * ammo ({@link #hasRangedAmmo()}) — an out-of-arrows mob draws melee and
+     * closes in instead of dry-firing. Thresholds come from
+     * {@link PlayerMobConfig} (defaults 8 / 4 blocks). Called every combat tick
+     * by {@link WeaponAwareAttackGoal} — a cheap no-op when the right weapon is
+     * already in hand.
      */
     public void equipBestWeaponForTarget(LivingEntity target) {
         if (target == null) return;
         double distSq = distanceToSqr(target);
-        Located ranged = bestOfCategory(ItemPickupPolicy.WeaponCategory.RANGED);
+        double rangedSq = sq(PlayerMobConfig.rangedEngageDistance());
+        double meleeSq = sq(PlayerMobConfig.meleeEngageDistance());
+        // Only consider a ranged weapon if there's ammo to feed it; without arrows the mob fights melee.
+        Located ranged = hasRangedAmmo() ? bestOfCategory(ItemPickupPolicy.WeaponCategory.RANGED) : null;
         Located melee = bestMelee();
 
         Located desired;
-        if (ranged != null && distSq > SWITCH_TO_RANGED_SQR) {
+        if (ranged != null && distSq > rangedSq) {
             desired = ranged;
-        } else if (melee != null && distSq < SWITCH_TO_MELEE_SQR) {
+        } else if (melee != null && distSq < meleeSq) {
             desired = melee;
         } else {
             // Hysteresis band (or only one type owned): keep the current combat
-            // weapon if we have one, else fall back to whatever we do own.
+            // weapon if we have one, else fall back to whatever we do own. A held
+            // ranged weapon only "counts" while we have ammo ({@code ranged != null});
+            // out of arrows, drop it for melee so the mob draws its sword/axe rather
+            // than bashing with an empty bow.
             ItemPickupPolicy.WeaponCategory current = ItemPickupPolicy.weaponCategory(getMainHandItem());
-            if (current == ItemPickupPolicy.WeaponCategory.SWORD
-                    || current == ItemPickupPolicy.WeaponCategory.AXE
-                    || current == ItemPickupPolicy.WeaponCategory.RANGED) {
+            boolean keepCurrent = current == ItemPickupPolicy.WeaponCategory.SWORD
+                || current == ItemPickupPolicy.WeaponCategory.AXE
+                || (current == ItemPickupPolicy.WeaponCategory.RANGED && ranged != null);
+            if (keepCurrent) {
                 return;
             }
             desired = (melee != null) ? melee : ranged;
@@ -3442,14 +3467,28 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     public void performRangedAttack(LivingEntity target, float velocity) {
         ItemStack mainhand = this.getMainHandItem();
         if (mainhand.getItem() instanceof CrossbowItem) {
+            // Vanilla crossbow firing shoots the bolt already loaded into the charge. getProjectile hands
+            // vanilla a throwaway COPY (so it can't deplete the backpack itself); the one real arrow is
+            // consumed deterministically when the shot actually fires — see PlayerMobCrossbowAttackGoal.
             this.performCrossbowAttack(this, 1.6F);
             return;
         }
+        // Bow path. Don't dry-fire with no arrows (the goal also gates on this, but guard the fire itself).
+        if (!this.hasRangedAmmo()) {
+            return;
+        }
         ItemStack arrowStack = this.getProjectile(mainhand);
+        if (arrowStack.isEmpty()) {
+            return;
+        }
+        // Build the projectile from a single-count copy so consuming the backing stack below can't disturb
+        // the in-flight arrow's item (potion/tipped data is carried on the copy).
+        ItemStack projectileStack = arrowStack.copy();
+        projectileStack.setCount(1);
         //? if >=1.21.1 {
-        AbstractArrow arrow = ProjectileUtil.getMobArrow(this, arrowStack, velocity, mainhand);
+        AbstractArrow arrow = ProjectileUtil.getMobArrow(this, projectileStack, velocity, mainhand);
         //?} else {
-        /*AbstractArrow arrow = ProjectileUtil.getMobArrow(this, arrowStack, velocity);*///?}
+        /*AbstractArrow arrow = ProjectileUtil.getMobArrow(this, projectileStack, velocity);*///?}
 
         double dx = target.getX() - this.getX();
         double dy = target.getY(0.3333) - arrow.getY();
@@ -3464,6 +3503,53 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         this.playSound(SoundEvents.ARROW_SHOOT, 1.0F,
                        1.0F / (this.getRandom().nextFloat() * 0.4F + 0.8F));
         this.level().addFreshEntity(arrow);
+        // Consume one real arrow from the backpack now the bolt has left the bow.
+        this.consumeArrowForShot();
+    }
+
+    /**
+     * The projectile a bow/crossbow will fire — overridden so a PlayerMob draws from its <em>backpack</em>
+     * inventory, which vanilla {@code Mob.getProjectile} never consults (it only checks the hands and then
+     * hands back a phantom {@link Items#ARROW}). Returns a <em>copy</em> of the first backpack arrow so the
+     * fired projectile matches the real ammo (tipped/spectral arrows work) while vanilla can't itself deplete
+     * the backpack — the single real arrow is consumed deterministically at fire time (bow:
+     * {@link #performRangedAttack}; crossbow: {@code PlayerMobCrossbowAttackGoal}). This keeps consumption
+     * identical across MC versions regardless of vanilla's mob-side ammo rules.
+     *
+     * <p>With no arrows and {@code requireArrows} on, returns {@link ItemStack#EMPTY} so the ranged path can't
+     * fire; with {@code requireArrows} off it restores the vanilla phantom arrow (infinite ammo). Only meaningful
+     * for {@link ProjectileWeaponItem}s.</p>
+     */
+    @Override
+    public ItemStack getProjectile(ItemStack weapon) {
+        if (!(weapon.getItem() instanceof ProjectileWeaponItem)) {
+            return ItemStack.EMPTY;
+        }
+        int slot = RangedAmmo.firstArrowSlot(this.inventory);
+        if (slot >= 0) {
+            return this.inventory.getItem(slot).copy();
+        }
+        return PlayerMobConfig.requireArrows() ? ItemStack.EMPTY : new ItemStack(Items.ARROW);
+    }
+
+    /**
+     * Whether this mob may fire a ranged weapon right now: true when {@code requireArrows} is off (vanilla
+     * infinite ammo) or the backpack holds at least one arrow. Single source of truth for the ammo-aware weapon
+     * switch ({@link #equipBestWeaponForTarget}), both ranged combat goals, and {@link SeekArrowsGoal}.
+     */
+    public boolean hasRangedAmmo() {
+        return !PlayerMobConfig.requireArrows() || RangedAmmo.hasUsableAmmo(this.inventory);
+    }
+
+    /**
+     * Consume one backpack arrow for a fired shot. Called at the moment a bow or crossbow shot leaves the mob
+     * ({@link #performRangedAttack} / {@code PlayerMobCrossbowAttackGoal}). A no-op when {@code requireArrows}
+     * is off (ammo is "infinite") or the backpack is already empty.
+     */
+    public void consumeArrowForShot() {
+        if (PlayerMobConfig.requireArrows()) {
+            RangedAmmo.consumeOneArrow(this.inventory);
+        }
     }
 
     // ---- Sounds (player-like — mirrors vanilla Player exactly) -----------

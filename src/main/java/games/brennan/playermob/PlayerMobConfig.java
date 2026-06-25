@@ -35,6 +35,11 @@ public final class PlayerMobConfig {
     /** Prefix for per-mob companion-chance keys, e.g. {@code naturalSpawnScale.minecraft:zombie}. */
     private static final String NATURAL_SPAWN_SCALE_PREFIX = "naturalSpawnScale.";
 
+    private static final String KEY_REQUIRE_ARROWS = "requireArrows";
+    private static final String KEY_SEEK_ARROWS_WHEN_EMPTY = "seekArrowsWhenEmpty";
+    private static final String KEY_RANGED_ENGAGE_DISTANCE = "rangedEngageDistance";
+    private static final String KEY_MELEE_ENGAGE_DISTANCE = "meleeEngageDistance";
+
     /** Default chance a Dungeon-Train echo with logged friends also brings back a friend-echo. */
     public static final float DEFAULT_ECHO_FRIEND_CHANCE = 0.40F;
     /** Debug spawn logging ships off — when on it broadcasts a chat line on every DT auto-spawn. */
@@ -45,6 +50,14 @@ public final class PlayerMobConfig {
     public static final boolean DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER = true;
     /** Natural spawning ships OFF — PlayerMobs only appear via egg, {@code /summon}, or Dungeon Train until enabled. */
     public static final boolean DEFAULT_NATURAL_SPAWN_ENABLED = false;
+    /** Ranged weapons need real arrows in the mob's inventory; on by default. Off restores vanilla infinite ammo. */
+    public static final boolean DEFAULT_REQUIRE_ARROWS = true;
+    /** Out of arrows mid-fight, a PlayerMob fetches a nearby dropped arrow (enemy not too close); on by default. */
+    public static final boolean DEFAULT_SEEK_ARROWS_WHEN_EMPTY = true;
+    /** Beyond this many blocks a PlayerMob prefers a ranged weapon (default 8). */
+    public static final float DEFAULT_RANGED_ENGAGE_DISTANCE = 8.0F;
+    /** Within this many blocks a PlayerMob draws a melee weapon (default 4); must stay below the ranged distance. */
+    public static final float DEFAULT_MELEE_ENGAGE_DISTANCE = 4.0F;
 
     /**
      * The mob groups natural spawning understands. Each carries the default chance that, when natural
@@ -134,6 +147,10 @@ public final class PlayerMobConfig {
     private static volatile boolean trainDigThrough = DEFAULT_TRAIN_DIG_THROUGH;
     private static volatile boolean trainFollowLovedPlayer = DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER;
     private static volatile boolean naturalSpawnEnabled = DEFAULT_NATURAL_SPAWN_ENABLED;
+    private static volatile boolean requireArrows = DEFAULT_REQUIRE_ARROWS;
+    private static volatile boolean seekArrowsWhenEmpty = DEFAULT_SEEK_ARROWS_WHEN_EMPTY;
+    private static volatile float rangedEngageDistance = DEFAULT_RANGED_ENGAGE_DISTANCE;
+    private static volatile float meleeEngageDistance = DEFAULT_MELEE_ENGAGE_DISTANCE;
     /** Per-mob explicit overrides (id → clamped 0–1 chance); immutable, replaced wholesale on {@link #load}. */
     private static volatile Map<String, Float> naturalSpawnScales = Map.of();
 
@@ -170,6 +187,34 @@ public final class PlayerMobConfig {
     /** Master switch for natural spawning — when false (default) no PlayerMob ever spawns alongside a mob. */
     public static boolean naturalSpawnEnabled() {
         return naturalSpawnEnabled;
+    }
+
+    /**
+     * When true (default), a PlayerMob only fires a bow/crossbow if it carries real arrows, consuming one per
+     * shot and falling back to melee when empty. When false, ranged weapons have vanilla infinite ammo.
+     * See {@code PlayerMobEntity#hasRangedAmmo} / {@code RangedAmmo}.
+     */
+    public static boolean requireArrows() {
+        return requireArrows;
+    }
+
+    /**
+     * When true (default), a PlayerMob that runs out of arrows mid-fight walks to a nearby dropped arrow to
+     * restock (only if the enemy isn't too close), otherwise it closes to melee. See {@code SeekArrowsGoal}.
+     * No effect when {@link #requireArrows()} is off.
+     */
+    public static boolean seekArrowsWhenEmpty() {
+        return seekArrowsWhenEmpty;
+    }
+
+    /** Distance (blocks) beyond which a PlayerMob prefers a ranged weapon over melee. See {@code equipBestWeaponForTarget}. */
+    public static float rangedEngageDistance() {
+        return rangedEngageDistance;
+    }
+
+    /** Distance (blocks) within which a PlayerMob draws melee instead of ranged. Always below {@link #rangedEngageDistance()}. */
+    public static float meleeEngageDistance() {
+        return meleeEngageDistance;
     }
 
     /**
@@ -273,6 +318,10 @@ public final class PlayerMobConfig {
             trainDigThrough = v.trainDigThrough();
             trainFollowLovedPlayer = v.trainFollowLovedPlayer();
             naturalSpawnEnabled = v.naturalSpawnEnabled();
+            requireArrows = v.requireArrows();
+            seekArrowsWhenEmpty = v.seekArrowsWhenEmpty();
+            rangedEngageDistance = v.rangedEngageDistance();
+            meleeEngageDistance = v.meleeEngageDistance();
             naturalSpawnScales = v.naturalSpawnScales();
             LOGGER.info("[{}] config: {}={}, {}={}, {}={}, {}={}, {}={} ({} per-mob override(s))",
                 PlayerMob.MOD_ID,
@@ -280,6 +329,11 @@ public final class PlayerMobConfig {
                 KEY_TRAIN_DIG_THROUGH, trainDigThrough,
                 KEY_TRAIN_FOLLOW_LOVED_PLAYER, trainFollowLovedPlayer,
                 KEY_NATURAL_SPAWN_ENABLED, naturalSpawnEnabled, naturalSpawnScales.size());
+            LOGGER.info("[{}] combat config: {}={}, {}={}, {}={}, {}={}",
+                PlayerMob.MOD_ID,
+                KEY_REQUIRE_ARROWS, requireArrows, KEY_SEEK_ARROWS_WHEN_EMPTY, seekArrowsWhenEmpty,
+                KEY_RANGED_ENGAGE_DISTANCE, rangedEngageDistance,
+                KEY_MELEE_ENGAGE_DISTANCE, meleeEngageDistance);
         } catch (IOException | RuntimeException e) {
             LOGGER.warn("[{}] failed to load {}; using defaults", PlayerMob.MOD_ID, FILE, e);
         }
@@ -288,16 +342,36 @@ public final class PlayerMobConfig {
     /** Parsed, validated values — split out (pure, no I/O) so the parsing rules are unit-tested. */
     record Values(float echoFriendChance, boolean debugSpawnLog, boolean trainDigThrough,
                   boolean trainFollowLovedPlayer, boolean naturalSpawnEnabled,
+                  boolean requireArrows, boolean seekArrowsWhenEmpty,
+                  float rangedEngageDistance, float meleeEngageDistance,
                   Map<String, Float> naturalSpawnScales) {}
 
     static Values parse(Properties props) {
+        float[] engage = parseEngageDistances(props);
         return new Values(
             clamp01(parseFloat(props.getProperty(KEY_ECHO_FRIEND_CHANCE), DEFAULT_ECHO_FRIEND_CHANCE)),
             parseBool(props.getProperty(KEY_DEBUG_SPAWN_LOG), DEFAULT_DEBUG_SPAWN_LOG),
             parseBool(props.getProperty(KEY_TRAIN_DIG_THROUGH), DEFAULT_TRAIN_DIG_THROUGH),
             parseBool(props.getProperty(KEY_TRAIN_FOLLOW_LOVED_PLAYER), DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER),
             parseBool(props.getProperty(KEY_NATURAL_SPAWN_ENABLED), DEFAULT_NATURAL_SPAWN_ENABLED),
+            parseBool(props.getProperty(KEY_REQUIRE_ARROWS), DEFAULT_REQUIRE_ARROWS),
+            parseBool(props.getProperty(KEY_SEEK_ARROWS_WHEN_EMPTY), DEFAULT_SEEK_ARROWS_WHEN_EMPTY),
+            engage[0], engage[1],
             parseScales(props));
+    }
+
+    /**
+     * Parse the ranged/melee engage distances as a {@code {ranged, melee}} pair, enforcing the invariant
+     * {@code 0 < melee < ranged}. If either is unparseable or the band is inverted/degenerate, BOTH fall back
+     * to their defaults (8 / 4) so the combat switch always has a sane hysteresis band — fail-safe, never throws.
+     */
+    static float[] parseEngageDistances(Properties props) {
+        float ranged = parseFloat(props.getProperty(KEY_RANGED_ENGAGE_DISTANCE), DEFAULT_RANGED_ENGAGE_DISTANCE);
+        float melee = parseFloat(props.getProperty(KEY_MELEE_ENGAGE_DISTANCE), DEFAULT_MELEE_ENGAGE_DISTANCE);
+        if (!(melee > 0.0F && melee < ranged)) {
+            return new float[] {DEFAULT_RANGED_ENGAGE_DISTANCE, DEFAULT_MELEE_ENGAGE_DISTANCE};
+        }
+        return new float[] {ranged, melee};
     }
 
     /**
@@ -370,10 +444,24 @@ public final class PlayerMobConfig {
             .append("# trainFollowLovedPlayer: when true, a PlayerMob on a Dungeon Train that loves a player\n")
             .append("#   aboard the same train abandons its fixed march to head to that player's carriage,\n")
             .append("#   idling once it's in the same carriage. Default true.\n")
+            .append("# requireArrows: when true, a PlayerMob only fires a bow/crossbow if it carries real arrows,\n")
+            .append("#   consuming one per shot and falling back to melee when empty. Set false for vanilla\n")
+            .append("#   infinite ammo. Default true.\n")
+            .append("# seekArrowsWhenEmpty: when true, a PlayerMob out of arrows mid-fight walks to a nearby\n")
+            .append("#   dropped arrow to restock (only if the enemy isn't too close), otherwise it closes to\n")
+            .append("#   melee. No effect when requireArrows=false. Default true.\n")
+            .append("# rangedEngageDistance / meleeEngageDistance: a PlayerMob prefers a ranged weapon beyond\n")
+            .append("#   rangedEngageDistance blocks and melee within meleeEngageDistance blocks (the band\n")
+            .append("#   between is hysteresis). meleeEngageDistance must be > 0 and < rangedEngageDistance,\n")
+            .append("#   else both reset to 8 / 4. Defaults 8.0 / 4.0.\n")
             .append(KEY_ECHO_FRIEND_CHANCE).append("=").append(DEFAULT_ECHO_FRIEND_CHANCE).append("\n")
             .append(KEY_DEBUG_SPAWN_LOG).append("=").append(DEFAULT_DEBUG_SPAWN_LOG).append("\n")
             .append(KEY_TRAIN_DIG_THROUGH).append("=").append(DEFAULT_TRAIN_DIG_THROUGH).append("\n")
             .append(KEY_TRAIN_FOLLOW_LOVED_PLAYER).append("=").append(DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER).append("\n")
+            .append(KEY_REQUIRE_ARROWS).append("=").append(DEFAULT_REQUIRE_ARROWS).append("\n")
+            .append(KEY_SEEK_ARROWS_WHEN_EMPTY).append("=").append(DEFAULT_SEEK_ARROWS_WHEN_EMPTY).append("\n")
+            .append(KEY_RANGED_ENGAGE_DISTANCE).append("=").append(DEFAULT_RANGED_ENGAGE_DISTANCE).append("\n")
+            .append(KEY_MELEE_ENGAGE_DISTANCE).append("=").append(DEFAULT_MELEE_ENGAGE_DISTANCE).append("\n")
             .append("#\n")
             .append("# --- Natural spawning (opt-in) ------------------------------------------------\n")
             .append("# naturalSpawnEnabled: master switch. When false (default), PlayerMobs only appear\n")

@@ -45,12 +45,14 @@ public final class PlayerMobBowAttackGoal extends Goal {
 
     @Override
     public boolean canUse() {
-        return this.mob.getTarget() != null && this.isHoldingBow();
+        return this.mob.getTarget() != null && this.isHoldingBow() && this.mob.hasRangedAmmo();
     }
 
     @Override
     public boolean canContinueToUse() {
-        return (this.canUse() || !this.mob.getNavigation().isDone()) && this.isHoldingBow();
+        return (this.canUse() || !this.mob.getNavigation().isDone())
+            && this.isHoldingBow()
+            && this.mob.hasRangedAmmo();
     }
 
     private boolean isHoldingBow() {
