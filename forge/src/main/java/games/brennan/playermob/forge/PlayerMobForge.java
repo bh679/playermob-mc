@@ -139,8 +139,24 @@ public final class PlayerMobForge {
             @Override
             public net.minecraft.world.item.ItemStack getDefaultInstance() {
                 net.minecraft.world.item.ItemStack stack = super.getDefaultInstance();
-                stack.getOrCreateTag().put("EntityTag", entityData.copy());
+                games.brennan.playermob.compat.RegistryCompat.ensureArchetypeEntityTag(stack, entityData);
                 return stack;
+            }
+            // new ItemStack(item) (creative tab / bare /give / pick-block) skips
+            // getDefaultInstance, so the stack carries no EntityTag — inject it (only when
+            // absent) before vanilla reads the stack tag at spawn, so the archetype pins.
+            @Override
+            public net.minecraft.world.InteractionResult useOn(net.minecraft.world.item.context.UseOnContext context) {
+                games.brennan.playermob.compat.RegistryCompat.ensureArchetypeEntityTag(context.getItemInHand(), entityData);
+                return super.useOn(context);
+            }
+            @Override
+            public net.minecraft.world.InteractionResultHolder<net.minecraft.world.item.ItemStack> use(
+                    net.minecraft.world.level.Level level,
+                    net.minecraft.world.entity.player.Player player,
+                    net.minecraft.world.InteractionHand hand) {
+                games.brennan.playermob.compat.RegistryCompat.ensureArchetypeEntityTag(player.getItemInHand(hand), entityData);
+                return super.use(level, player, hand);
             }
         };*/
         //?}
@@ -164,10 +180,12 @@ public final class PlayerMobForge {
 
     private static void onBuildCreativeTab(BuildCreativeModeTabContentsEvent event) {
         if (event.getTabKey() == CreativeModeTabs.SPAWN_EGGS) {
-            event.accept(PLAYER_MOB_SPAWN_EGG.get());
+            // Add via getDefaultInstance() so the archetype eggs carry their entity_data /
+            // EntityTag (on 1.20.1 a bare item built by new ItemStack would drop it).
+            event.accept(PLAYER_MOB_SPAWN_EGG.get().getDefaultInstance());
             for (Archetype archetype : Archetype.values()) {
                 event.accept(BuiltInRegistries.ITEM.get(
-                    PlayerMobRegistry.archetypeSpawnEggId(archetype)));
+                    PlayerMobRegistry.archetypeSpawnEggId(archetype)).getDefaultInstance());
             }
         }
     }

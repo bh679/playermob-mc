@@ -113,10 +113,12 @@ public final class PlayerMobFabric implements ModInitializer {
         });
         *///?} else {
         ItemGroupEvents.modifyEntriesEvent(CreativeModeTabs.SPAWN_EGGS).register(entries -> {
-            entries.accept(PlayerMobRegistry.PLAYER_MOB_SPAWN_EGG);
+            // Add via getDefaultInstance() so the archetype eggs carry their entity_data /
+            // EntityTag (on 1.20.1 a bare item built by new ItemStack would drop it).
+            entries.accept(PlayerMobRegistry.PLAYER_MOB_SPAWN_EGG.getDefaultInstance());
             for (Archetype archetype : Archetype.values()) {
                 entries.accept(BuiltInRegistries.ITEM.get(
-                    PlayerMobRegistry.archetypeSpawnEggId(archetype)));
+                    PlayerMobRegistry.archetypeSpawnEggId(archetype)).getDefaultInstance());
             }
         });
         //?}

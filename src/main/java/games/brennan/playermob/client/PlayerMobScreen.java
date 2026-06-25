@@ -76,9 +76,9 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     // Editable relationship rows shown; shared with FeelingEditButtons so the row
     // index ↔ button id mapping covers exactly the rows that have buttons.
     private static final int MAX_RELATIONSHIP_ROWS = FeelingEditButtons.MAX_ROWS;
-    private static final int LABEL_COLOR = 0x404040;
-    private static final int VALUE_COLOR = 0x202020;
-    private static final int MUTED_COLOR = 0x808080;
+    private static final int LABEL_COLOR = 0xFF404040;
+    private static final int VALUE_COLOR = 0xFF202020;
+    private static final int MUTED_COLOR = 0xFF808080;
     // Wide enough for the bars + the right-aligned edit buttons before the objectives divider.
     private static final int DISPOSITION_WIDTH = 136;
 
@@ -109,9 +109,9 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     // ---- Creative objectives column — right of the disposition panel ----
     private static final int OBJECTIVES_X = INVENTORY_WIDTH + DISPOSITION_WIDTH;
     private static final int OBJECTIVES_GUTTER = 124; // width reserved for the objectives column
-    private static final int OBJECTIVES_HEADER_COLOR = 0x404040;
-    private static final int OBJECTIVES_TEXT_COLOR = 0x404040;
-    private static final int OBJECTIVES_SUB_COLOR = 0x707070;
+    private static final int OBJECTIVES_HEADER_COLOR = 0xFF404040;
+    private static final int OBJECTIVES_TEXT_COLOR = 0xFF404040;
+    private static final int OBJECTIVES_SUB_COLOR = 0xFF707070;
 
     /** Names are stable for a session — resolve once per UUID. */
     private final Map<UUID, String> nameCache = new HashMap<>();
@@ -315,20 +315,38 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     }
 
     //? if >=26 {
-    /*// 26.x collapsed render/renderBg/renderLabels into a single extractRenderState override.
-    // super draws the dimmed background, slot cells, and items; tooltips are handled
-    // automatically by the base class now (no renderTooltip call). We then layer all the
-    // custom drawing on top: the programmatic panel (renderBg), the disposition panel, and
-    // the objectives column (renderLabels).
-    // NOTE: on 26 the custom panel is drawn AFTER super (so it sits over the slot cells),
-    // which differs from the pre-26 order (panel was behind slots) — verify panel layering
-    // in-game on 26.
+    /*// 26.x renders screens via extractRenderState → extractContents → extractLabels. extractContents
+    // runs Screen.extractRenderState (which extracts the renderable WIDGETS) FIRST, then translates
+    // the pose to (leftPos, topPos) and calls extractLabels (before extractSlots). So we split it:
+    //  - the panel + slot recesses go in extractContents BEFORE super, in absolute coords, so they
+    //    sit behind BOTH the edit-button widgets and the slot items;
+    //  - the disposition panel + objectives column go in extractLabels (window-local), on top.
+    // Tooltips are handled by the base automatically (no renderTooltip).
     @Override
-    public void extractRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
-        super.extractRenderState(g, mouseX, mouseY, partialTick);
-        renderBg(g, partialTick, mouseX, mouseY);
-        drawDispositionPanel(g);
-        renderLabels(g, mouseX, mouseY);
+    public void extractContents(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
+        renderBg(g, partialTick, mouseX, mouseY); // absolute coords, BEFORE widgets + slots
+        super.extractContents(g, mouseX, mouseY, partialTick);
+    }
+
+    @Override
+    protected void extractLabels(GuiGraphicsExtractor g, int mouseX, int mouseY) {
+        super.extractLabels(g, mouseX, mouseY);
+        // extractLabels runs pose-translated to (leftPos, topPos). drawDispositionPanel and the coord
+        // helpers all ADD leftPos/topPos for absolute space, so zero them for the duration: every
+        // coordinate resolves window-local, the base translate puts it back, and value text still
+        // lines up with the absolute edit-button widgets. (No g.pose() manipulation — the extractor
+        // batches draws, so a mid-extract translate corrupts the slot rendering.)
+        int lp = this.leftPos;
+        int tp = this.topPos;
+        this.leftPos = 0;
+        this.topPos = 0;
+        try {
+            drawDispositionPanel(g);
+            drawObjectivesColumn(g, mouseX, mouseY);
+        } finally {
+            this.leftPos = lp;
+            this.topPos = tp;
+        }
     }
     *///?} else {
     @Override
@@ -339,20 +357,27 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     }
     //?}
 
+    // pre-26: the base window-local label hook. On 26.x there is no renderLabels override —
+    // extractLabels (above) calls drawObjectivesColumn directly in the same window-local space.
+    //? if <26 {
+    @Override
+    protected void renderLabels(GuiGraphics guiGraphics, int mouseX, int mouseY) {
+        super.renderLabels(guiGraphics, mouseX, mouseY);
+        drawObjectivesColumn(guiGraphics, mouseX, mouseY);
+    }
+    //?}
+
     /**
      * Draws the Creative objectives column to the right of the inventory: the
      * mob's live goal stack ("Objective" then an indented phase), read from the
      * synced {@link PlayerMobEntity#getObjectivesReadout()}. Refreshes each frame
-     * as the mob's goals change. Drawn in {@code renderLabels} so it's in the
-     * window-local coordinate space (origin at the top-left of the panel).
+     * as the mob's goals change. Drawn in window-local coordinate space (origin at
+     * the top-left of the panel) — pre-26 from renderLabels, on 26.x from extractLabels.
      */
     //? if >=26 {
-    /*// Called from extractRenderState on 26 (no base renderLabels to override — no @Override, no super).
-    protected void renderLabels(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY) {
+    /*private void drawObjectivesColumn(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY) {
     *///?} else {
-    @Override
-    protected void renderLabels(GuiGraphics guiGraphics, int mouseX, int mouseY) {
-        super.renderLabels(guiGraphics, mouseX, mouseY);
+    private void drawObjectivesColumn(GuiGraphics guiGraphics, int mouseX, int mouseY) {
     //?}
 
         PlayerMobEntity mob = this.menu.getMob();
@@ -543,14 +568,13 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
 
     //? if >=26 {
     /*private void drawRelationshipRow(GuiGraphicsExtractor g, int x, int y, UUID id, float feeling) {
-        // PlayerFaceRenderer is gone in 26.2 with no replacement. Draw the 8x8 face directly
-        // from the 64x64 skin: base face region at uv (8,8), hat overlay at uv (40,8). The
-        // 9-arg blit overload is (Identifier, x, y, blitW, blitH, u, v, regionW, regionH);
-        // region size stays 8x8 even if FACE_SIZE scales the drawn size.
-        // NOTE: face blit (region/scaling) needs in-game visual verification on 26.
-        var faceTexture = resolveFaceTexture(id);
-        g.blit(faceTexture, x, y, FACE_SIZE, FACE_SIZE, 8f, 8f, 8f, 8f);
-        g.blit(faceTexture, x, y, FACE_SIZE, FACE_SIZE, 40f, 8f, 8f, 8f);
+        // PlayerFaceRenderer is gone in 26.2 and the 9-arg blit's UV-rect semantics differ from the
+        // pre-26 (u,v,regionW,regionH) form, so the per-skin 8x8 face is deferred on 26.x. Draw a
+        // small recessed placeholder square instead; the name + value still identify the row.
+        // TODO(26.2): restore the real face once the GuiGraphicsExtractor.blit UV rect is confirmed.
+        g.fill(x, y, x + FACE_SIZE, y + FACE_SIZE, 0xFF8B8B8B);
+        g.fill(x, y, x + FACE_SIZE, y + 1, 0xFF373737);
+        g.fill(x, y, x + 1, y + FACE_SIZE, 0xFF373737);
         String name = nameCache.computeIfAbsent(id, this::computeName);
         g.text(this.font, Component.literal(trim(name)), x + FACE_SIZE + 3, y, VALUE_COLOR, false);
         String value = String.format(Locale.ROOT, "%.1f", feeling);
