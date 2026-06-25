@@ -30,6 +30,28 @@ class PlayerMobConfigTest {
         assertEquals(PlayerMobConfig.DEFAULT_DEBUG_SPAWN_LOG, v.debugSpawnLog());
         assertEquals(PlayerMobConfig.DEFAULT_TRAIN_DIG_THROUGH, v.trainDigThrough());
         assertEquals(PlayerMobConfig.DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER, v.trainFollowLovedPlayer());
+        assertEquals(PlayerMobConfig.DEFAULT_ATTACK_RANGE_MULTIPLIER, v.attackRangeMultiplier(), 1e-6);
+        assertEquals(PlayerMobConfig.DEFAULT_RANGED_ATTACK_RANGE_MULTIPLIER, v.rangedAttackRangeMultiplier(), 1e-6);
+    }
+
+    @Test
+    void attackRangeMultipliersParsedClampedAndDefaulted() {
+        assertEquals(1.0F, PlayerMobConfig.DEFAULT_ATTACK_RANGE_MULTIPLIER, 1e-6, "global ships at 1.0 (unchanged)");
+        assertEquals(2.0F, PlayerMobConfig.DEFAULT_RANGED_ATTACK_RANGE_MULTIPLIER, 1e-6, "ranged ships at 2.0 (x2)");
+
+        var v = PlayerMobConfig.parse(props("attackRangeMultiplier", "1.5", "rangedAttackRangeMultiplier", "3"));
+        assertEquals(1.5F, v.attackRangeMultiplier(), 1e-6);
+        assertEquals(3.0F, v.rangedAttackRangeMultiplier(), 1e-6);
+
+        // Clamp: negative -> 0 (disables proactive distance-attack); absurd -> MAX_RANGE_MULTIPLIER.
+        assertEquals(0.0F, PlayerMobConfig.parse(props("attackRangeMultiplier", "-2")).attackRangeMultiplier(), 1e-6);
+        assertEquals(PlayerMobConfig.MAX_RANGE_MULTIPLIER,
+            PlayerMobConfig.parse(props("rangedAttackRangeMultiplier", "999")).rangedAttackRangeMultiplier(), 1e-6);
+
+        // Unparseable -> default (like the other lenient-parsed keys).
+        var bad = PlayerMobConfig.parse(props("attackRangeMultiplier", "abc", "rangedAttackRangeMultiplier", "x"));
+        assertEquals(PlayerMobConfig.DEFAULT_ATTACK_RANGE_MULTIPLIER, bad.attackRangeMultiplier(), 1e-6);
+        assertEquals(PlayerMobConfig.DEFAULT_RANGED_ATTACK_RANGE_MULTIPLIER, bad.rangedAttackRangeMultiplier(), 1e-6);
     }
 
     @Test

@@ -31,6 +31,8 @@ public final class PlayerMobConfig {
     private static final String KEY_DEBUG_SPAWN_LOG = "debugSpawnLog";
     private static final String KEY_TRAIN_DIG_THROUGH = "trainDigThrough";
     private static final String KEY_TRAIN_FOLLOW_LOVED_PLAYER = "trainFollowLovedPlayer";
+    private static final String KEY_ATTACK_RANGE_MULTIPLIER = "attackRangeMultiplier";
+    private static final String KEY_RANGED_ATTACK_RANGE_MULTIPLIER = "rangedAttackRangeMultiplier";
     private static final String KEY_NATURAL_SPAWN_ENABLED = "naturalSpawnEnabled";
     /** Prefix for per-mob companion-chance keys, e.g. {@code naturalSpawnScale.minecraft:zombie}. */
     private static final String NATURAL_SPAWN_SCALE_PREFIX = "naturalSpawnScale.";
@@ -43,6 +45,16 @@ public final class PlayerMobConfig {
     public static final boolean DEFAULT_TRAIN_DIG_THROUGH = true;
     /** On a Dungeon Train, a PlayerMob that loves a player aboard heads to that player's carriage; on by default. */
     public static final boolean DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER = true;
+    /**
+     * Global multiplier on the trait-based distance at which an aggressive PlayerMob proactively attacks a
+     * player. 1.0 = unchanged; applies to all such mobs regardless of weapon.
+     */
+    public static final float DEFAULT_ATTACK_RANGE_MULTIPLIER = 1.0F;
+    /**
+     * Extra multiplier applied on top of {@link #DEFAULT_ATTACK_RANGE_MULTIPLIER} when the mob holds a ranged
+     * weapon (bow/crossbow) with ammo, so it opens fire from further out. Default 2.0 (×2 reach).
+     */
+    public static final float DEFAULT_RANGED_ATTACK_RANGE_MULTIPLIER = 2.0F;
     /** Natural spawning ships OFF — PlayerMobs only appear via egg, {@code /summon}, or Dungeon Train until enabled. */
     public static final boolean DEFAULT_NATURAL_SPAWN_ENABLED = false;
 
@@ -133,6 +145,8 @@ public final class PlayerMobConfig {
     private static volatile boolean debugSpawnLog = DEFAULT_DEBUG_SPAWN_LOG;
     private static volatile boolean trainDigThrough = DEFAULT_TRAIN_DIG_THROUGH;
     private static volatile boolean trainFollowLovedPlayer = DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER;
+    private static volatile float attackRangeMultiplier = DEFAULT_ATTACK_RANGE_MULTIPLIER;
+    private static volatile float rangedAttackRangeMultiplier = DEFAULT_RANGED_ATTACK_RANGE_MULTIPLIER;
     private static volatile boolean naturalSpawnEnabled = DEFAULT_NATURAL_SPAWN_ENABLED;
     /** Per-mob explicit overrides (id → clamped 0–1 chance); immutable, replaced wholesale on {@link #load}. */
     private static volatile Map<String, Float> naturalSpawnScales = Map.of();
@@ -165,6 +179,24 @@ public final class PlayerMobConfig {
      */
     public static boolean trainFollowLovedPlayer() {
         return trainFollowLovedPlayer;
+    }
+
+    /**
+     * Global multiplier on an aggressive PlayerMob's trait-based attack-acquisition distance toward a player
+     * (1.0 = unchanged). Stacks with {@link #rangedAttackRangeMultiplier()} for ranged-armed mobs. See
+     * {@code PlayerMobEntity#reactionToward}.
+     */
+    public static float attackRangeMultiplier() {
+        return attackRangeMultiplier;
+    }
+
+    /**
+     * Extra multiplier on the attack-acquisition distance when the mob has a ranged weapon with ammo
+     * (default 2.0). Effective ranged reach scale = {@link #attackRangeMultiplier()} × this. See
+     * {@code PlayerMobEntity#hasRangedWeaponWithAmmo}.
+     */
+    public static float rangedAttackRangeMultiplier() {
+        return rangedAttackRangeMultiplier;
     }
 
     /** Master switch for natural spawning — when false (default) no PlayerMob ever spawns alongside a mob. */
@@ -272,13 +304,17 @@ public final class PlayerMobConfig {
             debugSpawnLog = v.debugSpawnLog();
             trainDigThrough = v.trainDigThrough();
             trainFollowLovedPlayer = v.trainFollowLovedPlayer();
+            attackRangeMultiplier = v.attackRangeMultiplier();
+            rangedAttackRangeMultiplier = v.rangedAttackRangeMultiplier();
             naturalSpawnEnabled = v.naturalSpawnEnabled();
             naturalSpawnScales = v.naturalSpawnScales();
-            LOGGER.info("[{}] config: {}={}, {}={}, {}={}, {}={}, {}={} ({} per-mob override(s))",
+            LOGGER.info("[{}] config: {}={}, {}={}, {}={}, {}={}, {}={}, {}={}, {}={} ({} per-mob override(s))",
                 PlayerMob.MOD_ID,
                 KEY_ECHO_FRIEND_CHANCE, echoFriendChance, KEY_DEBUG_SPAWN_LOG, debugSpawnLog,
                 KEY_TRAIN_DIG_THROUGH, trainDigThrough,
                 KEY_TRAIN_FOLLOW_LOVED_PLAYER, trainFollowLovedPlayer,
+                KEY_ATTACK_RANGE_MULTIPLIER, attackRangeMultiplier,
+                KEY_RANGED_ATTACK_RANGE_MULTIPLIER, rangedAttackRangeMultiplier,
                 KEY_NATURAL_SPAWN_ENABLED, naturalSpawnEnabled, naturalSpawnScales.size());
         } catch (IOException | RuntimeException e) {
             LOGGER.warn("[{}] failed to load {}; using defaults", PlayerMob.MOD_ID, FILE, e);
@@ -287,7 +323,8 @@ public final class PlayerMobConfig {
 
     /** Parsed, validated values — split out (pure, no I/O) so the parsing rules are unit-tested. */
     record Values(float echoFriendChance, boolean debugSpawnLog, boolean trainDigThrough,
-                  boolean trainFollowLovedPlayer, boolean naturalSpawnEnabled,
+                  boolean trainFollowLovedPlayer, float attackRangeMultiplier,
+                  float rangedAttackRangeMultiplier, boolean naturalSpawnEnabled,
                   Map<String, Float> naturalSpawnScales) {}
 
     static Values parse(Properties props) {
@@ -296,6 +333,8 @@ public final class PlayerMobConfig {
             parseBool(props.getProperty(KEY_DEBUG_SPAWN_LOG), DEFAULT_DEBUG_SPAWN_LOG),
             parseBool(props.getProperty(KEY_TRAIN_DIG_THROUGH), DEFAULT_TRAIN_DIG_THROUGH),
             parseBool(props.getProperty(KEY_TRAIN_FOLLOW_LOVED_PLAYER), DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER),
+            clampMultiplier(parseFloat(props.getProperty(KEY_ATTACK_RANGE_MULTIPLIER), DEFAULT_ATTACK_RANGE_MULTIPLIER)),
+            clampMultiplier(parseFloat(props.getProperty(KEY_RANGED_ATTACK_RANGE_MULTIPLIER), DEFAULT_RANGED_ATTACK_RANGE_MULTIPLIER)),
             parseBool(props.getProperty(KEY_NATURAL_SPAWN_ENABLED), DEFAULT_NATURAL_SPAWN_ENABLED),
             parseScales(props));
     }
@@ -352,6 +391,14 @@ public final class PlayerMobConfig {
         return v < 0.0F ? 0.0F : (v > 1.0F ? 1.0F : v);
     }
 
+    /** Largest a range multiplier may grow to — guards against absurd config (engagement is also capped by the mob's FOLLOW_RANGE + line-of-sight). */
+    public static final float MAX_RANGE_MULTIPLIER = 64.0F;
+
+    /** Clamp a range multiplier to {@code [0, MAX_RANGE_MULTIPLIER]}; 0 disables proactive distance-attack, and it never goes negative. */
+    private static float clampMultiplier(float v) {
+        return v < 0.0F ? 0.0F : (v > MAX_RANGE_MULTIPLIER ? MAX_RANGE_MULTIPLIER : v);
+    }
+
     private static void writeDefault(Path file) throws IOException {
         if (file.getParent() != null) {
             Files.createDirectories(file.getParent());
@@ -370,10 +417,18 @@ public final class PlayerMobConfig {
             .append("# trainFollowLovedPlayer: when true, a PlayerMob on a Dungeon Train that loves a player\n")
             .append("#   aboard the same train abandons its fixed march to head to that player's carriage,\n")
             .append("#   idling once it's in the same carriage. Default true.\n")
+            .append("# attackRangeMultiplier: global multiplier on the trait-based distance at which an\n")
+            .append("#   aggressive PlayerMob proactively attacks a player. 1.0 = unchanged; applies to ALL\n")
+            .append("#   such mobs. (Engagement is still capped by the mob's follow range + line-of-sight.)\n")
+            .append("# rangedAttackRangeMultiplier: extra multiplier applied ON TOP of attackRangeMultiplier\n")
+            .append("#   when the mob holds a ranged weapon (bow/crossbow) with ammo, so it opens fire from\n")
+            .append("#   further out. Default 2.0. Effective ranged reach = attackRangeMultiplier x this.\n")
             .append(KEY_ECHO_FRIEND_CHANCE).append("=").append(DEFAULT_ECHO_FRIEND_CHANCE).append("\n")
             .append(KEY_DEBUG_SPAWN_LOG).append("=").append(DEFAULT_DEBUG_SPAWN_LOG).append("\n")
             .append(KEY_TRAIN_DIG_THROUGH).append("=").append(DEFAULT_TRAIN_DIG_THROUGH).append("\n")
             .append(KEY_TRAIN_FOLLOW_LOVED_PLAYER).append("=").append(DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER).append("\n")
+            .append(KEY_ATTACK_RANGE_MULTIPLIER).append("=").append(DEFAULT_ATTACK_RANGE_MULTIPLIER).append("\n")
+            .append(KEY_RANGED_ATTACK_RANGE_MULTIPLIER).append("=").append(DEFAULT_RANGED_ATTACK_RANGE_MULTIPLIER).append("\n")
             .append("#\n")
             .append("# --- Natural spawning (opt-in) ------------------------------------------------\n")
             .append("# naturalSpawnEnabled: master switch. When false (default), PlayerMobs only appear\n")

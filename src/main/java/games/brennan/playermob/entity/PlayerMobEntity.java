@@ -1476,8 +1476,12 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             ? feelings.feelingToward(entity.getUUID())
             : FeelingLedger.DEFAULT;
         int ff = traits.fightFlight();
+        // Aggressive mobs acquire from further when armed with a loaded ranged weapon; both the global and
+        // the ranged-only knob are configurable. The scale only affects the FIGHT path inside resolve().
+        double attackRangeScale = PlayerMobConfig.attackRangeMultiplier()
+            * (hasRangedWeaponWithAmmo() ? PlayerMobConfig.rangedAttackRangeMultiplier() : 1.0);
         Reaction base = DispositionResolver.resolve(
-            ff, traits.friendliness(), feeling, category, distanceTo(entity));
+            ff, traits.friendliness(), feeling, category, distanceTo(entity), attackRangeScale);
         if ((base == Reaction.FIGHT || base == Reaction.FLEE) && DispositionResolver.isMidBand(ff)) {
             return DispositionResolver.applyWinAssessment(base, ff, selfCombatPower(), combatPowerOf(entity));
         }
@@ -2648,6 +2652,42 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             }
         }
         return best;
+    }
+
+    /** Per-tick cache for {@link #hasRangedWeaponWithAmmo} (queried per-candidate across several scan sites). */
+    private boolean rangedWithAmmoCache;
+    /** The {@code tickCount} {@link #rangedWithAmmoCache} was filled on; {@code -1} = stale/unset. */
+    private int rangedWithAmmoTick = -1;
+
+    /**
+     * Whether the mob is a ranged fighter <em>right now</em>: it owns a bow/crossbow (main hand or
+     * backpack, via {@link #bestOfCategory}) <b>and</b> has arrows on hand (main/off hand or backpack,
+     * via {@link ItemPickupPolicy#isAmmo}). Drives the ranged attack-range bonus in {@link
+     * #reactionToward} ({@link PlayerMobConfig#rangedAttackRangeMultiplier()}). Cached for the current
+     * tick — {@link #reactionToward} runs across many candidates per tick and the answer is the same for
+     * all of them. Transient: never saved or synced.
+     */
+    public boolean hasRangedWeaponWithAmmo() {
+        if (rangedWithAmmoTick != tickCount) {
+            rangedWithAmmoCache = computeHasRangedWeaponWithAmmo();
+            rangedWithAmmoTick = tickCount;
+        }
+        return rangedWithAmmoCache;
+    }
+
+    private boolean computeHasRangedWeaponWithAmmo() {
+        if (bestOfCategory(ItemPickupPolicy.WeaponCategory.RANGED) == null) {
+            return false;
+        }
+        if (ItemPickupPolicy.isAmmo(getMainHandItem()) || ItemPickupPolicy.isAmmo(getOffhandItem())) {
+            return true;
+        }
+        for (int i = 0; i < this.inventory.getContainerSize(); i++) {
+            if (ItemPickupPolicy.isAmmo(this.inventory.getItem(i))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Best melee weapon — the harder-hitting of the best sword and best axe. */

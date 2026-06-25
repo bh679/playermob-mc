@@ -121,6 +121,54 @@ class DispositionResolverTest {
         assertEquals(Reaction.FIGHT, resolve(9, 1, 6, TargetCategory.PLAYERS, 1));
     }
 
+    // ---- players: ranged attack-range scale (6-arg resolve) ----
+
+    @Test
+    void attackRangeScaleWidensOnlyAggressiveFightReach() {
+        // fr0 @ neutral: base inner 10, outer 15. A fighter (ff9) with scale 2.0 engages out to 20.
+        assertEquals(Reaction.FIGHT, resolve(9, 0, 5, TargetCategory.PLAYERS, 18, 2.0));  // within 10*2
+        assertEquals(Reaction.IGNORE, resolve(9, 0, 5, TargetCategory.PLAYERS, 21, 2.0)); // beyond 20 and outer
+        // The widened FIGHT reach absorbs the WATCH ring: at 12 it now engages instead of watching.
+        assertEquals(Reaction.WATCH, resolve(9, 0, 5, TargetCategory.PLAYERS, 12));       // base: between rings
+        assertEquals(Reaction.FIGHT, resolve(9, 0, 5, TargetCategory.PLAYERS, 12, 2.0));  // scaled: engage
+
+        // A timid mob's FLEE reach is NOT widened — a bow shouldn't make it bolt sooner.
+        // fr1 @ neutral: inner 5, outer 8.5. At 6 (< 5*2) it still only WATCHES, never FLEES.
+        assertEquals(Reaction.WATCH, resolve(4, 1, 5, TargetCategory.PLAYERS, 6, 2.0));
+        assertEquals(Reaction.FLEE, resolve(4, 1, 5, TargetCategory.PLAYERS, 3, 2.0));    // within base inner 5
+
+        // Hate path: a fighter's hate reach widens (16 -> 32); a fleer's does not.
+        assertEquals(Reaction.FIGHT, resolve(9, 1, 2, TargetCategory.PLAYERS, 20, 2.0));
+        assertEquals(Reaction.IGNORE, resolve(9, 1, 2, TargetCategory.PLAYERS, 20));      // base 16 < 20
+        assertEquals(Reaction.IGNORE, resolve(4, 8, 2, TargetCategory.PLAYERS, 20, 2.0)); // fleer not widened
+
+        // Scale 0 disables the aggressive distance-attack entirely (inner * 0 = 0).
+        assertEquals(Reaction.WATCH, resolve(9, 0, 5, TargetCategory.PLAYERS, 1, 0.0));
+
+        // Non-player categories ignore the scale entirely.
+        assertEquals(Reaction.FIGHT, resolve(9, 0, 5, TargetCategory.HOSTILE_MOBS, 30, 5.0));
+        assertEquals(Reaction.GREET, resolve(9, 5, 5, TargetCategory.ANIMALS, 2, 5.0));
+    }
+
+    @Test
+    void fiveArgEqualsSixArgAtUnitScale() {
+        float[] feelings = {0f, 3f, 5f, 7f, 10f};
+        double[] distances = {0, 1.5, 5, 8, 12, 16, 30};
+        for (int ff = 0; ff <= 10; ff++) {
+            for (int fr = 0; fr <= 10; fr++) {
+                for (float feeling : feelings) {
+                    for (double d : distances) {
+                        for (TargetCategory c : TargetCategory.values()) {
+                            assertEquals(resolve(ff, fr, feeling, c, d),
+                                resolve(ff, fr, feeling, c, d, 1.0),
+                                "unit scale must match the 5-arg overload");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // ---- onHurt ----
 
     @Test

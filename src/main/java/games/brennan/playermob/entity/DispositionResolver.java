@@ -103,25 +103,47 @@ public final class DispositionResolver {
      * The proactive reaction toward a categorised target at {@code distance}
      * blocks. {@code feeling} is ignored for non-player categories. Never returns
      * null; an uncategorised target (e.g. creative/spectator → null category)
-     * resolves to {@link Reaction#IGNORE}.
+     * resolves to {@link Reaction#IGNORE}. Equivalent to {@link #resolve(int, int,
+     * float, TargetCategory, double, double)} with a neutral (1.0×) attack-range
+     * scale.
      */
     public static Reaction resolve(int fightFlight, int friendliness, float feeling,
                                    TargetCategory category, double distance) {
+        return resolve(fightFlight, friendliness, feeling, category, distance, 1.0);
+    }
+
+    /**
+     * {@link #resolve(int, int, float, TargetCategory, double)} with an {@code
+     * attackRangeScale} multiplier on the <em>aggressive FIGHT acquisition
+     * distance</em> toward a player target — the trait-based personal-space
+     * {@link #innerRadius} and the {@link #HATE_RANGE} trigger — applied <b>only</b>
+     * when the mob would FIGHT (fightFlight ≥ {@link #FF_FIGHT}). A scale &gt; 1 lets
+     * a mob (e.g. one armed with a loaded ranged weapon) open fire from further out;
+     * FLEE distances, the WATCH/GREET rings, and the non-player categories are all
+     * unaffected. When the widened FIGHT reach exceeds the WATCH ring the mob simply
+     * engages instead of watching. {@code attackRangeScale == 1.0} reproduces the
+     * five-argument overload exactly.
+     */
+    public static Reaction resolve(int fightFlight, int friendliness, float feeling,
+                                   TargetCategory category, double distance, double attackRangeScale) {
         if (category == null) {
             return Reaction.IGNORE;
         }
+        boolean fights = fightFlight >= FF_FIGHT;
         switch (category) {
             case HOSTILE_MOBS:
-                return fightFlight >= FF_FIGHT ? Reaction.FIGHT : Reaction.FLEE;
+                return fights ? Reaction.FIGHT : Reaction.FLEE;
             case ANIMALS:
             case VILLAGERS:
                 return friendliness >= FRIEND_GREET ? Reaction.GREET : Reaction.IGNORE;
             case PLAYERS:
             default:
                 if (feeling <= FEELING_HATE) {
-                    // Hate overrides nature: treat as an enemy within HATE_RANGE.
-                    return distance <= HATE_RANGE
-                        ? (fightFlight >= FF_FIGHT ? Reaction.FIGHT : Reaction.FLEE)
+                    // Hate overrides nature: treat as an enemy within HATE_RANGE — a fighter's
+                    // reach is widened by attackRangeScale, a fleer's is not.
+                    double hateReach = fights ? HATE_RANGE * attackRangeScale : HATE_RANGE;
+                    return distance <= hateReach
+                        ? (fights ? Reaction.FIGHT : Reaction.FLEE)
                         : Reaction.IGNORE;
                 }
                 if (feeling >= FEELING_LOVE) {
@@ -132,8 +154,12 @@ public final class DispositionResolver {
                 if (friendliness >= FRIEND_GREET) {
                     return Reaction.GREET;
                 }
-                if (distance <= innerRadius(friendliness, feeling)) {
-                    return fightFlight >= FF_FIGHT ? Reaction.FIGHT : Reaction.FLEE;
+                // Inner (fight-or-flight) ring: the FIGHT reach is widened by attackRangeScale; the
+                // FLEE reach keeps the base radius so a ranged weapon never makes a timid mob bolt sooner.
+                double inner = innerRadius(friendliness, feeling);
+                double fightReach = fights ? inner * attackRangeScale : inner;
+                if (distance <= fightReach) {
+                    return fights ? Reaction.FIGHT : Reaction.FLEE;
                 }
                 if (distance <= outerRadius(friendliness, feeling)) {
                     return Reaction.WATCH;
