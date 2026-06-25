@@ -5,6 +5,8 @@ import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.builder.ArgumentBuilder;
+import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.suggestion.SuggestionProvider;
@@ -12,6 +14,7 @@ import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.entity.DispositionTraits;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.entity.PlayerMobSummon;
+import games.brennan.playermob.entity.goal.AttackOrder;
 import games.brennan.playermob.entity.goal.Order;
 import games.brennan.playermob.entity.goal.OrderType;
 import games.brennan.playermob.skin.PlayerSkinResolver;
@@ -22,6 +25,7 @@ import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.commands.arguments.GameProfileArgument;
 import net.minecraft.commands.arguments.blocks.BlockStateArgument;
 import net.minecraft.commands.arguments.coordinates.Vec3Argument;
+import net.minecraft.commands.arguments.item.ItemArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.entity.LivingEntity;
@@ -203,7 +207,7 @@ public final class ReincarnateCommand {
                         .suggests(TARGET_SUGGESTIONS)
                         .executes(ReincarnateCommand::orderWalkEntity)))
                 .then(entityAction("punch", OrderType.PUNCH))
-                .then(entityAction("attack", OrderType.ATTACK))
+                .then(attackSubtree(buildContext))
                 .then(entityAction("gift", OrderType.GIFT))
                 .then(entityAction("greet", OrderType.GREET))
                 .then(Commands.literal("place")
@@ -216,13 +220,135 @@ public final class ReincarnateCommand {
                             .executes(ReincarnateCommand::orderPlaceEntity)))));
     }
 
-    /** An entity-directed action literal (punch / attack / gift / greet) taking a {@code <target>}. */
+    /** An entity-directed action literal (punch / gift / greet) taking a {@code <target>}. */
     private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack> entityAction(
             String name, OrderType type) {
         return Commands.literal(name)
             .then(Commands.argument("target", StringArgumentType.word())
                 .suggests(TARGET_SUGGESTIONS)
                 .executes(ctx -> orderEntity(ctx, type)));
+    }
+
+    // ---- attack subtree: attack <target> [kill|forever|return|<n> s|<n> hearts] [with <weapon> [spawn]] ----
+
+    /** Resolves the chosen attack plan (single strike vs a limited sustained attack) from a command ctx. */
+    @FunctionalInterface
+    private interface AttackPlanFn {
+        AttackPlan resolve(CommandContext<CommandSourceStack> ctx);
+    }
+
+    /** A resolved attack: a single strike, or a sustained attack with a stop limit. */
+    private record AttackPlan(boolean once, AttackOrder.Limit limit, int amount) {
+        static AttackPlan single() {
+            return new AttackPlan(true, AttackOrder.Limit.KILL, 0);
+        }
+
+        static AttackPlan sustained(AttackOrder.Limit limit, int amount) {
+            return new AttackPlan(false, limit, amount);
+        }
+    }
+
+    /**
+     * Builds {@code attack <target> [kill|forever|return|<n> s|<n> hearts] [with <weapon> [spawn]]}.
+     * The bare target and every limit terminal share the same {@code with <weapon> [spawn]} tail, so
+     * the limit and the weapon compose (e.g. {@code attack Steve 10 s with diamond_sword spawn}).
+     */
+    private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack> attackSubtree(
+            CommandBuildContext buildContext) {
+        AttackPlanFn seconds = ctx ->
+            AttackPlan.sustained(AttackOrder.Limit.SECONDS, IntegerArgumentType.getInteger(ctx, "amount"));
+        AttackPlanFn hearts = ctx ->
+            AttackPlan.sustained(AttackOrder.Limit.HEARTS, IntegerArgumentType.getInteger(ctx, "amount"));
+
+        RequiredArgumentBuilder<CommandSourceStack, Integer> amount =
+            Commands.argument("amount", IntegerArgumentType.integer(1, 1_000_000));
+        amount.then(attackTail(Commands.literal("s"), buildContext, seconds));
+        amount.then(attackTail(Commands.literal("seconds"), buildContext, seconds));
+        amount.then(attackTail(Commands.literal("hearts"), buildContext, hearts));
+        amount.then(attackTail(Commands.literal("heart"), buildContext, hearts));
+
+        RequiredArgumentBuilder<CommandSourceStack, String> target = attackTail(
+            Commands.argument("target", StringArgumentType.word()).suggests(TARGET_SUGGESTIONS),
+            buildContext, ctx -> AttackPlan.single());
+        target.then(attackTail(Commands.literal("kill"), buildContext, ctx -> AttackPlan.sustained(AttackOrder.Limit.KILL, 0)));
+        target.then(attackTail(Commands.literal("forever"), buildContext, ctx -> AttackPlan.sustained(AttackOrder.Limit.KILL, 0)));
+        target.then(attackTail(Commands.literal("return"), buildContext, ctx -> AttackPlan.sustained(AttackOrder.Limit.UNTIL_HIT, 0)));
+        target.then(amount);
+
+        return Commands.literal("attack").then(target);
+    }
+
+    /**
+     * Attaches the shared tail to {@code node}: an {@code .executes} (no weapon) plus a
+     * {@code with <weapon> [spawn]} branch. {@code plan} resolves the limit from the live ctx.
+     */
+    private static <T extends ArgumentBuilder<CommandSourceStack, T>> T attackTail(
+            T node, CommandBuildContext buildContext, AttackPlanFn plan) {
+        node.executes(ctx -> orderAttack(ctx, plan.resolve(ctx), ItemStack.EMPTY, false));
+        node.then(Commands.literal("with")
+            .then(Commands.argument("weapon", ItemArgument.item(buildContext))
+                .executes(ctx -> orderAttack(ctx, plan.resolve(ctx), weaponStack(ctx), false))
+                .then(Commands.literal("spawn")
+                    .executes(ctx -> orderAttack(ctx, plan.resolve(ctx), weaponStack(ctx), true)))));
+        return node;
+    }
+
+    /** The chosen {@code <weapon>} as a single-item stack (empty if unspecified/unresolvable). */
+    private static ItemStack weaponStack(CommandContext<CommandSourceStack> ctx) {
+        try {
+            //? if >=26 {
+            /*// 26.x dropped the allow-overstack boolean from ItemInput.createItemStack.
+            return ItemArgument.getItem(ctx, "weapon").createItemStack(1);
+            *///?} else {
+            return ItemArgument.getItem(ctx, "weapon").createItemStack(1, false);
+            //?}
+        } catch (CommandSyntaxException e) {
+            return ItemStack.EMPTY;
+        }
+    }
+
+    /** Execute an attack order: resolve mob + target, handle the optional weapon, then strike or sustain. */
+    private static int orderAttack(CommandContext<CommandSourceStack> ctx, AttackPlan plan,
+                                   ItemStack weapon, boolean spawn) {
+        CommandSourceStack source = ctx.getSource();
+        PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
+        if (mob == null) {
+            return 0;
+        }
+        LivingEntity target = resolveTarget(source, StringArgumentType.getString(ctx, "target"));
+        if (target == null) {
+            return 0;
+        }
+        String who = label(mob);
+        String weaponNote = "";
+        if (weapon != null && !weapon.isEmpty()) {
+            weaponNote = " with " + weapon.getHoverName().getString();
+            if (spawn) {
+                mob.spawnWeapon(weapon.copy());
+            } else if (!mob.equipWeapon(weapon.getItem())) {
+                source.sendFailure(Component.literal(who + " doesn't have "
+                    + weapon.getHoverName().getString() + " — add 'spawn' to give it one."));
+                return 0;
+            }
+        }
+        String targetName = target.getName().getString();
+        String note = weaponNote;
+        if (plan.once()) {
+            // A single strike with the (now-)equipped weapon — reuse the punch goal.
+            mob.setOrder(Order.toward(OrderType.PUNCH, target));
+            source.sendSuccess(() -> Component.literal(who + " strikes " + targetName + note + "."), true);
+            return 1;
+        }
+        mob.orderAttack(target, plan.limit(), plan.amount());
+        String limitText = switch (plan.limit()) {
+            case KILL -> "until dead";
+            case SECONDS -> "for " + plan.amount() + "s";
+            case HEARTS -> "until " + plan.amount() + " hearts";
+            case UNTIL_HIT -> "until hit back";
+        };
+        source.sendSuccess(() -> Component.literal(
+            who + " attacks " + targetName + note + " " + limitText + "."), true);
+        return 1;
     }
 
     /**
@@ -280,7 +406,7 @@ public final class ReincarnateCommand {
         return cn != null ? cn.getString() : "PlayerMob";
     }
 
-    /** {@code /playermob order <name> (punch|attack|gift|greet) <target>}. */
+    /** {@code /playermob order <name> (punch|gift|greet) <target>} (attack has its own subtree). */
     private static int orderEntity(CommandContext<CommandSourceStack> ctx, OrderType type) {
         CommandSourceStack source = ctx.getSource();
         PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
@@ -293,12 +419,6 @@ public final class ReincarnateCommand {
         }
         String who = label(mob);
         String targetName = target.getName().getString();
-        if (type == OrderType.ATTACK) {
-            // ATTACK is just a combat target — the existing WeaponAwareAttackGoal does the fighting.
-            mob.setTarget(target);
-            source.sendSuccess(() -> Component.literal(who + " is now attacking " + targetName + "."), true);
-            return 1;
-        }
         mob.setOrder(Order.toward(type, target));
         source.sendSuccess(() -> Component.literal(who + " ordered to " + verb(type) + " " + targetName + "."), true);
         return 1;

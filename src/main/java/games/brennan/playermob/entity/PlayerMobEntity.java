@@ -6,6 +6,7 @@ import games.brennan.playermob.compat.PlayerMobSocialHooks;
 import games.brennan.playermob.compat.ReincarnationRecord;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.goal.AdvanceCarriageGoal;
+import games.brennan.playermob.entity.goal.AttackOrder;
 import games.brennan.playermob.entity.goal.BlockArrowsGoal;
 import games.brennan.playermob.entity.goal.CollectFloorItemsGoal;
 import games.brennan.playermob.entity.goal.CommandedActionGoal;
@@ -101,6 +102,7 @@ import net.minecraft.world.entity.projectile.ProjectileUtil;
 import net.minecraft.world.item.AxeItem;
 import net.minecraft.world.item.BowItem;
 import net.minecraft.world.item.CrossbowItem;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 //? if >=1.21.1 {
@@ -400,9 +402,17 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      */
     private Order pendingOrder;
 
+    /**
+     * A commanded {@link AttackOrder} (from {@code /playermob order ... attack}), monitored each
+     * server tick by {@link #tickAttackOrder()} rather than via a goal. Mutually exclusive with
+     * {@link #pendingOrder}. Transient server-only AI state — never persisted.
+     */
+    private AttackOrder attackOrder;
+
     /** Place a one-off order for this mob to carry out (replaces any pending order). */
     public void setOrder(Order order) {
         this.pendingOrder = order;
+        this.attackOrder = null;   // a movement order supersedes a commanded attack
     }
 
     /** The pending order, or {@code null} when the mob has none. */
@@ -413,6 +423,51 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     /** Clear the pending order — called by {@link CommandedActionGoal} once it's done. */
     public void clearOrder() {
         this.pendingOrder = null;
+    }
+
+    /**
+     * Order this mob to attack {@code target} until {@code limit} is met (see {@link AttackOrder}).
+     * Pins the combat target immediately; the existing weapon-aware attack goal does the fighting,
+     * while {@link #tickAttackOrder()} enforces the stop condition. Supersedes any movement order.
+     */
+    public void orderAttack(LivingEntity target, AttackOrder.Limit limit, int amount) {
+        this.pendingOrder = null;
+        this.attackOrder = new AttackOrder(target, limit, amount, this.tickCount);
+        setTarget(target);
+    }
+
+    /**
+     * Enforce a commanded {@link AttackOrder}: drop the target + order once the stop condition is
+     * met (target gone, the sweep would drop it, or the duration / hearts / hit-back limit is hit),
+     * otherwise keep the commanded target pinned so disposition/idle goals don't break it off.
+     */
+    private void tickAttackOrder() {
+        AttackOrder o = this.attackOrder;
+        if (o == null) {
+            return;
+        }
+        LivingEntity tgt = o.target();
+        boolean done = recovering
+            || tgt == null || !tgt.isAlive() || tgt.isRemoved()
+            || isIgnoredPlayer(tgt) || !TrainConfinement.allowsTarget(this, tgt);
+        if (!done) {
+            done = switch (o.limit()) {
+                case SECONDS -> (this.tickCount - o.startTick()) >= o.amount() * 20L;
+                case HEARTS -> tgt.getHealth() <= o.amount() * 2.0F;
+                case UNTIL_HIT -> getLastHurtByMobTimestamp() > o.startTick();
+                case KILL -> false;
+            };
+        }
+        if (done) {
+            if (getTarget() == tgt) {
+                setTarget(null);
+            }
+            this.attackOrder = null;
+            return;
+        }
+        if (getTarget() != tgt) {
+            setTarget(tgt);   // re-pin so the commanded attack rides through idle/flee goals
+        }
     }
 
     /**
@@ -741,6 +796,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
                 && (recovering || isIgnoredPlayer(target) || !TrainConfinement.allowsTarget(this, target))) {
             setTarget(null);   // recovering back onto a train preempts all combat
         }
+        tickAttackOrder();   // enforce a commanded attack's stop limit (duration / hearts / hit-back)
         latchTrainExploreDirection();
 
         // Tick down the door-close hold (armed by stuck-recovery, on or off a train) so a door it
@@ -1816,6 +1872,48 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
                 setItemSlot(EquipmentSlot.MAINHAND, inventory.removeItemNoUpdate(i));
                 return;
             }
+        }
+    }
+
+    /**
+     * Commanded "wield this": if the mob already holds {@code item} or carries one in its pack,
+     * move it to the main hand (stashing whatever it held) and return {@code true}; else {@code false}.
+     * Used by {@code /playermob order ... attack ... with <weapon>} (the non-spawn form).
+     */
+    public boolean equipWeapon(Item item) {
+        if (getMainHandItem().is(item)) {
+            return true;
+        }
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            if (inventory.getItem(i).is(item)) {
+                ItemStack found = inventory.removeItemNoUpdate(i);
+                stashMainHandToPack();
+                setItemSlot(EquipmentSlot.MAINHAND, found);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Commanded "conjure and wield": equip a freshly minted {@code stack} in the main hand,
+     * stashing whatever it held. Used by the {@code with <weapon> spawn} form.
+     */
+    public void spawnWeapon(ItemStack stack) {
+        stashMainHandToPack();
+        setItemSlot(EquipmentSlot.MAINHAND, stack);
+    }
+
+    /** Move the current main-hand item into the pack (dropping any overflow) so a new weapon can be held. */
+    private void stashMainHandToPack() {
+        ItemStack current = getMainHandItem();
+        if (current.isEmpty()) {
+            return;
+        }
+        setItemSlot(EquipmentSlot.MAINHAND, ItemStack.EMPTY);
+        ItemStack leftover = inventory.addItem(current);
+        if (!leftover.isEmpty()) {
+            dropAtLocation(leftover);
         }
     }
 
