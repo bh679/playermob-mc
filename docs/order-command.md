@@ -21,13 +21,18 @@ the mob returns to its normal AI once the action finishes.
 
 | Token | Accepts |
 |---|---|
-| **`<target>`** | An **online player's name**, or a **named PlayerMob**. (Plain names only — not `@e` selectors.) |
+| **`<target>`** | An **online player's name**, a **named PlayerMob**, or a **mob type** (resolves to the nearest entity of that type within 128 blocks of the ordered mob). Plain names only — not `@e` selectors. |
 | **`<pos>`** | World coordinates `x y z`. Relative `~ ~ ~` is supported. |
 | **`<block>`** | A block id (e.g. `minecraft:stone`) — placed conjured from air. |
 | **`<item>` / `<weapon>`** | An item id (e.g. `minecraft:diamond_sword`). |
 
 > **Spacing note:** Brigadier splits arguments on spaces, so numeric limits are written with a
 > space and a unit — `10 s`, `2 hearts`, `50 blocks` — not `10s`.
+>
+> **Mob types:** give the type's **id path** without a namespace — `sheep`, `cow`, `iron_golem`.
+> The command parser can't accept a colon in this slot, so `minecraft:sheep` won't parse; the
+> `minecraft` namespace is assumed. A type resolves to the nearest matching entity, so it's most
+> useful with a name (player / PlayerMob) reserved for a specific individual.
 
 ---
 

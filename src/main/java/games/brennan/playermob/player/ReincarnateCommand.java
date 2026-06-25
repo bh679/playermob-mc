@@ -318,7 +318,7 @@ public final class ReincarnateCommand {
         if (mob == null) {
             return 0;
         }
-        LivingEntity target = resolveTarget(source, StringArgumentType.getString(ctx, "target"));
+        LivingEntity target = resolveTarget(source, mob, StringArgumentType.getString(ctx, "target"));
         if (target == null) {
             return 0;
         }
@@ -388,7 +388,7 @@ public final class ReincarnateCommand {
      * Resolve a {@code <target>} arg to an entity: an online player by name, else a PlayerMob by
      * (case-insensitive) custom name. Sends a failure and returns {@code null} if neither matches.
      */
-    private static LivingEntity resolveTarget(CommandSourceStack source, String name) {
+    private static LivingEntity resolveTarget(CommandSourceStack source, PlayerMobEntity mob, String name) {
         ServerPlayer player = source.getServer().getPlayerList().getPlayerByName(name);
         if (player != null) {
             return player;
@@ -399,8 +399,40 @@ public final class ReincarnateCommand {
                 return m;
             }
         }
-        source.sendFailure(Component.literal("No player or named PlayerMob called '" + name + "' found."));
+        LivingEntity nearestOfType = nearestOfType(mob, name);
+        if (nearestOfType != null) {
+            return nearestOfType;
+        }
+        source.sendFailure(Component.literal(
+            "No player, named PlayerMob, or nearby mob of type '" + name + "' found."));
         return null;
+    }
+
+    /** Radius (blocks) searched around the ordered mob for the nearest entity of a given type. */
+    private static final double TYPE_SEARCH_RADIUS = 128.0;
+
+    /**
+     * The nearest living entity to {@code mob} whose entity-type id matches {@code name} — a bare
+     * path like {@code sheep} (namespace assumed {@code minecraft}) or a full {@code ns:path}.
+     * Matched case-insensitively; the ordered mob itself is excluded. {@code null} if none nearby.
+     */
+    private static LivingEntity nearestOfType(PlayerMobEntity mob, String name) {
+        String wanted = name.toLowerCase(java.util.Locale.ROOT);
+        AABB box = mob.getBoundingBox().inflate(TYPE_SEARCH_RADIUS);
+        LivingEntity nearest = null;
+        double best = Double.MAX_VALUE;
+        for (LivingEntity e : mob.level().getEntitiesOfClass(LivingEntity.class, box,
+                e -> e != mob && e.isAlive())) {
+            String key = net.minecraft.world.entity.EntityType.getKey(e.getType()).toString();
+            if (key.equals(wanted) || key.endsWith(":" + wanted)) {
+                double d = e.distanceToSqr(mob.position());
+                if (d < best) {
+                    best = d;
+                    nearest = e;
+                }
+            }
+        }
+        return nearest;
     }
 
     /** A short label for command feedback — the mob's custom name, or "PlayerMob" if unnamed. */
@@ -416,7 +448,7 @@ public final class ReincarnateCommand {
         if (mob == null) {
             return 0;
         }
-        LivingEntity target = resolveTarget(source, StringArgumentType.getString(ctx, "target"));
+        LivingEntity target = resolveTarget(source, mob, StringArgumentType.getString(ctx, "target"));
         if (target == null) {
             return 0;
         }
@@ -508,7 +540,7 @@ public final class ReincarnateCommand {
         if (mob == null) {
             return 0;
         }
-        LivingEntity target = resolveTarget(source, StringArgumentType.getString(ctx, "target"));
+        LivingEntity target = resolveTarget(source, mob, StringArgumentType.getString(ctx, "target"));
         if (target == null) {
             return 0;
         }
@@ -542,7 +574,7 @@ public final class ReincarnateCommand {
         if (mob == null) {
             return 0;
         }
-        LivingEntity target = resolveTarget(source, StringArgumentType.getString(ctx, "target"));
+        LivingEntity target = resolveTarget(source, mob, StringArgumentType.getString(ctx, "target"));
         if (target == null) {
             return 0;
         }
@@ -562,7 +594,7 @@ public final class ReincarnateCommand {
         if (mob == null) {
             return 0;
         }
-        LivingEntity target = resolveTarget(source, StringArgumentType.getString(ctx, "target"));
+        LivingEntity target = resolveTarget(source, mob, StringArgumentType.getString(ctx, "target"));
         if (target == null) {
             return 0;
         }
@@ -601,7 +633,7 @@ public final class ReincarnateCommand {
         if (mob == null) {
             return 0;
         }
-        LivingEntity target = resolveTarget(source, StringArgumentType.getString(ctx, "target"));
+        LivingEntity target = resolveTarget(source, mob, StringArgumentType.getString(ctx, "target"));
         if (target == null) {
             return 0;
         }
@@ -631,7 +663,7 @@ public final class ReincarnateCommand {
         if (mob == null) {
             return 0;
         }
-        LivingEntity target = resolveTarget(source, StringArgumentType.getString(ctx, "target"));
+        LivingEntity target = resolveTarget(source, mob, StringArgumentType.getString(ctx, "target"));
         if (target == null) {
             return 0;
         }
