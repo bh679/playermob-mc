@@ -266,6 +266,24 @@
       "released": true,
       "released_in": "v0.56.0",
       "released_at": "2026-06-25T00:40:16Z"
+    },
+    {
+      "id": "ammo-aware-ranged-combat",
+      "version": "0.57.0",
+      "type": "feat",
+      "title": "PlayerMobs use real ammo for bows and crossbows",
+      "summary": "Archers now draw from their own quiver: a PlayerMob fires its bow or crossbow only while it carries ammo it can use, spending one round per shot. Bows use arrows; crossbows use arrows or firework rockets. Run it dry and it stops shooting \u2014 switching to a melee weapon, or darting over to grab nearby loose ammo when the enemy isn't right on top of it, then picking the weapon back up. It still favours ranged at a distance and closes to melee up close, and reloads crossbows between shots.",
+      "highlights": [
+        "Bows and crossbows consume ammo from the mob's inventory \u2014 arrows for both, plus firework rockets for crossbows; no ammo means no shooting",
+        "Out of ammo mid-fight, it grabs nearby dropped arrows/fireworks (if the enemy isn't too close) or falls back to melee",
+        "Keeps the ranged-at-distance / melee-up-close behaviour and crossbow reloading",
+        "Toggle global unlimited ammo live with /playermob unlimitedammo on|off (or the requireArrows config), plus tunable engage distances"
+      ],
+      "pr": 121,
+      "date": "2026-06-25",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }

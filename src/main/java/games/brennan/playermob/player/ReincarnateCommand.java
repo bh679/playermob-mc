@@ -47,6 +47,9 @@ import java.util.Collection;
  *       source), with optional locked traits (default: random).</li>
  *   <li>{@code /playermob debug spawnlog [on|off]} — toggle (or report) the colour-coded
  *       Dungeon-Train auto-spawn chat log for this session.</li>
+ *   <li>{@code /playermob unlimitedammo [on|off]} — toggle (or report) global unlimited ammo for
+ *       this session: {@code on} = ranged weapons never run out; {@code off} = they consume inventory
+ *       ammo (the {@code requireArrows} default). A session override of the config flag.</li>
  *   <li>{@code /playermob naturalspawn [on|off]} — toggle (or report) the natural-spawn master
  *       switch for this session.</li>
  *   <li>{@code /playermob naturalspawn <mob> on|off|<chance>} — set a mob's companion chance
@@ -97,6 +100,10 @@ public final class ReincarnateCommand {
                         .executes(ReincarnateCommand::querySpawnLog)
                         .then(Commands.literal("on").executes(ctx -> setSpawnLog(ctx, true)))
                         .then(Commands.literal("off").executes(ctx -> setSpawnLog(ctx, false)))))
+                .then(Commands.literal("unlimitedammo")
+                    .executes(ReincarnateCommand::queryUnlimitedAmmo)
+                    .then(Commands.literal("on").executes(ctx -> setUnlimitedAmmo(ctx, true)))
+                    .then(Commands.literal("off").executes(ctx -> setUnlimitedAmmo(ctx, false))))
                 .then(Commands.literal("naturalspawn")
                     .executes(ReincarnateCommand::reportNaturalSpawn)
                     .then(Commands.literal("on").executes(ctx -> setNaturalSpawnMaster(ctx, true)))
@@ -150,6 +157,23 @@ public final class ReincarnateCommand {
         ctx.getSource().sendSuccess(
             () -> Component.literal("PlayerMob DT-spawn debug log " + (enabled ? "enabled" : "disabled")
                 + " for this session."), false);
+        return 1;
+    }
+
+    /** {@code /playermob unlimitedammo} — report whether global unlimited ammo is on (the inverse of requireArrows). */
+    private static int queryUnlimitedAmmo(CommandContext<CommandSourceStack> ctx) {
+        boolean unlimited = !PlayerMobConfig.requireArrows();
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob unlimited ammo is "
+            + (unlimited ? "ON — ranged weapons never run out"
+                         : "OFF — ranged weapons consume inventory ammo") + "."), false);
+        return 1;
+    }
+
+    /** {@code /playermob unlimitedammo on|off} — flip global unlimited ammo for this session. */
+    private static int setUnlimitedAmmo(CommandContext<CommandSourceStack> ctx, boolean unlimited) {
+        PlayerMobConfig.setRequireArrows(!unlimited);
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob unlimited ammo "
+            + (unlimited ? "enabled" : "disabled") + " for this session."), false);
         return 1;
     }
 
