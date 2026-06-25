@@ -784,6 +784,15 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * </ul>
      */
     @Override
+    public void tick() {
+        super.tick();
+        // The arm-swing animation progress (swingTime → attackAnim) wasn't advancing for this
+        // entity — it froze at the start of a swing, so punch/attack swings never animated. Advance
+        // it each tick (both sides) so commanded and combat swings play out like a real player's.
+        updateSwingTime();
+    }
+
+    @Override
     //? if >=26 {
     /*protected void customServerAiStep(ServerLevel level) {
         super.customServerAiStep(level);
