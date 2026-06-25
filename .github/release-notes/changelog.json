@@ -351,6 +351,25 @@
       "released": true,
       "released_in": "v0.61.0",
       "released_at": "2026-06-25T08:31:36Z"
+    },
+    {
+      "id": "playermob-order-command",
+      "version": "0.62.0",
+      "type": "feat",
+      "title": "Command PlayerMobs with /playermob order",
+      "summary": "A new op command lets you order a specific PlayerMob \u2014 by name, or the nearest one \u2014 to perform an action against a player, another PlayerMob, a mob type, or coordinates. The mob walks up, does the thing, then returns to its normal behaviour.",
+      "highlights": [
+        "walk to, punch, taunt (punchat), or greet a target",
+        "attack with a stop limit \u2014 once, until dead, for N seconds, until N hearts, or until it's hit back \u2014 optionally with a chosen or conjured weapon",
+        "gift an auto-picked or specified item, and steal a target's held item then flee for a time or distance",
+        "use any item with a real right-click \u2014 place, till, shear, milk, buckets \u2014 working with modded items too",
+        "place a block at a spot, or have the mob chase a live player and place it at their feet"
+      ],
+      "pr": 133,
+      "date": "2026-06-25",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
