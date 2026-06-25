@@ -207,7 +207,9 @@ public final class ReincarnateCommand {
                         .suggests(TARGET_SUGGESTIONS)
                         .executes(ReincarnateCommand::orderWalkEntity)))
                 .then(entityAction("punch", OrderType.PUNCH))
+                .then(entityAction("punchat", OrderType.PUNCH_AT))
                 .then(attackSubtree(buildContext))
+                .then(stealSubtree())
                 .then(entityAction("gift", OrderType.GIFT))
                 .then(entityAction("greet", OrderType.GREET))
                 .then(Commands.literal("place")
@@ -424,6 +426,48 @@ public final class ReincarnateCommand {
         return 1;
     }
 
+    /**
+     * Builds {@code steal <target> [<n> s | <n> blocks]} — grab the target's held item, then flee
+     * (for {@code n} seconds / blocks, or a short default when no limit is given).
+     */
+    private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack> stealSubtree() {
+        RequiredArgumentBuilder<CommandSourceStack, Integer> amount =
+            Commands.argument("amount", IntegerArgumentType.integer(1, 1_000_000));
+        amount.then(Commands.literal("s").executes(ctx -> orderSteal(ctx, Order.FleeUnit.SECONDS)));
+        amount.then(Commands.literal("seconds").executes(ctx -> orderSteal(ctx, Order.FleeUnit.SECONDS)));
+        amount.then(Commands.literal("b").executes(ctx -> orderSteal(ctx, Order.FleeUnit.BLOCKS)));
+        amount.then(Commands.literal("blocks").executes(ctx -> orderSteal(ctx, Order.FleeUnit.BLOCKS)));
+        return Commands.literal("steal")
+            .then(Commands.argument("target", StringArgumentType.word())
+                .suggests(TARGET_SUGGESTIONS)
+                .executes(ctx -> orderSteal(ctx, Order.FleeUnit.NONE))
+                .then(amount));
+    }
+
+    /** {@code /playermob order <name> steal <target> [<n> s|blocks]}. */
+    private static int orderSteal(CommandContext<CommandSourceStack> ctx, Order.FleeUnit unit) {
+        CommandSourceStack source = ctx.getSource();
+        PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
+        if (mob == null) {
+            return 0;
+        }
+        LivingEntity target = resolveTarget(source, StringArgumentType.getString(ctx, "target"));
+        if (target == null) {
+            return 0;
+        }
+        int amount = unit == Order.FleeUnit.NONE ? 0 : IntegerArgumentType.getInteger(ctx, "amount");
+        mob.setOrder(Order.steal(target, amount, unit));
+        String who = label(mob);
+        String targetName = target.getName().getString();
+        String fleeNote = switch (unit) {
+            case SECONDS -> ", fleeing for " + amount + "s";
+            case BLOCKS -> ", fleeing for " + amount + " blocks";
+            case NONE -> "";
+        };
+        source.sendSuccess(() -> Component.literal(who + " steals from " + targetName + fleeNote + "."), true);
+        return 1;
+    }
+
     /** {@code /playermob order <name> walk <pos>}. */
     private static int orderWalkPos(CommandContext<CommandSourceStack> ctx) {
         CommandSourceStack source = ctx.getSource();
@@ -497,9 +541,11 @@ public final class ReincarnateCommand {
         return switch (type) {
             case WALK -> "walk to";
             case PUNCH -> "punch";
+            case PUNCH_AT -> "feint at";
             case ATTACK -> "attack";
             case GIFT -> "gift";
             case GREET -> "greet";
+            case STEAL -> "steal from";
             case PLACE -> "place a block at";
         };
     }

@@ -3,8 +3,10 @@ package games.brennan.playermob.entity.goal;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
+import net.minecraft.world.entity.ai.util.DefaultRandomPos;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
@@ -22,26 +24,38 @@ import java.util.EnumSet;
  * gotcha). A small phase machine walks to the target, performs the action, then
  * clears the order:</p>
  *
- * <pre>PATH → ACT → DONE</pre>
+ * <pre>PATH → ACT → [FLEE] → DONE</pre>
  *
  * <p>Reuses the entity's own gifting helpers ({@link PlayerMobEntity#tossGift},
- * {@link PlayerMobEntity#selectGiftFromInventory}) and mirrors the crouch-bow of
- * {@link FriendlyGreetGoal} for the greeting. {@link OrderType#ATTACK} is handled
- * directly by the command (it just sets a combat target), so it never reaches
- * this goal.</p>
+ * {@link PlayerMobEntity#selectGiftFromInventory}), mirrors the crouch-bow of
+ * {@link FriendlyGreetGoal} for the greeting, and the {@link DefaultRandomPos}
+ * retreat picker of {@link FleeFromCategoryGoal} for a steal's getaway.
+ * {@link OrderType#ATTACK} is handled directly by the command (it just sets a
+ * combat target), so it never reaches this goal.</p>
  */
 public final class CommandedActionGoal extends Goal implements DescribableGoal {
 
     private static final int WALK_TIMEOUT_TICKS = 200;   // 10s to reach the target before giving up
-    private static final double ENTITY_REACH_SQR = 9.0;  // 3 blocks — close enough to punch/gift/greet
+    private static final double ENTITY_REACH_SQR = 9.0;  // 3 blocks — close enough to punch/gift/greet/steal
     private static final double WALK_ARRIVE_SQR = 4.0;    // 2 blocks — "arrived" at a position
     private static final double PLACE_REACH_SQR = 20.25;  // 4.5 blocks — close enough to place
+    private static final double PUNCH_AT_STANDOFF_SQR = 20.25; // 4.5 blocks — just out of melee reach
 
     private static final int CROUCH_HALF_PERIOD_TICKS = 5; // ticks per down / up half of a greeting bob
     private static final int MIN_CROUCHES = 3;
     private static final int MAX_CROUCHES = 10;
 
-    private enum Phase { PATH, ACT, DONE }
+    private static final int SWING_INTERVAL_TICKS = 8;   // gap between punch-at taunt swings
+    private static final int PUNCH_AT_SWINGS = 6;        // number of taunt swings before stopping
+
+    private static final int FLEE_DEFAULT_TICKS = 100;   // 5s of running off when a steal has no limit
+    private static final int FLEE_MAX_TICKS = 400;       // 20s safety cap (e.g. an unreachable block goal)
+    private static final int FLEE_REPATH_INTERVAL = 10;  // re-pick a retreat point every 0.5s
+    private static final int RETREAT_RADIUS = 16;
+    private static final int RETREAT_VERTICAL = 7;
+    private static final double FLEE_SPEED = 1.3;        // sprint away
+
+    private enum Phase { PATH, ACT, FLEE, DONE }
 
     private final PlayerMobEntity mob;
     private final double speed;
@@ -55,6 +69,15 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
     private int crouchesDone;
     private int halfPeriodTicks;
     private boolean crouchDown;
+
+    // Punch-at taunt state.
+    private int swingTicks;
+    private int swingsDone;
+
+    // Steal getaway state.
+    private int fleeStartTick;
+    private Vec3 fleeOrigin = Vec3.ZERO;
+    private int fleeRepathTicks;
 
     public CommandedActionGoal(PlayerMobEntity mob, double speed) {
         this.mob = mob;
@@ -70,9 +93,13 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
 
     @Override
     public boolean canContinueToUse() {
-        return phase != Phase.DONE
-            && order != null
-            && targetAlive();
+        if (order == null || phase == Phase.DONE) {
+            return false;
+        }
+        if (phase == Phase.FLEE) {
+            return true;   // finish the getaway even if the victim has gone
+        }
+        return targetAlive();
     }
 
     /** An entity-directed order ends early if its target vanishes; position orders never do. */
@@ -94,10 +121,10 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
             phase = Phase.DONE;
             return;
         }
-        lookAtDestination();
         switch (phase) {
-            case PATH -> tickPath();
-            case ACT -> tickAct();
+            case PATH -> { lookAtDestination(); tickPath(); }
+            case ACT -> { lookAtDestination(); tickAct(); }
+            case FLEE -> tickFlee();
             default -> { /* DONE — canContinueToUse ends the goal next evaluation */ }
         }
     }
@@ -125,6 +152,7 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
     private double reachSqr() {
         return switch (order.type()) {
             case PLACE -> PLACE_REACH_SQR;
+            case PUNCH_AT -> PUNCH_AT_STANDOFF_SQR;
             case WALK -> order.targetEntity() != null ? ENTITY_REACH_SQR : WALK_ARRIVE_SQR;
             default -> ENTITY_REACH_SQR;
         };
@@ -150,15 +178,22 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
         }
     }
 
-    /** Arrived — perform the action (one-shot, except the multi-tick greeting bob). */
+    /** Arrived — perform the action (one-shot, except the multi-tick greeting / taunt / steal-flee). */
     private void enterAct() {
         phase = Phase.ACT;
-        if (order.type() == OrderType.GREET) {
-            crouchesTarget = MIN_CROUCHES + mob.getRandom().nextInt(MAX_CROUCHES - MIN_CROUCHES + 1);
-            crouchesDone = 0;
-            halfPeriodTicks = 0;
-            crouchDown = true;
-            mob.setCrouching(true);
+        switch (order.type()) {
+            case GREET -> {
+                crouchesTarget = MIN_CROUCHES + mob.getRandom().nextInt(MAX_CROUCHES - MIN_CROUCHES + 1);
+                crouchesDone = 0;
+                halfPeriodTicks = 0;
+                crouchDown = true;
+                mob.setCrouching(true);
+            }
+            case PUNCH_AT -> {
+                swingTicks = 0;
+                swingsDone = 0;
+            }
+            default -> { /* one-shot actions act immediately in tickAct */ }
         }
     }
 
@@ -166,8 +201,10 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
         switch (order.type()) {
             case WALK -> phase = Phase.DONE;
             case PUNCH -> doPunch();
+            case PUNCH_AT -> tickPunchAt();
             case GIFT -> doGift();
             case GREET -> tickGreet();
+            case STEAL -> doSteal();
             case PLACE -> doPlace();
             default -> phase = Phase.DONE; // ATTACK never routes here
         }
@@ -184,6 +221,18 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
             //?}
         }
         phase = Phase.DONE;
+    }
+
+    /** Throw a few punch motions from out of reach — a taunt that never lands. */
+    private void tickPunchAt() {
+        if (swingTicks % SWING_INTERVAL_TICKS == 0) {
+            mob.swing(InteractionHand.MAIN_HAND);
+            swingsDone++;
+        }
+        swingTicks++;
+        if (swingsDone >= PUNCH_AT_SWINGS) {
+            phase = Phase.DONE;
+        }
     }
 
     private void doGift() {
@@ -224,6 +273,48 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
         mob.setCrouching(crouchDown); // assert every tick so nothing resets the pose mid-bob
     }
 
+    /** Snatch the target's held item into the pack, then run for it. */
+    private void doSteal() {
+        LivingEntity target = order.targetEntity();
+        if (target != null) {
+            ItemStack hand = target.getMainHandItem();
+            if (!hand.isEmpty()) {
+                ItemStack taken = hand.copy();
+                target.setItemSlot(EquipmentSlot.MAINHAND, ItemStack.EMPTY);
+                ItemStack leftover = mob.getInventory().addItem(taken);
+                if (!leftover.isEmpty()) {
+                    mob.dropAtLocation(leftover);
+                }
+            }
+        }
+        phase = Phase.FLEE;
+        fleeStartTick = mob.tickCount;
+        fleeOrigin = mob.position();
+        fleeRepathTicks = 0;
+    }
+
+    private void tickFlee() {
+        int elapsed = mob.tickCount - fleeStartTick;
+        boolean done = switch (order.unit()) {
+            case SECONDS -> elapsed >= order.amount() * 20;
+            case BLOCKS -> mob.position().distanceTo(fleeOrigin) >= order.amount() || elapsed > FLEE_MAX_TICKS;
+            case NONE -> elapsed >= FLEE_DEFAULT_TICKS;
+        };
+        if (done) {
+            phase = Phase.DONE;
+            return;
+        }
+        if (++fleeRepathTicks >= FLEE_REPATH_INTERVAL || mob.getNavigation().isDone()) {
+            fleeRepathTicks = 0;
+            LivingEntity target = order.targetEntity();
+            Vec3 threat = target != null ? target.position() : fleeOrigin;
+            Vec3 away = DefaultRandomPos.getPosAway(mob, RETREAT_RADIUS, RETREAT_VERTICAL, threat);
+            if (away != null) {
+                mob.getNavigation().moveTo(away.x, away.y, away.z, FLEE_SPEED);
+            }
+        }
+    }
+
     private void doPlace() {
         BlockPos pos = order.targetPos();
         if (pos != null && order.blockState() != null) {
@@ -257,11 +348,16 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
         if (order == null) {
             return null;
         }
+        if (phase == Phase.FLEE) {
+            return "fleeing";
+        }
         return switch (order.type()) {
             case WALK -> "walking";
             case PUNCH -> "punching";
+            case PUNCH_AT -> "feinting";
             case GIFT -> "gifting";
             case GREET -> "greeting";
+            case STEAL -> "stealing";
             case PLACE -> "placing block";
             default -> null;
         };
