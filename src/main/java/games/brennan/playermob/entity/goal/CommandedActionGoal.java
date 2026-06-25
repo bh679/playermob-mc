@@ -46,7 +46,8 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
     private static final int MAX_CROUCHES = 10;
 
     private static final int SWING_INTERVAL_TICKS = 8;   // gap between punch-at taunt swings
-    private static final int PUNCH_AT_SWINGS = 6;        // number of taunt swings before stopping
+    private static final int MIN_PUNCH_AT_SWINGS = 2;    // taunt swing count is randomised 2–6
+    private static final int MAX_PUNCH_AT_SWINGS = 6;
     // Hold facing the target after a one-shot strike so the ~6-tick swing plays out before the mob
     // releases control and turns away — otherwise the swing reads as "no animation" (like a player,
     // who stays planted through the swing).
@@ -77,6 +78,7 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
     // Punch-at taunt state.
     private int swingTicks;
     private int swingsDone;
+    private int punchAtSwingsTarget;
 
     // One-shot strike (punch / single-strike attack) follow-through.
     private boolean struck;
@@ -202,6 +204,8 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
             case PUNCH_AT -> {
                 swingTicks = 0;
                 swingsDone = 0;
+                punchAtSwingsTarget = MIN_PUNCH_AT_SWINGS
+                    + mob.getRandom().nextInt(MAX_PUNCH_AT_SWINGS - MIN_PUNCH_AT_SWINGS + 1);
             }
             default -> { /* one-shot actions act immediately in tickAct */ }
         }
@@ -227,6 +231,7 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
             // ACT tick) so the swing animation plays out before the order releases — like a player.
             LivingEntity target = order.targetEntity();
             if (target != null) {
+                faceBodyToward(target);   // body faces the target so the swing points at it
                 mob.swing(InteractionHand.MAIN_HAND);
                 //? if >=26 {
                 /*mob.doHurtTarget((net.minecraft.server.level.ServerLevel) mob.level(), target);
@@ -245,14 +250,30 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
 
     /** Throw a few punch motions from out of reach — a taunt that never lands. */
     private void tickPunchAt() {
+        // Face the BODY at the target (the look control only turns the head) so the swing reads as
+        // a punch toward you, not a sideways flail.
+        LivingEntity target = order.targetEntity();
+        if (target != null) {
+            faceBodyToward(target);
+        }
         if (swingTicks % SWING_INTERVAL_TICKS == 0) {
             mob.swing(InteractionHand.MAIN_HAND);
             swingsDone++;
         }
         swingTicks++;
-        if (swingsDone >= PUNCH_AT_SWINGS) {
+        if (swingsDone >= punchAtSwingsTarget) {
             phase = Phase.DONE;
         }
+    }
+
+    /** Snap the mob's body yaw to face {@code target}, so an arm swing points at it. */
+    private void faceBodyToward(LivingEntity target) {
+        double dx = target.getX() - mob.getX();
+        double dz = target.getZ() - mob.getZ();
+        float yaw = (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0);
+        mob.setYRot(yaw);
+        mob.yBodyRot = yaw;
+        mob.yBodyRotO = yaw;
     }
 
     private void doGift() {
