@@ -182,10 +182,13 @@ bonemeal, buckets, throwables) or on a target entity (shearing, milking, breedin
 /playermob order Bob use Cow minecraft:bucket spawn
 ```
 
-> **Caveats.** `use` drives a fake player to perform the interaction, so behaviour is
-> item-dependent and best-effort. Positional placement clicks the block *at* `<pos>`, so a
-> block/crop may land one block off depending on the item. Bucket results (milk, etc.) end up
-> in the fake player's hand rather than the world.
+> **How it works / caveats.** `use` drives a fake player through the full server interaction
+> pipeline (`useItemOn` / `useItem` / `interactOn`), so the loaders' interaction events fire and
+> **most modded items work**, not just vanilla. The mob's live held stack is used and written
+> back, so stateful items (buckets, energy, durability, milk) reflect their result on the mob.
+> NeoForge uses its real `FakePlayer` for capability-aware mods. Still best-effort: items needing
+> a client/screen or a specific player identity won't work, and positional placement clicks the
+> face of `<pos>` nearest the mob, so a block may land one over depending on the item.
 
 ## place
 

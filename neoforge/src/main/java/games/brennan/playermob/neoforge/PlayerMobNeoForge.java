@@ -171,6 +171,11 @@ public final class PlayerMobNeoForge {
                     Component.translatable("container.playermob.player_mob")),
                 buf -> buf.writeVarInt(mob.getId()));
 
+        // Use NeoForge's real FakePlayer for `/playermob order ... use` so capability- and
+        // instanceof-FakePlayer-aware modded items behave (it overrides the common fallback).
+        games.brennan.playermob.compat.FakePlayerSource.install(
+            net.neoforged.neoforge.common.util.FakePlayerFactory::getMinecraft);
+
         // Optional Dungeon Train integration. DT is NeoForge-only and optional;
         // gate on its presence so DungeonTrainEnvironment (and the Dungeon Train
         // symbols it imports) is only ever classloaded when DT is installed.

@@ -207,6 +207,13 @@ public final class PlayerMobForge {
                 serverPlayer, provider, buf -> buf.writeVarInt(mob.getId()));*/
             //?}
         };
+        // Forge 1.20.1 ships FakePlayerFactory (used for `/playermob order ... use`); Forge 1.21.1
+        // (52.x) dropped it, so that node falls back to the common fake player.
+        //? if <1.21.1 {
+        /*games.brennan.playermob.compat.FakePlayerSource.install(
+            net.minecraftforge.common.util.FakePlayerFactory::getMinecraft);
+        *///?}
+
         PlayerMob.init(FMLPaths.CONFIGDIR.get());
     }
 }
