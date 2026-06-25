@@ -204,6 +204,18 @@ class PlayerMobConfigTest {
     }
 
     @Test
+    void extraPickupItemsDefaultsEmptyAndParses() {
+        assertEquals("", PlayerMobConfig.DEFAULT_EXTRA_PICKUP_ITEMS);
+        assertTrue(PlayerMobConfig.parse(new Properties()).extraPickups().isEmpty(),
+            "missing key → empty list");
+        assertTrue(PlayerMobConfig.parse(props("extraPickupItems", "   ")).extraPickups().isEmpty(),
+            "blank value → empty list");
+        // A real id + a tag → a non-empty list (membership detail is covered in WantedItemListTest).
+        assertFalse(PlayerMobConfig.parse(props("extraPickupItems", "minecraft:diamond, #minecraft:logs"))
+            .extraPickups().isEmpty());
+    }
+
+    @Test
     void requireArrowsDefaultsOnAndTogglesAtRuntime() {
         assertTrue(PlayerMobConfig.DEFAULT_REQUIRE_ARROWS, "inventory ammo is the default");
         assertTrue(PlayerMobConfig.parse(new Properties()).requireArrows(), "missing key → default true");

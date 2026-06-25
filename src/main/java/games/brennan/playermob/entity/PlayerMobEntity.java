@@ -2321,15 +2321,37 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
 
         EquipmentSlot slot = getEquipmentSlotForItem(candidate);
         ItemStack current = getItemBySlot(slot);
-        if (!EquipmentEvaluator.shouldReplace(candidate, current)) return false;
-
-        setItemSlot(slot, candidate.copy());
-        source.setItem(slotIdx, ItemStack.EMPTY);
-        source.setChanged();
-        if (!current.isEmpty()) {
-            ItemStack leftover = EquipmentEvaluator.addToContainer(source, current.copy());
-            if (!leftover.isEmpty()) dropAtLocation(leftover);
+        if (EquipmentEvaluator.shouldReplace(candidate, current)) {
+            setItemSlot(slot, candidate.copy());
+            source.setItem(slotIdx, ItemStack.EMPTY);
+            source.setChanged();
+            if (!current.isEmpty()) {
+                ItemStack leftover = EquipmentEvaluator.addToContainer(source, current.copy());
+                if (!leftover.isEmpty()) dropAtLocation(leftover);
+            }
+            return true;
         }
+
+        // Not an equip upgrade — hoard it into the backpack if it's an admin-configured extra pickup.
+        if (isExtraWanted(candidate)) return takeExtraWantedFromContainer(source, slotIdx);
+        return false;
+    }
+
+    /**
+     * Move as much of an {@code extraPickupItems} stack as fits from a chest slot into the backpack
+     * (uncapped, matching the floor/valuables hoard semantics). Overflow that doesn't fit stays in the
+     * chest — nothing is dropped on the ground.
+     *
+     * @return true if any item moved
+     */
+    private boolean takeExtraWantedFromContainer(Container source, int slotIdx) {
+        ItemStack found = source.getItem(slotIdx);
+        if (found.isEmpty()) return false;
+        ItemStack leftover = EquipmentEvaluator.addToContainer(this.inventory, found.copy());
+        int moved = found.getCount() - leftover.getCount();
+        if (moved <= 0) return false;
+        found.shrink(moved);
+        source.setChanged();
         return true;
     }
 
@@ -2434,7 +2456,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         }
         EquipmentSlot slot = getEquipmentSlotForItem(candidate);
         ItemStack current = getItemBySlot(slot);
-        return EquipmentEvaluator.shouldReplace(candidate, current);
+        if (EquipmentEvaluator.shouldReplace(candidate, current)) return true;
+        // Mirror tryTakeFromContainer's extra-pickup fallback: hoard configured items with backpack room.
+        return isExtraWanted(candidate) && EquipmentEvaluator.hasRoomFor(this.inventory, candidate);
     }
 
     /** Pre-check variant of {@link #tryReplaceFromArmorStand}. */
@@ -2470,8 +2494,18 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             || wantsAsAmmo(stack)
             || ItemPickupPolicy.isValuable(stack)
             || ItemPickupPolicy.isConsumable(stack)
+            || isExtraWanted(stack)
             || (ItemPickupPolicy.isBuildingBlock(stack)
                 && ItemPickupPolicy.wantsBuildingBlock(this.inventory, stack));
+    }
+
+    /**
+     * True if {@code stack} is in the admin-configured {@code extraPickupItems} list — extra items
+     * the mob always grabs and hoards in its backpack (off the floor and out of chests), beyond the
+     * built-in gear/ammo/valuable/consumable categories. Empty by default. See {@link WantedItemList}.
+     */
+    private boolean isExtraWanted(ItemStack stack) {
+        return PlayerMobConfig.extraPickups().matches(stack);
     }
 
     /**
@@ -2527,7 +2561,8 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         }
         if (wantsAsAmmo(stack)
                 || ItemPickupPolicy.isValuable(stack)
-                || ItemPickupPolicy.isConsumable(stack)) {
+                || ItemPickupPolicy.isConsumable(stack)
+                || isExtraWanted(stack)) {
             // InventoryCarrier.pickUpItem handles its own want-check, take, and discard.
             //? if >=26 {
             /*// 26.x added a leading ServerLevel argument; pickup only runs server-side.

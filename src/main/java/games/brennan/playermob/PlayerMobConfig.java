@@ -1,6 +1,7 @@
 package games.brennan.playermob;
 
 import com.mojang.logging.LogUtils;
+import games.brennan.playermob.entity.WantedItemList;
 import org.slf4j.Logger;
 
 import java.io.IOException;
@@ -40,6 +41,8 @@ public final class PlayerMobConfig {
     private static final String KEY_RANGED_ENGAGE_DISTANCE = "rangedEngageDistance";
     private static final String KEY_MELEE_ENGAGE_DISTANCE = "meleeEngageDistance";
 
+    private static final String KEY_EXTRA_PICKUP_ITEMS = "extraPickupItems";
+
     /** Default chance a Dungeon-Train echo with logged friends also brings back a friend-echo. */
     public static final float DEFAULT_ECHO_FRIEND_CHANCE = 0.40F;
     /** Debug spawn logging ships off — when on it broadcasts a chat line on every DT auto-spawn. */
@@ -58,6 +61,8 @@ public final class PlayerMobConfig {
     public static final float DEFAULT_RANGED_ENGAGE_DISTANCE = 8.0F;
     /** Within this many blocks a PlayerMob draws a melee weapon (default 4); must stay below the ranged distance. */
     public static final float DEFAULT_MELEE_ENGAGE_DISTANCE = 4.0F;
+    /** No extra pickup items by default — the mob wants only its hardcoded gear/ammo/valuable/consumable set. */
+    public static final String DEFAULT_EXTRA_PICKUP_ITEMS = "";
 
     /**
      * The mob groups natural spawning understands. Each carries the default chance that, when natural
@@ -151,6 +156,8 @@ public final class PlayerMobConfig {
     private static volatile boolean seekArrowsWhenEmpty = DEFAULT_SEEK_ARROWS_WHEN_EMPTY;
     private static volatile float rangedEngageDistance = DEFAULT_RANGED_ENGAGE_DISTANCE;
     private static volatile float meleeEngageDistance = DEFAULT_MELEE_ENGAGE_DISTANCE;
+    /** Admin-configured extra items the mob always wants; replaced wholesale on {@link #load}. */
+    private static volatile WantedItemList extraPickups = WantedItemList.EMPTY;
     /** Per-mob explicit overrides (id → clamped 0–1 chance); immutable, replaced wholesale on {@link #load}. */
     private static volatile Map<String, Float> naturalSpawnScales = Map.of();
 
@@ -215,6 +222,15 @@ public final class PlayerMobConfig {
     /** Distance (blocks) within which a PlayerMob draws melee instead of ranged. Always below {@link #rangedEngageDistance()}. */
     public static float meleeEngageDistance() {
         return meleeEngageDistance;
+    }
+
+    /**
+     * Extra items the mob always picks up (off the floor and out of chests) and hoards in its backpack,
+     * beyond the hardcoded gear/ammo/valuable/consumable categories. Configured via {@code extraPickupItems}
+     * as item ids and/or {@code #}-prefixed item tags. See {@code PlayerMobEntity#isExtraWanted}.
+     */
+    public static WantedItemList extraPickups() {
+        return extraPickups;
     }
 
     /**
@@ -331,6 +347,7 @@ public final class PlayerMobConfig {
             seekArrowsWhenEmpty = v.seekArrowsWhenEmpty();
             rangedEngageDistance = v.rangedEngageDistance();
             meleeEngageDistance = v.meleeEngageDistance();
+            extraPickups = v.extraPickups();
             naturalSpawnScales = v.naturalSpawnScales();
             LOGGER.info("[{}] config: {}={}, {}={}, {}={}, {}={}, {}={} ({} per-mob override(s))",
                 PlayerMob.MOD_ID,
@@ -353,6 +370,7 @@ public final class PlayerMobConfig {
                   boolean trainFollowLovedPlayer, boolean naturalSpawnEnabled,
                   boolean requireArrows, boolean seekArrowsWhenEmpty,
                   float rangedEngageDistance, float meleeEngageDistance,
+                  WantedItemList extraPickups,
                   Map<String, Float> naturalSpawnScales) {}
 
     static Values parse(Properties props) {
@@ -366,6 +384,7 @@ public final class PlayerMobConfig {
             parseBool(props.getProperty(KEY_REQUIRE_ARROWS), DEFAULT_REQUIRE_ARROWS),
             parseBool(props.getProperty(KEY_SEEK_ARROWS_WHEN_EMPTY), DEFAULT_SEEK_ARROWS_WHEN_EMPTY),
             engage[0], engage[1],
+            WantedItemList.parse(props.getProperty(KEY_EXTRA_PICKUP_ITEMS, DEFAULT_EXTRA_PICKUP_ITEMS)),
             parseScales(props));
     }
 
@@ -464,6 +483,11 @@ public final class PlayerMobConfig {
             .append("#   rangedEngageDistance blocks and melee within meleeEngageDistance blocks (the band\n")
             .append("#   between is hysteresis). meleeEngageDistance must be > 0 and < rangedEngageDistance,\n")
             .append("#   else both reset to 8 / 4. Defaults 8.0 / 4.0.\n")
+            .append("# extraPickupItems: extra items the mob ALWAYS picks up (off the floor and out of chests)\n")
+            .append("#   and hoards in its backpack, beyond the built-in weapons/armor/ammo/valuables/food it\n")
+            .append("#   already grabs. List item ids and/or item tags, separated by commas or spaces. Prefix a\n")
+            .append("#   tag with #; a bare path with no namespace assumes minecraft. Empty by default.\n")
+            .append("#   Example: extraPickupItems=#scguns:ammo, scguns:assault_rifle, minecraft:diamond_block\n")
             .append(KEY_ECHO_FRIEND_CHANCE).append("=").append(DEFAULT_ECHO_FRIEND_CHANCE).append("\n")
             .append(KEY_DEBUG_SPAWN_LOG).append("=").append(DEFAULT_DEBUG_SPAWN_LOG).append("\n")
             .append(KEY_TRAIN_DIG_THROUGH).append("=").append(DEFAULT_TRAIN_DIG_THROUGH).append("\n")
@@ -472,6 +496,7 @@ public final class PlayerMobConfig {
             .append(KEY_SEEK_ARROWS_WHEN_EMPTY).append("=").append(DEFAULT_SEEK_ARROWS_WHEN_EMPTY).append("\n")
             .append(KEY_RANGED_ENGAGE_DISTANCE).append("=").append(DEFAULT_RANGED_ENGAGE_DISTANCE).append("\n")
             .append(KEY_MELEE_ENGAGE_DISTANCE).append("=").append(DEFAULT_MELEE_ENGAGE_DISTANCE).append("\n")
+            .append(KEY_EXTRA_PICKUP_ITEMS).append("=").append(DEFAULT_EXTRA_PICKUP_ITEMS).append("\n")
             .append("#\n")
             .append("# --- Natural spawning (opt-in) ------------------------------------------------\n")
             .append("# naturalSpawnEnabled: master switch. When false (default), PlayerMobs only appear\n")
