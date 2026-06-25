@@ -7,6 +7,7 @@ import static games.brennan.playermob.entity.DispositionResolver.innerRadius;
 import static games.brennan.playermob.entity.DispositionResolver.kindnessScale;
 import static games.brennan.playermob.entity.DispositionResolver.onHurt;
 import static games.brennan.playermob.entity.DispositionResolver.outerRadius;
+import static games.brennan.playermob.entity.DispositionResolver.rangedAttackExtraDelayTicks;
 import static games.brennan.playermob.entity.DispositionResolver.resolve;
 import static games.brennan.playermob.entity.DispositionResolver.witnessedAttackDelta;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -204,6 +205,34 @@ class DispositionResolverTest {
             assertTrue(kindnessScale(t) >= 1.0f, "kindness never dampens at trait " + t);
             assertTrue(attackScale(t) > 0.0f, "attack scale stays positive at trait " + t);
         }
+    }
+
+    // ---- ranged firerate curve ----
+
+    @Test
+    void rangedDelayHitsTheThreeAnchors() {
+        assertEquals(0, rangedAttackExtraDelayTicks(10));    // aggressive → fire as fast as the weapon allows
+        assertEquals(40, rangedAttackExtraDelayTicks(5));     // balanced → +2s beat
+        assertEquals(200, rangedAttackExtraDelayTicks(0));    // timid → +10s crawl (rarely fights anyway)
+    }
+
+    @Test
+    void rangedDelayIsMonotonicNonIncreasingWithAggression() {
+        // Each interior point sits on the piecewise-linear ramp; higher fightFlight never shoots slower.
+        int[] expected = {200, 168, 136, 104, 72, 40, 32, 24, 16, 8, 0};
+        for (int ff = 0; ff <= 10; ff++) {
+            assertEquals(expected[ff], rangedAttackExtraDelayTicks(ff), "extra delay at ff " + ff);
+            if (ff > 0) {
+                assertTrue(rangedAttackExtraDelayTicks(ff) <= rangedAttackExtraDelayTicks(ff - 1),
+                    "delay must not rise as fightFlight rises, at ff " + ff);
+            }
+        }
+    }
+
+    @Test
+    void rangedDelayClampsOutOfRange() {
+        assertEquals(rangedAttackExtraDelayTicks(0), rangedAttackExtraDelayTicks(-5));
+        assertEquals(rangedAttackExtraDelayTicks(10), rangedAttackExtraDelayTicks(99));
     }
 
     // ---- totality ----

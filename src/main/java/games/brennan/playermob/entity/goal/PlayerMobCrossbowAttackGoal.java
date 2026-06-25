@@ -1,6 +1,7 @@
 package games.brennan.playermob.entity.goal;
 
 import games.brennan.playermob.compat.CrossbowCompat;
+import games.brennan.playermob.entity.DispositionResolver;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.util.TimeUtil;
 import net.minecraft.util.valueproviders.UniformInt;
@@ -138,12 +139,19 @@ public final class PlayerMobCrossbowAttackGoal extends Goal {
             if (ticksUsing >= CrossbowCompat.chargeDuration(inUse, this.mob)) {
                 this.mob.releaseUsingItem();
                 this.crossbowState = CrossbowState.CHARGED;
-                this.attackDelay = 20 + this.mob.getRandom().nextInt(20);
+                // Firerate floor is the charge duration above; fightFlight adds the extra
+                // beat — 0 at ff10 (charge-limited) up to 200 ticks at ff0.
+                this.attackDelay = DispositionResolver.rangedAttackExtraDelayTicks(this.mob.fightFlight());
                 this.mob.setChargingCrossbow(false);
             }
         } else if (this.crossbowState == CrossbowState.CHARGED) {
-            --this.attackDelay;
-            if (this.attackDelay == 0) {
+            // Guard the decrement so attackDelay never underflows below 0: an
+            // aggressive mob's extra delay can be 0 (fire as soon as charged), and
+            // the `attackDelay == 0` re-path check above relies on it resting at 0.
+            if (this.attackDelay > 0) {
+                --this.attackDelay;
+            }
+            if (this.attackDelay <= 0) {
                 this.crossbowState = CrossbowState.READY_TO_ATTACK;
             }
         } else if (this.crossbowState == CrossbowState.READY_TO_ATTACK && canSee) {

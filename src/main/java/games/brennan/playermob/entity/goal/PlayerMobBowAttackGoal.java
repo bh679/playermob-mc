@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.entity.DispositionResolver;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
@@ -25,7 +26,6 @@ public final class PlayerMobBowAttackGoal extends Goal {
 
     private final PlayerMobEntity mob;
     private final double speedModifier;
-    private final int attackIntervalMin;
     private final float attackRadiusSqr;
 
     private int attackTime = -1;
@@ -34,11 +34,9 @@ public final class PlayerMobBowAttackGoal extends Goal {
     private boolean strafingBackwards;
     private int strafingTime = -1;
 
-    public PlayerMobBowAttackGoal(PlayerMobEntity mob, double speedModifier,
-                                  int attackInterval, float attackRadius) {
+    public PlayerMobBowAttackGoal(PlayerMobEntity mob, double speedModifier, float attackRadius) {
         this.mob = mob;
         this.speedModifier = speedModifier;
-        this.attackIntervalMin = attackInterval;
         this.attackRadiusSqr = attackRadius * attackRadius;
         this.setFlags(EnumSet.of(Goal.Flag.MOVE, Goal.Flag.LOOK));
     }
@@ -137,7 +135,9 @@ public final class PlayerMobBowAttackGoal extends Goal {
                 if (ticksUsing >= 20) {
                     this.mob.stopUsingItem();
                     this.mob.performRangedAttack(target, BowItem.getPowerForTime(ticksUsing));
-                    this.attackTime = this.attackIntervalMin;
+                    // Firerate floor is the 20-tick draw above; fightFlight adds the extra
+                    // beat — 0 at ff10 (draw-limited) up to 200 ticks at ff0.
+                    this.attackTime = DispositionResolver.rangedAttackExtraDelayTicks(this.mob.fightFlight());
                 }
             }
         } else if (--this.attackTime <= 0 && this.seeTime >= -60) {
