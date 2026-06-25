@@ -317,6 +317,23 @@
       "released": true,
       "released_in": "v0.59.0",
       "released_at": "2026-06-25T05:51:40Z"
+    },
+    {
+      "id": "extra-pickup-items",
+      "version": "0.60.0",
+      "type": "feat",
+      "title": "Configurable extra pickup items",
+      "summary": "PlayerMobs can now be told to scoop up extra items they'd normally ignore. List item ids and/or item tags in the new extraPickupItems config line and the mob will grab them off the ground and out of chests, stashing them in its backpack \u2014 perfect for modded loot like a gun mod's ammo.",
+      "highlights": [
+        "New extraPickupItems setting in playermob.properties \u2014 list item ids (scguns:assault_rifle) and/or tags (#scguns:ammo), comma or space separated",
+        "Configured items are picked up from the floor AND looted from chests, alongside the weapons, armor, ammo and valuables the mob already collects",
+        "Empty by default \u2014 no change unless you opt in; supports any mod's items"
+      ],
+      "pr": 127,
+      "date": "2026-06-25",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
