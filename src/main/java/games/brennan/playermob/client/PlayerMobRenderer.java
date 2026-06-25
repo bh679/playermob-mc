@@ -235,15 +235,27 @@ public final class PlayerMobRenderer
         // Humanoid fields (crouch, item-in-hand states, swim, etc.) — vanilla's shared extractor.
         HumanoidMobRenderer.extractHumanoidRenderState(entity, state, partialTick, this.itemModelResolver);
         state.isCrouching = entity.isCrouching();
-        // AvatarRenderState.skin drives the model's overlay-part visibility (hat/jacket/sleeves)
-        // in PlayerModel.setupAnim; give it the default so all overlays show and nothing NPEs.
-        // The actual rendered texture flows through getTextureLocation(state), not this field.
-        state.skin = SKIN_FALLBACK;
+        // 26.x reads the rendered texture AND arm model straight off state.skin (see vanilla
+        // AvatarRenderer.getTextureLocation / PlayerModel), and uses it for overlay-part
+        // visibility too. It does NOT call this renderer's getTextureLocation — verified at
+        // runtime: 0 calls. The earlier port stored the resolved skin in a side-map read by
+        // getTextureLocation and left state.skin on the default, so every mob rendered the
+        // default (Steve). Build the resolved skin onto state.skin itself, the vanilla way.
+        Identifier pmResolved = resolveSkin(entity);
+        boolean pmSlim = isSlimModel(entity);
+        // args: body, cape (none), elytra (none), arm model, secure(false ⇒ insecure).
+        // body uses verbatimTexture, NOT ClientAsset.ResourceTexture: resolveSkin already returns a
+        // fully-registered texture path (bundled "textures/.../name.png" or a SkinManager dynamic
+        // "skins/<hash>" id), whereas ResourceTexture re-wraps id → "textures/<id>.png" and would
+        // double it (textures/textures/.../steve.png.png).
+        state.skin = new net.minecraft.world.entity.player.PlayerSkin(
+            verbatimTexture(pmResolved),
+            null, null,
+            pmSlim ? net.minecraft.world.entity.player.PlayerModelType.SLIM
+                   : net.minecraft.world.entity.player.PlayerModelType.WIDE,
+            false);
         // Arm poses now live on the render state (ArmedEntityRenderState), not the model.
         applyArmPoses(entity, state);
-        // Snapshot the resolved skin + arm model so the entity-free draw path can read them.
-        rememberSlim(state, isSlimModel(entity));
-        rememberTexture(state, resolveSkin(entity));
         // Creative objective readout, stashed per-state (see the readouts map).
         Minecraft mc = Minecraft.getInstance();
         boolean creative = mc.player != null && mc.player.isCreative();
@@ -261,14 +273,30 @@ public final class PlayerMobRenderer
     public void submit(AvatarRenderState state, PoseStack poseStack,
                        SubmitNodeCollector collector, CameraRenderState camera) {
         // Pick this mob's arm model before the model + layers draw. getModel() backs the layers.
-        this.model = isSlim(state) ? slimModel : wideModel;
+        // Read the arm model off state.skin (set in extractRenderState) — same reason as the
+        // texture: a side-map keyed by render-state identity misses under the deferred draw.
+        this.model = (state.skin != null
+            && state.skin.model() == net.minecraft.world.entity.player.PlayerModelType.SLIM)
+            ? slimModel : wideModel;
         super.submit(state, poseStack, collector, camera);
     }
 
     @Override
     public Identifier getTextureLocation(AvatarRenderState state) {
-        Identifier texture = textureOf(state);
-        return texture != null ? texture : SkinCompat.defaultTexture();
+        // 26.x's avatar pipeline doesn't actually call this (the texture is read from state.skin
+        // directly), but it's an abstract override we must supply — return the same source so the
+        // two can never disagree, with the generic default as a null-guard.
+        return state.skin != null ? state.skin.body().texturePath() : SkinCompat.defaultTexture();
+    }
+
+    // A ClientAsset.Texture that binds the given Identifier as-is. resolveSkin already hands back a
+    // fully-registered texture path, so the body must pass it through unchanged — unlike vanilla's
+    // ClientAsset.ResourceTexture, which maps id → "textures/<id>.png" (and would double the path).
+    private static net.minecraft.core.ClientAsset.Texture verbatimTexture(Identifier path) {
+        return new net.minecraft.core.ClientAsset.Texture() {
+            @Override public Identifier id() { return path; }
+            @Override public Identifier texturePath() { return path; }
+        };
     }
 
     // Draws the name tag plus, for a Creative observer, the billboarded objective readout
@@ -312,15 +340,9 @@ public final class PlayerMobRenderer
         poseStack.popPose();
     }
 
-    // --- per-state side fields (AvatarRenderState can't carry custom fields; see readouts note) ---
-    private static final net.minecraft.world.entity.player.PlayerSkin SKIN_FALLBACK =
-        net.minecraft.client.resources.DefaultPlayerSkin.getDefaultSkin();
-    private final Map<AvatarRenderState, Identifier> stateTextures = new ConcurrentHashMap<>();
-    private final Map<AvatarRenderState, Boolean> stateSlim = new ConcurrentHashMap<>();
-    private void rememberTexture(AvatarRenderState s, Identifier t) { stateTextures.put(s, t); }
-    private void rememberSlim(AvatarRenderState s, boolean slim) { stateSlim.put(s, slim); }
-    private Identifier textureOf(AvatarRenderState s) { return stateTextures.get(s); }
-    private boolean isSlim(AvatarRenderState s) { return Boolean.TRUE.equals(stateSlim.get(s)); }
+    // Skin texture + arm model now ride on state.skin (set in extractRenderState), so the old
+    // identity-keyed texture/slim side-maps are gone. The Creative objective readout still uses a
+    // side-map (the readouts field above) — it can't be folded onto an existing render-state field.
     *///?} else {
     /**
      * Per-frame model setup that {@link HumanoidMobRenderer} doesn't do (only
