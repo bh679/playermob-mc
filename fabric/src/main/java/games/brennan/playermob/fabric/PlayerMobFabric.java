@@ -167,7 +167,7 @@ public final class PlayerMobFabric implements ModInitializer {
 
         // The /playermob command — reincarnation egg retrieval + live trait readout.
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
-            ReincarnateCommand.register(dispatcher));
+            ReincarnateCommand.register(dispatcher, registryAccess));
 
         PlayerMob.init(FabricLoader.getInstance().getConfigDir());
     }

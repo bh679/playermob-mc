@@ -171,7 +171,7 @@ public final class PlayerMobForge {
     }
 
     private static void onRegisterCommands(RegisterCommandsEvent event) {
-        ReincarnateCommand.register(event.getDispatcher());
+        ReincarnateCommand.register(event.getDispatcher(), event.getBuildContext());
     }
 
     private static void onEntityAttributeCreation(EntityAttributeCreationEvent event) {

@@ -8,6 +8,7 @@ import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.goal.AdvanceCarriageGoal;
 import games.brennan.playermob.entity.goal.BlockArrowsGoal;
 import games.brennan.playermob.entity.goal.CollectFloorItemsGoal;
+import games.brennan.playermob.entity.goal.CommandedActionGoal;
 import games.brennan.playermob.entity.goal.CrossGroupGapGoal;
 import games.brennan.playermob.entity.goal.DefendLovedOneGoal;
 import games.brennan.playermob.entity.goal.DigThroughGoal;
@@ -17,6 +18,7 @@ import games.brennan.playermob.entity.goal.FleeFromCategoryGoal;
 import games.brennan.playermob.entity.goal.FollowLovedOneGoal;
 import games.brennan.playermob.entity.goal.FriendlyGreetGoal;
 import games.brennan.playermob.entity.goal.HarvestCropsGoal;
+import games.brennan.playermob.entity.goal.Order;
 import games.brennan.playermob.entity.goal.HuntForFoodGoal;
 import games.brennan.playermob.entity.goal.PlayerMobDoorGoal;
 import games.brennan.playermob.entity.goal.RaidArmorStandsGoal;
@@ -392,6 +394,28 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private boolean recovering;
 
     /**
+     * A pending one-off {@link Order} issued by the {@code /playermob order} command,
+     * executed (and then cleared) by {@link CommandedActionGoal}. Transient server-only
+     * AI state — never persisted, replaced wholesale by a newer order.
+     */
+    private Order pendingOrder;
+
+    /** Place a one-off order for this mob to carry out (replaces any pending order). */
+    public void setOrder(Order order) {
+        this.pendingOrder = order;
+    }
+
+    /** The pending order, or {@code null} when the mob has none. */
+    public Order getOrder() {
+        return this.pendingOrder;
+    }
+
+    /** Clear the pending order — called by {@link CommandedActionGoal} once it's done. */
+    public void clearOrder() {
+        this.pendingOrder = null;
+    }
+
+    /**
      * True only while the Dungeon-Train dig-through reflex is actively mining a fill block that's
      * blocking this mob's march (set/cleared each tick by
      * {@code DungeonTrainEnvironment#digObstructingBlock}). Read by {@link DigThroughGoal} to
@@ -582,6 +606,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     @Override
     protected void registerGoals() {
         this.goalSelector.addGoal(0, new FloatGoal(this));
+        // An explicit player order (/playermob order ...) overrides autonomous behaviour.
+        // Added before the other priority-1 goals so it wins the MOVE/LOOK slot while it runs;
+        // no-op (canUse false) whenever there's no pending order, so normal AI is unaffected.
+        this.goalSelector.addGoal(1, new CommandedActionGoal(this, /* speed */ 1.0));
         // Fell off a Dungeon Train carriage? Getting back on preempts everything
         // but swimming — added before the other priority-1 goals so its canUse is
         // evaluated first. No-op without a train mod (nearestCarriage → null).

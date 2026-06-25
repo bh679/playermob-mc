@@ -7,18 +7,29 @@ import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import com.mojang.brigadier.suggestion.SuggestionProvider;
 import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.entity.DispositionTraits;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.entity.PlayerMobSummon;
+import games.brennan.playermob.entity.goal.Order;
+import games.brennan.playermob.entity.goal.OrderType;
 import games.brennan.playermob.skin.PlayerSkinResolver;
+import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.commands.arguments.GameProfileArgument;
+import net.minecraft.commands.arguments.blocks.BlockStateArgument;
 import net.minecraft.commands.arguments.coordinates.Vec3Argument;
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+
+import java.util.List;
 //? if >=26 {
 /*// 26.x renamed ResourceLocation → Identifier, so the namespaced-id argument is IdentifierArgument
 // (same id()/getId() shape). Referenced fully-qualified at the two call sites below.
@@ -65,7 +76,7 @@ public final class ReincarnateCommand {
 
     private ReincarnateCommand() {}
 
-    public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
+    public static void register(CommandDispatcher<CommandSourceStack> dispatcher, CommandBuildContext buildContext) {
         dispatcher.register(
             Commands.literal("playermob")
                 //? if >=26 {
@@ -75,6 +86,7 @@ public final class ReincarnateCommand {
                 *///?} else {
                 .requires(source -> source.hasPermission(2))
                 //?}
+                .then(orderTree(buildContext))
                 .then(Commands.literal("reincarnate")
                     .then(Commands.argument("player", GameProfileArgument.gameProfile())
                         .executes(ReincarnateCommand::reincarnate)))
@@ -141,6 +153,235 @@ public final class ReincarnateCommand {
             names.add(g.name().toLowerCase(java.util.Locale.ROOT));
         }
         return java.util.List.copyOf(names);
+    }
+
+    // ---- /playermob order <name> <action> <target> ----------------------------------------------
+
+    /** World-sized box so {@code getEntitiesOfClass} scans every loaded PlayerMob in the dimension. */
+    private static final AABB EVERYWHERE = new AABB(-3.0E7, -2.0E7, -3.0E7, 3.0E7, 2.0E7, 3.0E7);
+
+    /** Tab-completion for the {@code <name>} arg: the custom names of loaded PlayerMobs. */
+    private static final SuggestionProvider<CommandSourceStack> MOB_NAME_SUGGESTIONS = (ctx, builder) -> {
+        for (PlayerMobEntity m : ctx.getSource().getLevel().getEntitiesOfClass(PlayerMobEntity.class, EVERYWHERE)) {
+            Component cn = m.getCustomName();
+            if (cn != null) {
+                builder.suggest(cn.getString());
+            }
+        }
+        return builder.buildFuture();
+    };
+
+    /** Tab-completion for a {@code <target>} arg: online player names + loaded PlayerMob names. */
+    private static final SuggestionProvider<CommandSourceStack> TARGET_SUGGESTIONS = (ctx, builder) -> {
+        for (String n : ctx.getSource().getServer().getPlayerList().getPlayerNamesArray()) {
+            builder.suggest(n);
+        }
+        for (PlayerMobEntity m : ctx.getSource().getLevel().getEntitiesOfClass(PlayerMobEntity.class, EVERYWHERE)) {
+            Component cn = m.getCustomName();
+            if (cn != null) {
+                builder.suggest(cn.getString());
+            }
+        }
+        return builder.buildFuture();
+    };
+
+    /**
+     * Builds the {@code order} subtree: {@code /playermob order <name> <action> <target...>}.
+     * {@code <name>} selects a PlayerMob by custom name (nearest one as a fallback); a
+     * {@code <target>} resolves to an online player or a named PlayerMob; positions accept
+     * {@code ~ ~ ~}. {@code place} conjures the given block from air.
+     */
+    private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack> orderTree(
+            CommandBuildContext buildContext) {
+        return Commands.literal("order")
+            .then(Commands.argument("name", StringArgumentType.word())
+                .suggests(MOB_NAME_SUGGESTIONS)
+                .then(Commands.literal("walk")
+                    .then(Commands.argument("pos", Vec3Argument.vec3())
+                        .executes(ReincarnateCommand::orderWalkPos))
+                    .then(Commands.argument("target", StringArgumentType.word())
+                        .suggests(TARGET_SUGGESTIONS)
+                        .executes(ReincarnateCommand::orderWalkEntity)))
+                .then(entityAction("punch", OrderType.PUNCH))
+                .then(entityAction("attack", OrderType.ATTACK))
+                .then(entityAction("gift", OrderType.GIFT))
+                .then(entityAction("greet", OrderType.GREET))
+                .then(Commands.literal("place")
+                    .then(Commands.argument("pos", Vec3Argument.vec3())
+                        .then(Commands.argument("block", BlockStateArgument.block(buildContext))
+                            .executes(ReincarnateCommand::orderPlacePos)))
+                    .then(Commands.argument("target", StringArgumentType.word())
+                        .suggests(TARGET_SUGGESTIONS)
+                        .then(Commands.argument("block", BlockStateArgument.block(buildContext))
+                            .executes(ReincarnateCommand::orderPlaceEntity)))));
+    }
+
+    /** An entity-directed action literal (punch / attack / gift / greet) taking a {@code <target>}. */
+    private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack> entityAction(
+            String name, OrderType type) {
+        return Commands.literal(name)
+            .then(Commands.argument("target", StringArgumentType.word())
+                .suggests(TARGET_SUGGESTIONS)
+                .executes(ctx -> orderEntity(ctx, type)));
+    }
+
+    /**
+     * Resolve the {@code <name>} arg to a PlayerMob: an exact (case-insensitive) custom-name match
+     * among loaded PlayerMobs, else the nearest PlayerMob to the command source. Sends a failure and
+     * returns {@code null} only when the dimension holds no PlayerMob at all.
+     */
+    private static PlayerMobEntity resolveMob(CommandSourceStack source, String name) {
+        List<PlayerMobEntity> mobs = source.getLevel().getEntitiesOfClass(PlayerMobEntity.class, EVERYWHERE);
+        if (mobs.isEmpty()) {
+            source.sendFailure(Component.literal("No PlayerMob is loaded in this dimension."));
+            return null;
+        }
+        for (PlayerMobEntity m : mobs) {
+            Component cn = m.getCustomName();
+            if (cn != null && cn.getString().equalsIgnoreCase(name)) {
+                return m;
+            }
+        }
+        Vec3 origin = source.getPosition();
+        PlayerMobEntity nearest = null;
+        double best = Double.MAX_VALUE;
+        for (PlayerMobEntity m : mobs) {
+            double d = m.distanceToSqr(origin);
+            if (d < best) {
+                best = d;
+                nearest = m;
+            }
+        }
+        return nearest;
+    }
+
+    /**
+     * Resolve a {@code <target>} arg to an entity: an online player by name, else a PlayerMob by
+     * (case-insensitive) custom name. Sends a failure and returns {@code null} if neither matches.
+     */
+    private static LivingEntity resolveTarget(CommandSourceStack source, String name) {
+        ServerPlayer player = source.getServer().getPlayerList().getPlayerByName(name);
+        if (player != null) {
+            return player;
+        }
+        for (PlayerMobEntity m : source.getLevel().getEntitiesOfClass(PlayerMobEntity.class, EVERYWHERE)) {
+            Component cn = m.getCustomName();
+            if (cn != null && cn.getString().equalsIgnoreCase(name)) {
+                return m;
+            }
+        }
+        source.sendFailure(Component.literal("No player or named PlayerMob called '" + name + "' found."));
+        return null;
+    }
+
+    /** A short label for command feedback — the mob's custom name, or "PlayerMob" if unnamed. */
+    private static String label(PlayerMobEntity mob) {
+        Component cn = mob.getCustomName();
+        return cn != null ? cn.getString() : "PlayerMob";
+    }
+
+    /** {@code /playermob order <name> (punch|attack|gift|greet) <target>}. */
+    private static int orderEntity(CommandContext<CommandSourceStack> ctx, OrderType type) {
+        CommandSourceStack source = ctx.getSource();
+        PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
+        if (mob == null) {
+            return 0;
+        }
+        LivingEntity target = resolveTarget(source, StringArgumentType.getString(ctx, "target"));
+        if (target == null) {
+            return 0;
+        }
+        String who = label(mob);
+        String targetName = target.getName().getString();
+        if (type == OrderType.ATTACK) {
+            // ATTACK is just a combat target — the existing WeaponAwareAttackGoal does the fighting.
+            mob.setTarget(target);
+            source.sendSuccess(() -> Component.literal(who + " is now attacking " + targetName + "."), true);
+            return 1;
+        }
+        mob.setOrder(Order.toward(type, target));
+        source.sendSuccess(() -> Component.literal(who + " ordered to " + verb(type) + " " + targetName + "."), true);
+        return 1;
+    }
+
+    /** {@code /playermob order <name> walk <pos>}. */
+    private static int orderWalkPos(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
+        if (mob == null) {
+            return 0;
+        }
+        Vec3 pos = Vec3Argument.getVec3(ctx, "pos");
+        mob.setOrder(Order.walkTo(BlockPos.containing(pos)));
+        String who = label(mob);
+        source.sendSuccess(() -> Component.literal(who + " ordered to walk to "
+            + (int) pos.x + " " + (int) pos.y + " " + (int) pos.z + "."), true);
+        return 1;
+    }
+
+    /** {@code /playermob order <name> walk <target>}. */
+    private static int orderWalkEntity(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
+        if (mob == null) {
+            return 0;
+        }
+        LivingEntity target = resolveTarget(source, StringArgumentType.getString(ctx, "target"));
+        if (target == null) {
+            return 0;
+        }
+        mob.setOrder(Order.walkTo(target));
+        String who = label(mob);
+        String targetName = target.getName().getString();
+        source.sendSuccess(() -> Component.literal(who + " ordered to walk to " + targetName + "."), true);
+        return 1;
+    }
+
+    /** {@code /playermob order <name> place <pos> <block>}. */
+    private static int orderPlacePos(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
+        if (mob == null) {
+            return 0;
+        }
+        BlockPos pos = BlockPos.containing(Vec3Argument.getVec3(ctx, "pos"));
+        BlockState state = BlockStateArgument.getBlock(ctx, "block").getState();
+        return issuePlace(source, mob, pos, state);
+    }
+
+    /** {@code /playermob order <name> place <target> <block>} — places at the target's feet. */
+    private static int orderPlaceEntity(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
+        if (mob == null) {
+            return 0;
+        }
+        LivingEntity target = resolveTarget(source, StringArgumentType.getString(ctx, "target"));
+        if (target == null) {
+            return 0;
+        }
+        return issuePlace(source, mob, target.blockPosition(), BlockStateArgument.getBlock(ctx, "block").getState());
+    }
+
+    private static int issuePlace(CommandSourceStack source, PlayerMobEntity mob, BlockPos pos, BlockState state) {
+        mob.setOrder(Order.place(pos, state));
+        String who = label(mob);
+        String block = state.getBlock().getName().getString();
+        source.sendSuccess(() -> Component.literal(who + " ordered to place " + block + " at "
+            + pos.getX() + " " + pos.getY() + " " + pos.getZ() + "."), true);
+        return 1;
+    }
+
+    /** Human-readable verb for order feedback. */
+    private static String verb(OrderType type) {
+        return switch (type) {
+            case WALK -> "walk to";
+            case PUNCH -> "punch";
+            case ATTACK -> "attack";
+            case GIFT -> "gift";
+            case GREET -> "greet";
+            case PLACE -> "place a block at";
+        };
     }
 
     /** {@code /playermob debug spawnlog} — report whether the DT-spawn debug log is on. */
