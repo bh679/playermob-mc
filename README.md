@@ -38,8 +38,8 @@ Tune it live (op, session-only): `/playermob naturalspawn on|off`,
 
 Order a named PlayerMob (or the nearest one) to act with
 `/playermob order <name> <action> …` — walk, punch, punchat, attack, gift, greet, steal, use,
-and place, against a player, another PlayerMob, or coordinates. Full grammar and examples:
-**[Order command](docs/order-command.md)**.
+and place, against a player, another PlayerMob, a mob type, or coordinates. Full grammar and
+examples: **[Order command](https://github.com/bh679/playermob-mc/wiki/Order-Command)**.
 
 ## Build
 
