@@ -10,6 +10,7 @@ import net.fabricmc.api.Environment;
 import net.minecraft.client.Minecraft;
 //? if >=26 {
 /*import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.PlayerFaceExtractor;
 import net.minecraft.resources.Identifier;
 *///?} else {
 import net.minecraft.client.gui.GuiGraphics;
@@ -568,13 +569,9 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
 
     //? if >=26 {
     /*private void drawRelationshipRow(GuiGraphicsExtractor g, int x, int y, UUID id, float feeling) {
-        // PlayerFaceRenderer is gone in 26.2 and the 9-arg blit's UV-rect semantics differ from the
-        // pre-26 (u,v,regionW,regionH) form, so the per-skin 8x8 face is deferred on 26.x. Draw a
-        // small recessed placeholder square instead; the name + value still identify the row.
-        // TODO(26.2): restore the real face once the GuiGraphicsExtractor.blit UV rect is confirmed.
-        g.fill(x, y, x + FACE_SIZE, y + FACE_SIZE, 0xFF8B8B8B);
-        g.fill(x, y, x + FACE_SIZE, y + 1, 0xFF373737);
-        g.fill(x, y, x + 1, y + FACE_SIZE, 0xFF373737);
+        // PlayerFaceRenderer became PlayerFaceExtractor in 26.2: it blits the 8x8 base face +
+        // hat overlay from the 64x64 skin using normalised (0-1) UVs internally. White, opaque.
+        PlayerFaceExtractor.extractRenderState(g, resolveFaceTexture(id), x, y, FACE_SIZE, true, false, 0xFFFFFFFF);
         String name = nameCache.computeIfAbsent(id, this::computeName);
         g.text(this.font, Component.literal(trim(name)), x + FACE_SIZE + 3, y, VALUE_COLOR, false);
         String value = String.format(Locale.ROOT, "%.1f", feeling);
