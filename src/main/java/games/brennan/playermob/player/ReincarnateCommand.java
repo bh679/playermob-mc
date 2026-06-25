@@ -210,7 +210,7 @@ public final class ReincarnateCommand {
                 .then(entityAction("punchat", OrderType.PUNCH_AT))
                 .then(attackSubtree(buildContext))
                 .then(stealSubtree())
-                .then(entityAction("gift", OrderType.GIFT))
+                .then(giftSubtree(buildContext))
                 .then(entityAction("greet", OrderType.GREET))
                 .then(useSubtree(buildContext))
                 .then(Commands.literal("place")
@@ -446,23 +446,43 @@ public final class ReincarnateCommand {
     }
 
     /**
-     * Builds {@code use ( <pos> | <target> ) <item>} — walk up and right-click the item at a
-     * position or on a target entity (via the cross-loader fake player).
+     * Builds {@code use ( <pos> | <target> ) <item> [spawn]} — walk up and right-click the item at a
+     * position or on a target entity (via the fake player). Without {@code spawn} the mob must hold
+     * or carry the item; {@code spawn} conjures it into the mob's hand first.
      */
     private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack> useSubtree(
             CommandBuildContext buildContext) {
         return Commands.literal("use")
             .then(Commands.argument("pos", Vec3Argument.vec3())
                 .then(Commands.argument("item", ItemArgument.item(buildContext))
-                    .executes(ReincarnateCommand::orderUsePos)))
+                    .executes(ctx -> orderUsePos(ctx, false))
+                    .then(Commands.literal("spawn").executes(ctx -> orderUsePos(ctx, true)))))
             .then(Commands.argument("target", StringArgumentType.word())
                 .suggests(TARGET_SUGGESTIONS)
                 .then(Commands.argument("item", ItemArgument.item(buildContext))
-                    .executes(ReincarnateCommand::orderUseEntity)));
+                    .executes(ctx -> orderUseEntity(ctx, false))
+                    .then(Commands.literal("spawn").executes(ctx -> orderUseEntity(ctx, true)))));
     }
 
-    /** {@code /playermob order <name> use <pos> <item>}. */
-    private static int orderUsePos(CommandContext<CommandSourceStack> ctx) {
+    /**
+     * Give the mob the item (conjure it on {@code spawn}, else require it carry one) before a USE.
+     * Returns {@code false} and reports failure when it's needed but absent.
+     */
+    private static boolean provisionItem(CommandSourceStack source, PlayerMobEntity mob, ItemStack item, boolean spawn) {
+        if (spawn) {
+            mob.spawnWeapon(item.copy());
+            return true;
+        }
+        if (!mob.equipWeapon(item.getItem())) {
+            source.sendFailure(Component.literal(label(mob) + " doesn't have "
+                + item.getHoverName().getString() + " — add 'spawn' to give it one."));
+            return false;
+        }
+        return true;
+    }
+
+    /** {@code /playermob order <name> use <pos> <item> [spawn]}. */
+    private static int orderUsePos(CommandContext<CommandSourceStack> ctx, boolean spawn) {
         CommandSourceStack source = ctx.getSource();
         PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
         if (mob == null) {
@@ -470,6 +490,9 @@ public final class ReincarnateCommand {
         }
         BlockPos pos = BlockPos.containing(Vec3Argument.getVec3(ctx, "pos"));
         ItemStack item = itemStack(ctx, "item");
+        if (!provisionItem(source, mob, item, spawn)) {
+            return 0;
+        }
         mob.setOrder(Order.use(pos, item));
         String who = label(mob);
         String itemName = item.getHoverName().getString();
@@ -478,8 +501,8 @@ public final class ReincarnateCommand {
         return 1;
     }
 
-    /** {@code /playermob order <name> use <target> <item>}. */
-    private static int orderUseEntity(CommandContext<CommandSourceStack> ctx) {
+    /** {@code /playermob order <name> use <target> <item> [spawn]}. */
+    private static int orderUseEntity(CommandContext<CommandSourceStack> ctx, boolean spawn) {
         CommandSourceStack source = ctx.getSource();
         PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
         if (mob == null) {
@@ -490,11 +513,45 @@ public final class ReincarnateCommand {
             return 0;
         }
         ItemStack item = itemStack(ctx, "item");
+        if (!provisionItem(source, mob, item, spawn)) {
+            return 0;
+        }
         mob.setOrder(Order.use(target, item));
         String who = label(mob);
         String itemName = item.getHoverName().getString();
         String targetName = target.getName().getString();
         source.sendSuccess(() -> Component.literal(who + " ordered to use " + itemName + " on " + targetName + "."), true);
+        return 1;
+    }
+
+    /** Builds {@code gift <target> [<item>]} — toss a chosen (conjured) item, or auto-pick from the pack. */
+    private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack> giftSubtree(
+            CommandBuildContext buildContext) {
+        return Commands.literal("gift")
+            .then(Commands.argument("target", StringArgumentType.word())
+                .suggests(TARGET_SUGGESTIONS)
+                .executes(ctx -> orderGift(ctx, false))
+                .then(Commands.argument("item", ItemArgument.item(buildContext))
+                    .executes(ctx -> orderGift(ctx, true))));
+    }
+
+    /** {@code /playermob order <name> gift <target> [<item>]}. */
+    private static int orderGift(CommandContext<CommandSourceStack> ctx, boolean withItem) {
+        CommandSourceStack source = ctx.getSource();
+        PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
+        if (mob == null) {
+            return 0;
+        }
+        LivingEntity target = resolveTarget(source, StringArgumentType.getString(ctx, "target"));
+        if (target == null) {
+            return 0;
+        }
+        ItemStack item = withItem ? itemStack(ctx, "item") : ItemStack.EMPTY;
+        mob.setOrder(item.isEmpty() ? Order.toward(OrderType.GIFT, target) : Order.gift(target, item));
+        String who = label(mob);
+        String targetName = target.getName().getString();
+        String what = item.isEmpty() ? "a gift" : item.getHoverName().getString();
+        source.sendSuccess(() -> Component.literal(who + " ordered to gift " + what + " to " + targetName + "."), true);
         return 1;
     }
 
@@ -567,7 +624,7 @@ public final class ReincarnateCommand {
         return issuePlace(source, mob, pos, state);
     }
 
-    /** {@code /playermob order <name> place <target> <block>} — places at the target's feet. */
+    /** {@code /playermob order <name> place <target> <block>} — chase the live target, place at its feet. */
     private static int orderPlaceEntity(CommandContext<CommandSourceStack> ctx) {
         CommandSourceStack source = ctx.getSource();
         PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
@@ -578,7 +635,13 @@ public final class ReincarnateCommand {
         if (target == null) {
             return 0;
         }
-        return issuePlace(source, mob, target.blockPosition(), BlockStateArgument.getBlock(ctx, "block").getState());
+        BlockState state = BlockStateArgument.getBlock(ctx, "block").getState();
+        mob.setOrder(Order.placeAt(target, state));
+        String who = label(mob);
+        String block = state.getBlock().getName().getString();
+        String targetName = target.getName().getString();
+        source.sendSuccess(() -> Component.literal(who + " ordered to place " + block + " by " + targetName + "."), true);
+        return 1;
     }
 
     private static int issuePlace(CommandSourceStack source, PlayerMobEntity mob, BlockPos pos, BlockState state) {

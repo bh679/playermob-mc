@@ -151,7 +151,7 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
 
     private double reachSqr() {
         return switch (order.type()) {
-            case PLACE -> PLACE_REACH_SQR;
+            case PLACE -> order.targetEntity() != null ? ENTITY_REACH_SQR : PLACE_REACH_SQR;
             case PUNCH_AT -> PUNCH_AT_STANDOFF_SQR;
             case USE -> order.targetEntity() != null ? ENTITY_REACH_SQR : PLACE_REACH_SQR;
             case WALK -> order.targetEntity() != null ? ENTITY_REACH_SQR : WALK_ARRIVE_SQR;
@@ -240,7 +240,9 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
     private void doGift() {
         LivingEntity target = order.targetEntity();
         if (target != null) {
-            mob.tossGift(target, chooseGift(target));
+            // A named item is gifted verbatim (conjured); otherwise pick the best from the pack.
+            ItemStack gift = order.item().isEmpty() ? chooseGift(target) : order.item().copy();
+            mob.tossGift(target, gift);
         }
         phase = Phase.DONE;
     }
@@ -323,12 +325,23 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
     }
 
     private void doPlace() {
-        BlockPos pos = order.targetPos();
-        if (pos != null && order.blockState() != null) {
-            mob.level().setBlock(pos, order.blockState(), 3); // flag 3 = update + notify neighbours
-            mob.swing(InteractionHand.MAIN_HAND);
+        if (order.blockState() != null) {
+            // A fixed pos, or — for a live entity target — its current feet block (chased down).
+            BlockPos pos = order.targetEntity() != null
+                ? placePosNear(order.targetEntity())
+                : order.targetPos();
+            if (pos != null) {
+                mob.level().setBlock(pos, order.blockState(), 3); // flag 3 = update + notify neighbours
+                mob.swing(InteractionHand.MAIN_HAND);
+            }
         }
         phase = Phase.DONE;
+    }
+
+    /** The target's feet block if replaceable, else one above — "as close as possible (+1 ok)". */
+    private BlockPos placePosNear(LivingEntity target) {
+        BlockPos feet = target.blockPosition();
+        return mob.level().getBlockState(feet).canBeReplaced() ? feet : feet.above();
     }
 
     @Override

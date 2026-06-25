@@ -49,6 +49,16 @@ public record Order(OrderType type, LivingEntity targetEntity, BlockPos targetPo
         return new Order(OrderType.PLACE, null, pos, state, 0, FleeUnit.NONE, ItemStack.EMPTY);
     }
 
+    /** Chase {@code entity} and place {@code state} at its live feet block (conjured from air). */
+    public static Order placeAt(LivingEntity entity, BlockState state) {
+        return new Order(OrderType.PLACE, entity, null, state, 0, FleeUnit.NONE, ItemStack.EMPTY);
+    }
+
+    /** Walk up and toss {@code item} (conjured) to {@code entity} as a gift. */
+    public static Order gift(LivingEntity entity, ItemStack item) {
+        return new Order(OrderType.GIFT, entity, null, null, 0, FleeUnit.NONE, item);
+    }
+
     /** Take the target's held item, then flee {@code amount} (seconds/blocks per {@code unit}, 0/NONE = default). */
     public static Order steal(LivingEntity entity, int amount, FleeUnit unit) {
         return new Order(OrderType.STEAL, entity, null, null, amount, unit, ItemStack.EMPTY);
