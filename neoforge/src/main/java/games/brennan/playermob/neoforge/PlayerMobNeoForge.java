@@ -131,7 +131,7 @@ public final class PlayerMobNeoForge {
     //?}
 
     private static void onRegisterCommands(RegisterCommandsEvent event) {
-        ReincarnateCommand.register(event.getDispatcher());
+        ReincarnateCommand.register(event.getDispatcher(), event.getBuildContext());
     }
 
     private static void onEntityAttributeCreation(EntityAttributeCreationEvent event) {
@@ -170,6 +170,11 @@ public final class PlayerMobNeoForge {
                     (id, inv, player) -> new PlayerMobMenu(id, inv, mob),
                     Component.translatable("container.playermob.player_mob")),
                 buf -> buf.writeVarInt(mob.getId()));
+
+        // Use NeoForge's real FakePlayer for `/playermob order ... use` so capability- and
+        // instanceof-FakePlayer-aware modded items behave (it overrides the common fallback).
+        games.brennan.playermob.compat.FakePlayerSource.install(
+            net.neoforged.neoforge.common.util.FakePlayerFactory::getMinecraft);
 
         // Optional Dungeon Train integration. DT is NeoForge-only and optional;
         // gate on its presence so DungeonTrainEnvironment (and the Dungeon Train

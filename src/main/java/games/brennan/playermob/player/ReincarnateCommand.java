@@ -5,21 +5,36 @@ import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.builder.ArgumentBuilder;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import com.mojang.brigadier.suggestion.SuggestionProvider;
 import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.entity.DispositionTraits;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.entity.PlayerMobSummon;
+import games.brennan.playermob.entity.goal.AttackOrder;
+import games.brennan.playermob.entity.goal.Order;
+import games.brennan.playermob.entity.goal.OrderType;
 import games.brennan.playermob.skin.PlayerSkinResolver;
+import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.commands.arguments.GameProfileArgument;
+import net.minecraft.commands.arguments.blocks.BlockStateArgument;
 import net.minecraft.commands.arguments.coordinates.Vec3Argument;
+import net.minecraft.commands.arguments.item.ItemArgument;
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+
+import java.util.List;
 //? if >=26 {
 /*// 26.x renamed ResourceLocation → Identifier, so the namespaced-id argument is IdentifierArgument
 // (same id()/getId() shape). Referenced fully-qualified at the two call sites below.
@@ -67,7 +82,7 @@ public final class ReincarnateCommand {
 
     private ReincarnateCommand() {}
 
-    public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
+    public static void register(CommandDispatcher<CommandSourceStack> dispatcher, CommandBuildContext buildContext) {
         dispatcher.register(
             Commands.literal("playermob")
                 //? if >=26 {
@@ -77,6 +92,7 @@ public final class ReincarnateCommand {
                 *///?} else {
                 .requires(source -> source.hasPermission(2))
                 //?}
+                .then(orderTree(buildContext))
                 .then(Commands.literal("reincarnate")
                     .then(Commands.argument("player", GameProfileArgument.gameProfile())
                         .executes(ReincarnateCommand::reincarnate)))
@@ -147,6 +163,547 @@ public final class ReincarnateCommand {
             names.add(g.name().toLowerCase(java.util.Locale.ROOT));
         }
         return java.util.List.copyOf(names);
+    }
+
+    // ---- /playermob order <name> <action> <target> ----------------------------------------------
+
+    /** World-sized box so {@code getEntitiesOfClass} scans every loaded PlayerMob in the dimension. */
+    private static final AABB EVERYWHERE = new AABB(-3.0E7, -2.0E7, -3.0E7, 3.0E7, 2.0E7, 3.0E7);
+
+    /** Tab-completion for the {@code <name>} arg: the custom names of loaded PlayerMobs. */
+    private static final SuggestionProvider<CommandSourceStack> MOB_NAME_SUGGESTIONS = (ctx, builder) -> {
+        for (PlayerMobEntity m : ctx.getSource().getLevel().getEntitiesOfClass(PlayerMobEntity.class, EVERYWHERE)) {
+            Component cn = m.getCustomName();
+            if (cn != null) {
+                builder.suggest(cn.getString());
+            }
+        }
+        return builder.buildFuture();
+    };
+
+    /** Tab-completion for a {@code <target>} arg: online player names + loaded PlayerMob names. */
+    private static final SuggestionProvider<CommandSourceStack> TARGET_SUGGESTIONS = (ctx, builder) -> {
+        for (String n : ctx.getSource().getServer().getPlayerList().getPlayerNamesArray()) {
+            builder.suggest(n);
+        }
+        for (PlayerMobEntity m : ctx.getSource().getLevel().getEntitiesOfClass(PlayerMobEntity.class, EVERYWHERE)) {
+            Component cn = m.getCustomName();
+            if (cn != null) {
+                builder.suggest(cn.getString());
+            }
+        }
+        return builder.buildFuture();
+    };
+
+    /**
+     * Builds the {@code order} subtree: {@code /playermob order <name> <action> <target...>}.
+     * {@code <name>} selects a PlayerMob by custom name (nearest one as a fallback); a
+     * {@code <target>} resolves to an online player or a named PlayerMob; positions accept
+     * {@code ~ ~ ~}. {@code place} conjures the given block from air.
+     */
+    private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack> orderTree(
+            CommandBuildContext buildContext) {
+        return Commands.literal("order")
+            .then(Commands.argument("name", StringArgumentType.word())
+                .suggests(MOB_NAME_SUGGESTIONS)
+                .then(Commands.literal("walk")
+                    .then(Commands.argument("pos", Vec3Argument.vec3())
+                        .executes(ReincarnateCommand::orderWalkPos))
+                    .then(Commands.argument("target", StringArgumentType.word())
+                        .suggests(TARGET_SUGGESTIONS)
+                        .executes(ReincarnateCommand::orderWalkEntity)))
+                .then(entityAction("punch", OrderType.PUNCH))
+                .then(entityAction("punchat", OrderType.PUNCH_AT))
+                .then(attackSubtree(buildContext))
+                .then(stealSubtree())
+                .then(giftSubtree(buildContext))
+                .then(entityAction("greet", OrderType.GREET))
+                .then(useSubtree(buildContext))
+                .then(Commands.literal("place")
+                    .then(Commands.argument("pos", Vec3Argument.vec3())
+                        .then(Commands.argument("block", BlockStateArgument.block(buildContext))
+                            .executes(ReincarnateCommand::orderPlacePos)))
+                    .then(Commands.argument("target", StringArgumentType.word())
+                        .suggests(TARGET_SUGGESTIONS)
+                        .then(Commands.argument("block", BlockStateArgument.block(buildContext))
+                            .executes(ReincarnateCommand::orderPlaceEntity)))));
+    }
+
+    /** An entity-directed action literal (punch / gift / greet) taking a {@code <target>}. */
+    private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack> entityAction(
+            String name, OrderType type) {
+        return Commands.literal(name)
+            .then(Commands.argument("target", StringArgumentType.word())
+                .suggests(TARGET_SUGGESTIONS)
+                .executes(ctx -> orderEntity(ctx, type)));
+    }
+
+    // ---- attack subtree: attack <target> [kill|forever|return|<n> s|<n> hearts] [with <weapon> [spawn]] ----
+
+    /** Resolves the chosen attack plan (single strike vs a limited sustained attack) from a command ctx. */
+    @FunctionalInterface
+    private interface AttackPlanFn {
+        AttackPlan resolve(CommandContext<CommandSourceStack> ctx);
+    }
+
+    /** A resolved attack: a single strike, or a sustained attack with a stop limit. */
+    private record AttackPlan(boolean once, AttackOrder.Limit limit, int amount) {
+        static AttackPlan single() {
+            return new AttackPlan(true, AttackOrder.Limit.KILL, 0);
+        }
+
+        static AttackPlan sustained(AttackOrder.Limit limit, int amount) {
+            return new AttackPlan(false, limit, amount);
+        }
+    }
+
+    /**
+     * Builds {@code attack <target> [kill|forever|return|<n> s|<n> hearts] [with <weapon> [spawn]]}.
+     * The bare target and every limit terminal share the same {@code with <weapon> [spawn]} tail, so
+     * the limit and the weapon compose (e.g. {@code attack Steve 10 s with diamond_sword spawn}).
+     */
+    private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack> attackSubtree(
+            CommandBuildContext buildContext) {
+        AttackPlanFn seconds = ctx ->
+            AttackPlan.sustained(AttackOrder.Limit.SECONDS, IntegerArgumentType.getInteger(ctx, "amount"));
+        AttackPlanFn hearts = ctx ->
+            AttackPlan.sustained(AttackOrder.Limit.HEARTS, IntegerArgumentType.getInteger(ctx, "amount"));
+
+        RequiredArgumentBuilder<CommandSourceStack, Integer> amount =
+            Commands.argument("amount", IntegerArgumentType.integer(1, 1_000_000));
+        amount.then(attackTail(Commands.literal("s"), buildContext, seconds));
+        amount.then(attackTail(Commands.literal("seconds"), buildContext, seconds));
+        amount.then(attackTail(Commands.literal("hearts"), buildContext, hearts));
+        amount.then(attackTail(Commands.literal("heart"), buildContext, hearts));
+
+        RequiredArgumentBuilder<CommandSourceStack, String> target = attackTail(
+            Commands.argument("target", StringArgumentType.word()).suggests(TARGET_SUGGESTIONS),
+            buildContext, ctx -> AttackPlan.single());
+        target.then(attackTail(Commands.literal("kill"), buildContext, ctx -> AttackPlan.sustained(AttackOrder.Limit.KILL, 0)));
+        target.then(attackTail(Commands.literal("forever"), buildContext, ctx -> AttackPlan.sustained(AttackOrder.Limit.KILL, 0)));
+        target.then(attackTail(Commands.literal("return"), buildContext, ctx -> AttackPlan.sustained(AttackOrder.Limit.UNTIL_HIT, 0)));
+        target.then(amount);
+
+        return Commands.literal("attack").then(target);
+    }
+
+    /**
+     * Attaches the shared tail to {@code node}: an {@code .executes} (no weapon) plus a
+     * {@code with <weapon> [spawn]} branch. {@code plan} resolves the limit from the live ctx.
+     */
+    private static <T extends ArgumentBuilder<CommandSourceStack, T>> T attackTail(
+            T node, CommandBuildContext buildContext, AttackPlanFn plan) {
+        node.executes(ctx -> orderAttack(ctx, plan.resolve(ctx), ItemStack.EMPTY, false));
+        node.then(Commands.literal("with")
+            .then(Commands.argument("weapon", ItemArgument.item(buildContext))
+                .executes(ctx -> orderAttack(ctx, plan.resolve(ctx), itemStack(ctx, "weapon"), false))
+                .then(Commands.literal("spawn")
+                    .executes(ctx -> orderAttack(ctx, plan.resolve(ctx), itemStack(ctx, "weapon"), true)))));
+        return node;
+    }
+
+    /** The named item argument as a single-item stack (empty if unresolvable). */
+    private static ItemStack itemStack(CommandContext<CommandSourceStack> ctx, String argName) {
+        try {
+            //? if >=26 {
+            /*// 26.x dropped the allow-overstack boolean from ItemInput.createItemStack.
+            return ItemArgument.getItem(ctx, argName).createItemStack(1);
+            *///?} else {
+            return ItemArgument.getItem(ctx, argName).createItemStack(1, false);
+            //?}
+        } catch (CommandSyntaxException e) {
+            return ItemStack.EMPTY;
+        }
+    }
+
+    /** Execute an attack order: resolve mob + target, handle the optional weapon, then strike or sustain. */
+    private static int orderAttack(CommandContext<CommandSourceStack> ctx, AttackPlan plan,
+                                   ItemStack weapon, boolean spawn) {
+        CommandSourceStack source = ctx.getSource();
+        PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
+        if (mob == null) {
+            return 0;
+        }
+        LivingEntity target = resolveTarget(source, mob, StringArgumentType.getString(ctx, "target"));
+        if (target == null) {
+            return 0;
+        }
+        String who = label(mob);
+        String weaponNote = "";
+        if (weapon != null && !weapon.isEmpty()) {
+            weaponNote = " with " + weapon.getHoverName().getString();
+            if (spawn) {
+                mob.spawnWeapon(weapon.copy());
+            } else if (!mob.equipWeapon(weapon.getItem())) {
+                source.sendFailure(Component.literal(who + " doesn't have "
+                    + weapon.getHoverName().getString() + " — add 'spawn' to give it one."));
+                return 0;
+            }
+        }
+        String targetName = target.getName().getString();
+        String note = weaponNote;
+        if (plan.once()) {
+            // A single strike with the (now-)equipped weapon — reuse the punch goal.
+            mob.setOrder(Order.toward(OrderType.PUNCH, target));
+            source.sendSuccess(() -> Component.literal(who + " strikes " + targetName + note + "."), true);
+            return 1;
+        }
+        mob.orderAttack(target, plan.limit(), plan.amount());
+        String limitText = switch (plan.limit()) {
+            case KILL -> "until dead";
+            case SECONDS -> "for " + plan.amount() + "s";
+            case HEARTS -> "until " + plan.amount() + " hearts";
+            case UNTIL_HIT -> "until hit back";
+        };
+        source.sendSuccess(() -> Component.literal(
+            who + " attacks " + targetName + note + " " + limitText + "."), true);
+        return 1;
+    }
+
+    /**
+     * Resolve the {@code <name>} arg to a PlayerMob: an exact (case-insensitive) custom-name match
+     * among loaded PlayerMobs, else the nearest PlayerMob to the command source. Sends a failure and
+     * returns {@code null} only when the dimension holds no PlayerMob at all.
+     */
+    private static PlayerMobEntity resolveMob(CommandSourceStack source, String name) {
+        List<PlayerMobEntity> mobs = source.getLevel().getEntitiesOfClass(PlayerMobEntity.class, EVERYWHERE);
+        if (mobs.isEmpty()) {
+            source.sendFailure(Component.literal("No PlayerMob is loaded in this dimension."));
+            return null;
+        }
+        for (PlayerMobEntity m : mobs) {
+            Component cn = m.getCustomName();
+            if (cn != null && cn.getString().equalsIgnoreCase(name)) {
+                return m;
+            }
+        }
+        Vec3 origin = source.getPosition();
+        PlayerMobEntity nearest = null;
+        double best = Double.MAX_VALUE;
+        for (PlayerMobEntity m : mobs) {
+            double d = m.distanceToSqr(origin);
+            if (d < best) {
+                best = d;
+                nearest = m;
+            }
+        }
+        return nearest;
+    }
+
+    /**
+     * Resolve a {@code <target>} arg to an entity: an online player by name, else a PlayerMob by
+     * (case-insensitive) custom name. Sends a failure and returns {@code null} if neither matches.
+     */
+    private static LivingEntity resolveTarget(CommandSourceStack source, PlayerMobEntity mob, String name) {
+        ServerPlayer player = source.getServer().getPlayerList().getPlayerByName(name);
+        if (player != null) {
+            return player;
+        }
+        for (PlayerMobEntity m : source.getLevel().getEntitiesOfClass(PlayerMobEntity.class, EVERYWHERE)) {
+            Component cn = m.getCustomName();
+            if (cn != null && cn.getString().equalsIgnoreCase(name)) {
+                return m;
+            }
+        }
+        LivingEntity nearestOfType = nearestOfType(mob, name);
+        if (nearestOfType != null) {
+            return nearestOfType;
+        }
+        source.sendFailure(Component.literal(
+            "No player, named PlayerMob, or nearby mob of type '" + name + "' found."));
+        return null;
+    }
+
+    /** Radius (blocks) searched around the ordered mob for the nearest entity of a given type. */
+    private static final double TYPE_SEARCH_RADIUS = 128.0;
+
+    /**
+     * The nearest living entity to {@code mob} whose entity-type id matches {@code name} — a bare
+     * path like {@code sheep} (namespace assumed {@code minecraft}) or a full {@code ns:path}.
+     * Matched case-insensitively; the ordered mob itself is excluded. {@code null} if none nearby.
+     */
+    private static LivingEntity nearestOfType(PlayerMobEntity mob, String name) {
+        String wanted = name.toLowerCase(java.util.Locale.ROOT);
+        AABB box = mob.getBoundingBox().inflate(TYPE_SEARCH_RADIUS);
+        LivingEntity nearest = null;
+        double best = Double.MAX_VALUE;
+        for (LivingEntity e : mob.level().getEntitiesOfClass(LivingEntity.class, box,
+                e -> e != mob && e.isAlive())) {
+            String key = net.minecraft.world.entity.EntityType.getKey(e.getType()).toString();
+            if (key.equals(wanted) || key.endsWith(":" + wanted)) {
+                double d = e.distanceToSqr(mob.position());
+                if (d < best) {
+                    best = d;
+                    nearest = e;
+                }
+            }
+        }
+        return nearest;
+    }
+
+    /** A short label for command feedback — the mob's custom name, or "PlayerMob" if unnamed. */
+    private static String label(PlayerMobEntity mob) {
+        Component cn = mob.getCustomName();
+        return cn != null ? cn.getString() : "PlayerMob";
+    }
+
+    /** {@code /playermob order <name> (punch|gift|greet) <target>} (attack has its own subtree). */
+    private static int orderEntity(CommandContext<CommandSourceStack> ctx, OrderType type) {
+        CommandSourceStack source = ctx.getSource();
+        PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
+        if (mob == null) {
+            return 0;
+        }
+        LivingEntity target = resolveTarget(source, mob, StringArgumentType.getString(ctx, "target"));
+        if (target == null) {
+            return 0;
+        }
+        String who = label(mob);
+        String targetName = target.getName().getString();
+        mob.setOrder(Order.toward(type, target));
+        source.sendSuccess(() -> Component.literal(who + " ordered to " + verb(type) + " " + targetName + "."), true);
+        return 1;
+    }
+
+    /**
+     * Builds {@code steal <target> [<n> s | <n> blocks]} — grab the target's held item, then flee
+     * (for {@code n} seconds / blocks, or a short default when no limit is given).
+     */
+    private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack> stealSubtree() {
+        RequiredArgumentBuilder<CommandSourceStack, Integer> amount =
+            Commands.argument("amount", IntegerArgumentType.integer(1, 1_000_000));
+        amount.then(Commands.literal("s").executes(ctx -> orderSteal(ctx, Order.FleeUnit.SECONDS)));
+        amount.then(Commands.literal("seconds").executes(ctx -> orderSteal(ctx, Order.FleeUnit.SECONDS)));
+        amount.then(Commands.literal("b").executes(ctx -> orderSteal(ctx, Order.FleeUnit.BLOCKS)));
+        amount.then(Commands.literal("blocks").executes(ctx -> orderSteal(ctx, Order.FleeUnit.BLOCKS)));
+        return Commands.literal("steal")
+            .then(Commands.argument("target", StringArgumentType.word())
+                .suggests(TARGET_SUGGESTIONS)
+                .executes(ctx -> orderSteal(ctx, Order.FleeUnit.NONE))
+                .then(amount));
+    }
+
+    /**
+     * Builds {@code use ( <pos> | <target> ) <item> [spawn]} — walk up and right-click the item at a
+     * position or on a target entity (via the fake player). Without {@code spawn} the mob must hold
+     * or carry the item; {@code spawn} conjures it into the mob's hand first.
+     */
+    private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack> useSubtree(
+            CommandBuildContext buildContext) {
+        return Commands.literal("use")
+            .then(Commands.argument("pos", Vec3Argument.vec3())
+                .then(Commands.argument("item", ItemArgument.item(buildContext))
+                    .executes(ctx -> orderUsePos(ctx, false))
+                    .then(Commands.literal("spawn").executes(ctx -> orderUsePos(ctx, true)))))
+            .then(Commands.argument("target", StringArgumentType.word())
+                .suggests(TARGET_SUGGESTIONS)
+                .then(Commands.argument("item", ItemArgument.item(buildContext))
+                    .executes(ctx -> orderUseEntity(ctx, false))
+                    .then(Commands.literal("spawn").executes(ctx -> orderUseEntity(ctx, true)))));
+    }
+
+    /**
+     * Give the mob the item (conjure it on {@code spawn}, else require it carry one) before a USE.
+     * Returns {@code false} and reports failure when it's needed but absent.
+     */
+    private static boolean provisionItem(CommandSourceStack source, PlayerMobEntity mob, ItemStack item, boolean spawn) {
+        if (spawn) {
+            mob.spawnWeapon(item.copy());
+            return true;
+        }
+        if (!mob.equipWeapon(item.getItem())) {
+            source.sendFailure(Component.literal(label(mob) + " doesn't have "
+                + item.getHoverName().getString() + " — add 'spawn' to give it one."));
+            return false;
+        }
+        return true;
+    }
+
+    /** {@code /playermob order <name> use <pos> <item> [spawn]}. */
+    private static int orderUsePos(CommandContext<CommandSourceStack> ctx, boolean spawn) {
+        CommandSourceStack source = ctx.getSource();
+        PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
+        if (mob == null) {
+            return 0;
+        }
+        BlockPos pos = BlockPos.containing(Vec3Argument.getVec3(ctx, "pos"));
+        ItemStack item = itemStack(ctx, "item");
+        if (!provisionItem(source, mob, item, spawn)) {
+            return 0;
+        }
+        mob.setOrder(Order.use(pos, item));
+        String who = label(mob);
+        String itemName = item.getHoverName().getString();
+        source.sendSuccess(() -> Component.literal(who + " ordered to use " + itemName + " at "
+            + pos.getX() + " " + pos.getY() + " " + pos.getZ() + "."), true);
+        return 1;
+    }
+
+    /** {@code /playermob order <name> use <target> <item> [spawn]}. */
+    private static int orderUseEntity(CommandContext<CommandSourceStack> ctx, boolean spawn) {
+        CommandSourceStack source = ctx.getSource();
+        PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
+        if (mob == null) {
+            return 0;
+        }
+        LivingEntity target = resolveTarget(source, mob, StringArgumentType.getString(ctx, "target"));
+        if (target == null) {
+            return 0;
+        }
+        ItemStack item = itemStack(ctx, "item");
+        if (!provisionItem(source, mob, item, spawn)) {
+            return 0;
+        }
+        mob.setOrder(Order.use(target, item));
+        String who = label(mob);
+        String itemName = item.getHoverName().getString();
+        String targetName = target.getName().getString();
+        source.sendSuccess(() -> Component.literal(who + " ordered to use " + itemName + " on " + targetName + "."), true);
+        return 1;
+    }
+
+    /** Builds {@code gift <target> [<item>]} — toss a chosen (conjured) item, or auto-pick from the pack. */
+    private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack> giftSubtree(
+            CommandBuildContext buildContext) {
+        return Commands.literal("gift")
+            .then(Commands.argument("target", StringArgumentType.word())
+                .suggests(TARGET_SUGGESTIONS)
+                .executes(ctx -> orderGift(ctx, false))
+                .then(Commands.argument("item", ItemArgument.item(buildContext))
+                    .executes(ctx -> orderGift(ctx, true))));
+    }
+
+    /** {@code /playermob order <name> gift <target> [<item>]}. */
+    private static int orderGift(CommandContext<CommandSourceStack> ctx, boolean withItem) {
+        CommandSourceStack source = ctx.getSource();
+        PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
+        if (mob == null) {
+            return 0;
+        }
+        LivingEntity target = resolveTarget(source, mob, StringArgumentType.getString(ctx, "target"));
+        if (target == null) {
+            return 0;
+        }
+        ItemStack item = withItem ? itemStack(ctx, "item") : ItemStack.EMPTY;
+        mob.setOrder(item.isEmpty() ? Order.toward(OrderType.GIFT, target) : Order.gift(target, item));
+        String who = label(mob);
+        String targetName = target.getName().getString();
+        String what = item.isEmpty() ? "a gift" : item.getHoverName().getString();
+        source.sendSuccess(() -> Component.literal(who + " ordered to gift " + what + " to " + targetName + "."), true);
+        return 1;
+    }
+
+    /** {@code /playermob order <name> steal <target> [<n> s|blocks]}. */
+    private static int orderSteal(CommandContext<CommandSourceStack> ctx, Order.FleeUnit unit) {
+        CommandSourceStack source = ctx.getSource();
+        PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
+        if (mob == null) {
+            return 0;
+        }
+        LivingEntity target = resolveTarget(source, mob, StringArgumentType.getString(ctx, "target"));
+        if (target == null) {
+            return 0;
+        }
+        int amount = unit == Order.FleeUnit.NONE ? 0 : IntegerArgumentType.getInteger(ctx, "amount");
+        mob.setOrder(Order.steal(target, amount, unit));
+        String who = label(mob);
+        String targetName = target.getName().getString();
+        String fleeNote = switch (unit) {
+            case SECONDS -> ", fleeing for " + amount + "s";
+            case BLOCKS -> ", fleeing for " + amount + " blocks";
+            case NONE -> "";
+        };
+        source.sendSuccess(() -> Component.literal(who + " steals from " + targetName + fleeNote + "."), true);
+        return 1;
+    }
+
+    /** {@code /playermob order <name> walk <pos>}. */
+    private static int orderWalkPos(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
+        if (mob == null) {
+            return 0;
+        }
+        Vec3 pos = Vec3Argument.getVec3(ctx, "pos");
+        mob.setOrder(Order.walkTo(BlockPos.containing(pos)));
+        String who = label(mob);
+        source.sendSuccess(() -> Component.literal(who + " ordered to walk to "
+            + (int) pos.x + " " + (int) pos.y + " " + (int) pos.z + "."), true);
+        return 1;
+    }
+
+    /** {@code /playermob order <name> walk <target>}. */
+    private static int orderWalkEntity(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
+        if (mob == null) {
+            return 0;
+        }
+        LivingEntity target = resolveTarget(source, mob, StringArgumentType.getString(ctx, "target"));
+        if (target == null) {
+            return 0;
+        }
+        mob.setOrder(Order.walkTo(target));
+        String who = label(mob);
+        String targetName = target.getName().getString();
+        source.sendSuccess(() -> Component.literal(who + " ordered to walk to " + targetName + "."), true);
+        return 1;
+    }
+
+    /** {@code /playermob order <name> place <pos> <block>}. */
+    private static int orderPlacePos(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
+        if (mob == null) {
+            return 0;
+        }
+        BlockPos pos = BlockPos.containing(Vec3Argument.getVec3(ctx, "pos"));
+        BlockState state = BlockStateArgument.getBlock(ctx, "block").getState();
+        return issuePlace(source, mob, pos, state);
+    }
+
+    /** {@code /playermob order <name> place <target> <block>} — chase the live target, place at its feet. */
+    private static int orderPlaceEntity(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
+        if (mob == null) {
+            return 0;
+        }
+        LivingEntity target = resolveTarget(source, mob, StringArgumentType.getString(ctx, "target"));
+        if (target == null) {
+            return 0;
+        }
+        BlockState state = BlockStateArgument.getBlock(ctx, "block").getState();
+        mob.setOrder(Order.placeAt(target, state));
+        String who = label(mob);
+        String block = state.getBlock().getName().getString();
+        String targetName = target.getName().getString();
+        source.sendSuccess(() -> Component.literal(who + " ordered to place " + block + " by " + targetName + "."), true);
+        return 1;
+    }
+
+    private static int issuePlace(CommandSourceStack source, PlayerMobEntity mob, BlockPos pos, BlockState state) {
+        mob.setOrder(Order.place(pos, state));
+        String who = label(mob);
+        String block = state.getBlock().getName().getString();
+        source.sendSuccess(() -> Component.literal(who + " ordered to place " + block + " at "
+            + pos.getX() + " " + pos.getY() + " " + pos.getZ() + "."), true);
+        return 1;
+    }
+
+    /** Human-readable verb for order feedback. */
+    private static String verb(OrderType type) {
+        return switch (type) {
+            case WALK -> "walk to";
+            case PUNCH -> "punch";
+            case PUNCH_AT -> "feint at";
+            case ATTACK -> "attack";
+            case GIFT -> "gift";
+            case GREET -> "greet";
+            case STEAL -> "steal from";
+            case USE -> "use an item on";
+            case PLACE -> "place a block at";
+        };
     }
 
     /** {@code /playermob debug spawnlog} — report whether the DT-spawn debug log is on. */

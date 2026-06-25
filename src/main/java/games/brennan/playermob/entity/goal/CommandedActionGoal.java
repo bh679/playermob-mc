@@ -1,0 +1,386 @@
+package games.brennan.playermob.entity.goal;
+
+import games.brennan.playermob.entity.PlayerMobEntity;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.ai.goal.Goal;
+import net.minecraft.world.entity.ai.util.DefaultRandomPos;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.phys.Vec3;
+
+import java.util.EnumSet;
+
+/**
+ * Executes a one-off {@link Order} placed on a PlayerMob by the
+ * {@code /playermob order} command — the only goal that overrides the mob's
+ * autonomous behaviour on an explicit player command.
+ *
+ * <p>Registered at priority 1 (before the social/recovery goals) so an order wins
+ * the MOVE/LOOK slot while it runs; it claims no JUMP flag, so the priority-0
+ * {@code FloatGoal} still keeps the mob afloat (see the goal-JUMP-vs-FloatGoal
+ * gotcha). A small phase machine walks to the target, performs the action, then
+ * clears the order:</p>
+ *
+ * <pre>PATH → ACT → [FLEE] → DONE</pre>
+ *
+ * <p>Reuses the entity's own gifting helpers ({@link PlayerMobEntity#tossGift},
+ * {@link PlayerMobEntity#selectGiftFromInventory}), mirrors the crouch-bow of
+ * {@link FriendlyGreetGoal} for the greeting, and the {@link DefaultRandomPos}
+ * retreat picker of {@link FleeFromCategoryGoal} for a steal's getaway.
+ * {@link OrderType#ATTACK} is handled directly by the command (it just sets a
+ * combat target), so it never reaches this goal.</p>
+ */
+public final class CommandedActionGoal extends Goal implements DescribableGoal {
+
+    private static final int WALK_TIMEOUT_TICKS = 200;   // 10s to reach the target before giving up
+    private static final double ENTITY_REACH_SQR = 9.0;  // 3 blocks — close enough to punch/gift/greet/steal
+    private static final double WALK_ARRIVE_SQR = 4.0;    // 2 blocks — "arrived" at a position
+    private static final double PLACE_REACH_SQR = 20.25;  // 4.5 blocks — close enough to place
+    private static final double PUNCH_AT_STANDOFF_SQR = 20.25; // 4.5 blocks — just out of melee reach
+
+    private static final int CROUCH_HALF_PERIOD_TICKS = 5; // ticks per down / up half of a greeting bob
+    private static final int MIN_CROUCHES = 3;
+    private static final int MAX_CROUCHES = 10;
+
+    private static final int SWING_INTERVAL_TICKS = 8;   // gap between punch-at taunt swings
+    private static final int PUNCH_AT_SWINGS = 6;        // number of taunt swings before stopping
+
+    private static final int FLEE_DEFAULT_TICKS = 100;   // 5s of running off when a steal has no limit
+    private static final int FLEE_MAX_TICKS = 400;       // 20s safety cap (e.g. an unreachable block goal)
+    private static final int FLEE_REPATH_INTERVAL = 10;  // re-pick a retreat point every 0.5s
+    private static final int RETREAT_RADIUS = 16;
+    private static final int RETREAT_VERTICAL = 7;
+    private static final double FLEE_SPEED = 1.3;        // sprint away
+
+    private enum Phase { PATH, ACT, FLEE, DONE }
+
+    private final PlayerMobEntity mob;
+    private final double speed;
+
+    private Order order;
+    private Phase phase = Phase.DONE;
+    private int walkTicks;
+
+    // Greeting crouch state (mirrors FriendlyGreetGoal).
+    private int crouchesTarget;
+    private int crouchesDone;
+    private int halfPeriodTicks;
+    private boolean crouchDown;
+
+    // Punch-at taunt state.
+    private int swingTicks;
+    private int swingsDone;
+
+    // Steal getaway state.
+    private int fleeStartTick;
+    private Vec3 fleeOrigin = Vec3.ZERO;
+    private int fleeRepathTicks;
+
+    public CommandedActionGoal(PlayerMobEntity mob, double speed) {
+        this.mob = mob;
+        this.speed = speed;
+        // MOVE + LOOK only — no JUMP, so FloatGoal can still own JUMP in water.
+        setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
+    }
+
+    @Override
+    public boolean canUse() {
+        return mob.getOrder() != null;
+    }
+
+    @Override
+    public boolean canContinueToUse() {
+        if (order == null || phase == Phase.DONE) {
+            return false;
+        }
+        if (phase == Phase.FLEE) {
+            return true;   // finish the getaway even if the victim has gone
+        }
+        return targetAlive();
+    }
+
+    /** An entity-directed order ends early if its target vanishes; position orders never do. */
+    private boolean targetAlive() {
+        LivingEntity target = order.targetEntity();
+        return target == null || (target.isAlive() && !target.isRemoved());
+    }
+
+    @Override
+    public void start() {
+        this.order = mob.getOrder();
+        this.phase = Phase.PATH;
+        this.walkTicks = 0;
+    }
+
+    @Override
+    public void tick() {
+        if (order == null) {
+            phase = Phase.DONE;
+            return;
+        }
+        switch (phase) {
+            case PATH -> { lookAtDestination(); tickPath(); }
+            case ACT -> { lookAtDestination(); tickAct(); }
+            case FLEE -> tickFlee();
+            default -> { /* DONE — canContinueToUse ends the goal next evaluation */ }
+        }
+    }
+
+    /** Centre of the order's destination, whether an entity or a fixed position. */
+    private Vec3 destination() {
+        LivingEntity target = order.targetEntity();
+        if (target != null) {
+            return target.position();
+        }
+        BlockPos pos = order.targetPos();
+        return pos != null ? Vec3.atCenterOf(pos) : mob.position();
+    }
+
+    private void lookAtDestination() {
+        LivingEntity target = order.targetEntity();
+        if (target != null) {
+            mob.getLookControl().setLookAt(target, 30.0F, 30.0F);
+        } else if (order.targetPos() != null) {
+            Vec3 c = Vec3.atCenterOf(order.targetPos());
+            mob.getLookControl().setLookAt(c.x, c.y, c.z);
+        }
+    }
+
+    private double reachSqr() {
+        return switch (order.type()) {
+            case PLACE -> order.targetEntity() != null ? ENTITY_REACH_SQR : PLACE_REACH_SQR;
+            case PUNCH_AT -> PUNCH_AT_STANDOFF_SQR;
+            case USE -> order.targetEntity() != null ? ENTITY_REACH_SQR : PLACE_REACH_SQR;
+            case WALK -> order.targetEntity() != null ? ENTITY_REACH_SQR : WALK_ARRIVE_SQR;
+            default -> ENTITY_REACH_SQR;
+        };
+    }
+
+    private void tickPath() {
+        if (mob.distanceToSqr(destination()) <= reachSqr()) {
+            mob.getNavigation().stop();
+            enterAct();
+            return;
+        }
+        if (++walkTicks > WALK_TIMEOUT_TICKS) {
+            // Couldn't reach it in time — abandon the order rather than stall forever.
+            phase = Phase.DONE;
+            return;
+        }
+        LivingEntity target = order.targetEntity();
+        if (target != null) {
+            mob.getNavigation().moveTo(target, speed);
+        } else {
+            Vec3 d = destination();
+            mob.getNavigation().moveTo(d.x, d.y, d.z, speed);
+        }
+    }
+
+    /** Arrived — perform the action (one-shot, except the multi-tick greeting / taunt / steal-flee). */
+    private void enterAct() {
+        phase = Phase.ACT;
+        switch (order.type()) {
+            case GREET -> {
+                crouchesTarget = MIN_CROUCHES + mob.getRandom().nextInt(MAX_CROUCHES - MIN_CROUCHES + 1);
+                crouchesDone = 0;
+                halfPeriodTicks = 0;
+                crouchDown = true;
+                mob.setCrouching(true);
+            }
+            case PUNCH_AT -> {
+                swingTicks = 0;
+                swingsDone = 0;
+            }
+            default -> { /* one-shot actions act immediately in tickAct */ }
+        }
+    }
+
+    private void tickAct() {
+        switch (order.type()) {
+            case WALK -> phase = Phase.DONE;
+            case PUNCH -> doPunch();
+            case PUNCH_AT -> tickPunchAt();
+            case GIFT -> doGift();
+            case GREET -> tickGreet();
+            case STEAL -> doSteal();
+            case USE -> doUse();
+            case PLACE -> doPlace();
+            default -> phase = Phase.DONE; // ATTACK never routes here
+        }
+    }
+
+    private void doPunch() {
+        LivingEntity target = order.targetEntity();
+        if (target != null) {
+            mob.swing(InteractionHand.MAIN_HAND);
+            //? if >=26 {
+            /*mob.doHurtTarget((net.minecraft.server.level.ServerLevel) mob.level(), target);
+            *///?} else {
+            mob.doHurtTarget(target);
+            //?}
+        }
+        phase = Phase.DONE;
+    }
+
+    /** Throw a few punch motions from out of reach — a taunt that never lands. */
+    private void tickPunchAt() {
+        if (swingTicks % SWING_INTERVAL_TICKS == 0) {
+            mob.swing(InteractionHand.MAIN_HAND);
+            swingsDone++;
+        }
+        swingTicks++;
+        if (swingsDone >= PUNCH_AT_SWINGS) {
+            phase = Phase.DONE;
+        }
+    }
+
+    private void doGift() {
+        LivingEntity target = order.targetEntity();
+        if (target != null) {
+            // A named item is gifted verbatim (conjured); otherwise pick the best from the pack.
+            ItemStack gift = order.item().isEmpty() ? chooseGift(target) : order.item().copy();
+            mob.tossGift(target, gift);
+        }
+        phase = Phase.DONE;
+    }
+
+    /**
+     * Pick a gift for an ordered hand-over: the best the pack offers, else a nearby
+     * dropped item if one is right here, else a token flower — so an explicit order
+     * always produces a gift (unlike the love-gated greeting gift).
+     */
+    private ItemStack chooseGift(LivingEntity target) {
+        ItemStack gift = mob.selectGiftFromInventory(target);
+        if (gift.isEmpty()) {
+            ItemEntity nearby = mob.findGiftableNearbyItem(4.0);
+            if (nearby != null) {
+                gift = nearby.getItem().copy();
+                nearby.discard();
+            }
+        }
+        return gift.isEmpty() ? mob.trinketGift() : gift;
+    }
+
+    private void tickGreet() {
+        if (++halfPeriodTicks >= CROUCH_HALF_PERIOD_TICKS) {
+            halfPeriodTicks = 0;
+            crouchDown = !crouchDown;
+            if (!crouchDown && ++crouchesDone >= crouchesTarget) {
+                mob.setCrouching(false);
+                phase = Phase.DONE;
+                return;
+            }
+        }
+        mob.setCrouching(crouchDown); // assert every tick so nothing resets the pose mid-bob
+    }
+
+    /** Snatch the target's held item into the pack, then run for it. */
+    private void doSteal() {
+        LivingEntity target = order.targetEntity();
+        if (target != null) {
+            ItemStack hand = target.getMainHandItem();
+            if (!hand.isEmpty()) {
+                ItemStack taken = hand.copy();
+                target.setItemSlot(EquipmentSlot.MAINHAND, ItemStack.EMPTY);
+                ItemStack leftover = mob.getInventory().addItem(taken);
+                if (!leftover.isEmpty()) {
+                    mob.dropAtLocation(leftover);
+                }
+            }
+        }
+        phase = Phase.FLEE;
+        fleeStartTick = mob.tickCount;
+        fleeOrigin = mob.position();
+        fleeRepathTicks = 0;
+    }
+
+    private void tickFlee() {
+        int elapsed = mob.tickCount - fleeStartTick;
+        boolean done = switch (order.unit()) {
+            case SECONDS -> elapsed >= order.amount() * 20;
+            case BLOCKS -> mob.position().distanceTo(fleeOrigin) >= order.amount() || elapsed > FLEE_MAX_TICKS;
+            case NONE -> elapsed >= FLEE_DEFAULT_TICKS;
+        };
+        if (done) {
+            phase = Phase.DONE;
+            return;
+        }
+        if (++fleeRepathTicks >= FLEE_REPATH_INTERVAL || mob.getNavigation().isDone()) {
+            fleeRepathTicks = 0;
+            LivingEntity target = order.targetEntity();
+            Vec3 threat = target != null ? target.position() : fleeOrigin;
+            Vec3 away = DefaultRandomPos.getPosAway(mob, RETREAT_RADIUS, RETREAT_VERTICAL, threat);
+            if (away != null) {
+                mob.getNavigation().moveTo(away.x, away.y, away.z, FLEE_SPEED);
+            }
+        }
+    }
+
+    private void doUse() {
+        CommandedUse.perform(mob, order.item(), order.targetEntity(), order.targetPos());
+        phase = Phase.DONE;
+    }
+
+    private void doPlace() {
+        if (order.blockState() != null) {
+            // A fixed pos, or — for a live entity target — its current feet block (chased down).
+            BlockPos pos = order.targetEntity() != null
+                ? placePosNear(order.targetEntity())
+                : order.targetPos();
+            if (pos != null) {
+                mob.level().setBlock(pos, order.blockState(), 3); // flag 3 = update + notify neighbours
+                mob.swing(InteractionHand.MAIN_HAND);
+            }
+        }
+        phase = Phase.DONE;
+    }
+
+    /** The target's feet block if replaceable, else one above — "as close as possible (+1 ok)". */
+    private BlockPos placePosNear(LivingEntity target) {
+        BlockPos feet = target.blockPosition();
+        return mob.level().getBlockState(feet).canBeReplaced() ? feet : feet.above();
+    }
+
+    @Override
+    public void stop() {
+        mob.setCrouching(false);
+        mob.getNavigation().stop();
+        mob.clearOrder();   // an order is one-shot — consumed whether it completed or was interrupted
+        this.order = null;
+        this.phase = Phase.DONE;
+    }
+
+    @Override
+    public boolean requiresUpdateEveryTick() {
+        return true;
+    }
+
+    @Override
+    public String objective() {
+        return "Following order";
+    }
+
+    @Override
+    public String subObjective() {
+        if (order == null) {
+            return null;
+        }
+        if (phase == Phase.FLEE) {
+            return "fleeing";
+        }
+        return switch (order.type()) {
+            case WALK -> "walking";
+            case PUNCH -> "punching";
+            case PUNCH_AT -> "feinting";
+            case GIFT -> "gifting";
+            case GREET -> "greeting";
+            case STEAL -> "stealing";
+            case USE -> "using item";
+            case PLACE -> "placing block";
+            default -> null;
+        };
+    }
+}

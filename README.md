@@ -34,6 +34,13 @@ Tune it live (op, session-only): `/playermob naturalspawn on|off`,
 `/playermob naturalspawn <mob> on|off|<chance>`, and
 `/playermob naturalspawn group <group> on|off|<chance>`. No raid participation.
 
+## Commanding PlayerMobs
+
+Order a named PlayerMob (or the nearest one) to act with
+`/playermob order <name> <action> …` — walk, punch, punchat, attack, gift, greet, steal, use,
+and place, against a player, another PlayerMob, a mob type, or coordinates. Full grammar and
+examples: **[Order command](https://github.com/bh679/playermob-mc/wiki/Order-Command)**.
+
 ## Build
 
 ```bash
