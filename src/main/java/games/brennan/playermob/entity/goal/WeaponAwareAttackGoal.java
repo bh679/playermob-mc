@@ -144,15 +144,16 @@ public final class WeaponAwareAttackGoal extends Goal implements DescribableGoal
      * items — all are melee-mode).
      *
      * <p>A ranged weapon only routes to its ranged delegate while the mob has
-     * ammo ({@link PlayerMobEntity#hasRangedAmmo()}). With no arrows a mob still
-     * holding a bow/crossbow falls to the melee delegate — so it bashes in
-     * rather than dry-firing or standing idle when it owns no melee weapon to
-     * swap to. (When it does own one, {@code equipBestWeaponForTarget} has
-     * already drawn it.)</p>
+     * ammo that weapon accepts ({@link PlayerMobEntity#hasRangedAmmo(ItemStack)}
+     * — arrows for a bow, arrows or fireworks for a crossbow). With no usable
+     * ammo a mob still holding a bow/crossbow falls to the melee delegate — so
+     * it bashes in rather than dry-firing or standing idle when it owns no melee
+     * weapon to swap to. (When it does own one, {@code equipBestWeaponForTarget}
+     * has already drawn it.)</p>
      */
     private Goal pickGoalForMainhand() {
         ItemStack mainhand = mob.getMainHandItem();
-        if (mob.hasRangedAmmo()) {
+        if (mob.hasRangedAmmo(mainhand)) {
             if (mainhand.is(Items.CROSSBOW)) return crossbow;
             if (mainhand.is(Items.BOW)) return bow;
         }

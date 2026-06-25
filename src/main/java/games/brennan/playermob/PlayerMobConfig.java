@@ -200,7 +200,7 @@ public final class PlayerMobConfig {
 
     /**
      * When true (default), a PlayerMob that runs out of arrows mid-fight walks to a nearby dropped arrow to
-     * restock (only if the enemy isn't too close), otherwise it closes to melee. See {@code SeekArrowsGoal}.
+     * restock (only if the enemy isn't too close), otherwise it closes to melee. See {@code SeekAmmoGoal}.
      * No effect when {@link #requireArrows()} is off.
      */
     public static boolean seekArrowsWhenEmpty() {

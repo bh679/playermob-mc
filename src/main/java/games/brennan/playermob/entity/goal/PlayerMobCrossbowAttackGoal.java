@@ -49,7 +49,7 @@ public final class PlayerMobCrossbowAttackGoal extends Goal {
 
     @Override
     public boolean canUse() {
-        return this.isValidTarget() && this.isHoldingCrossbow() && this.mob.hasRangedAmmo();
+        return this.isValidTarget() && this.isHoldingCrossbow() && this.mob.hasRangedAmmo(this.mob.getMainHandItem());
     }
 
     @Override
@@ -57,7 +57,7 @@ public final class PlayerMobCrossbowAttackGoal extends Goal {
         return this.isValidTarget()
             && (this.canUse() || !this.mob.getNavigation().isDone())
             && this.isHoldingCrossbow()
-            && this.mob.hasRangedAmmo();
+            && this.mob.hasRangedAmmo(this.mob.getMainHandItem());
     }
 
     private boolean isHoldingCrossbow() {
@@ -124,7 +124,7 @@ public final class PlayerMobCrossbowAttackGoal extends Goal {
         if (this.crossbowState == CrossbowState.UNCHARGED) {
             // Only begin a charge with arrows to load — otherwise the cycle would charge and fire a blank.
             // (canUse/canContinueToUse already gate on this; the guard keeps the state machine honest.)
-            if (!shouldClose && this.mob.hasRangedAmmo()) {
+            if (!shouldClose && this.mob.hasRangedAmmo(this.mob.getMainHandItem())) {
                 this.mob.startUsingItem(ProjectileUtil.getWeaponHoldingHand(this.mob, Items.CROSSBOW));
                 this.crossbowState = CrossbowState.CHARGING;
                 this.mob.setChargingCrossbow(true);
@@ -148,9 +148,9 @@ public final class PlayerMobCrossbowAttackGoal extends Goal {
             }
         } else if (this.crossbowState == CrossbowState.READY_TO_ATTACK && canSee) {
             this.mob.performRangedAttack(target, 1.0F);
-            // The bolt has left the crossbow — consume one real arrow from the backpack. (getProjectile hands
-            // vanilla only a copy, so this is the single, deterministic depletion for the crossbow path.)
-            this.mob.consumeArrowForShot();
+            // The bolt has left the crossbow — consume one round (arrow or firework) from the backpack.
+            // (getProjectile hands vanilla only a copy, so this is the single, deterministic crossbow depletion.)
+            this.mob.consumeAmmoForShot();
             // The shooting path already empties the charge; clear it again
             // defensively so the state machine and item agree on uncharged.
             ItemStack fired = this.mob.getItemInHand(

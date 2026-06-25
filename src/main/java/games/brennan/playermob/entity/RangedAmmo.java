@@ -1,19 +1,24 @@
 package games.brennan.playermob.entity;
 
 import net.minecraft.world.Container;
+import net.minecraft.world.item.CrossbowItem;
+import net.minecraft.world.item.FireworkRocketItem;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.ProjectileWeaponItem;
 
 /**
- * Pure inventory-ammo helpers for ranged combat: count, locate, and consume arrows in a mob's backpack.
+ * Pure, weapon-aware inventory-ammo helpers for ranged combat: classify, count, locate, and consume the ammo a
+ * given ranged weapon accepts.
  *
- * <p>Arrow classification reuses {@link ItemPickupPolicy#isAmmo} (an {@code instanceof ArrowItem} test that
- * covers plain, spectral, and tipped arrows) so the rule lives in one place. Everything here operates on the
- * {@link Container} / {@link ItemStack} contract only — no entity, level, registry, or tag access — so it stays
- * version-agnostic across the Stonecutter MC targets and is unit-testable with a plain {@code SimpleContainer}.</p>
+ * <p>Which items count as ammo depends on the weapon, exactly like vanilla: a <b>crossbow</b> fires arrows
+ * <em>or</em> firework rockets; a <b>bow</b> (and modded {@link ProjectileWeaponItem}s) fires arrows only. Arrow
+ * classification reuses {@link ItemPickupPolicy#isAmmo} (an {@code instanceof ArrowItem} test covering plain,
+ * spectral, and tipped arrows). The weapon dispatch is by {@code instanceof} ({@link CrossbowItem} /
+ * {@link FireworkRocketItem}) rather than vanilla's {@code getSupportedHeldProjectiles()} so it stays stable
+ * across the Stonecutter MC nodes.</p>
  *
- * <p>Used as the single source of truth behind {@code PlayerMobEntity#hasRangedAmmo()}, the ammo-aware weapon
- * switch in {@code equipBestWeaponForTarget}, the bow fire path in {@code performRangedAttack}, and the
- * {@code SeekArrowsGoal} restock drive.</p>
+ * <p>Everything operates on the {@link Container} / {@link ItemStack} contract only — no entity, level, registry,
+ * or tag access — so it's version-agnostic and unit-testable with a plain {@code SimpleContainer}.</p>
  */
 public final class RangedAmmo {
 
@@ -24,7 +29,29 @@ public final class RangedAmmo {
         return ItemPickupPolicy.isAmmo(stack);
     }
 
-    /** Total arrows held across every slot of {@code inv}. */
+    /** True if {@code stack} is a firework rocket (crossbow-only ammo). */
+    public static boolean isFirework(ItemStack stack) {
+        return stack.getItem() instanceof FireworkRocketItem;
+    }
+
+    /**
+     * Whether {@code weapon} accepts {@code candidate} as ammo: a crossbow takes arrows or fireworks; any other
+     * projectile weapon (bow, modded bows) takes arrows only; a non-projectile weapon takes nothing.
+     */
+    public static boolean accepts(ItemStack weapon, ItemStack candidate) {
+        if (candidate.isEmpty()) {
+            return false;
+        }
+        if (weapon.getItem() instanceof CrossbowItem) {
+            return isArrow(candidate) || isFirework(candidate);
+        }
+        if (weapon.getItem() instanceof ProjectileWeaponItem) {
+            return isArrow(candidate);
+        }
+        return false;
+    }
+
+    /** Total arrows held across every slot of {@code inv} (weapon-agnostic; used by tests and arrow counts). */
     public static int countArrows(Container inv) {
         int total = 0;
         for (int i = 0; i < inv.getContainerSize(); i++) {
@@ -36,29 +63,30 @@ public final class RangedAmmo {
         return total;
     }
 
-    /** True if {@code inv} holds at least one arrow. */
-    public static boolean hasUsableAmmo(Container inv) {
-        return firstArrowSlot(inv) >= 0;
-    }
-
-    /** Index of the first slot holding an arrow, or {@code -1} if none. */
-    public static int firstArrowSlot(Container inv) {
+    /** Index of the first slot holding ammo {@code weapon} accepts, or {@code -1} if none. */
+    public static int firstAmmoSlot(Container inv, ItemStack weapon) {
         for (int i = 0; i < inv.getContainerSize(); i++) {
             ItemStack stack = inv.getItem(i);
-            if (!stack.isEmpty() && isArrow(stack)) {
+            if (accepts(weapon, stack)) {
                 return i;
             }
         }
         return -1;
     }
 
+    /** True if {@code inv} holds at least one item {@code weapon} can fire. */
+    public static boolean hasAmmoFor(Container inv, ItemStack weapon) {
+        return firstAmmoSlot(inv, weapon) >= 0;
+    }
+
     /**
-     * Remove one arrow from the first arrow stack in {@code inv}, clearing the slot when it hits zero.
+     * Remove one round of ammo {@code weapon} accepts from the first matching slot of {@code inv}, clearing the
+     * slot when it hits zero.
      *
-     * @return true if an arrow was consumed; false if {@code inv} held none
+     * @return true if a round was consumed; false if {@code inv} held no matching ammo
      */
-    public static boolean consumeOneArrow(Container inv) {
-        int slot = firstArrowSlot(inv);
+    public static boolean consumeOneAmmo(Container inv, ItemStack weapon) {
+        int slot = firstAmmoSlot(inv, weapon);
         if (slot < 0) {
             return false;
         }
