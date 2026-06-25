@@ -54,10 +54,12 @@ public final class WeaponAwareAttackGoal extends Goal implements DescribableGoal
      */
     public WeaponAwareAttackGoal(PlayerMobEntity mob, double speed, float rangedAttackRange) {
         this.mob = mob;
-        // 20-tick attack interval mirrors vanilla skeleton; the crossbow goal
-        // manages its own charge timing so doesn't take an interval arg.
+        // Both ranged goals self-manage their inter-shot cadence: the weapon's own
+        // draw/charge time floors the firerate, and fightFlight adds the extra beat
+        // (see DispositionResolver.rangedAttackExtraDelayTicks), so neither takes an
+        // interval arg.
         this.crossbow = new PlayerMobCrossbowAttackGoal(mob, speed, rangedAttackRange);
-        this.bow = new PlayerMobBowAttackGoal(mob, speed, 20, rangedAttackRange);
+        this.bow = new PlayerMobBowAttackGoal(mob, speed, rangedAttackRange);
         this.melee = new MeleeAttackGoal(mob, speed, true);
         // We claim every flag any delegate might need so the selector reserves
         // them for us. Inner-goal flags are irrelevant — they're not selector-managed.

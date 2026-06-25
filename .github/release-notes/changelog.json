@@ -300,6 +300,23 @@
       "released": true,
       "released_in": "v0.57.0",
       "released_at": "2026-06-25T01:38:55Z"
+    },
+    {
+      "id": "fightflight-ranged-firerate",
+      "version": "0.59.0",
+      "type": "feat",
+      "title": "Aggression sets how fast a PlayerMob fires its bow or crossbow",
+      "summary": "A PlayerMob's ranged firerate now follows its fight-or-flight nature. Brave mobs loose arrows and bolts as fast as the weapon can draw or charge; even-tempered ones pause a beat between shots; timid ones (which usually flee anyway) fire only rarely. The weapon's own draw/charge time is always the floor \u2014 nobody shoots faster than the bow allows.",
+      "highlights": [
+        "Fearless mobs fire at the weapon's full speed",
+        "Average mobs add a ~2-second pause between shots",
+        "Timid mobs fire slowly on the rare occasion they stand and fight",
+        "Applies to both bows and crossbows"
+      ],
+      "date": "2026-06-25",
+      "released": true,
+      "released_in": "v0.59.0",
+      "released_at": "2026-06-25T05:51:40Z"
     }
   ]
 }

@@ -207,6 +207,45 @@ public final class DispositionResolver {
         return ATTACK_SCALE_BASE - clampTrait(fightFlight) * ATTACK_SCALE_PER_POINT;
     }
 
+    // ---- Ranged firerate (how fast a fighting mob shoots) ------------------
+    //
+    // A ranged mob's firerate is floored by the weapon's own cadence (bow draw /
+    // crossbow charge) — it can never shoot faster than it can ready the weapon.
+    // fightFlight then adds an EXTRA cooldown on top of that floor: an aggressive
+    // mob adds nothing (fires as fast as the weapon allows), a balanced mob adds a
+    // beat, a timid one adds a long pause (it rarely fights at all, so this barely
+    // shows). Pure and primitives-only — unit-tests without a live world.
+
+    /** Extra ranged cooldown at fightFlight 10 (ticks): fire as fast as the weapon allows. */
+    public static final int RANGED_DELAY_HIGH = 0;
+    /** Extra ranged cooldown at fightFlight 5 (ticks = 2s): the balanced beat. */
+    public static final int RANGED_DELAY_MID = 40;
+    /** Extra ranged cooldown at fightFlight 0 (ticks = 10s): the timid crawl. */
+    public static final int RANGED_DELAY_LOW = 200;
+    /** Pivot point of the firerate curve — matches {@link #FF_FIGHT} / {@link DispositionTraits#DEFAULT}. */
+    static final int RANGED_DELAY_PIVOT = 5;
+
+    /**
+     * Extra cooldown (in ticks) added <b>on top of the weapon's own firing cadence</b>
+     * between ranged shots, as a function of fightFlight. Piecewise-linear through three
+     * anchors: {@link #RANGED_DELAY_HIGH 0} ticks at ff 10 (fire as fast as the weapon
+     * allows), {@link #RANGED_DELAY_MID 40} (2s) at ff 5, {@link #RANGED_DELAY_LOW 200}
+     * (10s) at ff 0. The curve steepens below the pivot (8 ticks/point above, 32 below)
+     * on purpose: a low-fightFlight mob usually flees rather than fights, so its slow
+     * firerate seldom comes into play. Clamped to {@code [0, 10]}.
+     */
+    public static int rangedAttackExtraDelayTicks(int fightFlight) {
+        int ff = clampTrait(fightFlight);
+        if (ff >= RANGED_DELAY_PIVOT) {
+            // ff 10 → HIGH (0), ff 5 → MID (40): lerp down across the top half.
+            return RANGED_DELAY_MID
+                + (RANGED_DELAY_HIGH - RANGED_DELAY_MID) * (ff - RANGED_DELAY_PIVOT) / (DispositionTraits.MAX - RANGED_DELAY_PIVOT);
+        }
+        // ff 5 → MID (40), ff 0 → LOW (200): steeper lerp across the bottom half.
+        return RANGED_DELAY_MID
+            + (RANGED_DELAY_LOW - RANGED_DELAY_MID) * (RANGED_DELAY_PIVOT - ff) / (RANGED_DELAY_PIVOT - DispositionTraits.MIN);
+    }
+
     /** Clamp a trait to {@code [MIN, MAX]} — defensive; traits are already bounded at source. */
     private static int clampTrait(int trait) {
         if (trait < DispositionTraits.MIN) return DispositionTraits.MIN;
