@@ -1,0 +1,172 @@
+name: Publish with retry
+description: >-
+  Publish one (loader, MC version) artifact to Modrinth + CurseForge via
+  Kir-Antipov/mc-publish, retrying the WHOLE action on failure. mc-publish's own
+  retry-attempts/fail-mode only cover its Modrinth/CurseForge upload calls; its
+  internal Mojang version-manifest fetch (piston-meta) runs during version
+  resolution BEFORE upload and throws past fail-mode. A transient blip there
+  (e.g. the v0.61.0 NeoForge-26.2 failure) takes the whole step down, so we wrap
+  the action in a continue-on-error retry chain. The modrinth-version /
+  curseforge-version outputs are coalesced across attempts so callers (e.g. the
+  Discord summary) resolve the successful attempt regardless of which one won.
+
+inputs:
+  modrinth-id:
+    description: Modrinth project id (empty string skips Modrinth).
+    required: false
+    default: ""
+  modrinth-token:
+    description: Modrinth API token.
+    required: false
+    default: ""
+  curseforge-id:
+    description: CurseForge project id (empty string skips CurseForge).
+    required: false
+    default: ""
+  curseforge-token:
+    description: CurseForge API token.
+    required: false
+    default: ""
+  files:
+    description: Glob/path of the jar(s) to publish.
+    required: true
+  name:
+    description: Human-readable version name.
+    required: true
+  version:
+    description: version_number (SemVer + build-metadata suffix, e.g. v0.61.1+fabric-1.21.1).
+    required: true
+  version-type:
+    description: release | beta | alpha.
+    required: true
+  changelog-file:
+    description: Path to the release-notes markdown used as the platform changelog.
+    required: true
+  loaders:
+    description: Mod loader (fabric | forge | neoforge).
+    required: true
+  game-versions:
+    description: Minecraft game version(s), e.g. 1.21.1 or "26.2".
+    required: true
+  java:
+    description: Java version tag for the platform metadata.
+    required: true
+  dependencies:
+    description: Optional mc-publish dependency declarations (multiline). Empty = none.
+    required: false
+    default: ""
+  max-attempts:
+    description: Maximum whole-step attempts (the chain implements 3).
+    required: false
+    default: "3"
+  retry-wait-seconds:
+    description: Seconds to wait between whole-step attempts.
+    required: false
+    default: "30"
+
+outputs:
+  modrinth-version:
+    description: Modrinth version id from the winning attempt (empty if none succeeded).
+    value: >-
+      ${{ steps.attempt1.outputs.modrinth-version
+          || steps.attempt2.outputs.modrinth-version
+          || steps.attempt3.outputs.modrinth-version }}
+  curseforge-version:
+    description: CurseForge version id from the winning attempt (empty if none succeeded).
+    value: >-
+      ${{ steps.attempt1.outputs.curseforge-version
+          || steps.attempt2.outputs.curseforge-version
+          || steps.attempt3.outputs.curseforge-version }}
+
+# Each attempt keeps mc-publish's own retry-attempts/retry-delay/fail-mode so
+# upload-level flakes are still retried INSIDE one attempt; the chain adds
+# whole-action retries on top so the pre-upload Mojang fetch is covered too.
+# continue-on-error is a LITERAL true here — composite steps only mis-handle
+# continue-on-error when it's an input expression (actions/runner#2418).
+runs:
+  using: composite
+  steps:
+    - name: Publish (attempt 1)
+      id: attempt1
+      continue-on-error: true
+      uses: Kir-Antipov/mc-publish@v3.3
+      with:
+        modrinth-id: ${{ inputs.modrinth-id }}
+        modrinth-token: ${{ inputs.modrinth-token }}
+        curseforge-id: ${{ inputs.curseforge-id }}
+        curseforge-token: ${{ inputs.curseforge-token }}
+        files: ${{ inputs.files }}
+        name: ${{ inputs.name }}
+        version: ${{ inputs.version }}
+        version-type: ${{ inputs.version-type }}
+        changelog-file: ${{ inputs.changelog-file }}
+        loaders: ${{ inputs.loaders }}
+        game-versions: ${{ inputs.game-versions }}
+        java: ${{ inputs.java }}
+        dependencies: ${{ inputs.dependencies }}
+        retry-attempts: 2
+        retry-delay: 10000
+        fail-mode: warn
+
+    - name: Wait before attempt 2
+      if: steps.attempt1.outcome == 'failure'
+      shell: bash
+      run: |
+        echo "::warning::Publish attempt 1 failed for ${{ inputs.name }} — retrying in ${{ inputs.retry-wait-seconds }}s."
+        sleep ${{ inputs.retry-wait-seconds }}
+
+    - name: Publish (attempt 2)
+      id: attempt2
+      if: steps.attempt1.outcome == 'failure'
+      continue-on-error: true
+      uses: Kir-Antipov/mc-publish@v3.3
+      with:
+        modrinth-id: ${{ inputs.modrinth-id }}
+        modrinth-token: ${{ inputs.modrinth-token }}
+        curseforge-id: ${{ inputs.curseforge-id }}
+        curseforge-token: ${{ inputs.curseforge-token }}
+        files: ${{ inputs.files }}
+        name: ${{ inputs.name }}
+        version: ${{ inputs.version }}
+        version-type: ${{ inputs.version-type }}
+        changelog-file: ${{ inputs.changelog-file }}
+        loaders: ${{ inputs.loaders }}
+        game-versions: ${{ inputs.game-versions }}
+        java: ${{ inputs.java }}
+        dependencies: ${{ inputs.dependencies }}
+        retry-attempts: 2
+        retry-delay: 10000
+        fail-mode: warn
+
+    - name: Wait before attempt 3
+      if: steps.attempt1.outcome == 'failure' && steps.attempt2.outcome == 'failure'
+      shell: bash
+      run: |
+        echo "::warning::Publish attempt 2 failed for ${{ inputs.name }} — final retry in ${{ inputs.retry-wait-seconds }}s."
+        sleep ${{ inputs.retry-wait-seconds }}
+
+    # Final attempt is NOT continue-on-error: if all three fail the step (and the
+    # job) fail truthfully. The GitHub Release is already live by this point and
+    # the changelog mark step is gated on the release step's outcome, so a hard
+    # failure here is the operator's signal to re-dispatch with republish=true.
+    - name: Publish (attempt 3)
+      id: attempt3
+      if: steps.attempt1.outcome == 'failure' && steps.attempt2.outcome == 'failure'
+      uses: Kir-Antipov/mc-publish@v3.3
+      with:
+        modrinth-id: ${{ inputs.modrinth-id }}
+        modrinth-token: ${{ inputs.modrinth-token }}
+        curseforge-id: ${{ inputs.curseforge-id }}
+        curseforge-token: ${{ inputs.curseforge-token }}
+        files: ${{ inputs.files }}
+        name: ${{ inputs.name }}
+        version: ${{ inputs.version }}
+        version-type: ${{ inputs.version-type }}
+        changelog-file: ${{ inputs.changelog-file }}
+        loaders: ${{ inputs.loaders }}
+        game-versions: ${{ inputs.game-versions }}
+        java: ${{ inputs.java }}
+        dependencies: ${{ inputs.dependencies }}
+        retry-attempts: 2
+        retry-delay: 10000
+        fail-mode: warn

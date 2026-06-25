@@ -22,6 +22,11 @@ on:
         required: false
         type: boolean
         default: false
+      republish:
+        description: "Recovery for a partial-publish failure: re-run for a tag/release that ALREADY exists. Skips the tag-exists guard; the GitHub release is updated in place and mc-publish (fail-mode:warn) no-ops already-published platform versions while publishing the missing combo(s)."
+        required: false
+        type: boolean
+        default: false
       changelog:
         description: "Release notes (Markdown) for the GitHub release body + Modrinth/CurseForge changelog. Blank = auto-generated notes only."
         required: false
@@ -58,12 +63,15 @@ jobs:
           fi
           echo "MOD_VERSION=$GRADLE_VERSION" >> "$GITHUB_ENV"
 
+      # Skipped on republish: recovery dispatches intentionally target an
+      # existing tag/release (action-gh-release updates it in place below).
       - name: Check tag does not already exist
+        if: ${{ inputs.republish == false }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if gh api "repos/${GITHUB_REPOSITORY}/git/refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
-            echo "::error::Tag $RELEASE_TAG already exists on remote (likely an orphan from before the dispatch-only flow). Delete it first: gh api -X DELETE repos/${GITHUB_REPOSITORY}/git/refs/tags/${RELEASE_TAG}"
+            echo "::error::Tag $RELEASE_TAG already exists on remote (likely an orphan from before the dispatch-only flow). Delete it first: gh api -X DELETE repos/${GITHUB_REPOSITORY}/git/refs/tags/${RELEASE_TAG} — or re-dispatch with republish=true to update the existing release."
             exit 1
           fi
 
@@ -139,7 +147,10 @@ jobs:
           cat release-notes.md
           echo "::endgroup::"
 
+      # action-gh-release is idempotent: on a republish dispatch it updates the
+      # existing release/tag in place rather than failing.
       - name: Create GitHub Release
+        id: gh_release
         uses: softprops/action-gh-release@v2
         with:
           name: PlayerMob ${{ env.RELEASE_TAG }}
@@ -182,7 +193,7 @@ jobs:
       - name: Publish Fabric 1.21.1 to Modrinth + CurseForge
         id: publish_fabric
         if: steps.publish_check.outputs.modrinth == 'true' || steps.publish_check.outputs.curseforge == 'true'
-        uses: Kir-Antipov/mc-publish@v3.3
+        uses: ./.github/actions/publish-with-retry
         with:
           modrinth-id: ${{ steps.publish_check.outputs.modrinth == 'true' && vars.MODRINTH_PROJECT_ID || '' }}
           modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
@@ -196,14 +207,11 @@ jobs:
           loaders: fabric
           game-versions: 1.21.1
           java: 21
-          retry-attempts: 2
-          retry-delay: 10000
-          fail-mode: warn
 
       - name: Publish Fabric 1.20.1 to Modrinth + CurseForge
         id: publish_fabric_1201
         if: steps.publish_check.outputs.modrinth == 'true' || steps.publish_check.outputs.curseforge == 'true'
-        uses: Kir-Antipov/mc-publish@v3.3
+        uses: ./.github/actions/publish-with-retry
         with:
           modrinth-id: ${{ steps.publish_check.outputs.modrinth == 'true' && vars.MODRINTH_PROJECT_ID || '' }}
           modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
@@ -217,14 +225,11 @@ jobs:
           loaders: fabric
           game-versions: 1.20.1
           java: 17
-          retry-attempts: 2
-          retry-delay: 10000
-          fail-mode: warn
 
       - name: Publish Forge 1.21.1 to Modrinth + CurseForge
         id: publish_forge
         if: steps.publish_check.outputs.modrinth == 'true' || steps.publish_check.outputs.curseforge == 'true'
-        uses: Kir-Antipov/mc-publish@v3.3
+        uses: ./.github/actions/publish-with-retry
         with:
           modrinth-id: ${{ steps.publish_check.outputs.modrinth == 'true' && vars.MODRINTH_PROJECT_ID || '' }}
           modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
@@ -238,14 +243,11 @@ jobs:
           loaders: forge
           game-versions: 1.21.1
           java: 21
-          retry-attempts: 2
-          retry-delay: 10000
-          fail-mode: warn
 
       - name: Publish Forge 1.20.1 to Modrinth + CurseForge
         id: publish_forge_1201
         if: steps.publish_check.outputs.modrinth == 'true' || steps.publish_check.outputs.curseforge == 'true'
-        uses: Kir-Antipov/mc-publish@v3.3
+        uses: ./.github/actions/publish-with-retry
         with:
           modrinth-id: ${{ steps.publish_check.outputs.modrinth == 'true' && vars.MODRINTH_PROJECT_ID || '' }}
           modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
@@ -259,14 +261,11 @@ jobs:
           loaders: forge
           game-versions: 1.20.1
           java: 17
-          retry-attempts: 2
-          retry-delay: 10000
-          fail-mode: warn
 
       - name: Publish NeoForge 1.21.1 to Modrinth + CurseForge
         id: publish_neoforge
         if: steps.publish_check.outputs.modrinth == 'true' || steps.publish_check.outputs.curseforge == 'true'
-        uses: Kir-Antipov/mc-publish@v3.3
+        uses: ./.github/actions/publish-with-retry
         with:
           modrinth-id: ${{ steps.publish_check.outputs.modrinth == 'true' && vars.MODRINTH_PROJECT_ID || '' }}
           modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
@@ -287,14 +286,11 @@ jobs:
           # NeoForge file since DT cannot load on Fabric/Forge.
           dependencies: |
             dungeon-train(optional){curseforge:dungeon-train}{modrinth:dungeon-train}
-          retry-attempts: 2
-          retry-delay: 10000
-          fail-mode: warn
 
       - name: Publish Fabric 26.2 to Modrinth + CurseForge
         id: publish_fabric_262
         if: steps.publish_check.outputs.modrinth == 'true' || steps.publish_check.outputs.curseforge == 'true'
-        uses: Kir-Antipov/mc-publish@v3.3
+        uses: ./.github/actions/publish-with-retry
         with:
           modrinth-id: ${{ steps.publish_check.outputs.modrinth == 'true' && vars.MODRINTH_PROJECT_ID || '' }}
           modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
@@ -308,14 +304,11 @@ jobs:
           loaders: fabric
           game-versions: "26.2"
           java: 25
-          retry-attempts: 2
-          retry-delay: 10000
-          fail-mode: warn
 
       - name: Publish NeoForge 26.2 to Modrinth + CurseForge
         id: publish_neoforge_262
         if: steps.publish_check.outputs.modrinth == 'true' || steps.publish_check.outputs.curseforge == 'true'
-        uses: Kir-Antipov/mc-publish@v3.3
+        uses: ./.github/actions/publish-with-retry
         with:
           modrinth-id: ${{ steps.publish_check.outputs.modrinth == 'true' && vars.MODRINTH_PROJECT_ID || '' }}
           modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
@@ -329,18 +322,20 @@ jobs:
           loaders: neoforge
           game-versions: "26.2"
           java: 25
-          retry-attempts: 2
-          retry-delay: 10000
-          fail-mode: warn
 
-      # After a successful real release (auto=false), mark the shipped changelog
+      # After the GitHub Release lands (auto=false), mark the shipped changelog
       # entries released so the next release's "unreleased" set starts clean.
-      # This repo has no auto-release cascade today, so every release is real and
-      # entries are always marked; the auto gate is kept for parity with DT and
-      # forward-compatibility. Commits to main with [skip ci] (no version-bump or
-      # build workflows here to trigger anyway).
+      # GATED ON THE GITHUB-RELEASE STEP, NOT whole-job success(): GitHub is the
+      # canonical release, so a flaky Modrinth/CurseForge upload must never again
+      # leave the ledger out of sync with a live release (the v0.61.0 failure).
+      # Re-run safe: with no unreleased entries mark-released.py is a no-op, so a
+      # republish dispatch won't double-commit. This repo has no auto-release
+      # cascade today, so every release is real and entries are always marked;
+      # the auto gate is kept for parity with DT and forward-compatibility.
+      # Commits to main with [skip ci] (no version-bump or build workflows here
+      # to trigger anyway).
       - name: Mark changelog entries released
-        if: ${{ success() && inputs.auto == false }}
+        if: ${{ always() && steps.gh_release.outcome == 'success' && inputs.auto == false }}
         env:
           RELEASE_TAG: ${{ env.RELEASE_TAG }}
         run: |
