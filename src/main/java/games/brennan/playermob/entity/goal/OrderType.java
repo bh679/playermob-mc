@@ -16,6 +16,8 @@ package games.brennan.playermob.entity.goal;
  *   <li>{@link #GIFT} — walk up and toss the recipient an item.</li>
  *   <li>{@link #GREET} — walk up and perform the crouch-bow greeting.</li>
  *   <li>{@link #STEAL} — walk up, take the target's held item, then flee.</li>
+ *   <li>{@link #USE} — walk up and right-click an item on the target entity / at a position
+ *       (via a cross-loader fake player; see {@link CommandedUse}).</li>
  *   <li>{@link #PLACE} — walk near a position and place a block (conjured from air).</li>
  * </ul>
  */
@@ -27,5 +29,6 @@ public enum OrderType {
     GIFT,
     GREET,
     STEAL,
+    USE,
     PLACE
 }

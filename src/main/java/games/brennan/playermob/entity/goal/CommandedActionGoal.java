@@ -153,6 +153,7 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
         return switch (order.type()) {
             case PLACE -> PLACE_REACH_SQR;
             case PUNCH_AT -> PUNCH_AT_STANDOFF_SQR;
+            case USE -> order.targetEntity() != null ? ENTITY_REACH_SQR : PLACE_REACH_SQR;
             case WALK -> order.targetEntity() != null ? ENTITY_REACH_SQR : WALK_ARRIVE_SQR;
             default -> ENTITY_REACH_SQR;
         };
@@ -205,6 +206,7 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
             case GIFT -> doGift();
             case GREET -> tickGreet();
             case STEAL -> doSteal();
+            case USE -> doUse();
             case PLACE -> doPlace();
             default -> phase = Phase.DONE; // ATTACK never routes here
         }
@@ -315,6 +317,11 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
         }
     }
 
+    private void doUse() {
+        CommandedUse.perform(mob, order.item(), order.targetEntity(), order.targetPos());
+        phase = Phase.DONE;
+    }
+
     private void doPlace() {
         BlockPos pos = order.targetPos();
         if (pos != null && order.blockState() != null) {
@@ -358,6 +365,7 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
             case GIFT -> "gifting";
             case GREET -> "greeting";
             case STEAL -> "stealing";
+            case USE -> "using item";
             case PLACE -> "placing block";
             default -> null;
         };
