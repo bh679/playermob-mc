@@ -274,6 +274,15 @@ public final class PlayerMobConfig {
     }
 
     /**
+     * Flip the require-arrows / unlimited-ammo gate at runtime (e.g. from {@code /playermob unlimitedammo on|off}).
+     * {@code true} = consume inventory ammo (default); {@code false} = global unlimited ammo. A session override —
+     * not written back to the file, which stays the startup default.
+     */
+    public static void setRequireArrows(boolean required) {
+        requireArrows = required;
+    }
+
+    /**
      * Set a single mob's replacement chance at runtime (e.g. from {@code /playermob naturalspawn <mob> ...}).
      * Copies the immutable override map with the clamped value added/replaced, so concurrent spawn-thread
      * reads always see a complete map. A session override — not written back to the file.
@@ -444,9 +453,10 @@ public final class PlayerMobConfig {
             .append("# trainFollowLovedPlayer: when true, a PlayerMob on a Dungeon Train that loves a player\n")
             .append("#   aboard the same train abandons its fixed march to head to that player's carriage,\n")
             .append("#   idling once it's in the same carriage. Default true.\n")
-            .append("# requireArrows: when true, a PlayerMob only fires a bow/crossbow if it carries real arrows,\n")
-            .append("#   consuming one per shot and falling back to melee when empty. Set false for vanilla\n")
-            .append("#   infinite ammo. Default true.\n")
+            .append("# requireArrows: when true, a PlayerMob only fires a bow/crossbow if it carries ammo it can\n")
+            .append("#   use (arrows for bows; arrows or firework rockets for crossbows), consuming one per shot\n")
+            .append("#   and falling back to melee when empty. Set false for global unlimited ammo. Toggle live\n")
+            .append("#   with /playermob unlimitedammo on|off (session override). Default true.\n")
             .append("# seekArrowsWhenEmpty: when true, a PlayerMob out of arrows mid-fight walks to a nearby\n")
             .append("#   dropped arrow to restock (only if the enemy isn't too close), otherwise it closes to\n")
             .append("#   melee. No effect when requireArrows=false. Default true.\n")

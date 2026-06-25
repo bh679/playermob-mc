@@ -202,4 +202,20 @@ class PlayerMobConfigTest {
             PlayerMobConfig.setDebugSpawnLog(PlayerMobConfig.DEFAULT_DEBUG_SPAWN_LOG); // don't leak into other tests
         }
     }
+
+    @Test
+    void requireArrowsDefaultsOnAndTogglesAtRuntime() {
+        assertTrue(PlayerMobConfig.DEFAULT_REQUIRE_ARROWS, "inventory ammo is the default");
+        assertTrue(PlayerMobConfig.parse(new Properties()).requireArrows(), "missing key → default true");
+        assertFalse(PlayerMobConfig.parse(props("requireArrows", "false")).requireArrows());
+        try {
+            // /playermob unlimitedammo on → setRequireArrows(false); off → setRequireArrows(true)
+            PlayerMobConfig.setRequireArrows(false);
+            assertFalse(PlayerMobConfig.requireArrows(), "unlimited ammo on");
+            PlayerMobConfig.setRequireArrows(true);
+            assertTrue(PlayerMobConfig.requireArrows(), "back to inventory ammo");
+        } finally {
+            PlayerMobConfig.setRequireArrows(PlayerMobConfig.DEFAULT_REQUIRE_ARROWS); // don't leak into other tests
+        }
+    }
 }

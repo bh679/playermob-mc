@@ -277,7 +277,7 @@
         "Bows and crossbows consume ammo from the mob's inventory \u2014 arrows for both, plus firework rockets for crossbows; no ammo means no shooting",
         "Out of ammo mid-fight, it grabs nearby dropped arrows/fireworks (if the enemy isn't too close) or falls back to melee",
         "Keeps the ranged-at-distance / melee-up-close behaviour and crossbow reloading",
-        "Server config: requireArrows (set false for the old infinite ammo), plus tunable engage distances"
+        "Toggle global unlimited ammo live with /playermob unlimitedammo on|off (or the requireArrows config), plus tunable engage distances"
       ],
       "pr": 121,
       "date": "2026-06-25",
