@@ -6,6 +6,7 @@ import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.ArgumentBuilder;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
@@ -57,9 +58,10 @@ import java.util.Collection;
  *       stamped with that player's last completed life.</li>
  *   <li>{@code /playermob life <player>} — read the in-progress life tally and the
  *       traits it would currently distil to (verify tracking without dying).</li>
- *   <li>{@code /playermob summon <displayName> [<pos>] [<friendliness>] [<fightFlight>]} — spawn a
- *       PlayerMob wearing that player's resolved skin, at an optional position (default: the command
- *       source), with optional locked traits (default: random).</li>
+ *   <li>{@code /playermob summon <displayName> [<pos>] [<friendliness>] [<fightFlight>] [named [<customName>]]}
+ *       — spawn a PlayerMob wearing that player's resolved skin, at an optional position (default: the
+ *       command source), with optional locked traits (default: random). Append {@code named} to also give
+ *       the mob a nameplate — {@code customName} if supplied, otherwise {@code displayName}.</li>
  *   <li>{@code /playermob debug spawnlog [on|off]} — toggle (or report) the colour-coded
  *       Dungeon-Train auto-spawn chat log for this session.</li>
  *   <li>{@code /playermob unlimitedammo [on|off]} — toggle (or report) global unlimited ammo for
@@ -99,18 +101,22 @@ public final class ReincarnateCommand {
                         .executes(ReincarnateCommand::life)))
                 .then(Commands.literal("summon")
                     .then(Commands.argument("displayName", StringArgumentType.word())
-                        .executes(ctx -> summon(ctx, null, null, null))
+                        .executes(ctx -> summon(ctx, false))
+                        // `named [<customName>]` gives the mob a nameplate (defaults to displayName);
+                        // attached at every level so it can follow any arg combo. Literals bind before
+                        // the vec3/int args, so it never clashes with `pos`/the trait numbers.
+                        .then(namedFlag())
                         // Position chains before the traits (and a number alone would be ambiguous with
                         // a vec3 coord), so use `~ ~ ~` to set traits "here" — mirrors /summon's [pos].
                         .then(Commands.argument("pos", Vec3Argument.vec3())
-                            .executes(ctx -> summon(ctx, Vec3Argument.getVec3(ctx, "pos"), null, null))
+                            .executes(ctx -> summon(ctx, false))
+                            .then(namedFlag())
                             .then(Commands.argument("friendliness", IntegerArgumentType.integer(0, 10))
-                                .executes(ctx -> summon(ctx, Vec3Argument.getVec3(ctx, "pos"),
-                                    IntegerArgumentType.getInteger(ctx, "friendliness"), null))
+                                .executes(ctx -> summon(ctx, false))
+                                .then(namedFlag())
                                 .then(Commands.argument("fightFlight", IntegerArgumentType.integer(0, 10))
-                                    .executes(ctx -> summon(ctx, Vec3Argument.getVec3(ctx, "pos"),
-                                        IntegerArgumentType.getInteger(ctx, "friendliness"),
-                                        IntegerArgumentType.getInteger(ctx, "fightFlight"))))))))
+                                    .executes(ctx -> summon(ctx, false))
+                                    .then(namedFlag()))))))
                 .then(Commands.literal("debug")
                     .then(Commands.literal("spawnlog")
                         .executes(ReincarnateCommand::querySpawnLog)
@@ -853,16 +859,56 @@ public final class ReincarnateCommand {
     }
 
     /**
-     * {@code /playermob summon <displayName> [<pos>] [<friendliness>] [<fightFlight>]} — spawn a
-     * PlayerMob wearing the named player's skin. The mob appears immediately (with a rolled skin)
-     * at {@code pos} (or the command source); the named player's real skin is resolved off-thread
+     * The {@code named [<customName>]} flag node for the {@code summon} subcommand, built fresh for
+     * each call site (a Brigadier builder is consumed when passed to {@code .then(...)}). Appending
+     * {@code named} sets the mob's nameplate; an optional trailing {@code customName} (greedy, so it
+     * may contain spaces) overrides the name — otherwise it defaults to {@code displayName}.
+     */
+    private static LiteralArgumentBuilder<CommandSourceStack> namedFlag() {
+        return Commands.literal("named")
+            .executes(ctx -> summon(ctx, true))
+            .then(Commands.argument("customName", StringArgumentType.greedyString())
+                .executes(ctx -> summon(ctx, true)));
+    }
+
+    /**
+     * Whether the parsed command actually supplied the named (optional) argument. Brigadier's
+     * {@code getArgument} throws when an argument node wasn't part of the matched path, so a thrown
+     * {@link IllegalArgumentException} means "absent" (the per-version {@code getArguments()} map is
+     * not consistently public).
+     */
+    private static boolean has(CommandContext<CommandSourceStack> ctx, String name) {
+        try {
+            ctx.getArgument(name, Object.class);
+            return true;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    /**
+     * {@code /playermob summon <displayName> [<pos>] [<friendliness>] [<fightFlight>] [named [<customName>]]}
+     * — spawn a PlayerMob wearing the named player's skin. The mob appears immediately (with a rolled
+     * skin) at {@code pos} (or the command source); the named player's real skin is resolved off-thread
      * and applied a moment later, falling back to the rolled skin if the name can't be resolved
      * (unknown name / offline server). Traits are pinned when supplied, else rolled.
+     *
+     * <p>Optional arguments are read from the parsed context so a single handler serves every terminal
+     * in the chain. When {@code nameMob} is set (the {@code named} flag was appended) the mob is given a
+     * visible nameplate — {@code customName} if supplied, otherwise {@code displayName}.</p>
      */
-    private static int summon(CommandContext<CommandSourceStack> ctx, Vec3 pos,
-                              Integer friendliness, Integer fightFlight) {
+    private static int summon(CommandContext<CommandSourceStack> ctx, boolean nameMob) {
         CommandSourceStack source = ctx.getSource();
         String name = StringArgumentType.getString(ctx, "displayName");
+        Vec3 pos = has(ctx, "pos") ? Vec3Argument.getVec3(ctx, "pos") : null;
+        Integer friendliness = has(ctx, "friendliness")
+            ? IntegerArgumentType.getInteger(ctx, "friendliness") : null;
+        Integer fightFlight = has(ctx, "fightFlight")
+            ? IntegerArgumentType.getInteger(ctx, "fightFlight") : null;
+        String customName = has(ctx, "customName")
+            ? StringArgumentType.getString(ctx, "customName")
+            : (nameMob ? name : null);
+
         ServerLevel level = source.getLevel();
         Vec3 at = pos != null ? pos : source.getPosition();
         float yRot = source.getRotation().y;
@@ -870,6 +916,10 @@ public final class ReincarnateCommand {
         if (mob == null) {
             source.sendFailure(Component.literal("Could not create a PlayerMob."));
             return 0;
+        }
+        if (customName != null) {
+            mob.setCustomName(Component.literal(customName));
+            mob.setCustomNameVisible(true);
         }
         // Resolve the named player's skin off-thread; apply on the server thread when it lands.
         MinecraftServer server = source.getServer();
@@ -882,8 +932,10 @@ public final class ReincarnateCommand {
                 mob.setSkinSlim(resolved.slim());
             });
         });
-        source.sendSuccess(() -> Component.literal("Summoned a PlayerMob for " + name
-            + " — resolving skin…"), true);
+        String label = customName != null
+            ? "Summoned a PlayerMob named \"" + customName + "\" for " + name
+            : "Summoned a PlayerMob for " + name;
+        source.sendSuccess(() -> Component.literal(label + " — resolving skin…"), true);
         return 1;
     }
 

@@ -334,6 +334,23 @@
       "released": true,
       "released_in": "v0.60.0",
       "released_at": "2026-06-25T07:37:54Z"
+    },
+    {
+      "id": "summon-named-flag",
+      "version": "0.61.0",
+      "type": "feat",
+      "title": "Name your summoned PlayerMobs",
+      "summary": "The /playermob summon command can now give the spawned mob a floating nameplate, not just a player's skin. Append 'named' to use the same name as the skin, or 'named <yourname>' to set a different label.",
+      "highlights": [
+        "/playermob summon Steve named \u2014 spawns with Steve's skin and a 'Steve' nameplate",
+        "/playermob summon Steve named Bob \u2014 Steve's skin, but the nameplate reads 'Bob' (multi-word names work too)",
+        "The flag tacks onto any existing form, e.g. /playermob summon Steve ~ ~ ~ 8 2 named"
+      ],
+      "pr": 129,
+      "date": "2026-06-25",
+      "released": true,
+      "released_in": "v0.61.0",
+      "released_at": "2026-06-25T08:31:36Z"
     }
   ]
 }
