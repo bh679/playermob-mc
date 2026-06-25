@@ -47,6 +47,10 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
 
     private static final int SWING_INTERVAL_TICKS = 8;   // gap between punch-at taunt swings
     private static final int PUNCH_AT_SWINGS = 6;        // number of taunt swings before stopping
+    // Hold facing the target after a one-shot strike so the ~6-tick swing plays out before the mob
+    // releases control and turns away — otherwise the swing reads as "no animation" (like a player,
+    // who stays planted through the swing).
+    private static final int STRIKE_FOLLOW_THROUGH_TICKS = 8;
 
     private static final int FLEE_DEFAULT_TICKS = 100;   // 5s of running off when a steal has no limit
     private static final int FLEE_MAX_TICKS = 400;       // 20s safety cap (e.g. an unreachable block goal)
@@ -73,6 +77,10 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
     // Punch-at taunt state.
     private int swingTicks;
     private int swingsDone;
+
+    // One-shot strike (punch / single-strike attack) follow-through.
+    private boolean struck;
+    private int followThroughTicks;
 
     // Steal getaway state.
     private int fleeStartTick;
@@ -113,6 +121,7 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
         this.order = mob.getOrder();
         this.phase = Phase.PATH;
         this.walkTicks = 0;
+        this.struck = false;
     }
 
     @Override
@@ -213,16 +222,25 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
     }
 
     private void doPunch() {
-        LivingEntity target = order.targetEntity();
-        if (target != null) {
-            mob.swing(InteractionHand.MAIN_HAND);
-            //? if >=26 {
-            /*mob.doHurtTarget((net.minecraft.server.level.ServerLevel) mob.level(), target);
-            *///?} else {
-            mob.doHurtTarget(target);
-            //?}
+        if (!struck) {
+            // Strike once, then plant + face the target (nav stopped here; the look is asserted each
+            // ACT tick) so the swing animation plays out before the order releases — like a player.
+            LivingEntity target = order.targetEntity();
+            if (target != null) {
+                mob.swing(InteractionHand.MAIN_HAND);
+                //? if >=26 {
+                /*mob.doHurtTarget((net.minecraft.server.level.ServerLevel) mob.level(), target);
+                *///?} else {
+                mob.doHurtTarget(target);
+                //?}
+            }
+            mob.getNavigation().stop();
+            struck = true;
+            followThroughTicks = STRIKE_FOLLOW_THROUGH_TICKS;
         }
-        phase = Phase.DONE;
+        if (--followThroughTicks <= 0) {
+            phase = Phase.DONE;
+        }
     }
 
     /** Throw a few punch motions from out of reach — a taunt that never lands. */
