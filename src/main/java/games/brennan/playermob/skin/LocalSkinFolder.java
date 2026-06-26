@@ -31,7 +31,9 @@ public final class LocalSkinFolder {
 
     private static volatile Path dir;
     private static volatile List<String> cachedNames = List.of();
-    private static volatile long cachedAt = Long.MIN_VALUE;
+    /** Last scan time (ms); {@code 0} means "stale, rescan on next list()". Never use a large negative
+     *  sentinel here — {@code now - sentinel} would overflow and read as "fresh", wedging the cache. */
+    private static volatile long cachedAt = 0L;
 
     private LocalSkinFolder() {}
 
@@ -52,7 +54,7 @@ public final class LocalSkinFolder {
             LOGGER.warn("[playermob] could not create local skins folder {}; local skins disabled", resolved, e);
         }
         dir = resolved;
-        cachedAt = Long.MIN_VALUE;     // force a fresh listing on first use
+        cachedAt = 0L;     // force a fresh listing on first use
     }
 
     /** The skins folder, or {@code null} before {@link #init} runs. */
@@ -71,13 +73,23 @@ public final class LocalSkinFolder {
             return List.of();
         }
         long now = System.currentTimeMillis();
-        if (now - cachedAt < CACHE_TTL_MS) {
+        if (!dueForRescan(now, cachedAt)) {
             return cachedNames;
         }
         List<String> names = scan(d);
         cachedNames = names;
         cachedAt = now;
         return names;
+    }
+
+    /**
+     * Whether the cache is due for a rescan — true once {@code now} is at least {@link #CACHE_TTL_MS}
+     * past {@code cachedAt}. Subtraction-free (compares {@code now >= cachedAt + ttl}) so a {@code 0}
+     * sentinel always reads stale and no value can overflow into a spurious "fresh" — the exact trap
+     * that wedged an earlier version's cache. Package-private + pure for unit testing.
+     */
+    static boolean dueForRescan(long now, long cachedAt) {
+        return now >= cachedAt + CACHE_TTL_MS;
     }
 
     /** Scan the folder for {@code *.png} files and return their sorted, de-duplicated base names. */
