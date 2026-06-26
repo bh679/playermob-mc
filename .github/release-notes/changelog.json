@@ -385,6 +385,24 @@
       "released": true,
       "released_in": "v0.63.1",
       "released_at": "2026-06-25T11:15:16Z"
+    },
+    {
+      "id": "local-skin-folder",
+      "version": "0.64.0",
+      "type": "feat",
+      "title": "Drop-in local skin folder",
+      "summary": "PlayerMobs can now wear your own skins. Drop PNG skin files into config/playermob/skins and they join the random rotation alongside the built-in and online skins \u2014 slim (Alex) and wide (Steve) arms are detected automatically. You can also spawn a PlayerMob wearing a specific skin by filename, and turn each skin source on or off.",
+      "highlights": [
+        "Drop .png skins in config/playermob/skins \u2014 used automatically on random spawns",
+        "Slim vs wide arms auto-detected from the skin file",
+        "/playermob skin spawn <file> \u2014 summon a PlayerMob wearing a specific local skin",
+        "/playermob skin sources and /playermob skin source <bundled|online|local> on|off \u2014 see and toggle which skin sources are used"
+      ],
+      "pr": 138,
+      "date": "2026-06-26",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
