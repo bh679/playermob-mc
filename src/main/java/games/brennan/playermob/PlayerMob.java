@@ -42,6 +42,9 @@ public final class PlayerMob {
      */
     public static void init(Path configDir) {
         PlayerMobConfig.load(configDir);
+        // The local-skin drop folder (config/playermob/skins) — created if absent. Resolved on each
+        // physical side: the server lists names to pick from, the client loads the PNGs.
+        games.brennan.playermob.skin.LocalSkinFolder.init(configDir);
         // The local death log is always a source; integrating mods register their own on top.
         ReincarnationSources.register(new GlobalLifeReincarnationSource());
         LOGGER.info("[{}] common init — entity={}, spawn egg={}",

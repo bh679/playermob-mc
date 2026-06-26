@@ -51,6 +51,22 @@ class PlayerMobConfigTest {
     }
 
     @Test
+    void skinSourcesDefaultOnAndParse() {
+        var def = PlayerMobConfig.parse(new Properties());
+        assertTrue(def.skinSourceBundled(), "bundled source ships on");
+        assertTrue(def.skinSourceOnline(), "online source ships on");
+        assertTrue(def.skinSourceLocal(), "local source ships on");
+        assertTrue(PlayerMobConfig.DEFAULT_SKIN_SOURCE_BUNDLED);
+        assertTrue(PlayerMobConfig.DEFAULT_SKIN_SOURCE_ONLINE);
+        assertTrue(PlayerMobConfig.DEFAULT_SKIN_SOURCE_LOCAL);
+        var v = PlayerMobConfig.parse(props(
+            "skinSourceBundled", "false", "skinSourceOnline", "true", "skinSourceLocal", "nonsense"));
+        assertFalse(v.skinSourceBundled());
+        assertTrue(v.skinSourceOnline());
+        assertTrue(v.skinSourceLocal(), "unrecognised value falls back to default (true)");
+    }
+
+    @Test
     void validValuesParsed() {
         var v = PlayerMobConfig.parse(props("echoFriendChance", "0.4", "debugSpawnLog", "true"));
         assertEquals(0.4F, v.echoFriendChance(), 1e-6);

@@ -18,6 +18,9 @@ import games.brennan.playermob.entity.PlayerMobSummon;
 import games.brennan.playermob.entity.goal.AttackOrder;
 import games.brennan.playermob.entity.goal.Order;
 import games.brennan.playermob.entity.goal.OrderType;
+import games.brennan.playermob.skin.LocalSkinFolder;
+import games.brennan.playermob.skin.LocalSkinRef;
+import games.brennan.playermob.skin.PlayerMobSkinRegistry;
 import games.brennan.playermob.skin.PlayerSkinResolver;
 import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
@@ -73,6 +76,12 @@ import java.util.Collection;
  *       (the chance a PlayerMob spawns <em>beside</em> it on a natural spawn) for this session.</li>
  *   <li>{@code /playermob naturalspawn group <group> on|off|<chance>} — set every mob in a group
  *       (hostile / nether / animals / friendly / water / villager) for this session.</li>
+ *   <li>{@code /playermob skin sources} — report which skin sources (bundled / online / local) a random
+ *       PlayerMob may draw from, with counts.</li>
+ *   <li>{@code /playermob skin source <bundled|online|local> on|off} — toggle one skin source for this
+ *       session.</li>
+ *   <li>{@code /playermob skin spawn <file> [pos]} — summon a PlayerMob wearing the named local-folder
+ *       skin (a PNG dropped in {@code config/playermob/skins}).</li>
  * </ul>
  *
  * <p>Like {@code spawnlog}, the {@code naturalspawn} edits are session overrides — they take effect
@@ -151,7 +160,8 @@ public final class ReincarnateCommand {
                             .then(Commands.literal("on").executes(ctx -> setGroup(ctx, null)))
                             .then(Commands.literal("off").executes(ctx -> setGroup(ctx, 0.0F)))
                             .then(Commands.argument("chance", FloatArgumentType.floatArg(0.0F, 1.0F))
-                                .executes(ctx -> setGroup(ctx, FloatArgumentType.getFloat(ctx, "chance"))))))));
+                                .executes(ctx -> setGroup(ctx, FloatArgumentType.getFloat(ctx, "chance")))))))
+                .then(skinTree()));
     }
 
     /** Lower-case group names for {@code /playermob naturalspawn group <group>} tab-completion. */
@@ -163,6 +173,107 @@ public final class ReincarnateCommand {
             names.add(g.name().toLowerCase(java.util.Locale.ROOT));
         }
         return java.util.List.copyOf(names);
+    }
+
+    // ---- /playermob skin ... --------------------------------------------------------------------
+
+    /** Tab-completion for {@code /playermob skin spawn <file>}: the base names in config/playermob/skins. */
+    private static final SuggestionProvider<CommandSourceStack> LOCAL_SKIN_SUGGESTIONS = (ctx, builder) ->
+        SharedSuggestionProvider.suggest(LocalSkinFolder.list(), builder);
+
+    /**
+     * The {@code /playermob skin} subtree:
+     * <ul>
+     *   <li>{@code skin sources} — report which of the three skin sources (bundled / online / local)
+     *       a random PlayerMob may draw from, with counts.</li>
+     *   <li>{@code skin source <bundled|online|local> on|off} — toggle one source for this session.</li>
+     *   <li>{@code skin spawn <file> [pos]} — summon a PlayerMob wearing the named local-folder skin.</li>
+     * </ul>
+     */
+    private static LiteralArgumentBuilder<CommandSourceStack> skinTree() {
+        return Commands.literal("skin")
+            .then(Commands.literal("sources").executes(ReincarnateCommand::reportSkinSources))
+            .then(Commands.literal("source")
+                .then(skinSourceToggle("bundled"))
+                .then(skinSourceToggle("online"))
+                .then(skinSourceToggle("local")))
+            .then(Commands.literal("spawn")
+                .then(Commands.argument("file", StringArgumentType.string())
+                    .suggests(LOCAL_SKIN_SUGGESTIONS)
+                    .executes(ReincarnateCommand::skinSpawn)
+                    .then(Commands.argument("pos", Vec3Argument.vec3())
+                        .executes(ReincarnateCommand::skinSpawn))));
+    }
+
+    /** One {@code <source> on|off} branch for {@link #skinTree()} (built fresh per call site). */
+    private static LiteralArgumentBuilder<CommandSourceStack> skinSourceToggle(String source) {
+        return Commands.literal(source)
+            .then(Commands.literal("on").executes(ctx -> setSkinSource(ctx, source, true)))
+            .then(Commands.literal("off").executes(ctx -> setSkinSource(ctx, source, false)));
+    }
+
+    /** {@code /playermob skin sources} — report each source's on/off state and how many skins it has. */
+    private static int reportSkinSources(CommandContext<CommandSourceStack> ctx) {
+        boolean bundled = PlayerMobConfig.skinSourceBundled();
+        boolean online = PlayerMobConfig.skinSourceOnline();
+        boolean local = PlayerMobConfig.skinSourceLocal();
+        int onlineCount = PlayerMobSkinRegistry.size();
+        int localCount = LocalSkinFolder.list().size();
+        ctx.getSource().sendSuccess(() -> Component.literal(
+            "PlayerMob skin sources — bundled " + onOff(bundled)
+                + ", online " + onOff(online) + " (" + onlineCount + ")"
+                + ", local " + onOff(local) + " (" + localCount + " in config/playermob/skins)."), false);
+        return 1;
+    }
+
+    /** {@code /playermob skin source <source> on|off} — flip one skin source for this session. */
+    private static int setSkinSource(CommandContext<CommandSourceStack> ctx, String source, boolean enabled) {
+        switch (source) {
+            case "bundled" -> PlayerMobConfig.setSkinSourceBundled(enabled);
+            case "online" -> PlayerMobConfig.setSkinSourceOnline(enabled);
+            case "local" -> PlayerMobConfig.setSkinSourceLocal(enabled);
+            default -> {
+                ctx.getSource().sendFailure(Component.literal("Unknown skin source '" + source + "'."));
+                return 0;
+            }
+        }
+        ctx.getSource().sendSuccess(() -> Component.literal(
+            "PlayerMob skin source " + source + " " + (enabled ? "enabled" : "disabled")
+                + " for this session."), false);
+        return 1;
+    }
+
+    /**
+     * {@code /playermob skin spawn <file> [pos]} — summon a PlayerMob wearing the local-folder skin
+     * {@code <file>} (a PNG base name in config/playermob/skins), at {@code pos} or the command source.
+     * Fails with the available names if the file isn't found.
+     */
+    private static int skinSpawn(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        String file = StringArgumentType.getString(ctx, "file");
+        if (LocalSkinFolder.resolve(file) == null) {
+            source.sendFailure(Component.literal("No local skin '" + file
+                + "' in config/playermob/skins. Available: "
+                + (LocalSkinFolder.list().isEmpty() ? "(none)" : String.join(", ", LocalSkinFolder.list())) + "."));
+            return 0;
+        }
+        ServerLevel level = source.getLevel();
+        Vec3 at = has(ctx, "pos") ? Vec3Argument.getVec3(ctx, "pos") : source.getPosition();
+        float yRot = source.getRotation().y;
+        PlayerMobEntity mob = PlayerMobSummon.summon(level, at.x, at.y, at.z, yRot, null, null);
+        if (mob == null) {
+            source.sendFailure(Component.literal("Could not create a PlayerMob."));
+            return 0;
+        }
+        mob.setSkinTextureUrl(LocalSkinRef.encode(file));
+        source.sendSuccess(() -> Component.literal(
+            "Summoned a PlayerMob wearing local skin '" + file + "'."), true);
+        return 1;
+    }
+
+    /** "ON"/"OFF" label for source-state reporting. */
+    private static String onOff(boolean on) {
+        return on ? "ON" : "OFF";
     }
 
     // ---- /playermob order <name> <action> <target> ----------------------------------------------

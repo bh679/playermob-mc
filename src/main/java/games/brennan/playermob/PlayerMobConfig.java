@@ -43,6 +43,10 @@ public final class PlayerMobConfig {
 
     private static final String KEY_EXTRA_PICKUP_ITEMS = "extraPickupItems";
 
+    private static final String KEY_SKIN_SOURCE_BUNDLED = "skinSourceBundled";
+    private static final String KEY_SKIN_SOURCE_ONLINE = "skinSourceOnline";
+    private static final String KEY_SKIN_SOURCE_LOCAL = "skinSourceLocal";
+
     /** Default chance a Dungeon-Train echo with logged friends also brings back a friend-echo. */
     public static final float DEFAULT_ECHO_FRIEND_CHANCE = 0.40F;
     /** Debug spawn logging ships off — when on it broadcasts a chat line on every DT auto-spawn. */
@@ -63,6 +67,12 @@ public final class PlayerMobConfig {
     public static final float DEFAULT_MELEE_ENGAGE_DISTANCE = 4.0F;
     /** No extra pickup items by default — the mob wants only its hardcoded gear/ammo/valuable/consumable set. */
     public static final String DEFAULT_EXTRA_PICKUP_ITEMS = "";
+    /** Bundled default skins are an eligible random source by default. */
+    public static final boolean DEFAULT_SKIN_SOURCE_BUNDLED = true;
+    /** Online skins (datapack / by-name / external registry) are an eligible random source by default. */
+    public static final boolean DEFAULT_SKIN_SOURCE_ONLINE = true;
+    /** Local-folder skins ({@code config/playermob/skins}) are an eligible random source by default. */
+    public static final boolean DEFAULT_SKIN_SOURCE_LOCAL = true;
 
     /**
      * The mob groups natural spawning understands. Each carries the default chance that, when natural
@@ -160,6 +170,9 @@ public final class PlayerMobConfig {
     private static volatile WantedItemList extraPickups = WantedItemList.EMPTY;
     /** Per-mob explicit overrides (id → clamped 0–1 chance); immutable, replaced wholesale on {@link #load}. */
     private static volatile Map<String, Float> naturalSpawnScales = Map.of();
+    private static volatile boolean skinSourceBundled = DEFAULT_SKIN_SOURCE_BUNDLED;
+    private static volatile boolean skinSourceOnline = DEFAULT_SKIN_SOURCE_ONLINE;
+    private static volatile boolean skinSourceLocal = DEFAULT_SKIN_SOURCE_LOCAL;
 
     private PlayerMobConfig() {}
 
@@ -234,6 +247,31 @@ public final class PlayerMobConfig {
     }
 
     /**
+     * Whether bundled default skins may be chosen by the spawn-time random roll (default true). One of the
+     * three skin sources — see {@code SkinSourceSelector}. Bundled is also the always-safe fallback when no
+     * other source has any skin. Toggle live with {@code /playermob skin source bundled on|off}.
+     */
+    public static boolean skinSourceBundled() {
+        return skinSourceBundled;
+    }
+
+    /**
+     * Whether online skins (datapack / by-name / external {@code SkinSources} registry) may be chosen by the
+     * spawn-time random roll (default true). Toggle live with {@code /playermob skin source online on|off}.
+     */
+    public static boolean skinSourceOnline() {
+        return skinSourceOnline;
+    }
+
+    /**
+     * Whether local-folder skins ({@code config/playermob/skins}) may be chosen by the spawn-time random
+     * roll (default true). Toggle live with {@code /playermob skin source local on|off}.
+     */
+    public static boolean skinSourceLocal() {
+        return skinSourceLocal;
+    }
+
+    /**
      * The chance (0–1) a PlayerMob spawns <em>alongside</em> {@code typeId} on a natural spawn (additive —
      * the mob is never replaced).
      *
@@ -299,6 +337,24 @@ public final class PlayerMobConfig {
     }
 
     /**
+     * Toggle a skin source at runtime (e.g. from {@code /playermob skin source <bundled|online|local> on|off}).
+     * A session override — not written back to the file, which stays the startup default.
+     */
+    public static void setSkinSourceBundled(boolean enabled) {
+        skinSourceBundled = enabled;
+    }
+
+    /** @see #setSkinSourceBundled(boolean) */
+    public static void setSkinSourceOnline(boolean enabled) {
+        skinSourceOnline = enabled;
+    }
+
+    /** @see #setSkinSourceBundled(boolean) */
+    public static void setSkinSourceLocal(boolean enabled) {
+        skinSourceLocal = enabled;
+    }
+
+    /**
      * Set a single mob's replacement chance at runtime (e.g. from {@code /playermob naturalspawn <mob> ...}).
      * Copies the immutable override map with the clamped value added/replaced, so concurrent spawn-thread
      * reads always see a complete map. A session override — not written back to the file.
@@ -349,6 +405,9 @@ public final class PlayerMobConfig {
             meleeEngageDistance = v.meleeEngageDistance();
             extraPickups = v.extraPickups();
             naturalSpawnScales = v.naturalSpawnScales();
+            skinSourceBundled = v.skinSourceBundled();
+            skinSourceOnline = v.skinSourceOnline();
+            skinSourceLocal = v.skinSourceLocal();
             LOGGER.info("[{}] config: {}={}, {}={}, {}={}, {}={}, {}={} ({} per-mob override(s))",
                 PlayerMob.MOD_ID,
                 KEY_ECHO_FRIEND_CHANCE, echoFriendChance, KEY_DEBUG_SPAWN_LOG, debugSpawnLog,
@@ -371,7 +430,8 @@ public final class PlayerMobConfig {
                   boolean requireArrows, boolean seekArrowsWhenEmpty,
                   float rangedEngageDistance, float meleeEngageDistance,
                   WantedItemList extraPickups,
-                  Map<String, Float> naturalSpawnScales) {}
+                  Map<String, Float> naturalSpawnScales,
+                  boolean skinSourceBundled, boolean skinSourceOnline, boolean skinSourceLocal) {}
 
     static Values parse(Properties props) {
         float[] engage = parseEngageDistances(props);
@@ -385,7 +445,10 @@ public final class PlayerMobConfig {
             parseBool(props.getProperty(KEY_SEEK_ARROWS_WHEN_EMPTY), DEFAULT_SEEK_ARROWS_WHEN_EMPTY),
             engage[0], engage[1],
             WantedItemList.parse(props.getProperty(KEY_EXTRA_PICKUP_ITEMS, DEFAULT_EXTRA_PICKUP_ITEMS)),
-            parseScales(props));
+            parseScales(props),
+            parseBool(props.getProperty(KEY_SKIN_SOURCE_BUNDLED), DEFAULT_SKIN_SOURCE_BUNDLED),
+            parseBool(props.getProperty(KEY_SKIN_SOURCE_ONLINE), DEFAULT_SKIN_SOURCE_ONLINE),
+            parseBool(props.getProperty(KEY_SKIN_SOURCE_LOCAL), DEFAULT_SKIN_SOURCE_LOCAL));
     }
 
     /**
@@ -488,6 +551,11 @@ public final class PlayerMobConfig {
             .append("#   already grabs. List item ids and/or item tags, separated by commas or spaces. Prefix a\n")
             .append("#   tag with #; a bare path with no namespace assumes minecraft. Empty by default.\n")
             .append("#   Example: extraPickupItems=#scguns:ammo, scguns:assault_rifle, minecraft:diamond_block\n")
+            .append("# skinSourceBundled / skinSourceOnline / skinSourceLocal: which skin sources a random\n")
+            .append("#   PlayerMob may draw from. bundled = the built-in default skins; online = datapack /\n")
+            .append("#   by-name / external-mod skins; local = PNG files you drop in config/playermob/skins.\n")
+            .append("#   All on by default. Bundled is always the fallback when no other source has any skin.\n")
+            .append("#   Toggle live with /playermob skin source <bundled|online|local> on|off (session override).\n")
             .append(KEY_ECHO_FRIEND_CHANCE).append("=").append(DEFAULT_ECHO_FRIEND_CHANCE).append("\n")
             .append(KEY_DEBUG_SPAWN_LOG).append("=").append(DEFAULT_DEBUG_SPAWN_LOG).append("\n")
             .append(KEY_TRAIN_DIG_THROUGH).append("=").append(DEFAULT_TRAIN_DIG_THROUGH).append("\n")
@@ -497,6 +565,9 @@ public final class PlayerMobConfig {
             .append(KEY_RANGED_ENGAGE_DISTANCE).append("=").append(DEFAULT_RANGED_ENGAGE_DISTANCE).append("\n")
             .append(KEY_MELEE_ENGAGE_DISTANCE).append("=").append(DEFAULT_MELEE_ENGAGE_DISTANCE).append("\n")
             .append(KEY_EXTRA_PICKUP_ITEMS).append("=").append(DEFAULT_EXTRA_PICKUP_ITEMS).append("\n")
+            .append(KEY_SKIN_SOURCE_BUNDLED).append("=").append(DEFAULT_SKIN_SOURCE_BUNDLED).append("\n")
+            .append(KEY_SKIN_SOURCE_ONLINE).append("=").append(DEFAULT_SKIN_SOURCE_ONLINE).append("\n")
+            .append(KEY_SKIN_SOURCE_LOCAL).append("=").append(DEFAULT_SKIN_SOURCE_LOCAL).append("\n")
             .append("#\n")
             .append("# --- Natural spawning (opt-in) ------------------------------------------------\n")
             .append("# naturalSpawnEnabled: master switch. When false (default), PlayerMobs only appear\n")

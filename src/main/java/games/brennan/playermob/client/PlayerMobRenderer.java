@@ -3,6 +3,7 @@ package games.brennan.playermob.client;
 import com.mojang.blaze3d.vertex.PoseStack;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.player.SourceProfileSkin;
+import games.brennan.playermob.skin.LocalSkinRef;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.Minecraft;
@@ -558,7 +559,16 @@ public final class PlayerMobRenderer
             }
             return PlayerMobSkinTextures.playerSkin(source.get().uuid(), source.get().name()).texture();
         }
-        if (!url.isEmpty()) {
+        // Local-folder skin: load the PNG the player dropped in config/playermob/skins. A missing file
+        // (e.g. on a dedicated server where this client lacks it) yields null → fall through to bundled,
+        // NOT the URL path (the "playermob-local:" value is not a real URL).
+        Optional<String> localName = LocalSkinRef.decode(url);
+        if (localName.isPresent()) {
+            var local = LocalSkinTextures.lookup(localName.get());
+            if (local != null) {
+                return local;
+            }
+        } else if (!url.isEmpty()) {
             return PlayerMobSkinTextures.lookup(url, entity.isSkinSlim());
         }
         // No URL ⇒ legacy 0.2.0 mob, or registry-empty new mob. Render the
@@ -588,6 +598,11 @@ public final class PlayerMobRenderer
                 return entity.isSkinSlim();
             }
             return PlayerMobSkinTextures.playerSkin(source.get().uuid(), source.get().name()).slim();
+        }
+        // Local-folder skin: arm model is auto-detected from the PNG pixels at load time.
+        Optional<String> localName = LocalSkinRef.decode(entity.getSkinTextureUrl());
+        if (localName.isPresent()) {
+            return LocalSkinTextures.isSlim(localName.get());
         }
         return entity.isSkinSlim();
     }

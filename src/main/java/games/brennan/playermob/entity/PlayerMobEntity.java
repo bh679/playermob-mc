@@ -32,9 +32,12 @@ import games.brennan.playermob.player.PlayerLifeRecord;
 import games.brennan.playermob.player.PlayerLifeStore;
 import games.brennan.playermob.player.GlobalLifeStore;
 import games.brennan.playermob.player.PlayerReincarnation;
+import games.brennan.playermob.skin.LocalSkinFolder;
+import games.brennan.playermob.skin.LocalSkinRef;
 import games.brennan.playermob.skin.PlayerMobSkin;
 import games.brennan.playermob.skin.PlayerMobSkinRegistry;
 import games.brennan.playermob.skin.SkinModel;
+import games.brennan.playermob.skin.SkinSourceSelector;
 import games.brennan.playermob.compat.GameRuleCompat;
 import games.brennan.playermob.compat.ItemDataCompat;
 import games.brennan.playermob.compat.ItemKindCompat;
@@ -1349,11 +1352,26 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             // per-name model — we mirror that coin-flip. A URL skin (below) overrides
             // this with its own authored model.
             setSkinSlim(random.nextBoolean());
-            if (random.nextFloat() < URL_SKIN_CHANCE) {
-                PlayerMobSkinRegistry.pickRandom(random).ifPresent(skin -> {
+            // Pick a skin across the three enabled sources (bundled base / online registry / local
+            // folder) via the pure selector. Bundled stays the base; the URL_SKIN_CHANCE override now
+            // draws uniformly from the combined online+local pool. Snapshot both lists once so the
+            // index the selector returns indexes the same list we read.
+            List<PlayerMobSkin> online = PlayerMobSkinRegistry.all();
+            List<String> local = LocalSkinFolder.list();
+            SkinSourceSelector.Choice choice = SkinSourceSelector.choose(
+                PlayerMobConfig.skinSourceBundled(),
+                PlayerMobConfig.skinSourceOnline(),
+                PlayerMobConfig.skinSourceLocal(),
+                online.size(), local.size(), URL_SKIN_CHANCE,
+                random::nextInt, () -> random.nextFloat());
+            switch (choice.kind()) {
+                case ONLINE -> {
+                    PlayerMobSkin skin = online.get(choice.index());
                     setSkinTextureUrl(skin.textureUrl());
                     setSkinSlim(skin.model() == SkinModel.SLIM);
-                });
+                }
+                case LOCAL -> setSkinTextureUrl(LocalSkinRef.encode(local.get(choice.index())));
+                case BUNDLED -> { /* keep the bundled index rolled above */ }
             }
         }
         // Roll any trait not pinned by a spawn egg's entity_data or /summon NBT
