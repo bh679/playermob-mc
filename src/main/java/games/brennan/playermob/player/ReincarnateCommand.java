@@ -62,9 +62,11 @@ import java.util.Collection;
  *   <li>{@code /playermob life <player>} — read the in-progress life tally and the
  *       traits it would currently distil to (verify tracking without dying).</li>
  *   <li>{@code /playermob summon <displayName> [<pos>] [<friendliness>] [<fightFlight>] [named [<customName>]]}
- *       — spawn a PlayerMob wearing that player's resolved skin, at an optional position (default: the
- *       command source), with optional locked traits (default: random). Append {@code named} to also give
- *       the mob a nameplate — {@code customName} if supplied, otherwise {@code displayName}.</li>
+ *       — spawn a PlayerMob wearing that skin, at an optional position (default: the command source), with
+ *       optional locked traits (default: random). {@code displayName} is a local-folder skin name (a PNG in
+ *       {@code config/playermob/skins}) if one matches, otherwise a player name whose skin is resolved.
+ *       Append {@code named} to also give the mob a nameplate — {@code customName} if supplied, otherwise
+ *       {@code displayName}.</li>
  *   <li>{@code /playermob debug spawnlog [on|off]} — toggle (or report) the colour-coded
  *       Dungeon-Train auto-spawn chat log for this session.</li>
  *   <li>{@code /playermob unlimitedammo [on|off]} — toggle (or report) global unlimited ammo for
@@ -80,8 +82,6 @@ import java.util.Collection;
  *       PlayerMob may draw from, with counts.</li>
  *   <li>{@code /playermob skin source <bundled|online|local> on|off} — toggle one skin source for this
  *       session.</li>
- *   <li>{@code /playermob skin spawn <file> [pos]} — summon a PlayerMob wearing the named local-folder
- *       skin (a PNG dropped in {@code config/playermob/skins}).</li>
  * </ul>
  *
  * <p>Like {@code spawnlog}, the {@code naturalspawn} edits are session overrides — they take effect
@@ -110,6 +110,8 @@ public final class ReincarnateCommand {
                         .executes(ReincarnateCommand::life)))
                 .then(Commands.literal("summon")
                     .then(Commands.argument("displayName", StringArgumentType.word())
+                        // Suggest local-folder skin names (you can also type any player name).
+                        .suggests(LOCAL_SKIN_SUGGESTIONS)
                         .executes(ctx -> summon(ctx, false))
                         // `named [<customName>]` gives the mob a nameplate (defaults to displayName);
                         // attached at every level so it can follow any arg combo. Literals bind before
@@ -187,8 +189,10 @@ public final class ReincarnateCommand {
      *   <li>{@code skin sources} — report which of the three skin sources (bundled / online / local)
      *       a random PlayerMob may draw from, with counts.</li>
      *   <li>{@code skin source <bundled|online|local> on|off} — toggle one source for this session.</li>
-     *   <li>{@code skin spawn <file> [pos]} — summon a PlayerMob wearing the named local-folder skin.</li>
      * </ul>
+     *
+     * <p>To <em>spawn</em> a mob wearing a specific local skin, use {@code /playermob summon <file>}
+     * (same command as a named-player summon — a local-folder name takes precedence over a player name).</p>
      */
     private static LiteralArgumentBuilder<CommandSourceStack> skinTree() {
         return Commands.literal("skin")
@@ -196,13 +200,7 @@ public final class ReincarnateCommand {
             .then(Commands.literal("source")
                 .then(skinSourceToggle("bundled"))
                 .then(skinSourceToggle("online"))
-                .then(skinSourceToggle("local")))
-            .then(Commands.literal("spawn")
-                .then(Commands.argument("file", StringArgumentType.string())
-                    .suggests(LOCAL_SKIN_SUGGESTIONS)
-                    .executes(ReincarnateCommand::skinSpawn)
-                    .then(Commands.argument("pos", Vec3Argument.vec3())
-                        .executes(ReincarnateCommand::skinSpawn))));
+                .then(skinSourceToggle("local")));
     }
 
     /** One {@code <source> on|off} branch for {@link #skinTree()} (built fresh per call site). */
@@ -240,34 +238,6 @@ public final class ReincarnateCommand {
         ctx.getSource().sendSuccess(() -> Component.literal(
             "PlayerMob skin source " + source + " " + (enabled ? "enabled" : "disabled")
                 + " for this session."), false);
-        return 1;
-    }
-
-    /**
-     * {@code /playermob skin spawn <file> [pos]} — summon a PlayerMob wearing the local-folder skin
-     * {@code <file>} (a PNG base name in config/playermob/skins), at {@code pos} or the command source.
-     * Fails with the available names if the file isn't found.
-     */
-    private static int skinSpawn(CommandContext<CommandSourceStack> ctx) {
-        CommandSourceStack source = ctx.getSource();
-        String file = StringArgumentType.getString(ctx, "file");
-        if (LocalSkinFolder.resolve(file) == null) {
-            source.sendFailure(Component.literal("No local skin '" + file
-                + "' in config/playermob/skins. Available: "
-                + (LocalSkinFolder.list().isEmpty() ? "(none)" : String.join(", ", LocalSkinFolder.list())) + "."));
-            return 0;
-        }
-        ServerLevel level = source.getLevel();
-        Vec3 at = has(ctx, "pos") ? Vec3Argument.getVec3(ctx, "pos") : source.getPosition();
-        float yRot = source.getRotation().y;
-        PlayerMobEntity mob = PlayerMobSummon.summon(level, at.x, at.y, at.z, yRot, null, null);
-        if (mob == null) {
-            source.sendFailure(Component.literal("Could not create a PlayerMob."));
-            return 0;
-        }
-        mob.setSkinTextureUrl(LocalSkinRef.encode(file));
-        source.sendSuccess(() -> Component.literal(
-            "Summoned a PlayerMob wearing local skin '" + file + "'."), true);
         return 1;
     }
 
@@ -1032,21 +1002,31 @@ public final class ReincarnateCommand {
             mob.setCustomName(Component.literal(customName));
             mob.setCustomNameVisible(true);
         }
-        // Resolve the named player's skin off-thread; apply on the server thread when it lands.
-        MinecraftServer server = source.getServer();
-        PlayerSkinResolver.resolveAsync(server, name, opt -> {
-            if (mob.isRemoved()) {
-                return;
-            }
-            opt.ifPresent(resolved -> {
-                mob.setSkinTextureUrl(resolved.url());
-                mob.setSkinSlim(resolved.slim());
+        // A local-folder skin (a PNG in config/playermob/skins) takes precedence: if <displayName>
+        // names one, the mob wears it immediately. Otherwise <displayName> is treated as a player
+        // name and that player's skin is resolved off-thread, applied when it lands.
+        boolean localSkin = LocalSkinFolder.resolve(name) != null;
+        if (localSkin) {
+            mob.setSkinTextureUrl(LocalSkinRef.encode(name));
+        } else {
+            MinecraftServer server = source.getServer();
+            PlayerSkinResolver.resolveAsync(server, name, opt -> {
+                if (mob.isRemoved()) {
+                    return;
+                }
+                opt.ifPresent(resolved -> {
+                    mob.setSkinTextureUrl(resolved.url());
+                    mob.setSkinSlim(resolved.slim());
+                });
             });
-        });
-        String label = customName != null
-            ? "Summoned a PlayerMob named \"" + customName + "\" for " + name
-            : "Summoned a PlayerMob for " + name;
-        source.sendSuccess(() -> Component.literal(label + " — resolving skin…"), true);
+        }
+        String who = customName != null
+            ? "Summoned a PlayerMob named \"" + customName + "\""
+            : "Summoned a PlayerMob";
+        String label = localSkin
+            ? who + " wearing local skin '" + name + "'."
+            : who + " for " + name + " — resolving skin…";
+        source.sendSuccess(() -> Component.literal(label), true);
         return 1;
     }
 

@@ -4,8 +4,8 @@
       "id": "streamer-mcc-skins",
       "version": "0.41.0",
       "type": "content",
-      "title": "30 more player skins \u2014 Dream SMP, MCC & YouTubers",
-      "summary": "PlayerMobs can now spawn wearing 30 additional real-player skins from the Minecraft streaming and MCC scene \u2014 Dream, Technoblade, CaptainSparklez, LDShadowLady, Skeppy and more \u2014 bringing the custom-skin pool to 68. Recognizable real-player skins also show up more often: a naturally-spawned PlayerMob now has a 40% chance (up from 30%) of wearing one instead of a vanilla default.",
+      "title": "30 more player skins — Dream SMP, MCC & YouTubers",
+      "summary": "PlayerMobs can now spawn wearing 30 additional real-player skins from the Minecraft streaming and MCC scene — Dream, Technoblade, CaptainSparklez, LDShadowLady, Skeppy and more — bringing the custom-skin pool to 68. Recognizable real-player skins also show up more often: a naturally-spawned PlayerMob now has a 40% chance (up from 30%) of wearing one instead of a vanilla default.",
       "highlights": [
         "30 new skins (pool now 68): Dream SMP, MCC players, and Minecraft YouTubers",
         "Recognizable real-player skins now appear ~40% of the time, up from ~30%",
@@ -25,7 +25,7 @@
       "summary": "On a Dungeon Train, a PlayerMob that has come to love you now abandons its own fixed route and makes its way to your carriage, settling in once it's with you. Move on down the train and it follows; step off the train and it stays aboard and goes back to its usual wandering.",
       "highlights": [
         "A PlayerMob that loves you heads to your carriage instead of marching its own way",
-        "Uses the full train toolkit to reach you \u2014 stepping through rooms, leaping carriage-group gaps, opening doors, and digging through fill",
+        "Uses the full train toolkit to reach you — stepping through rooms, leaping carriage-group gaps, opening doors, and digging through fill",
         "Relaxes and does its own thing once it shares your carriage; resumes its route if you leave the train",
         "Toggle with the new trainFollowLovedPlayer config option (on by default)"
       ],
@@ -40,7 +40,7 @@
       "version": "0.43.0",
       "type": "fix",
       "title": "Reincarnated echoes wear the player's real skin",
-      "summary": "\"Echo of <name>\" PlayerMobs on the Dungeon Train now show the real skin of the player they're an echo of, instead of a default Steve/Alex skin. Their name was already right \u2014 now their look matches too.",
+      "summary": "\"Echo of <name>\" PlayerMobs on the Dungeon Train now show the real skin of the player they're an echo of, instead of a default Steve/Alex skin. Their name was already right — now their look matches too.",
       "highlights": [
         "Dungeon-Train echoes match the skin of the player they came from",
         "Also fixes the friend-echoes that travel alongside them",
@@ -57,10 +57,10 @@
       "version": "0.44.0",
       "type": "feat",
       "title": "Reincarnations can come from other mods",
-      "summary": "PlayerMob now has a two-way reincarnation bridge other mods can plug into: a companion mod can both add past lives \u2014 including players from other worlds \u2014 to the pool a PlayerMob may return as, and read PlayerMob's death log. Local and remote reincarnations roll on separate chances, so meeting players from elsewhere never reduces your chance of meeting your own past lives. With no such mod installed nothing changes \u2014 except that Dungeon Train echoes now lean toward your more recent past lives.",
+      "summary": "PlayerMob now has a two-way reincarnation bridge other mods can plug into: a companion mod can both add past lives — including players from other worlds — to the pool a PlayerMob may return as, and read PlayerMob's death log. Local and remote reincarnations roll on separate chances, so meeting players from elsewhere never reduces your chance of meeting your own past lives. With no such mod installed nothing changes — except that Dungeon Train echoes now lean toward your more recent past lives.",
       "highlights": [
-        "Other mods can contribute past lives to the reincarnation pool \u2014 a spawning PlayerMob can come back as a life from an integrating mod, not just PlayerMob's own death log.",
-        "Players from other worlds can turn up as echoes in yours (and you in theirs) \u2014 a remote echo is always someone else, never you.",
+        "Other mods can contribute past lives to the reincarnation pool — a spawning PlayerMob can come back as a life from an integrating mod, not just PlayerMob's own death log.",
+        "Players from other worlds can turn up as echoes in yours (and you in theirs) — a remote echo is always someone else, never you.",
         "Local and remote echoes roll separately, so a remote pool never eats into your own past-life reincarnations.",
         "Other mods can read PlayerMob's death log (who died, where, and their skin, gear and traits).",
         "Dungeon Train echoes now favour your more recent deaths, with a mild lean toward lives that ended near your current depth."
@@ -90,7 +90,7 @@
       "version": "0.46.0",
       "type": "feat",
       "title": "Echo-spawn modding seam",
-      "summary": "Adds a modding hook so an integrating mod can react the moment a PlayerMob spawns as a reincarnated echo \u2014 Dungeon Train uses it to chronicle cross-world echo encounters.",
+      "summary": "Adds a modding hook so an integrating mod can react the moment a PlayerMob spawns as a reincarnated echo — Dungeon Train uses it to chronicle cross-world echo encounters.",
       "highlights": [
         "New PlayerMobSpawnHooks seam reports each echo spawn with its source life and whether it came from a local or remote (cross-world) pool."
       ],
@@ -105,10 +105,10 @@
       "version": "0.47.0",
       "type": "feat",
       "title": "Personality now colours how PlayerMobs feel about you",
-      "summary": "A PlayerMob's friendliness and aggression now shape how strongly it reacts to you, not just how it behaves. The friendlier a mob, the more it warms to acts of kindness \u2014 gifts, bows, and being defended land harder. The more aggressive a mob, the less it cares about being struck \u2014 a hot-tempered fighter shrugs off a blow that would turn a gentler mob against you.",
+      "summary": "A PlayerMob's friendliness and aggression now shape how strongly it reacts to you, not just how it behaves. The friendlier a mob, the more it warms to acts of kindness — gifts, bows, and being defended land harder. The more aggressive a mob, the less it cares about being struck — a hot-tempered fighter shrugs off a blow that would turn a gentler mob against you.",
       "highlights": [
-        "Friendly mobs warm up to twice as fast from gifts, bows, and rescues (\u00d71.0 at minimum friendliness rising to \u00d72.0 at maximum).",
-        "Aggressive mobs barely hold a grudge for being hit, while timid mobs take it to heart (\u00d70.2 at maximum aggression up to \u00d71.2 at minimum).",
+        "Friendly mobs warm up to twice as fast from gifts, bows, and rescues (×1.0 at minimum friendliness rising to ×2.0 at maximum).",
+        "Aggressive mobs barely hold a grudge for being hit, while timid mobs take it to heart (×0.2 at maximum aggression up to ×1.2 at minimum).",
         "The Aggressive archetype is now both hard to befriend and slow to anger when struck; the Friendly archetype bonds quickly but is more easily hurt."
       ],
       "pr": 103,
@@ -122,11 +122,11 @@
       "version": "0.48.0",
       "type": "feat",
       "title": "PlayerMob now runs on Minecraft 1.20.1",
-      "summary": "PlayerMob now ships a build for Minecraft 1.20.1 (Fabric and Forge), alongside the existing 1.21.1 build. It's the same player-shaped, weapon-aware mob \u2014 now playable on 1.20.1 worlds.",
+      "summary": "PlayerMob now ships a build for Minecraft 1.20.1 (Fabric and Forge), alongside the existing 1.21.1 build. It's the same player-shaped, weapon-aware mob — now playable on 1.20.1 worlds.",
       "highlights": [
         "New 1.20.1 build for Fabric and Forge.",
         "NeoForge 1.20.1 users: the Forge jar works on NeoForge 1.20.1.",
-        "1.21.1 builds (Fabric, Forge, NeoForge) are unchanged \u2014 grab the jar matching your Minecraft version + loader."
+        "1.21.1 builds (Fabric, Forge, NeoForge) are unchanged — grab the jar matching your Minecraft version + loader."
       ],
       "pr": 104,
       "date": "2026-06-23",
@@ -139,10 +139,10 @@
       "version": "0.49.0",
       "type": "feat",
       "title": "PlayerMob now runs on the latest Minecraft (26.2)",
-      "summary": "PlayerMob now ships a build for Minecraft 26.2 'Chaos Cubed' (Fabric and NeoForge), on top of the existing 1.20.1 and 1.21.1 builds. It's the same player-shaped, weapon-aware mob \u2014 now on the latest Minecraft.",
+      "summary": "PlayerMob now ships a build for Minecraft 26.2 'Chaos Cubed' (Fabric and NeoForge), on top of the existing 1.20.1 and 1.21.1 builds. It's the same player-shaped, weapon-aware mob — now on the latest Minecraft.",
       "highlights": [
         "New 26.2 build for Fabric and NeoForge.",
-        "PlayerMob now covers Minecraft 1.20.1, 1.21.1, and 26.2 \u2014 grab the jar matching your version + loader.",
+        "PlayerMob now covers Minecraft 1.20.1, 1.21.1, and 26.2 — grab the jar matching your version + loader.",
         "NeoForge 26.2 is still in beta upstream, so treat the 26.2 build as a preview."
       ],
       "pr": 107,
@@ -156,9 +156,9 @@
       "version": "0.50.0",
       "type": "feat",
       "title": "Adventure Item Names now bundled in",
-      "summary": "PlayerMob now ships with Adventure Item Names built in on Minecraft 1.21.1 (Fabric, Forge, and NeoForge) \u2014 no separate download. Naturally-spawned swords, tools, shields, and armor get procedural names out of the box, and the two mods coordinate so reincarnated echo mobs keep their own names.",
+      "summary": "PlayerMob now ships with Adventure Item Names built in on Minecraft 1.21.1 (Fabric, Forge, and NeoForge) — no separate download. Naturally-spawned swords, tools, shields, and armor get procedural names out of the box, and the two mods coordinate so reincarnated echo mobs keep their own names.",
       "highlights": [
-        "Auto-installs alongside PlayerMob on MC 1.21.1 \u2014 no extra file to grab",
+        "Auto-installs alongside PlayerMob on MC 1.21.1 — no extra file to grab",
         "Turn it off anytime: set Adventure Item Names' naming chance to 0 in its config, or remove the bundled mod",
         "1.20.1 and 26.2 builds are unaffected (not bundled there yet)"
       ],
@@ -172,12 +172,12 @@
       "id": "natural-spawning",
       "version": "0.51.0",
       "type": "feat",
-      "title": "Natural spawning \u2014 PlayerMobs appear in the wild",
-      "summary": "PlayerMobs can now spawn naturally in your world, off by default. When enabled, a PlayerMob has a configurable chance to appear alongside a normally-spawning mob (the mob is never replaced), with sensible per-group defaults \u2014 and villages can be settled by PlayerMobs among their villagers.",
+      "title": "Natural spawning — PlayerMobs appear in the wild",
+      "summary": "PlayerMobs can now spawn naturally in your world, off by default. When enabled, a PlayerMob has a configurable chance to appear alongside a normally-spawning mob (the mob is never replaced), with sensible per-group defaults — and villages can be settled by PlayerMobs among their villagers.",
       "highlights": [
         "Opt-in: set naturalSpawnEnabled=true in config/playermob.properties (ships off).",
-        "Spawns BESIDE the mob, never replacing it \u2014 works for hostiles, nether mobs, animals, water, and villages.",
-        "Per-group default chances: Hostile 0.0, Nether 0.05, Animals 0.15, Friendly 0.15, Water 0.0, Villager 0.25 \u2014 each mob also tunable individually.",
+        "Spawns BESIDE the mob, never replacing it — works for hostiles, nether mobs, animals, water, and villages.",
+        "Per-group default chances: Hostile 0.0, Nether 0.05, Animals 0.15, Friendly 0.15, Water 0.0, Villager 0.25 — each mob also tunable individually.",
         "Villages: ~1/4 of villagers (and structure iron golems) get a PlayerMob companion.",
         "Tune it live without a restart: /playermob naturalspawn on|off, /playermob naturalspawn <mob> on|off|<chance>, and /playermob naturalspawn group <group> on|off|<chance>."
       ],
@@ -192,9 +192,9 @@
       "version": "0.52.0",
       "type": "feat",
       "title": "Custom skins by player name",
-      "summary": "Mob-pack authors can now add a PlayerMob skin by simply naming a player \u2014 PlayerMob looks up that player's real skin (and arm model) automatically, so you no longer need to hunt down a texture URL. You can also summon a PlayerMob wearing a specific player's skin in-game, and mods can feed skins in through a new API.",
+      "summary": "Mob-pack authors can now add a PlayerMob skin by simply naming a player — PlayerMob looks up that player's real skin (and arm model) automatically, so you no longer need to hunt down a texture URL. You can also summon a PlayerMob wearing a specific player's skin in-game, and mods can feed skins in through a new API.",
       "highlights": [
-        "Datapack skins accept \"playerName\" instead of a \"textureUrl\" \u2014 the skin is resolved for you on /reload.",
+        "Datapack skins accept \"playerName\" instead of a \"textureUrl\" — the skin is resolved for you on /reload.",
         "New command: /playermob summon <player> [<pos>] [<friendliness>] [<fightFlight>] spawns a PlayerMob wearing that player's skin (traits optional, default random).",
         "Modders can add skins via the new SkinSources API.",
         "Name lookups need internet and are cached; unknown names or an offline server fall back to a bundled skin. Pre-resolved textureUrl entries still work offline."
@@ -222,7 +222,7 @@
       "version": "0.54.0",
       "type": "fix",
       "title": "Fixed PlayerMob crashing on startup on Forge 1.20.1",
-      "summary": "PlayerMob now loads on Forge 1.20.1. Previously the mod crashed the game on startup the instant it loaded, making it unusable on that version. The startup crash \u2014 and a second crash that surfaced right after it, where the spawn eggs failed to register \u2014 are both fixed. PlayerMob now loads, summons, and all six spawn eggs work on Forge 1.20.1. Forge 1.21.1, NeoForge, and Fabric were never affected.",
+      "summary": "PlayerMob now loads on Forge 1.20.1. Previously the mod crashed the game on startup the instant it loaded, making it unusable on that version. The startup crash — and a second crash that surfaced right after it, where the spawn eggs failed to register — are both fixed. PlayerMob now loads, summons, and all six spawn eggs work on Forge 1.20.1. Forge 1.21.1, NeoForge, and Fabric were never affected.",
       "highlights": [
         "Forge 1.20.1 no longer crashes on startup when PlayerMob is installed",
         "The PlayerMob spawn egg and the five archetype eggs now register and work on Forge 1.20.1",
@@ -244,7 +244,7 @@
         "PlayerMobs on MC 26.2 show their real, varied skins again instead of all looking like Steve",
         "Spawn-egg icons show their proper colours instead of the missing-texture checkerboard",
         "Fixed a client crash that could fire when a PlayerMob came into view on 26.2",
-        "The right-click editor menu (Creative) renders correctly again on 26.2 \u2014 relationship portraits show as placeholder squares there for now"
+        "The right-click editor menu (Creative) renders correctly again on 26.2 — relationship portraits show as placeholder squares there for now"
       ],
       "date": "2026-06-24",
       "released": true,
@@ -256,10 +256,10 @@
       "version": "0.56.0",
       "type": "fix",
       "title": "Personality spawn eggs keep their archetype on MC 1.20.1",
-      "summary": "On Minecraft 1.20.1, the personality spawn eggs (Aggressive, Friendly, Passive, Skeptical, Shy) were spawning random PlayerMobs instead of their intended personality. They now reliably spawn a mob with the egg's archetype \u2014 both from the creative menu and from /give.",
+      "summary": "On Minecraft 1.20.1, the personality spawn eggs (Aggressive, Friendly, Passive, Skeptical, Shy) were spawning random PlayerMobs instead of their intended personality. They now reliably spawn a mob with the egg's archetype — both from the creative menu and from /give.",
       "highlights": [
         "Aggressive, Friendly, Passive, Skeptical and Shy eggs now pin their fight/flight + friendliness on 1.20.1, like they already did on newer versions.",
-        "Works however you get the egg \u2014 creative inventory, /give, or pick-block."
+        "Works however you get the egg — creative inventory, /give, or pick-block."
       ],
       "pr": 119,
       "date": "2026-06-25",
@@ -272,9 +272,9 @@
       "version": "0.58.0",
       "type": "feat",
       "title": "PlayerMobs use real ammo for bows and crossbows",
-      "summary": "Archers now draw from their own quiver: a PlayerMob fires its bow or crossbow only while it carries ammo it can use, spending one round per shot. Bows use arrows; crossbows use arrows or firework rockets. Run it dry and it stops shooting \u2014 switching to a melee weapon, or darting over to grab nearby loose ammo when the enemy isn't right on top of it, then picking the weapon back up. It still favours ranged at a distance and closes to melee up close, and reloads crossbows between shots.",
+      "summary": "Archers now draw from their own quiver: a PlayerMob fires its bow or crossbow only while it carries ammo it can use, spending one round per shot. Bows use arrows; crossbows use arrows or firework rockets. Run it dry and it stops shooting — switching to a melee weapon, or darting over to grab nearby loose ammo when the enemy isn't right on top of it, then picking the weapon back up. It still favours ranged at a distance and closes to melee up close, and reloads crossbows between shots.",
       "highlights": [
-        "Bows and crossbows consume ammo from the mob's inventory \u2014 arrows for both, plus firework rockets for crossbows; no ammo means no shooting",
+        "Bows and crossbows consume ammo from the mob's inventory — arrows for both, plus firework rockets for crossbows; no ammo means no shooting",
         "Out of ammo mid-fight, it grabs nearby dropped arrows/fireworks (if the enemy isn't too close) or falls back to melee",
         "Keeps the ranged-at-distance / melee-up-close behaviour and crossbow reloading",
         "Toggle global unlimited ammo live with /playermob unlimitedammo on|off (or the requireArrows config), plus tunable engage distances"
@@ -290,7 +290,7 @@
       "version": "0.57.0",
       "type": "fix",
       "title": "Relationship faces render again on the latest MC build",
-      "summary": "On the newest Minecraft build, the PlayerMob editor's relationship list was drawing a blank grey square instead of each remembered individual's face. Real faces are back \u2014 every row shows the actual skin (head + hat overlay) again, matching the 1.20.1 and 1.21.1 versions.",
+      "summary": "On the newest Minecraft build, the PlayerMob editor's relationship list was drawing a blank grey square instead of each remembered individual's face. Real faces are back — every row shows the actual skin (head + hat overlay) again, matching the 1.20.1 and 1.21.1 versions.",
       "highlights": [
         "Real per-skin faces restored in the relationship list on the latest MC build",
         "Head and hat-overlay both render, identical to older versions"
@@ -306,7 +306,7 @@
       "version": "0.59.0",
       "type": "feat",
       "title": "Aggression sets how fast a PlayerMob fires its bow or crossbow",
-      "summary": "A PlayerMob's ranged firerate now follows its fight-or-flight nature. Brave mobs loose arrows and bolts as fast as the weapon can draw or charge; even-tempered ones pause a beat between shots; timid ones (which usually flee anyway) fire only rarely. The weapon's own draw/charge time is always the floor \u2014 nobody shoots faster than the bow allows.",
+      "summary": "A PlayerMob's ranged firerate now follows its fight-or-flight nature. Brave mobs loose arrows and bolts as fast as the weapon can draw or charge; even-tempered ones pause a beat between shots; timid ones (which usually flee anyway) fire only rarely. The weapon's own draw/charge time is always the floor — nobody shoots faster than the bow allows.",
       "highlights": [
         "Fearless mobs fire at the weapon's full speed",
         "Average mobs add a ~2-second pause between shots",
@@ -323,11 +323,11 @@
       "version": "0.60.0",
       "type": "feat",
       "title": "Configurable extra pickup items",
-      "summary": "PlayerMobs can now be told to scoop up extra items they'd normally ignore. List item ids and/or item tags in the new extraPickupItems config line and the mob will grab them off the ground and out of chests, stashing them in its backpack \u2014 perfect for modded loot like a gun mod's ammo.",
+      "summary": "PlayerMobs can now be told to scoop up extra items they'd normally ignore. List item ids and/or item tags in the new extraPickupItems config line and the mob will grab them off the ground and out of chests, stashing them in its backpack — perfect for modded loot like a gun mod's ammo.",
       "highlights": [
-        "New extraPickupItems setting in playermob.properties \u2014 list item ids (scguns:assault_rifle) and/or tags (#scguns:ammo), comma or space separated",
+        "New extraPickupItems setting in playermob.properties — list item ids (scguns:assault_rifle) and/or tags (#scguns:ammo), comma or space separated",
         "Configured items are picked up from the floor AND looted from chests, alongside the weapons, armor, ammo and valuables the mob already collects",
-        "Empty by default \u2014 no change unless you opt in; supports any mod's items"
+        "Empty by default — no change unless you opt in; supports any mod's items"
       ],
       "pr": 127,
       "date": "2026-06-25",
@@ -342,8 +342,8 @@
       "title": "Name your summoned PlayerMobs",
       "summary": "The /playermob summon command can now give the spawned mob a floating nameplate, not just a player's skin. Append 'named' to use the same name as the skin, or 'named <yourname>' to set a different label.",
       "highlights": [
-        "/playermob summon Steve named \u2014 spawns with Steve's skin and a 'Steve' nameplate",
-        "/playermob summon Steve named Bob \u2014 Steve's skin, but the nameplate reads 'Bob' (multi-word names work too)",
+        "/playermob summon Steve named — spawns with Steve's skin and a 'Steve' nameplate",
+        "/playermob summon Steve named Bob — Steve's skin, but the nameplate reads 'Bob' (multi-word names work too)",
         "The flag tacks onto any existing form, e.g. /playermob summon Steve ~ ~ ~ 8 2 named"
       ],
       "pr": 129,
@@ -357,12 +357,12 @@
       "version": "0.62.0",
       "type": "feat",
       "title": "Command PlayerMobs with /playermob order",
-      "summary": "A new op command lets you order a specific PlayerMob \u2014 by name, or the nearest one \u2014 to perform an action against a player, another PlayerMob, a mob type, or coordinates. The mob walks up, does the thing, then returns to its normal behaviour.",
+      "summary": "A new op command lets you order a specific PlayerMob — by name, or the nearest one — to perform an action against a player, another PlayerMob, a mob type, or coordinates. The mob walks up, does the thing, then returns to its normal behaviour.",
       "highlights": [
         "walk to, punch, taunt (punchat), or greet a target",
-        "attack with a stop limit \u2014 once, until dead, for N seconds, until N hearts, or until it's hit back \u2014 optionally with a chosen or conjured weapon",
+        "attack with a stop limit — once, until dead, for N seconds, until N hearts, or until it's hit back — optionally with a chosen or conjured weapon",
         "gift an auto-picked or specified item, and steal a target's held item then flee for a time or distance",
-        "use any item with a real right-click \u2014 place, till, shear, milk, buckets \u2014 working with modded items too",
+        "use any item with a real right-click — place, till, shear, milk, buckets — working with modded items too",
         "place a block at a spot, or have the mob chase a live player and place it at their feet"
       ],
       "pr": 133,
@@ -376,10 +376,10 @@
       "version": "0.63.1",
       "type": "fix",
       "title": "PlayerMobs now visibly swing their arms",
-      "summary": "PlayerMobs weren't playing their arm-swing animation \u2014 punches, attacks, and the /playermob order actions looked static. They now swing like a real player, and an ordered punchat throws 2\u20136 punch motions facing you.",
+      "summary": "PlayerMobs weren't playing their arm-swing animation — punches, attacks, and the /playermob order actions looked static. They now swing like a real player, and an ordered punchat throws 2–6 punch motions facing you.",
       "highlights": [
         "arm swings now animate in combat and for every order action",
-        "punchat faces you and throws 2\u20136 visible punches"
+        "punchat faces you and throws 2–6 visible punches"
       ],
       "date": "2026-06-25",
       "released": true,
@@ -391,12 +391,12 @@
       "version": "0.64.0",
       "type": "feat",
       "title": "Drop-in local skin folder",
-      "summary": "PlayerMobs can now wear your own skins. Drop PNG skin files into config/playermob/skins and they join the random rotation alongside the built-in and online skins \u2014 slim (Alex) and wide (Steve) arms are detected automatically. You can also spawn a PlayerMob wearing a specific skin by filename, and turn each skin source on or off.",
+      "summary": "PlayerMobs can now wear your own skins. Drop PNG skin files into config/playermob/skins and they join the random rotation alongside the built-in and online skins — slim (Alex) and wide (Steve) arms are detected automatically. You can also spawn a PlayerMob wearing a specific skin by filename, and turn each skin source on or off.",
       "highlights": [
-        "Drop .png skins in config/playermob/skins \u2014 used automatically on random spawns",
+        "Drop .png skins in config/playermob/skins — used automatically on random spawns",
         "Slim vs wide arms auto-detected from the skin file",
-        "/playermob skin spawn <file> \u2014 summon a PlayerMob wearing a specific local skin",
-        "/playermob skin sources and /playermob skin source <bundled|online|local> on|off \u2014 see and toggle which skin sources are used"
+        "/playermob summon <skin> — spawn a PlayerMob wearing a specific local skin (same command as a named-player summon)",
+        "/playermob skin sources and /playermob skin source <bundled|online|local> on|off — see and toggle which skin sources are used"
       ],
       "pr": 138,
       "date": "2026-06-26",
