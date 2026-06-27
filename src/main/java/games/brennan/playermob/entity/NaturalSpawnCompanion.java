@@ -89,7 +89,21 @@ public final class NaturalSpawnCompanion {
         if (!shouldSpawn(typeId, world.getRandom())) {
             return;
         }
-        DifficultyInstance difficulty = world.getLevel().getCurrentDifficultyAt(origin.blockPosition());
+        // Build the DifficultyInstance directly — do NOT call Level#getCurrentDifficultyAt here. We run on
+        // the worldgen worker thread (a village structure placing its villagers / iron golem), and that
+        // method loads the chunk at the position (getChunkAt -> CompletableFuture.join), which deadlocks
+        // chunk generation against itself (the worker blocks waiting on a chunk only the worker pool can
+        // make). This mirrors exactly what getCurrentDifficultyAt returns for a not-yet-loaded chunk
+        // (inhabitedTime 0, moonBrightness 0) but with only chunk-free reads. MC 26.x moved difficulty /
+        // time onto LevelData, so the inputs are version-guarded.
+        ServerLevel level = world.getLevel();
+        //? if >=26 {
+        /*DifficultyInstance difficulty = new DifficultyInstance(
+            level.getLevelData().getDifficulty(), level.getLevelData().getGameTime(), 0L, 0.0F);
+        *///?} else {
+        DifficultyInstance difficulty = new DifficultyInstance(
+            level.getDifficulty(), level.getDayTime(), 0L, 0.0F);
+        //?}
         materialise(world, difficulty, COMPANION_REASON, origin.getX(), origin.getY(), origin.getZ(),
             origin.getYRot(), origin.getXRot());
     }

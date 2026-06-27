@@ -4,11 +4,13 @@ import org.junit.jupiter.api.Test;
 
 import games.brennan.playermob.entity.AutoNameMode;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -159,6 +161,49 @@ class PlayerMobConfigTest {
         assertEquals(0.0F, scales.get("minecraft:cow"), 1e-6);
         assertFalse(scales.containsKey("minecraft:pig"), "unparseable value is dropped");
         assertEquals(3, scales.size(), "only zombie, creeper, cow survive (pig + blank-id dropped)");
+    }
+
+    // --- file-text parsing (parseProperties) — the path the props() helper above bypasses ---
+
+    @Test
+    void parsePropertiesRoundTripsColonKeys_regressionForDroppedOverrides() {
+        // Regression for the reported bug: java.util.Properties.load() treats ':' as a separator,
+        // so it mis-parsed every "naturalSpawnScale.minecraft:<mob>=x" line into the junk key
+        // "naturalSpawnScale.minecraft" and silently dropped the override (always "0 per-mob override(s)").
+        Properties props = PlayerMobConfig.parseProperties(List.of(
+            "naturalSpawnEnabled=true",
+            "naturalSpawnScale.minecraft:zombie=1.0",
+            "naturalSpawnScale.minecraft:cow=0.15"));
+        assertEquals("1.0", props.getProperty("naturalSpawnScale.minecraft:zombie"), "colon key survives intact");
+        assertEquals("true", props.getProperty("naturalSpawnEnabled"));
+        assertNull(props.getProperty("naturalSpawnScale.minecraft"), "must NOT collapse to a junk key");
+        // and the override actually reaches the parsed config (end-to-end of the load() path)
+        var v = PlayerMobConfig.parse(props);
+        assertEquals(1.0F, v.naturalSpawnScales().get("minecraft:zombie"), 1e-6);
+        assertEquals(0.15F, v.naturalSpawnScales().get("minecraft:cow"), 1e-6);
+        assertEquals(2, v.naturalSpawnScales().size());
+    }
+
+    @Test
+    void parsePropertiesSkipsCommentsBlanksAndKeylessLines() {
+        Properties props = PlayerMobConfig.parseProperties(List.of(
+            "# a comment",
+            "! also a comment",
+            "",
+            "   ",
+            "noEqualsHere",
+            "naturalSpawnEnabled=true"));
+        assertEquals(1, props.stringPropertyNames().size(), "only the real entry is kept");
+        assertEquals("true", props.getProperty("naturalSpawnEnabled"));
+    }
+
+    @Test
+    void parsePropertiesTrimsAndSplitsOnFirstEquals() {
+        Properties props = PlayerMobConfig.parseProperties(List.of(
+            "  naturalSpawnScale.minecraft:zombie  =  0.5  ", // surrounding + inner whitespace trimmed
+            "k=a=b"));                                         // split on the FIRST '=' only
+        assertEquals("0.5", props.getProperty("naturalSpawnScale.minecraft:zombie"));
+        assertEquals("a=b", props.getProperty("k"));
     }
 
     @Test

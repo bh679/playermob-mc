@@ -6,7 +6,6 @@ import games.brennan.playermob.entity.WantedItemList;
 import org.slf4j.Logger;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
@@ -415,10 +414,7 @@ public final class PlayerMobConfig {
             if (!Files.exists(file)) {
                 writeDefault(file);
             }
-            Properties props = new Properties();
-            try (InputStream in = Files.newInputStream(file)) {
-                props.load(in);
-            }
+            Properties props = parseProperties(Files.readAllLines(file));
             Values v = parse(props);
             echoFriendChance = v.echoFriendChance();
             debugSpawnLog = v.debugSpawnLog();
@@ -492,6 +488,35 @@ public final class PlayerMobConfig {
             return new float[] {DEFAULT_RANGED_ENGAGE_DISTANCE, DEFAULT_MELEE_ENGAGE_DISTANCE};
         }
         return new float[] {ranged, melee};
+    }
+
+    /**
+     * Parse the config file body into {@link Properties}, splitting each entry on the <em>first</em>
+     * {@code '='} only. This is deliberately NOT {@link Properties#load} — the per-mob keys contain a
+     * colon ({@code naturalSpawnScale.minecraft:zombie}), and {@code Properties.load} treats {@code ':'}
+     * (and {@code '='}) as a key/value separator, so it would mis-parse every per-mob line into the junk
+     * key {@code naturalSpawnScale.minecraft} and silently drop the override. Comments ({@code #}/{@code !})
+     * and blank lines are skipped; key and value are trimmed (matching {@code Properties} semantics). The
+     * config uses no line-continuations or unicode escapes, so a first-{@code '='} split is sufficient.
+     */
+    static Properties parseProperties(List<String> lines) {
+        Properties props = new Properties();
+        for (String raw : lines) {
+            String line = raw.trim();
+            if (line.isEmpty() || line.charAt(0) == '#' || line.charAt(0) == '!') {
+                continue;
+            }
+            int eq = line.indexOf('=');
+            if (eq < 0) {
+                continue;
+            }
+            String key = line.substring(0, eq).trim();
+            if (key.isEmpty()) {
+                continue;
+            }
+            props.setProperty(key, line.substring(eq + 1).trim());
+        }
+        return props;
     }
 
     /**
