@@ -420,6 +420,23 @@
       "released": true,
       "released_in": "v0.65.0",
       "released_at": "2026-06-27T00:43:30Z"
+    },
+    {
+      "id": "autoname-spawn-modes",
+      "version": "0.66.0",
+      "type": "feat",
+      "title": "Choose which PlayerMobs get named after their skin",
+      "summary": "Auto-naming is now a mode instead of an on/off switch. Pick which kinds of spawns wear their skin source as a nameplate \u2014 wild spawns, egg/spawner/command spawns, all of them, or none.",
+      "highlights": [
+        "/playermob autoname off|natural|egg|all (off by default)",
+        "'egg' covers spawn eggs, mob spawners, /summon and dispensers; 'natural' covers wild spawns; 'all' covers everything except Dungeon Train",
+        "/playermob summon <name|file> now waits for the skin to load before naming, and an explicit 'named' always takes priority"
+      ],
+      "pr": 141,
+      "date": "2026-06-27",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
