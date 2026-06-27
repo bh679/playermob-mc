@@ -467,6 +467,23 @@
       "released": false,
       "released_in": null,
       "released_at": null
+    },
+    {
+      "id": "natural-spawn-per-mob-config-fix",
+      "version": "0.69.0",
+      "type": "fix",
+      "title": "Per-mob natural-spawn chances now work (and no more world-gen freeze)",
+      "summary": "Per-mob natural-spawn chances set in playermob.properties (e.g. naturalSpawnScale.minecraft:zombie) were silently ignored \u2014 every mob fell back to its group default, so custom values you set never applied. They now load correctly from your existing config, no edits needed. This also fixes a world-generation freeze that could happen when a village generated while natural spawning was on.",
+      "highlights": [
+        "Per-mob naturalSpawnScale.<id> overrides now actually take effect (they were all being dropped)",
+        "Fixes a world-gen hang when villages/iron golems generated with natural spawning enabled",
+        "Works with your existing config file \u2014 no changes required"
+      ],
+      "pr": 147,
+      "date": "2026-06-27",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
