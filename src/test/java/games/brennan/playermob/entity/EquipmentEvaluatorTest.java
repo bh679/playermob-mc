@@ -11,12 +11,14 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.Enchantments;
+import games.brennan.playermob.testutil.WeaponClassification;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Pure-logic tests for {@link EquipmentEvaluator}.
@@ -131,6 +133,7 @@ class EquipmentEvaluatorTest {
 
     @Test
     void shouldReplaceTakesEquipmentIntoEmptySlot() {
+        assumeTrue(WeaponClassification.available(), WeaponClassification.SKIP_REASON);
         // Recognised gear into empty slot — always wins.
         assertTrue(EquipmentEvaluator.shouldReplace(new ItemStack(Items.IRON_SWORD), ItemStack.EMPTY));
     }
@@ -151,6 +154,7 @@ class EquipmentEvaluatorTest {
 
     @Test
     void shouldReplacePicksHigherBaseDamageWeapon() {
+        assumeTrue(WeaponClassification.available(), WeaponClassification.SKIP_REASON);
         // Diamond sword (base attack damage 7) beats iron sword (5) when
         // neither is enchanted.
         assertTrue(EquipmentEvaluator.shouldReplace(
@@ -179,6 +183,7 @@ class EquipmentEvaluatorTest {
     void shouldReplacePicksEnchantedIronOverPlainDiamond() {
         // The headline v2 behaviour: Sharpness V iron sword (base 5 + 5×0.5
         // = 7.5) should beat plain diamond sword (base 7).
+        assumeTrue(WeaponClassification.available(), WeaponClassification.SKIP_REASON);
         ItemStack ironSharp5 = new ItemStack(Items.IRON_SWORD);
         ironSharp5.enchant(sharpness(), 5);
 
@@ -188,6 +193,7 @@ class EquipmentEvaluatorTest {
 
     @Test
     void shouldReplacePicksMoreEnchantedSameItem() {
+        assumeTrue(WeaponClassification.available(), WeaponClassification.SKIP_REASON);
         // Among two iron swords, the enchanted one wins.
         ItemStack enchanted = new ItemStack(Items.IRON_SWORD);
         enchanted.enchant(sharpness(), 3);
@@ -222,6 +228,6 @@ class EquipmentEvaluatorTest {
 
     private static Enchantment protection() {
         return Enchantments.ALL_DAMAGE_PROTECTION; // 1.20.1's field name for Protection
-    }*/
-    //?}
+    }
+    *///?}
 }

@@ -1,0 +1,57 @@
+name: CI
+
+# Runs the unit-test suite for every Stonecutter version node on each push and PR.
+# `./gradlew build` aggregates all nodes' `:test`, but the canonical, isolated way to
+# exercise a node is its own `:<version>:test` task — each node compiles its own
+# preprocessed source against its own Minecraft jar, independent of the committed
+# `stonecutter active` version. One matrix leg per version keeps failures attributable.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# Newer pushes to the same branch/PR supersede in-flight runs.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: "test (MC ${{ matrix.version }})"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Mirrors settings.gradle.kts `versions(...)`. Each node's tests run on the
+        # JDK its toolchain selects (21 for 1.20.1/1.21.1, 25 for 26.2).
+        version: ["1.20.1", "1.21.1", "26.2"]
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install both toolchains. The Gradle daemon runs on 25 (MC 26.x requires it);
+      # the 1.20.1/1.21.1 nodes pin a Java 21 toolchain, which Gradle resolves from the
+      # installations registered here (no foojay download needed at run time).
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: |
+            21
+            25
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Run ${{ matrix.version }} unit tests
+        run: ./gradlew :${{ matrix.version }}:test --no-daemon --stacktrace
+
+      # Surface the HTML/XML reports when a leg fails so failures are diagnosable
+      # without re-running locally.
+      - name: Upload test report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report-${{ matrix.version }}
+          path: versions/${{ matrix.version }}/build/reports/tests/test
+          if-no-files-found: ignore
