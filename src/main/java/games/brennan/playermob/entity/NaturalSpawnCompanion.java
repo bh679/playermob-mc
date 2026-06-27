@@ -122,8 +122,26 @@ public final class NaturalSpawnCompanion {
         mob.finalizeSpawn(world, difficulty, reason, null);
         //?} else {
         /*mob.finalizeSpawn(world, difficulty, reason, null, null);*///?}
+        maybeAutoName(mob);
         world.addFreshEntity(mob);
         return true;
+    }
+
+    /**
+     * If {@link PlayerMobConfig#autoNameNaturalSpawns()} is on and {@code mob} isn't already named, give it a
+     * nameplate drawn from its skin source — the local-folder filename or the online-skin {@code displayName}
+     * (see {@link games.brennan.playermob.skin.SkinDisplayName}). Runs after {@code finalizeSpawn} has rolled
+     * the skin, so the {@code SkinTextureUrl} is set. A bundled-skin mob has no source name and stays unnamed.
+     */
+    private static void maybeAutoName(PlayerMobEntity mob) {
+        if (!PlayerMobConfig.autoNameNaturalSpawns() || mob.hasCustomName()) {
+            return;
+        }
+        games.brennan.playermob.skin.SkinDisplayName.resolve(mob.getSkinTextureUrl())
+            .ifPresent(name -> {
+                mob.setCustomName(net.minecraft.network.chat.Component.literal(name));
+                mob.setCustomNameVisible(true);
+            });
     }
 
     /**

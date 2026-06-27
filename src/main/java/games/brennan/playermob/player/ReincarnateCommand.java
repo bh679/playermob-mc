@@ -163,6 +163,10 @@ public final class ReincarnateCommand {
                             .then(Commands.literal("off").executes(ctx -> setGroup(ctx, 0.0F)))
                             .then(Commands.argument("chance", FloatArgumentType.floatArg(0.0F, 1.0F))
                                 .executes(ctx -> setGroup(ctx, FloatArgumentType.getFloat(ctx, "chance")))))))
+                .then(Commands.literal("autonamenaturalspawns")
+                    .executes(ReincarnateCommand::queryAutoNameNaturalSpawns)
+                    .then(Commands.literal("on").executes(ctx -> setAutoNameNaturalSpawns(ctx, true)))
+                    .then(Commands.literal("off").executes(ctx -> setAutoNameNaturalSpawns(ctx, false))))
                 .then(skinTree()));
     }
 
@@ -818,6 +822,23 @@ public final class ReincarnateCommand {
         PlayerMobConfig.setRequireArrows(!unlimited);
         ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob unlimited ammo "
             + (unlimited ? "enabled" : "disabled") + " for this session."), false);
+        return 1;
+    }
+
+    /** {@code /playermob autonamenaturalspawns} — report whether natural spawns are auto-named from their skin source. */
+    private static int queryAutoNameNaturalSpawns(CommandContext<CommandSourceStack> ctx) {
+        boolean on = PlayerMobConfig.autoNameNaturalSpawns();
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob auto-name natural spawns is "
+            + (on ? "ON — natural spawns wear their skin source as a nameplate"
+                  : "OFF — natural spawns are unnamed") + "."), false);
+        return 1;
+    }
+
+    /** {@code /playermob autonamenaturalspawns on|off} — flip skin-source auto-naming of natural spawns for this session. */
+    private static int setAutoNameNaturalSpawns(CommandContext<CommandSourceStack> ctx, boolean enabled) {
+        PlayerMobConfig.setAutoNameNaturalSpawns(enabled);
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob auto-name natural spawns "
+            + (enabled ? "enabled" : "disabled") + " for this session."), false);
         return 1;
     }
 
