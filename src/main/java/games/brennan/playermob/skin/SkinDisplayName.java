@@ -6,7 +6,7 @@ import java.util.Optional;
  * Resolves the human-readable source name of a skin from the value carried in a PlayerMob's
  * {@code SkinTextureUrl} field — used to auto-label naturally-spawned mobs (see
  * {@link games.brennan.playermob.entity.NaturalSpawnCompanion} and
- * {@link games.brennan.playermob.PlayerMobConfig#autoNameNaturalSpawns()}).
+ * {@link games.brennan.playermob.PlayerMobConfig#autoNameMode()}).
  *
  * <p>Two sources carry a name:</p>
  * <ul>

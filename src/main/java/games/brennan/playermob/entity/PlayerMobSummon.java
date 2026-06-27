@@ -49,6 +49,9 @@ public final class PlayerMobSummon {
         mob.moveTo(x, y, z, yRot, 0.0F);
         //?}
         mob.setExplicitTraits(fightFlight, friendliness);
+        // The caller applies the real skin AFTER finalizeSpawn (a local file synchronously, a player name
+        // asynchronously), so defer auto-naming to it — naming here would label the mob off the rolled skin.
+        mob.setDeferAutoName(true);
         DifficultyInstance difficulty = level.getCurrentDifficultyAt(BlockPos.containing(x, y, z));
         //? if >=1.21.1 {
         mob.finalizeSpawn(level, difficulty, SUMMON_REASON, null);

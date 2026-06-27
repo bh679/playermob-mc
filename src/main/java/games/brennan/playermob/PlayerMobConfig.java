@@ -1,6 +1,7 @@
 package games.brennan.playermob;
 
 import com.mojang.logging.LogUtils;
+import games.brennan.playermob.entity.AutoNameMode;
 import games.brennan.playermob.entity.WantedItemList;
 import org.slf4j.Logger;
 
@@ -33,6 +34,8 @@ public final class PlayerMobConfig {
     private static final String KEY_TRAIN_DIG_THROUGH = "trainDigThrough";
     private static final String KEY_TRAIN_FOLLOW_LOVED_PLAYER = "trainFollowLovedPlayer";
     private static final String KEY_NATURAL_SPAWN_ENABLED = "naturalSpawnEnabled";
+    private static final String KEY_AUTO_NAME_MODE = "autoNameMode";
+    /** Legacy v0.65.0 boolean key, read for back-compat only ({@code true} → {@link AutoNameMode#NATURAL}). */
     private static final String KEY_AUTO_NAME_NATURAL_SPAWNS = "autoNameNaturalSpawns";
     /** Prefix for per-mob companion-chance keys, e.g. {@code naturalSpawnScale.minecraft:zombie}. */
     private static final String NATURAL_SPAWN_SCALE_PREFIX = "naturalSpawnScale.";
@@ -58,8 +61,8 @@ public final class PlayerMobConfig {
     public static final boolean DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER = true;
     /** Natural spawning ships OFF — PlayerMobs only appear via egg, {@code /summon}, or Dungeon Train until enabled. */
     public static final boolean DEFAULT_NATURAL_SPAWN_ENABLED = false;
-    /** Naturally-spawned PlayerMobs are not auto-named by default — opt in to label them with their skin source. */
-    public static final boolean DEFAULT_AUTO_NAME_NATURAL_SPAWNS = false;
+    /** Auto-naming ships OFF — opt in (per spawn category) to label PlayerMobs with their skin source. */
+    public static final AutoNameMode DEFAULT_AUTO_NAME_MODE = AutoNameMode.OFF;
     /** Ranged weapons need real arrows in the mob's inventory; on by default. Off restores vanilla infinite ammo. */
     public static final boolean DEFAULT_REQUIRE_ARROWS = true;
     /** Out of arrows mid-fight, a PlayerMob fetches a nearby dropped arrow (enemy not too close); on by default. */
@@ -165,7 +168,7 @@ public final class PlayerMobConfig {
     private static volatile boolean trainDigThrough = DEFAULT_TRAIN_DIG_THROUGH;
     private static volatile boolean trainFollowLovedPlayer = DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER;
     private static volatile boolean naturalSpawnEnabled = DEFAULT_NATURAL_SPAWN_ENABLED;
-    private static volatile boolean autoNameNaturalSpawns = DEFAULT_AUTO_NAME_NATURAL_SPAWNS;
+    private static volatile AutoNameMode autoNameMode = DEFAULT_AUTO_NAME_MODE;
     private static volatile boolean requireArrows = DEFAULT_REQUIRE_ARROWS;
     private static volatile boolean seekArrowsWhenEmpty = DEFAULT_SEEK_ARROWS_WHEN_EMPTY;
     private static volatile float rangedEngageDistance = DEFAULT_RANGED_ENGAGE_DISTANCE;
@@ -214,14 +217,14 @@ public final class PlayerMobConfig {
     }
 
     /**
-     * When true, a naturally-spawned PlayerMob is given a nameplate derived from its skin source — the
-     * local-folder filename (no extension) for a local skin, or the {@code displayName} for an online /
-     * registry skin. A mob wearing a bundled default skin has no source name and stays unnamed. Off by
-     * default; toggle live with {@code /playermob autonamenaturalspawns on|off}. See
-     * {@code NaturalSpawnCompanion} and {@code SkinDisplayName}.
+     * Which spawns get a nameplate derived from their skin source — the local-folder filename (no
+     * extension) for a local skin, or the {@code displayName} for an online / registry skin (a bundled
+     * default skin has no source name and stays unnamed). {@link AutoNameMode#OFF} by default; toggle live
+     * with {@code /playermob autoname <off|natural|egg|all>}. See {@code PlayerMobEntity#finalizeSpawn} and
+     * {@code SkinDisplayName}.
      */
-    public static boolean autoNameNaturalSpawns() {
-        return autoNameNaturalSpawns;
+    public static AutoNameMode autoNameMode() {
+        return autoNameMode;
     }
 
     /**
@@ -343,11 +346,11 @@ public final class PlayerMobConfig {
     }
 
     /**
-     * Flip auto-naming of natural spawns at runtime (e.g. from {@code /playermob autonamenaturalspawns on|off}).
+     * Set the auto-name mode at runtime (e.g. from {@code /playermob autoname <off|natural|egg|all>}).
      * A session override — not written back to the file, which stays the startup default.
      */
-    public static void setAutoNameNaturalSpawns(boolean enabled) {
-        autoNameNaturalSpawns = enabled;
+    public static void setAutoNameMode(AutoNameMode mode) {
+        autoNameMode = mode == null ? DEFAULT_AUTO_NAME_MODE : mode;
     }
 
     /**
@@ -422,7 +425,7 @@ public final class PlayerMobConfig {
             trainDigThrough = v.trainDigThrough();
             trainFollowLovedPlayer = v.trainFollowLovedPlayer();
             naturalSpawnEnabled = v.naturalSpawnEnabled();
-            autoNameNaturalSpawns = v.autoNameNaturalSpawns();
+            autoNameMode = v.autoNameMode();
             requireArrows = v.requireArrows();
             seekArrowsWhenEmpty = v.seekArrowsWhenEmpty();
             rangedEngageDistance = v.rangedEngageDistance();
@@ -451,7 +454,7 @@ public final class PlayerMobConfig {
     /** Parsed, validated values — split out (pure, no I/O) so the parsing rules are unit-tested. */
     record Values(float echoFriendChance, boolean debugSpawnLog, boolean trainDigThrough,
                   boolean trainFollowLovedPlayer, boolean naturalSpawnEnabled,
-                  boolean autoNameNaturalSpawns,
+                  AutoNameMode autoNameMode,
                   boolean requireArrows, boolean seekArrowsWhenEmpty,
                   float rangedEngageDistance, float meleeEngageDistance,
                   WantedItemList extraPickups,
@@ -466,7 +469,7 @@ public final class PlayerMobConfig {
             parseBool(props.getProperty(KEY_TRAIN_DIG_THROUGH), DEFAULT_TRAIN_DIG_THROUGH),
             parseBool(props.getProperty(KEY_TRAIN_FOLLOW_LOVED_PLAYER), DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER),
             parseBool(props.getProperty(KEY_NATURAL_SPAWN_ENABLED), DEFAULT_NATURAL_SPAWN_ENABLED),
-            parseBool(props.getProperty(KEY_AUTO_NAME_NATURAL_SPAWNS), DEFAULT_AUTO_NAME_NATURAL_SPAWNS),
+            parseAutoNameMode(props),
             parseBool(props.getProperty(KEY_REQUIRE_ARROWS), DEFAULT_REQUIRE_ARROWS),
             parseBool(props.getProperty(KEY_SEEK_ARROWS_WHEN_EMPTY), DEFAULT_SEEK_ARROWS_WHEN_EMPTY),
             engage[0], engage[1],
@@ -512,6 +515,20 @@ public final class PlayerMobConfig {
             }
         }
         return Map.copyOf(map);
+    }
+
+    /**
+     * Resolve the auto-name mode. The {@code autoNameMode} key wins; if it's absent (or blank) the legacy
+     * v0.65.0 boolean {@code autoNameNaturalSpawns=true} maps to {@link AutoNameMode#NATURAL}, so an existing
+     * config keeps working. An unrecognised {@code autoNameMode} value falls back to the default.
+     */
+    static AutoNameMode parseAutoNameMode(Properties props) {
+        String raw = props.getProperty(KEY_AUTO_NAME_MODE);
+        if (raw != null && !raw.isBlank()) {
+            return AutoNameMode.fromString(raw, DEFAULT_AUTO_NAME_MODE);
+        }
+        boolean legacyNatural = parseBool(props.getProperty(KEY_AUTO_NAME_NATURAL_SPAWNS), false);
+        return legacyNatural ? AutoNameMode.NATURAL : DEFAULT_AUTO_NAME_MODE;
     }
 
     private static float parseFloat(String raw, float fallback) {
@@ -600,11 +617,16 @@ public final class PlayerMobConfig {
             .append("#   via spawn egg, /summon, or Dungeon Train — never naturally. Set true to let the\n")
             .append("#   per-mob chances below take effect.\n")
             .append("#\n")
-            .append("# autoNameNaturalSpawns: when true, a naturally-spawned PlayerMob gets a nameplate from\n")
-            .append("#   its skin source — the local-folder filename (no extension) for a local skin, or the\n")
-            .append("#   displayName for an online / registry skin. A mob wearing a bundled default skin has no\n")
-            .append("#   source name and stays unnamed. Toggle live with /playermob autonamenaturalspawns on|off\n")
-            .append("#   (session override). Default false.\n")
+            .append("# autoNameMode: which spawns get a nameplate from their skin source — the local-folder\n")
+            .append("#   filename (no extension) for a local skin, or the displayName for an online / registry\n")
+            .append("#   skin (a bundled default skin has no source name and stays unnamed). One of:\n")
+            .append("#     off     — never (default)\n")
+            .append("#     natural — only natural / chunk-generation spawns\n")
+            .append("#     egg     — only spawn eggs, mob spawners, /summon, and dispensers\n")
+            .append("#     all     — every spawn except Dungeon-Train events (which keep their own naming)\n")
+            .append("#   /playermob summon <name|file> labels with that name once its skin loads (unless 'named'\n")
+            .append("#   was given, which always wins). Toggle live with /playermob autoname <off|natural|egg|all>\n")
+            .append("#   (session override).\n")
             .append("#\n")
             .append("# naturalSpawnScale.<id>: chance (0.0-1.0) that, when that mob spawns naturally, a\n")
             .append("#   PlayerMob ALSO spawns beside it (additive — the mob is NOT replaced). 0.0 = never;\n")
@@ -614,7 +636,7 @@ public final class PlayerMobConfig {
             .append("#   /playermob naturalspawn group <group> <chance>. Delete a line to fall back to its\n")
             .append("#   group default. Only takes effect while naturalSpawnEnabled=true.\n")
             .append(KEY_NATURAL_SPAWN_ENABLED).append("=").append(DEFAULT_NATURAL_SPAWN_ENABLED).append("\n")
-            .append(KEY_AUTO_NAME_NATURAL_SPAWNS).append("=").append(DEFAULT_AUTO_NAME_NATURAL_SPAWNS).append("\n");
+            .append(KEY_AUTO_NAME_MODE).append("=").append(DEFAULT_AUTO_NAME_MODE.token()).append("\n");
         for (SpawnGroup group : SpawnGroup.values()) {
             body.append("# --- ").append(group.name().charAt(0))
                 .append(group.name().substring(1).toLowerCase(java.util.Locale.ROOT))

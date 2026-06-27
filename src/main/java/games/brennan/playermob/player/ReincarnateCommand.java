@@ -12,6 +12,7 @@ import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.suggestion.SuggestionProvider;
 import games.brennan.playermob.PlayerMobConfig;
+import games.brennan.playermob.entity.AutoNameMode;
 import games.brennan.playermob.entity.DispositionTraits;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.entity.PlayerMobSummon;
@@ -163,10 +164,12 @@ public final class ReincarnateCommand {
                             .then(Commands.literal("off").executes(ctx -> setGroup(ctx, 0.0F)))
                             .then(Commands.argument("chance", FloatArgumentType.floatArg(0.0F, 1.0F))
                                 .executes(ctx -> setGroup(ctx, FloatArgumentType.getFloat(ctx, "chance")))))))
-                .then(Commands.literal("autonamenaturalspawns")
-                    .executes(ReincarnateCommand::queryAutoNameNaturalSpawns)
-                    .then(Commands.literal("on").executes(ctx -> setAutoNameNaturalSpawns(ctx, true)))
-                    .then(Commands.literal("off").executes(ctx -> setAutoNameNaturalSpawns(ctx, false))))
+                .then(Commands.literal("autoname")
+                    .executes(ReincarnateCommand::queryAutoName)
+                    .then(Commands.literal("off").executes(ctx -> setAutoName(ctx, AutoNameMode.OFF)))
+                    .then(Commands.literal("natural").executes(ctx -> setAutoName(ctx, AutoNameMode.NATURAL)))
+                    .then(Commands.literal("egg").executes(ctx -> setAutoName(ctx, AutoNameMode.EGG)))
+                    .then(Commands.literal("all").executes(ctx -> setAutoName(ctx, AutoNameMode.ALL))))
                 .then(skinTree()));
     }
 
@@ -825,21 +828,29 @@ public final class ReincarnateCommand {
         return 1;
     }
 
-    /** {@code /playermob autonamenaturalspawns} — report whether natural spawns are auto-named from their skin source. */
-    private static int queryAutoNameNaturalSpawns(CommandContext<CommandSourceStack> ctx) {
-        boolean on = PlayerMobConfig.autoNameNaturalSpawns();
-        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob auto-name natural spawns is "
-            + (on ? "ON — natural spawns wear their skin source as a nameplate"
-                  : "OFF — natural spawns are unnamed") + "."), false);
+    /** {@code /playermob autoname} — report which spawns are auto-named from their skin source. */
+    private static int queryAutoName(CommandContext<CommandSourceStack> ctx) {
+        ctx.getSource().sendSuccess(() -> Component.literal(
+            "PlayerMob auto-name is " + autoNameDescription(PlayerMobConfig.autoNameMode()) + "."), false);
         return 1;
     }
 
-    /** {@code /playermob autonamenaturalspawns on|off} — flip skin-source auto-naming of natural spawns for this session. */
-    private static int setAutoNameNaturalSpawns(CommandContext<CommandSourceStack> ctx, boolean enabled) {
-        PlayerMobConfig.setAutoNameNaturalSpawns(enabled);
-        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob auto-name natural spawns "
-            + (enabled ? "enabled" : "disabled") + " for this session."), false);
+    /** {@code /playermob autoname <off|natural|egg|all>} — set the skin-source auto-name mode for this session. */
+    private static int setAutoName(CommandContext<CommandSourceStack> ctx, AutoNameMode mode) {
+        PlayerMobConfig.setAutoNameMode(mode);
+        ctx.getSource().sendSuccess(() -> Component.literal(
+            "PlayerMob auto-name set to " + autoNameDescription(mode) + " for this session."), false);
         return 1;
+    }
+
+    /** Human-readable description of an auto-name mode for command feedback. */
+    private static String autoNameDescription(AutoNameMode mode) {
+        return switch (mode) {
+            case OFF -> "OFF — PlayerMobs spawn unnamed";
+            case NATURAL -> "NATURAL — wild / chunk-generation spawns wear their skin source";
+            case EGG -> "EGG — spawn eggs, spawners, /summon and dispensers wear their skin source";
+            case ALL -> "ALL — every spawn (except Dungeon-Train events) wears its skin source";
+        };
     }
 
     /** {@code /playermob naturalspawn} — report the master switch + the group defaults. */
@@ -1023,12 +1034,20 @@ public final class ReincarnateCommand {
             mob.setCustomName(Component.literal(customName));
             mob.setCustomNameVisible(true);
         }
+        // Auto-name (when the mode covers command spawns and no explicit `named` was given): label the mob
+        // with its source <name|file> once the real skin has loaded — never off the temporary rolled skin
+        // (PlayerMobSummon deferred finalizeSpawn's auto-name for exactly this). `named` always wins.
+        boolean autoName = customName == null
+            && PlayerMobConfig.autoNameMode().covers(AutoNameMode.Category.EGG);
         // A local-folder skin (a PNG in config/playermob/skins) takes precedence: if <displayName>
         // names one, the mob wears it immediately. Otherwise <displayName> is treated as a player
         // name and that player's skin is resolved off-thread, applied when it lands.
         boolean localSkin = LocalSkinFolder.resolve(name) != null;
         if (localSkin) {
             mob.setSkinTextureUrl(LocalSkinRef.encode(name));
+            if (autoName) {
+                mob.applyNameplate(name);
+            }
         } else {
             MinecraftServer server = source.getServer();
             PlayerSkinResolver.resolveAsync(server, name, opt -> {
@@ -1038,6 +1057,9 @@ public final class ReincarnateCommand {
                 opt.ifPresent(resolved -> {
                     mob.setSkinTextureUrl(resolved.url());
                     mob.setSkinSlim(resolved.slim());
+                    if (autoName) {
+                        mob.applyNameplate(name);
+                    }
                 });
             });
         }

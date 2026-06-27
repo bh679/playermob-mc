@@ -34,6 +34,7 @@ import games.brennan.playermob.player.GlobalLifeStore;
 import games.brennan.playermob.player.PlayerReincarnation;
 import games.brennan.playermob.skin.LocalSkinFolder;
 import games.brennan.playermob.skin.LocalSkinRef;
+import games.brennan.playermob.skin.SkinDisplayName;
 import games.brennan.playermob.skin.PlayerMobSkin;
 import games.brennan.playermob.skin.PlayerMobSkinRegistry;
 import games.brennan.playermob.skin.SkinModel;
@@ -379,6 +380,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * is actually present, so a trait-only egg still rolls a random skin.
      */
     private boolean skinExplicit;
+
+    /**
+     * Transient (never saved): when {@code true}, {@link #finalizeSpawn} skips the generic skin-source
+     * auto-name, leaving naming to the caller. Set by {@link PlayerMobSummon} for {@code /playermob summon},
+     * whose real skin is applied <em>after</em> {@code finalizeSpawn} (a local file synchronously, a player
+     * name asynchronously) — so the command names the mob once that skin lands rather than off the rolled one.
+     */
+    private boolean deferAutoName;
 
     /**
      * Server tick of the last moment this mob stood on a train carriage, or a
@@ -1327,10 +1336,49 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (isEventSpawn(reason)) {
             DtSpawnDebug.report(world.getLevel(), this, echo != null, companion);
         }
+        maybeAutoName(reason.name());
         //? if >=1.21.1 {
         return super.finalizeSpawn(world, difficulty, reason, data);
         //?} else {
         /*return super.finalizeSpawn(world, difficulty, reason, data, dataTag);*///?}
+    }
+
+    /**
+     * Suppress (or restore) the generic skin-source auto-name for this mob's {@code finalizeSpawn}. Used by
+     * {@link PlayerMobSummon} so {@code /playermob summon} can name the mob after its real skin lands instead.
+     */
+    public void setDeferAutoName(boolean defer) {
+        this.deferAutoName = defer;
+    }
+
+    /**
+     * If the configured {@link AutoNameMode} covers this spawn's category, give the mob a nameplate drawn
+     * from its skin source (local filename / online displayName; see {@link SkinDisplayName}). A no-op when
+     * naming is deferred to the caller, the mob is already named, the mode doesn't cover the category, or the
+     * skin has no source name (a bundled default). Called from {@link #finalizeSpawn} once the skin is rolled.
+     *
+     * @param reasonName the spawn reason's enum-constant name ({@code reason.name()}), version-agnostic
+     */
+    private void maybeAutoName(String reasonName) {
+        if (deferAutoName || hasCustomName()) {
+            return;
+        }
+        if (!PlayerMobConfig.autoNameMode().covers(AutoNameMode.categorize(reasonName))) {
+            return;
+        }
+        SkinDisplayName.resolve(getSkinTextureUrl()).ifPresent(this::applyNameplate);
+    }
+
+    /**
+     * Give the mob a visible nameplate, unless it already has a custom name. Public so {@code /playermob
+     * summon} can label the mob with its source ({@code <name|file>}) once a deferred skin has been applied.
+     */
+    public void applyNameplate(String name) {
+        if (hasCustomName()) {
+            return;
+        }
+        setCustomName(Component.literal(name));
+        setCustomNameVisible(true);
     }
 
     /**

@@ -2,6 +2,8 @@ package games.brennan.playermob;
 
 import org.junit.jupiter.api.Test;
 
+import games.brennan.playermob.entity.AutoNameMode;
+
 import java.util.Map;
 import java.util.Properties;
 
@@ -48,6 +50,29 @@ class PlayerMobConfigTest {
         assertTrue(PlayerMobConfig.parse(props("trainFollowLovedPlayer", "true")).trainFollowLovedPlayer());
         // Unrecognised value → default (true), like the other boolean key.
         assertTrue(PlayerMobConfig.parse(props("trainFollowLovedPlayer", "maybe")).trainFollowLovedPlayer());
+    }
+
+    @Test
+    void autoNameModeDefaultsOffAndParses() {
+        assertEquals(AutoNameMode.OFF, PlayerMobConfig.DEFAULT_AUTO_NAME_MODE);
+        assertEquals(AutoNameMode.OFF, PlayerMobConfig.parse(new Properties()).autoNameMode(), "missing key → off");
+        assertEquals(AutoNameMode.NATURAL, PlayerMobConfig.parse(props("autoNameMode", "natural")).autoNameMode());
+        assertEquals(AutoNameMode.EGG, PlayerMobConfig.parse(props("autoNameMode", "EGG")).autoNameMode());
+        assertEquals(AutoNameMode.ALL, PlayerMobConfig.parse(props("autoNameMode", "all")).autoNameMode());
+        // Unrecognised value → default (off).
+        assertEquals(AutoNameMode.OFF, PlayerMobConfig.parse(props("autoNameMode", "sometimes")).autoNameMode());
+    }
+
+    @Test
+    void autoNameModeHonoursLegacyBooleanKey() {
+        // A v0.65.0 config with the old boolean key and no autoNameMode maps true → NATURAL, false → OFF.
+        assertEquals(AutoNameMode.NATURAL,
+            PlayerMobConfig.parse(props("autoNameNaturalSpawns", "true")).autoNameMode());
+        assertEquals(AutoNameMode.OFF,
+            PlayerMobConfig.parse(props("autoNameNaturalSpawns", "false")).autoNameMode());
+        // The explicit new key always wins over the legacy one.
+        assertEquals(AutoNameMode.ALL,
+            PlayerMobConfig.parse(props("autoNameMode", "all", "autoNameNaturalSpawns", "true")).autoNameMode());
     }
 
     @Test
