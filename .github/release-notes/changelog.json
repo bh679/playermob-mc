@@ -403,6 +403,23 @@
       "released": true,
       "released_in": "v0.64.0",
       "released_at": "2026-06-26T14:54:31Z"
+    },
+    {
+      "id": "auto-name-natural-spawns",
+      "version": "0.65.0",
+      "type": "feat",
+      "title": "Naturally-spawned PlayerMobs can be named after their skin",
+      "summary": "Turn on auto-naming and every PlayerMob that spawns out in the world wears a nameplate showing where its look came from \u2014 the filename of your local skin, or the name behind an online skin. Mobs using a built-in default skin stay unnamed.",
+      "highlights": [
+        "New 'autoNameNaturalSpawns' config option (off by default)",
+        "Toggle it live in-game with /playermob autonamenaturalspawns on|off",
+        "Local skins show their filename; online skins show their display name"
+      ],
+      "pr": 139,
+      "date": "2026-06-27",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
