@@ -77,9 +77,12 @@ builds do **not** bundle AIN.
 
 ## Custom skins & skin packs
 
-About 40% of PlayerMobs wear a real player's skin, drawn from a datapack-extensible pool. Mob-pack
-authors can grow that pool **without hunting down texture URLs** — just name a player and PlayerMob
-resolves their skin automatically:
+By default about 40% of PlayerMobs wear a real player's skin (the rest wear a bundled vanilla
+default), drawn from a datapack-extensible pool. Adjust that ratio with `customSkinChance` in
+`config/playermob.properties` (0.0 = always a bundled default, 1.0 = always a custom skin when one
+is available), or live with `/playermob skin chance <0.0-1.0>`. Mob-pack authors can grow the pool
+**without hunting down texture URLs** — just name a player and PlayerMob resolves their skin
+automatically:
 
 ```json
 // data/<your_pack>/playermob_skins/notch.json

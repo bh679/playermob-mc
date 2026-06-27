@@ -155,10 +155,10 @@ import java.util.UUID;
  *
  * <p><b>Skins</b> — Each mob rolls its look in {@link #finalizeSpawn}. It
  * always rolls a bundled-vanilla index in {@code [0, SKIN_COUNT)}, then with
- * probability {@link #URL_SKIN_CHANCE} (~40%) overrides it with a Mojang skin
- * texture URL drawn from the datapack-extensible {@link PlayerMobSkinRegistry}.
- * So ~60% of mobs wear a vanilla default and ~40% wear a recognisable
- * real-player skin. The client renderer ({@code PlayerMobRenderer}, not
+ * probability {@link PlayerMobConfig#customSkinChance()} (default ~40%) overrides
+ * it with a Mojang skin texture URL drawn from the datapack-extensible
+ * {@link PlayerMobSkinRegistry}. So by default ~60% of mobs wear a vanilla default
+ * and ~40% wear a recognisable real-player skin. The client renderer ({@code PlayerMobRenderer}, not
  * imported here to keep this class server-loadable) prefers the URL when set
  * and falls back to the bundled index otherwise. Both fields persist across
  * save/load; the URL field is purely additive on top of the v1 (0.2.0) save
@@ -243,19 +243,6 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * classpath.</p>
      */
     public static final int SKIN_COUNT = 9;
-
-    /**
-     * Probability a freshly-spawned mob uses a Mojang URL skin from the
-     * datapack-fed {@link PlayerMobSkinRegistry} instead of one of the
-     * {@link #SKIN_COUNT} bundled vanilla default skins.
-     *
-     * <p>{@code 0.40f} ⇒ ~40% real-player skins, ~60% vanilla defaults. The
-     * vanilla defaults stay the common case so the mob reads as "a player"
-     * at a glance, with recognisable real skins as the occasional standout.
-     * Only consulted when the registry is non-empty — an empty registry
-     * always falls back to a bundled skin regardless of this roll.</p>
-     */
-    private static final float URL_SKIN_CHANCE = 0.40f;
 
     /** Backpack size — matches Pillager (5) plus a little extra. */
     private static final int INVENTORY_SIZE = 8;
@@ -1300,11 +1287,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * Roll the random skin at spawn so all clients see the same value.
      * Server-side; syncs to clients via SynchedEntityData.
      *
-     * <p>Always rolls a bundled-vanilla index first — it's both the ~60%
-     * common case (see {@link #URL_SKIN_CHANCE}) and the downgrade-safe
-     * payload for 0.2.0 clients. Then, with probability
-     * {@link #URL_SKIN_CHANCE}, overrides it with a Mojang URL skin from
-     * {@link PlayerMobSkinRegistry}. The other ~60% keep the bundled
+     * <p>Always rolls a bundled-vanilla index first — it's both the (default)
+     * ~60% common case (see {@link PlayerMobConfig#customSkinChance()}) and the
+     * downgrade-safe payload for 0.2.0 clients. Then, with probability
+     * {@link PlayerMobConfig#customSkinChance()}, overrides it with a Mojang URL
+     * skin from {@link PlayerMobSkinRegistry}. The rest keep the bundled
      * vanilla skin (URL left blank ⇒ renderer uses the index path). An
      * empty registry always falls through to the bundled skin.</p>
      */
@@ -1401,7 +1388,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             // this with its own authored model.
             setSkinSlim(random.nextBoolean());
             // Pick a skin across the three enabled sources (bundled base / online registry / local
-            // folder) via the pure selector. Bundled stays the base; the URL_SKIN_CHANCE override now
+            // folder) via the pure selector. Bundled stays the base; the customSkinChance override now
             // draws uniformly from the combined online+local pool. Snapshot both lists once so the
             // index the selector returns indexes the same list we read.
             List<PlayerMobSkin> online = PlayerMobSkinRegistry.all();
@@ -1410,7 +1397,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
                 PlayerMobConfig.skinSourceBundled(),
                 PlayerMobConfig.skinSourceOnline(),
                 PlayerMobConfig.skinSourceLocal(),
-                online.size(), local.size(), URL_SKIN_CHANCE,
+                online.size(), local.size(), PlayerMobConfig.customSkinChance(),
                 random::nextInt, () -> random.nextFloat());
             switch (choice.kind()) {
                 case ONLINE -> {

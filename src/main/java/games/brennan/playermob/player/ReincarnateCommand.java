@@ -83,6 +83,8 @@ import java.util.Collection;
  *       PlayerMob may draw from, with counts.</li>
  *   <li>{@code /playermob skin source <bundled|online|local> on|off} — toggle one skin source for this
  *       session.</li>
+ *   <li>{@code /playermob skin chance <0.0-1.0>} — set the chance a spawn wears a custom (online/local)
+ *       skin instead of a bundled default, for this session.</li>
  * </ul>
  *
  * <p>Like {@code spawnlog}, the {@code naturalspawn} edits are session overrides — they take effect
@@ -196,6 +198,7 @@ public final class ReincarnateCommand {
      *   <li>{@code skin sources} — report which of the three skin sources (bundled / online / local)
      *       a random PlayerMob may draw from, with counts.</li>
      *   <li>{@code skin source <bundled|online|local> on|off} — toggle one source for this session.</li>
+     *   <li>{@code skin chance <0.0-1.0>} — set the custom-skin override chance for this session.</li>
      * </ul>
      *
      * <p>To <em>spawn</em> a mob wearing a specific local skin, use {@code /playermob summon <file>}
@@ -207,7 +210,10 @@ public final class ReincarnateCommand {
             .then(Commands.literal("source")
                 .then(skinSourceToggle("bundled"))
                 .then(skinSourceToggle("online"))
-                .then(skinSourceToggle("local")));
+                .then(skinSourceToggle("local")))
+            .then(Commands.literal("chance")
+                .then(Commands.argument("chance", FloatArgumentType.floatArg(0.0f, 1.0f))
+                    .executes(ReincarnateCommand::setSkinChance)));
     }
 
     /** One {@code <source> on|off} branch for {@link #skinTree()} (built fresh per call site). */
@@ -224,10 +230,12 @@ public final class ReincarnateCommand {
         boolean local = PlayerMobConfig.skinSourceLocal();
         int onlineCount = PlayerMobSkinRegistry.size();
         int localCount = LocalSkinFolder.list().size();
+        float chance = PlayerMobConfig.customSkinChance();
         ctx.getSource().sendSuccess(() -> Component.literal(
             "PlayerMob skin sources — bundled " + onOff(bundled)
                 + ", online " + onOff(online) + " (" + onlineCount + ")"
-                + ", local " + onOff(local) + " (" + localCount + " in config/playermob/skins)."), false);
+                + ", local " + onOff(local) + " (" + localCount + " in config/playermob/skins)"
+                + ", custom-skin chance " + String.format(java.util.Locale.ROOT, "%.2f", chance) + "."), false);
         return 1;
     }
 
@@ -245,6 +253,17 @@ public final class ReincarnateCommand {
         ctx.getSource().sendSuccess(() -> Component.literal(
             "PlayerMob skin source " + source + " " + (enabled ? "enabled" : "disabled")
                 + " for this session."), false);
+        return 1;
+    }
+
+    /** {@code /playermob skin chance <0.0-1.0>} — set the custom-skin override chance for this session. */
+    private static int setSkinChance(CommandContext<CommandSourceStack> ctx) {
+        float chance = FloatArgumentType.getFloat(ctx, "chance");
+        PlayerMobConfig.setCustomSkinChance(chance);
+        float applied = PlayerMobConfig.customSkinChance();
+        ctx.getSource().sendSuccess(() -> Component.literal(
+            "PlayerMob custom-skin chance set to "
+                + String.format(java.util.Locale.ROOT, "%.2f", applied) + " for this session."), false);
         return 1;
     }
 
