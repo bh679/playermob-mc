@@ -316,4 +316,31 @@ class PlayerMobConfigTest {
             PlayerMobConfig.setRequireArrows(PlayerMobConfig.DEFAULT_REQUIRE_ARROWS); // don't leak into other tests
         }
     }
+
+    @Test
+    void customSkinChanceDefaultsAndParsesAndClamps() {
+        assertEquals(0.40F, PlayerMobConfig.DEFAULT_CUSTOM_SKIN_CHANCE, 1e-6);
+        assertEquals(0.40F, PlayerMobConfig.parse(new Properties()).customSkinChance(), 1e-6,
+            "missing key → default 0.40");
+        assertEquals(0.7F, PlayerMobConfig.parse(props("customSkinChance", "0.7")).customSkinChance(), 1e-6);
+        // out-of-range clamps to the unit interval
+        assertEquals(1.0F, PlayerMobConfig.parse(props("customSkinChance", "5")).customSkinChance(), 1e-6);
+        assertEquals(0.0F, PlayerMobConfig.parse(props("customSkinChance", "-1")).customSkinChance(), 1e-6);
+        // unparseable → default
+        assertEquals(0.40F, PlayerMobConfig.parse(props("customSkinChance", "abc")).customSkinChance(), 1e-6);
+    }
+
+    @Test
+    void setCustomSkinChanceUpdatesAndClampsAtRuntime() {
+        try {
+            PlayerMobConfig.setCustomSkinChance(0.25F);
+            assertEquals(0.25F, PlayerMobConfig.customSkinChance(), 1e-6);
+            PlayerMobConfig.setCustomSkinChance(9.0F);
+            assertEquals(1.0F, PlayerMobConfig.customSkinChance(), 1e-6, "clamps above 1");
+            PlayerMobConfig.setCustomSkinChance(-3.0F);
+            assertEquals(0.0F, PlayerMobConfig.customSkinChance(), 1e-6, "clamps below 0");
+        } finally {
+            PlayerMobConfig.setCustomSkinChance(PlayerMobConfig.DEFAULT_CUSTOM_SKIN_CHANCE); // don't leak
+        }
+    }
 }

@@ -50,7 +50,7 @@ public final class PlayerReincarnation {
      * life (the player's own death log) and an equal, independent slice for a <em>remote</em> life
      * supplied by an integrating mod. They partition the spawn roll ({@code SELF} + {@code REMOTE}
      * + fresh = 1), so a remote pool never erodes the local self-reincarnation chance. Named
-     * constants in the mod's convention (cf. {@code PlayerMobEntity.URL_SKIN_CHANCE}); compose on
+     * constants in the mod's convention (cf. {@code PlayerMobConfig.customSkinChance}); compose on
      * top of Dungeon Train's own "1-in-N" decision to spawn a group at all.
      */
     public static final float SELF_REINCARNATION_CHANCE = 0.25F;   // 1-in-4 EVENT spawns try a LOCAL past life (self allowed)

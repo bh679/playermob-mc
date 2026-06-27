@@ -49,6 +49,7 @@ public final class PlayerMobConfig {
     private static final String KEY_SKIN_SOURCE_BUNDLED = "skinSourceBundled";
     private static final String KEY_SKIN_SOURCE_ONLINE = "skinSourceOnline";
     private static final String KEY_SKIN_SOURCE_LOCAL = "skinSourceLocal";
+    private static final String KEY_CUSTOM_SKIN_CHANCE = "customSkinChance";
 
     /** Default chance a Dungeon-Train echo with logged friends also brings back a friend-echo. */
     public static final float DEFAULT_ECHO_FRIEND_CHANCE = 0.40F;
@@ -78,6 +79,8 @@ public final class PlayerMobConfig {
     public static final boolean DEFAULT_SKIN_SOURCE_ONLINE = true;
     /** Local-folder skins ({@code config/playermob/skins}) are an eligible random source by default. */
     public static final boolean DEFAULT_SKIN_SOURCE_LOCAL = true;
+    /** Default chance (0–1) a spawn overrides its bundled base look with a custom (online/local) skin. */
+    public static final float DEFAULT_CUSTOM_SKIN_CHANCE = 0.40F;
 
     /**
      * The mob groups natural spawning understands. Each carries the default chance that, when natural
@@ -179,6 +182,7 @@ public final class PlayerMobConfig {
     private static volatile boolean skinSourceBundled = DEFAULT_SKIN_SOURCE_BUNDLED;
     private static volatile boolean skinSourceOnline = DEFAULT_SKIN_SOURCE_ONLINE;
     private static volatile boolean skinSourceLocal = DEFAULT_SKIN_SOURCE_LOCAL;
+    private static volatile float customSkinChance = DEFAULT_CUSTOM_SKIN_CHANCE;
 
     private PlayerMobConfig() {}
 
@@ -289,6 +293,17 @@ public final class PlayerMobConfig {
     }
 
     /**
+     * The chance (0–1) a spawning PlayerMob overrides its bundled (vanilla default) base look with a
+     * "custom" skin drawn from the combined enabled online + local pool (default 0.40). {@code 0.0} keeps
+     * every mob on a bundled default; {@code 1.0} always picks a custom skin when a custom pool exists.
+     * When no custom skin is available the mob keeps its bundled look regardless — bundled is the safety
+     * fallback (see {@code SkinSourceSelector}). Toggle live with {@code /playermob skin chance <0.0-1.0>}.
+     */
+    public static float customSkinChance() {
+        return customSkinChance;
+    }
+
+    /**
      * The chance (0–1) a PlayerMob spawns <em>alongside</em> {@code typeId} on a natural spawn (additive —
      * the mob is never replaced).
      *
@@ -380,6 +395,14 @@ public final class PlayerMobConfig {
     }
 
     /**
+     * Set the custom-skin override chance at runtime (e.g. from {@code /playermob skin chance <0.0-1.0>}),
+     * clamped to 0–1. A session override — not written back to the file, which stays the startup default.
+     */
+    public static void setCustomSkinChance(float chance) {
+        customSkinChance = clamp01(chance);
+    }
+
+    /**
      * Set a single mob's replacement chance at runtime (e.g. from {@code /playermob naturalspawn <mob> ...}).
      * Copies the immutable override map with the clamped value added/replaced, so concurrent spawn-thread
      * reads always see a complete map. A session override — not written back to the file.
@@ -431,6 +454,7 @@ public final class PlayerMobConfig {
             skinSourceBundled = v.skinSourceBundled();
             skinSourceOnline = v.skinSourceOnline();
             skinSourceLocal = v.skinSourceLocal();
+            customSkinChance = v.customSkinChance();
             LOGGER.info("[{}] config: {}={}, {}={}, {}={}, {}={}, {}={} ({} per-mob override(s))",
                 PlayerMob.MOD_ID,
                 KEY_ECHO_FRIEND_CHANCE, echoFriendChance, KEY_DEBUG_SPAWN_LOG, debugSpawnLog,
@@ -455,7 +479,8 @@ public final class PlayerMobConfig {
                   float rangedEngageDistance, float meleeEngageDistance,
                   WantedItemList extraPickups,
                   Map<String, Float> naturalSpawnScales,
-                  boolean skinSourceBundled, boolean skinSourceOnline, boolean skinSourceLocal) {}
+                  boolean skinSourceBundled, boolean skinSourceOnline, boolean skinSourceLocal,
+                  float customSkinChance) {}
 
     static Values parse(Properties props) {
         float[] engage = parseEngageDistances(props);
@@ -473,7 +498,8 @@ public final class PlayerMobConfig {
             parseScales(props),
             parseBool(props.getProperty(KEY_SKIN_SOURCE_BUNDLED), DEFAULT_SKIN_SOURCE_BUNDLED),
             parseBool(props.getProperty(KEY_SKIN_SOURCE_ONLINE), DEFAULT_SKIN_SOURCE_ONLINE),
-            parseBool(props.getProperty(KEY_SKIN_SOURCE_LOCAL), DEFAULT_SKIN_SOURCE_LOCAL));
+            parseBool(props.getProperty(KEY_SKIN_SOURCE_LOCAL), DEFAULT_SKIN_SOURCE_LOCAL),
+            clamp01(parseFloat(props.getProperty(KEY_CUSTOM_SKIN_CHANCE), DEFAULT_CUSTOM_SKIN_CHANCE)));
     }
 
     /**
@@ -624,6 +650,11 @@ public final class PlayerMobConfig {
             .append("#   by-name / external-mod skins; local = PNG files you drop in config/playermob/skins.\n")
             .append("#   All on by default. Bundled is always the fallback when no other source has any skin.\n")
             .append("#   Toggle live with /playermob skin source <bundled|online|local> on|off (session override).\n")
+            .append("# customSkinChance: chance (0.0-1.0) a spawning PlayerMob overrides its bundled (vanilla\n")
+            .append("#   default) base look with a custom skin drawn from the online + local pool. 0.0 = always\n")
+            .append("#   a bundled default; 1.0 = always custom when a custom skin is available (a mob with no\n")
+            .append("#   custom skin available keeps its bundled look regardless). Toggle live with\n")
+            .append("#   /playermob skin chance <0.0-1.0> (session override). Default 0.4.\n")
             .append(KEY_ECHO_FRIEND_CHANCE).append("=").append(DEFAULT_ECHO_FRIEND_CHANCE).append("\n")
             .append(KEY_DEBUG_SPAWN_LOG).append("=").append(DEFAULT_DEBUG_SPAWN_LOG).append("\n")
             .append(KEY_TRAIN_DIG_THROUGH).append("=").append(DEFAULT_TRAIN_DIG_THROUGH).append("\n")
@@ -636,6 +667,7 @@ public final class PlayerMobConfig {
             .append(KEY_SKIN_SOURCE_BUNDLED).append("=").append(DEFAULT_SKIN_SOURCE_BUNDLED).append("\n")
             .append(KEY_SKIN_SOURCE_ONLINE).append("=").append(DEFAULT_SKIN_SOURCE_ONLINE).append("\n")
             .append(KEY_SKIN_SOURCE_LOCAL).append("=").append(DEFAULT_SKIN_SOURCE_LOCAL).append("\n")
+            .append(KEY_CUSTOM_SKIN_CHANCE).append("=").append(DEFAULT_CUSTOM_SKIN_CHANCE).append("\n")
             .append("#\n")
             .append("# --- Natural spawning (opt-in) ------------------------------------------------\n")
             .append("# naturalSpawnEnabled: master switch. When false (default), PlayerMobs only appear\n")

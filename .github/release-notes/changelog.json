@@ -437,6 +437,36 @@
       "released": true,
       "released_in": "v0.66.0",
       "released_at": "2026-06-27T01:58:59Z"
+    },
+    {
+      "id": "custom-skin-chance",
+      "version": "0.67.0",
+      "type": "feat",
+      "title": "Tune how often PlayerMobs wear a custom skin",
+      "summary": "The chance a PlayerMob spawns wearing a real custom skin (instead of a bundled vanilla default) is now yours to set. It still defaults to ~40%, exactly as before \u2014 but you can dial it anywhere from 0% (always a plain vanilla look) to 100% (always a custom skin, whenever one is available).",
+      "highlights": [
+        "New config option customSkinChance (0.0-1.0) in config/playermob.properties \u2014 defaults to 0.4, so nothing changes unless you want it to.",
+        "Adjust it live without a restart: /playermob skin chance <0.0-1.0>.",
+        "/playermob skin sources now also shows the current custom-skin chance.",
+        "0.0 = every PlayerMob wears a bundled vanilla default; 1.0 = always a custom (online or local) skin when one exists; bundled stays the fallback when none is available."
+      ],
+      "pr": 143,
+      "date": "2026-06-27",
+      "released": true,
+      "released_in": "v0.67.0",
+      "released_at": "2026-06-27T12:54:09Z"
+    },
+    {
+      "id": "ci-per-version-test-matrix",
+      "version": "0.68.0",
+      "type": "ci",
+      "title": "Unit tests now run on every supported Minecraft version",
+      "summary": "The mod's unit-test suite now runs automatically across all supported Minecraft versions (1.20.1, 1.21.1, and the 26.x preview) on every change, so cross-version regressions get caught before a build ever ships.",
+      "highlights": [],
+      "date": "2026-06-27",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }

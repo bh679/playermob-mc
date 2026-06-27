@@ -5,6 +5,7 @@ import net.minecraft.server.Bootstrap;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import games.brennan.playermob.testutil.WeaponClassification;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -12,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Pure-logic tests for {@link ItemPickupPolicy} — the floor-item classifier.
@@ -32,6 +34,7 @@ class ItemPickupPolicyTest {
 
     @Test
     void classifiesWeaponCategories() {
+        assumeTrue(WeaponClassification.available(), WeaponClassification.SKIP_REASON);
         assertEquals(ItemPickupPolicy.WeaponCategory.SWORD,
             ItemPickupPolicy.weaponCategory(new ItemStack(Items.DIAMOND_SWORD)), "sword");
         assertEquals(ItemPickupPolicy.WeaponCategory.AXE,
@@ -175,8 +178,8 @@ class ItemPickupPolicyTest {
         //? if >=1.21.1 {
         assertTrue(ItemPickupPolicy.isStone(new ItemStack(Items.TUFF_BRICKS)), "tuff bricks");
         //?} else {
-        /*assertTrue(ItemPickupPolicy.isStone(new ItemStack(Items.TUFF)), "tuff");*/
-        //?}
+        /*assertTrue(ItemPickupPolicy.isStone(new ItemStack(Items.TUFF)), "tuff");
+        *///?}
         assertFalse(ItemPickupPolicy.isStone(new ItemStack(Items.OAK_PLANKS)), "planks are not stone");
         assertFalse(ItemPickupPolicy.isStone(new ItemStack(Items.DIRT)), "dirt is not stone");
         assertFalse(ItemPickupPolicy.isStone(new ItemStack(Items.DIAMOND)), "diamond is not stone");
