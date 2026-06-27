@@ -455,6 +455,18 @@
       "released": true,
       "released_in": "v0.67.0",
       "released_at": "2026-06-27T12:54:09Z"
+    },
+    {
+      "id": "ci-per-version-test-matrix",
+      "version": "0.68.0",
+      "type": "ci",
+      "title": "Unit tests now run on every supported Minecraft version",
+      "summary": "The mod's unit-test suite now runs automatically across all supported Minecraft versions (1.20.1, 1.21.1, and the 26.x preview) on every change, so cross-version regressions get caught before a build ever ships.",
+      "highlights": [],
+      "date": "2026-06-27",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
