@@ -81,6 +81,11 @@ configurations {
 
 repositories {
     mavenCentral()
+    // Source for the opt-in Better Combat / Better Mob Combat compat-test stack (see the
+    // `-PbmcCompatTest` block in dependencies). Only consulted when that flag is set.
+    if (project.hasProperty("bmcCompatTest")) {
+        maven("https://api.modrinth.com/maven")
+    }
 }
 
 dependencies {
@@ -103,6 +108,35 @@ dependencies {
         commonBundle(project(common.path)) { isTransitive = false }
     }
     shadowBundle(project(common.path, "transformProductionFabric")) { isTransitive = false }
+
+    // ----------------------------------------------------------------------
+    // Opt-in compat-test stack: Better Combat + Player Animator + Better Mob
+    // Combat + Mob Player Animator (+ Cloth Config). Verifies that PlayerMob
+    // picks up Better Combat's animated melee in a real dev client. Enable with
+    //   ./gradlew :fabric:1.20.1:runClient -PbmcCompatTest
+    // OFF by default so normal dev runs aren't burdened with external mods.
+    // `modRuntimeOnly` → dev RUNTIME only; never compiled against, never enters
+    // the published jar, never a real PlayerMob dependency. Gated to MC 1.20.1,
+    // the only target where all four are natively available (1.21.1 needs the
+    // separate NeoForge-only "Better Mob Combat Neo" fork; 26.2 has none).
+    // ----------------------------------------------------------------------
+    if (mc == "1.20.1" && project.hasProperty("bmcCompatTest")) {
+        // Better Combat 1.8.6, NOT the newer 1.9.0: Better Mob Combat 1.3.0 calls
+        // net.bettercombat.compatibility.CompatibilityFlags.firstPersonRender(), which 1.9.0
+        // removed — pairing 1.3.0 with 1.9.0 crashes (NoSuchMethodError) the first time any
+        // mob plays a Better Combat attack animation. 1.8.6 is the newest BC that BMC 1.3.0
+        // is binary-compatible with.
+        "modRuntimeOnly"("maven.modrinth:better-combat:1.8.6+1.20.1-fabric")
+        "modRuntimeOnly"("maven.modrinth:playeranimator:1.0.2-rc1+1.20-fabric")
+        "modRuntimeOnly"("maven.modrinth:cloth-config:11.1.136+fabric")
+        // Better Mob Combat + Mob Player Animator publish a separate Modrinth version
+        // per loader that all share the same bare version_number (1.3.0 / 1.3.3), so
+        // `…:better-mob-combat:1.3.0` is ambiguous and the Modrinth maven serves the
+        // Forge jar (no fabric.mod.json → silently not loaded). Pin the exact Fabric
+        // version IDs instead: wboV6qEY = bmc 1.3.0 fabric, suabW0rX = mpa 1.3.3 fabric.
+        "modRuntimeOnly"("maven.modrinth:mob-player-animator:suabW0rX")
+        "modRuntimeOnly"("maven.modrinth:better-mob-combat:wboV6qEY")
+    }
 }
 
 configure<LoomGradleExtensionAPI> {

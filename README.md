@@ -159,6 +159,41 @@ So a source need only cache/fetch **~5 lives per band** — and it can pull seve
 re-fetch only when the player crosses the pre-fetched range, keeping fetch frequency low. Cache
 size is then O(bands-ahead × 5), independent of how large the global log grows.
 
+## Mod compatibility — Better Combat / Better Mob Combat
+
+PlayerMobs work with [Better Combat](https://modrinth.com/mod/better-combat) and its mob add-on
+[Better Mob Combat](https://modrinth.com/mod/better-mob-combat) **out of the box** — no PlayerMob
+config or code needed. A PlayerMob is a humanoid mob drawn with the vanilla player model, so when it
+holds a **melee weapon** (sword, axe) it picks up Better Combat's animated wind-up/combo swings like
+any other humanoid mob. Better Combat overhauls *melee* only — a PlayerMob holding a crossbow, bow,
+or empty hand looks unchanged, so give it a sword to see the effect.
+
+**Install the whole stack.** "Better Mob Combat" silently depends on three other mods; if any is
+missing the mobs won't animate (or the game won't start). Install all of:
+
+- [Better Combat](https://modrinth.com/mod/better-combat) · [Player Animator](https://modrinth.com/mod/playeranimator) · [Mob Player Animator](https://modrinth.com/mod/mob-player-animator) · [Better Mob Combat](https://modrinth.com/mod/better-mob-combat) · [Cloth Config](https://modrinth.com/mod/cloth-config) (pulled in by Better Combat)
+
+**⚠️ Match the Better Combat version.** Better Mob Combat **1.3.0** is built against Better Combat
+**1.8.6** and **crashes with the newer Better Combat 1.9.0**: BMC calls
+`CompatibilityFlags.firstPersonRender()`, which 1.9.0 removed, so the game hard-crashes
+(`NoSuchMethodError`) the first time *any* mob plays an attack swing — a vanilla zombie would crash
+it too. If your world dies the moment combat starts, this mismatch is almost always why. Pin
+**Better Combat 1.8.6 or earlier** with Better Mob Combat 1.3.0.
+
+**Where it's available.** The full stack is native on **Minecraft 1.20.1** (Fabric, Forge,
+NeoForge). On **1.21.1**, Better Mob Combat ships only as the separate NeoForge-only
+[Better Mob Combat Neo](https://modrinth.com/mod/better-mob-combat-neo) fork. There is no **26.2**
+build of Better Mob Combat.
+
+**Reproduce / regression-test it.** The 1.20.1 Fabric dev client can load the whole compatible
+stack on demand (dev-runtime only — never shipped in PlayerMob's jar):
+
+```bash
+./gradlew :fabric:1.20.1:runClient -PbmcCompatTest
+```
+
+Then `/summon playermob:player_mob`, give it a sword with `/item replace entity @e[type=playermob:player_mob,limit=1] weapon.mainhand with minecraft:diamond_sword`, and provoke it — it attacks with Better Combat's animation.
+
 ## License
 
 PolyForm Shield 1.0.0 — see [LICENSE](LICENSE).
