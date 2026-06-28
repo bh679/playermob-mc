@@ -26,6 +26,8 @@
     "fabric-api": "*"
   },
   "suggests": {
-    "adventureitemnames": "*"
+    "adventureitemnames": "*",
+    "bettercombat": "*",
+    "bettermobcombat": "*"
   }
 }

@@ -34,3 +34,19 @@ config="playermob.mixins.json"
     versionRange="*"
     ordering="NONE"
     side="BOTH"
+
+# Optional — PlayerMobs pick up Better Combat's animated melee when these are present.
+# See README "Mod compatibility". (1.21.1 uses the NeoForge-only "Better Mob Combat Neo" fork.)
+[[dependencies.playermob]]
+    modId="bettercombat"
+    type="optional"
+    versionRange="*"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.playermob]]
+    modId="bettermobcombat"
+    type="optional"
+    versionRange="*"
+    ordering="NONE"
+    side="BOTH"
