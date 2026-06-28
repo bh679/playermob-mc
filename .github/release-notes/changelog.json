@@ -484,6 +484,22 @@
       "released": true,
       "released_in": "v0.69.0",
       "released_at": "2026-06-27T14:57:15Z"
+    },
+    {
+      "id": "better-mob-combat-compat",
+      "version": "0.70.0",
+      "type": "feat",
+      "title": "Better Combat / Better Mob Combat support",
+      "summary": "Give a PlayerMob a sword or axe and it fights with Better Combat's animated wind-up and combo swings, like any other humanoid mob \u2014 works out of the box with Better Combat + Better Mob Combat (now listed as optional dependencies). Modpack heads-up: pair Better Mob Combat 1.3.0 with Better Combat 1.8.6, as the newer Better Combat 1.9.0 crashes.",
+      "highlights": [
+        "PlayerMobs use Better Combat's animated melee when Better Combat + Better Mob Combat are installed",
+        "Pair Better Mob Combat 1.3.0 with Better Combat 1.8.6 \u2014 the newer 1.9.0 crashes"
+      ],
+      "pr": 149,
+      "date": "2026-06-28",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
