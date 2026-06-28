@@ -168,6 +168,10 @@ holds a **melee weapon** (sword, axe) it picks up Better Combat's animated wind-
 any other humanoid mob. Better Combat overhauls *melee* only — a PlayerMob holding a crossbow, bow,
 or empty hand looks unchanged, so give it a sword to see the effect.
 
+> 📖 **Full setup guide:** [Better Mob Combat — Setup](https://github.com/bh679/playermob-mc/wiki/Better-Mob-Combat-Setup)
+> — required mod stack, the two ways to resolve the Better Combat version crash (the **Fix mod** vs
+> pinning 1.8.6), per‑version availability, and troubleshooting.
+
 **Install the whole stack.** "Better Mob Combat" silently depends on three other mods; if any is
 missing the mobs won't animate (or the game won't start). Install all of:
 
@@ -177,8 +181,10 @@ missing the mobs won't animate (or the game won't start). Install all of:
 **1.8.6** and **crashes with the newer Better Combat 1.9.0**: BMC calls
 `CompatibilityFlags.firstPersonRender()`, which 1.9.0 removed, so the game hard-crashes
 (`NoSuchMethodError`) the first time *any* mob plays an attack swing — a vanilla zombie would crash
-it too. If your world dies the moment combat starts, this mismatch is almost always why. Pin
-**Better Combat 1.8.6 or earlier** with Better Mob Combat 1.3.0.
+it too. If your world dies the moment combat starts, this mismatch is almost always why. Two fixes:
+pin **Better Combat 1.8.6 or earlier** with Better Mob Combat 1.3.0, **or** keep the latest Better
+Combat and add the [Better Mob Combat Fix](https://www.curseforge.com/minecraft/mc-mods/better-mob-combat-fix)
+mod (Fabric) — see the [setup guide](https://github.com/bh679/playermob-mc/wiki/Better-Mob-Combat-Setup).
 
 **Where it's available.** The full stack is native on **Minecraft 1.20.1** (Fabric, Forge,
 NeoForge). On **1.21.1**, Better Mob Combat ships only as the separate NeoForge-only
