@@ -73,6 +73,9 @@ import java.util.Collection;
  *   <li>{@code /playermob unlimitedammo [on|off]} — toggle (or report) global unlimited ammo for
  *       this session: {@code on} = ranged weapons never run out; {@code off} = they consume inventory
  *       ammo (the {@code requireArrows} default). A session override of the config flag.</li>
+ *   <li>{@code /playermob tntcombat [on|off]} — toggle (or report) TNT-bombing combat for this
+ *       session: when {@code on}, a PlayerMob carrying TNT + a way to light it bombs its target
+ *       instead of fighting with bow/melee. A session override of the config flag.</li>
  *   <li>{@code /playermob naturalspawn [on|off]} — toggle (or report) the natural-spawn master
  *       switch for this session.</li>
  *   <li>{@code /playermob naturalspawn <mob> on|off|<chance>} — set a mob's companion chance
@@ -140,6 +143,10 @@ public final class ReincarnateCommand {
                     .executes(ReincarnateCommand::queryUnlimitedAmmo)
                     .then(Commands.literal("on").executes(ctx -> setUnlimitedAmmo(ctx, true)))
                     .then(Commands.literal("off").executes(ctx -> setUnlimitedAmmo(ctx, false))))
+                .then(Commands.literal("tntcombat")
+                    .executes(ReincarnateCommand::queryTntCombat)
+                    .then(Commands.literal("on").executes(ctx -> setTntCombat(ctx, true)))
+                    .then(Commands.literal("off").executes(ctx -> setTntCombat(ctx, false))))
                 .then(Commands.literal("naturalspawn")
                     .executes(ReincarnateCommand::reportNaturalSpawn)
                     .then(Commands.literal("on").executes(ctx -> setNaturalSpawnMaster(ctx, true)))
@@ -844,6 +851,23 @@ public final class ReincarnateCommand {
         PlayerMobConfig.setRequireArrows(!unlimited);
         ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob unlimited ammo "
             + (unlimited ? "enabled" : "disabled") + " for this session."), false);
+        return 1;
+    }
+
+    /** {@code /playermob tntcombat} — report whether PlayerMobs bomb their targets with TNT. */
+    private static int queryTntCombat(CommandContext<CommandSourceStack> ctx) {
+        boolean on = PlayerMobConfig.tntCombat();
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob TNT combat is "
+            + (on ? "ON — a mob with TNT + a way to light it bombs its target"
+                  : "OFF — mobs fight with bow/melee only") + "."), false);
+        return 1;
+    }
+
+    /** {@code /playermob tntcombat on|off} — flip TNT-bombing combat for this session. */
+    private static int setTntCombat(CommandContext<CommandSourceStack> ctx, boolean enabled) {
+        PlayerMobConfig.setTntCombat(enabled);
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob TNT combat "
+            + (enabled ? "enabled" : "disabled") + " for this session."), false);
         return 1;
     }
 

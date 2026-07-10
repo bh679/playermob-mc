@@ -43,6 +43,7 @@ public final class PlayerMobConfig {
     private static final String KEY_SEEK_ARROWS_WHEN_EMPTY = "seekArrowsWhenEmpty";
     private static final String KEY_RANGED_ENGAGE_DISTANCE = "rangedEngageDistance";
     private static final String KEY_MELEE_ENGAGE_DISTANCE = "meleeEngageDistance";
+    private static final String KEY_TNT_COMBAT = "tntCombat";
 
     private static final String KEY_EXTRA_PICKUP_ITEMS = "extraPickupItems";
 
@@ -71,6 +72,8 @@ public final class PlayerMobConfig {
     public static final float DEFAULT_RANGED_ENGAGE_DISTANCE = 8.0F;
     /** Within this many blocks a PlayerMob draws a melee weapon (default 4); must stay below the ranged distance. */
     public static final float DEFAULT_MELEE_ENGAGE_DISTANCE = 4.0F;
+    /** A PlayerMob carrying TNT + a way to light it bombs its target instead of fighting; on by default (needs mobGriefing). */
+    public static final boolean DEFAULT_TNT_COMBAT = true;
     /** No extra pickup items by default — the mob wants only its hardcoded gear/ammo/valuable/consumable set. */
     public static final String DEFAULT_EXTRA_PICKUP_ITEMS = "";
     /** Bundled default skins are an eligible random source by default. */
@@ -175,6 +178,7 @@ public final class PlayerMobConfig {
     private static volatile boolean seekArrowsWhenEmpty = DEFAULT_SEEK_ARROWS_WHEN_EMPTY;
     private static volatile float rangedEngageDistance = DEFAULT_RANGED_ENGAGE_DISTANCE;
     private static volatile float meleeEngageDistance = DEFAULT_MELEE_ENGAGE_DISTANCE;
+    private static volatile boolean tntCombat = DEFAULT_TNT_COMBAT;
     /** Admin-configured extra items the mob always wants; replaced wholesale on {@link #load}. */
     private static volatile WantedItemList extraPickups = WantedItemList.EMPTY;
     /** Per-mob explicit overrides (id → clamped 0–1 chance); immutable, replaced wholesale on {@link #load}. */
@@ -246,6 +250,16 @@ public final class PlayerMobConfig {
      */
     public static boolean seekArrowsWhenEmpty() {
         return seekArrowsWhenEmpty;
+    }
+
+    /**
+     * When true (default), a PlayerMob carrying TNT and a way to light it (flint &amp; steel, fire charge,
+     * redstone block, lever, button, or pressure plate) bombs the enemy it is fighting instead of trading
+     * bow/melee blows, until it runs out of TNT. Also requires the {@code mobGriefing} gamerule (it places
+     * and primes real TNT). See {@code TntCombatGoal}.
+     */
+    public static boolean tntCombat() {
+        return tntCombat;
     }
 
     /** Distance (blocks) beyond which a PlayerMob prefers a ranged weapon over melee. See {@code equipBestWeaponForTarget}. */
@@ -377,6 +391,14 @@ public final class PlayerMobConfig {
     }
 
     /**
+     * Toggle TNT-combat at runtime (e.g. from {@code /playermob tntcombat on|off}). A session override —
+     * not written back to the file, which stays the startup default.
+     */
+    public static void setTntCombat(boolean enabled) {
+        tntCombat = enabled;
+    }
+
+    /**
      * Toggle a skin source at runtime (e.g. from {@code /playermob skin source <bundled|online|local> on|off}).
      * A session override — not written back to the file, which stays the startup default.
      */
@@ -449,6 +471,7 @@ public final class PlayerMobConfig {
             seekArrowsWhenEmpty = v.seekArrowsWhenEmpty();
             rangedEngageDistance = v.rangedEngageDistance();
             meleeEngageDistance = v.meleeEngageDistance();
+            tntCombat = v.tntCombat();
             extraPickups = v.extraPickups();
             naturalSpawnScales = v.naturalSpawnScales();
             skinSourceBundled = v.skinSourceBundled();
@@ -461,11 +484,12 @@ public final class PlayerMobConfig {
                 KEY_TRAIN_DIG_THROUGH, trainDigThrough,
                 KEY_TRAIN_FOLLOW_LOVED_PLAYER, trainFollowLovedPlayer,
                 KEY_NATURAL_SPAWN_ENABLED, naturalSpawnEnabled, naturalSpawnScales.size());
-            LOGGER.info("[{}] combat config: {}={}, {}={}, {}={}, {}={}",
+            LOGGER.info("[{}] combat config: {}={}, {}={}, {}={}, {}={}, {}={}",
                 PlayerMob.MOD_ID,
                 KEY_REQUIRE_ARROWS, requireArrows, KEY_SEEK_ARROWS_WHEN_EMPTY, seekArrowsWhenEmpty,
                 KEY_RANGED_ENGAGE_DISTANCE, rangedEngageDistance,
-                KEY_MELEE_ENGAGE_DISTANCE, meleeEngageDistance);
+                KEY_MELEE_ENGAGE_DISTANCE, meleeEngageDistance,
+                KEY_TNT_COMBAT, tntCombat);
         } catch (IOException | RuntimeException e) {
             LOGGER.warn("[{}] failed to load {}; using defaults", PlayerMob.MOD_ID, FILE, e);
         }
@@ -476,7 +500,7 @@ public final class PlayerMobConfig {
                   boolean trainFollowLovedPlayer, boolean naturalSpawnEnabled,
                   AutoNameMode autoNameMode,
                   boolean requireArrows, boolean seekArrowsWhenEmpty,
-                  float rangedEngageDistance, float meleeEngageDistance,
+                  float rangedEngageDistance, float meleeEngageDistance, boolean tntCombat,
                   WantedItemList extraPickups,
                   Map<String, Float> naturalSpawnScales,
                   boolean skinSourceBundled, boolean skinSourceOnline, boolean skinSourceLocal,
@@ -494,6 +518,7 @@ public final class PlayerMobConfig {
             parseBool(props.getProperty(KEY_REQUIRE_ARROWS), DEFAULT_REQUIRE_ARROWS),
             parseBool(props.getProperty(KEY_SEEK_ARROWS_WHEN_EMPTY), DEFAULT_SEEK_ARROWS_WHEN_EMPTY),
             engage[0], engage[1],
+            parseBool(props.getProperty(KEY_TNT_COMBAT), DEFAULT_TNT_COMBAT),
             WantedItemList.parse(props.getProperty(KEY_EXTRA_PICKUP_ITEMS, DEFAULT_EXTRA_PICKUP_ITEMS)),
             parseScales(props),
             parseBool(props.getProperty(KEY_SKIN_SOURCE_BUNDLED), DEFAULT_SKIN_SOURCE_BUNDLED),
@@ -640,6 +665,11 @@ public final class PlayerMobConfig {
             .append("#   rangedEngageDistance blocks and melee within meleeEngageDistance blocks (the band\n")
             .append("#   between is hysteresis). meleeEngageDistance must be > 0 and < rangedEngageDistance,\n")
             .append("#   else both reset to 8 / 4. Defaults 8.0 / 4.0.\n")
+            .append("# tntCombat: when true, a PlayerMob carrying TNT and a way to light it (flint & steel, fire\n")
+            .append("#   charge, redstone block, lever, button, or pressure plate) runs up to its target, drops a\n")
+            .append("#   TNT block, lights it, and sprints clear — repeating until out of TNT, then reverting to\n")
+            .append("#   normal bow/melee combat. Also requires the mobGriefing gamerule (it places + primes real\n")
+            .append("#   TNT). Toggle live with /playermob tntcombat on|off (session override). Default true.\n")
             .append("# extraPickupItems: extra items the mob ALWAYS picks up (off the floor and out of chests)\n")
             .append("#   and hoards in its backpack, beyond the built-in weapons/armor/ammo/valuables/food it\n")
             .append("#   already grabs. List item ids and/or item tags, separated by commas or spaces. Prefix a\n")
@@ -663,6 +693,7 @@ public final class PlayerMobConfig {
             .append(KEY_SEEK_ARROWS_WHEN_EMPTY).append("=").append(DEFAULT_SEEK_ARROWS_WHEN_EMPTY).append("\n")
             .append(KEY_RANGED_ENGAGE_DISTANCE).append("=").append(DEFAULT_RANGED_ENGAGE_DISTANCE).append("\n")
             .append(KEY_MELEE_ENGAGE_DISTANCE).append("=").append(DEFAULT_MELEE_ENGAGE_DISTANCE).append("\n")
+            .append(KEY_TNT_COMBAT).append("=").append(DEFAULT_TNT_COMBAT).append("\n")
             .append(KEY_EXTRA_PICKUP_ITEMS).append("=").append(DEFAULT_EXTRA_PICKUP_ITEMS).append("\n")
             .append(KEY_SKIN_SOURCE_BUNDLED).append("=").append(DEFAULT_SKIN_SOURCE_BUNDLED).append("\n")
             .append(KEY_SKIN_SOURCE_ONLINE).append("=").append(DEFAULT_SKIN_SOURCE_ONLINE).append("\n")

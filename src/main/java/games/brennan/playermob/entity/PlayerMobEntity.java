@@ -26,6 +26,7 @@ import games.brennan.playermob.entity.goal.RaidArmorStandsGoal;
 import games.brennan.playermob.entity.goal.RaidContainersGoal;
 import games.brennan.playermob.entity.goal.SeekAmmoGoal;
 import games.brennan.playermob.entity.goal.SkepticalWatchGoal;
+import games.brennan.playermob.entity.goal.TntCombatGoal;
 import games.brennan.playermob.entity.goal.TrainRecoveryGoal;
 import games.brennan.playermob.entity.goal.WeaponAwareAttackGoal;
 import games.brennan.playermob.player.PlayerLifeRecord;
@@ -695,6 +696,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // mines fill blocking the march. No flags (like PlayerMobDoorGoal) so it never evicts the
         // advance goal — the mob keeps stepping into the gap as the wall clears. No-op off a train.
         this.goalSelector.addGoal(1, new DigThroughGoal(this));
+        // Carrying TNT + a way to light it? Bomb the enemy instead of trading bow/melee blows — registered
+        // BEFORE the seek/attack goals at the same priority so its canUse() (config on, mobGriefing on, TNT +
+        // an igniter on hand) wins the MOVE slot while armed. When it runs out of TNT/igniters its canUse()
+        // goes false and the normal fight goals take back over. Gated on mobGriefing (it places + primes TNT).
+        this.goalSelector.addGoal(2, new TntCombatGoal(this, /* speed */ 1.0));
         // Out of ammo mid-fight? Fetch a nearby dropped round before fighting — registered BEFORE the attack
         // goal at the same priority so its narrow canUse() (ranged weapon owned, no ammo, enemy not too close,
         // a round within reach) wins the MOVE slot; otherwise the attack goal runs. After a restock its
