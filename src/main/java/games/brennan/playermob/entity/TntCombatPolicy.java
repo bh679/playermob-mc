@@ -42,10 +42,9 @@ public final class TntCombatPolicy {
     public enum IgnitionStrategy {
         /** Right-click the TNT block with the held item (flint &amp; steel, fire charge) — vanilla primes + consumes it. */
         RIGHT_CLICK,
-        /** Place the item's block powered/adjacent so a redstone signal primes the TNT (redstone block, lever, button). */
-        PLACE_POWER,
-        /** Place the item on top of the TNT as an armed trap that primes when something treads on it (pressure plate). */
-        TRAP
+        /** Spend the item and prime the TNT directly (redstone block, lever, button, pressure plate) — reliable
+         *  across MC versions where authoring a powered redstone component to feed the signal in was not. */
+        PLACE_PRIME
     }
 
     /**
@@ -62,15 +61,12 @@ public final class TntCombatPolicy {
             return IgnitionStrategy.RIGHT_CLICK;
         }
         if (item == Items.REDSTONE_BLOCK) {
-            return IgnitionStrategy.PLACE_POWER;
+            return IgnitionStrategy.PLACE_PRIME;
         }
         if (item instanceof BlockItem blockItem) {
             Block block = blockItem.getBlock();
-            if (block instanceof LeverBlock || block instanceof ButtonBlock) {
-                return IgnitionStrategy.PLACE_POWER;
-            }
-            if (block instanceof BasePressurePlateBlock) {
-                return IgnitionStrategy.TRAP;
+            if (block instanceof LeverBlock || block instanceof ButtonBlock || block instanceof BasePressurePlateBlock) {
+                return IgnitionStrategy.PLACE_PRIME;
             }
         }
         return null;

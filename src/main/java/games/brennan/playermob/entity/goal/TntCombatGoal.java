@@ -8,6 +8,8 @@ import games.brennan.playermob.entity.TntCombatPolicy;
 import games.brennan.playermob.entity.TntCombatPolicy.IgnitionStrategy;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.Container;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.SimpleContainer;
@@ -16,13 +18,10 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.ai.util.DefaultRandomPos;
 import net.minecraft.world.entity.item.PrimedTnt;
-import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.properties.AttachFace;
-import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
@@ -42,9 +41,12 @@ import java.util.EnumSet;
  * <p><b>Lighting</b> is delegated per igniter by {@link TntCombatPolicy}:
  * flint &amp; steel / fire charge right-click the TNT block through the proven, modded-safe
  * {@link CommandedUse} pipeline (vanilla {@code TntBlock.useItemOn} primes it and consumes the igniter);
- * a redstone block / lever / button is placed powered on top of the TNT so a redstone signal primes it;
- * a pressure plate is laid on top as an armed trap. TNT is only consumed on a successful light — a failed
- * ignition rolls the placed block back so the mob never litters unlit TNT.</p>
+ * every other igniter (redstone block / lever / button / pressure plate) is consumed from the pack and
+ * primes the TNT directly — replacing the block with a fused {@link PrimedTnt}, exactly as vanilla
+ * {@code TntBlock.explode} does. (Placing a pre-powered redstone component and hoping the neighbour
+ * signal reaches the TNT proved unreliable across versions, so the redstone family lights it outright.)
+ * TNT is only consumed on a successful light — a failed ignition rolls the placed block back so the mob
+ * never litters unlit TNT.</p>
  *
  * <p>No JUMP flag (so the priority-0 {@code FloatGoal} keeps the mob afloat — see the goal-JUMP gotcha).
  * Gated on {@link PlayerMobConfig#tntCombat()} and the {@code mobGriefing} gamerule (a world-modifying
@@ -56,7 +58,6 @@ public final class TntCombatGoal extends Goal implements DescribableGoal {
     private static final double APPROACH_REACH_SQR = 12.25;
     private static final int WALK_TIMEOUT_TICKS = 200;       // 10s to reach the target before giving up
     private static final int FLEE_TICKS = 90;                // ~fuse (80) + margin: wait out the primed TNT before re-arming
-    private static final int FLEE_TRAP_TICKS = 30;           // a laid trap won't blow on our schedule — a short backpedal
     private static final double FLEE_SPEED = 1.4;            // sprint clear — the blast is lethal
     private static final int FLEE_REPATH_INTERVAL = 8;       // re-pick a retreat point every 0.4s
     private static final int RETREAT_RADIUS = 10;
@@ -69,7 +70,7 @@ public final class TntCombatGoal extends Goal implements DescribableGoal {
     private static final int FAIL_COOLDOWN = 40;             // 2s pause after a failed placement, so we don't thrash
 
     /** Outcome of an ignition attempt. */
-    private enum Outcome { PRIMED, ARMED_TRAP, FAILED }
+    private enum Outcome { PRIMED, FAILED }
 
     private enum Phase { APPROACH, FLEE, DONE }
 
@@ -82,7 +83,6 @@ public final class TntCombatGoal extends Goal implements DescribableGoal {
     private int fleeRepathTicks;
     private int cooldown;
     private BlockPos tntPos;
-    private boolean trap;
 
     public TntCombatGoal(PlayerMobEntity mob, double speed) {
         this.mob = mob;
@@ -141,7 +141,6 @@ public final class TntCombatGoal extends Goal implements DescribableGoal {
         phase = Phase.APPROACH;
         walkTicks = 0;
         tntPos = null;
-        trap = false;
     }
 
     @Override
@@ -149,7 +148,6 @@ public final class TntCombatGoal extends Goal implements DescribableGoal {
         mob.getNavigation().stop();
         phase = Phase.DONE;
         tntPos = null;
-        trap = false;
         // Hand the mob back a proper weapon; WeaponAwareAttackGoal re-selects ranged/melee on its next tick.
         mob.equipBestMeleeInHand();
     }
@@ -223,7 +221,6 @@ public final class TntCombatGoal extends Goal implements DescribableGoal {
         }
         pack.removeItem(tntSlot, 1);
         this.tntPos = pos;
-        this.trap = outcome == Outcome.ARMED_TRAP;
         mob.swing(InteractionHand.MAIN_HAND);
         return true;
     }
@@ -239,15 +236,13 @@ public final class TntCombatGoal extends Goal implements DescribableGoal {
         if (slot < 0) {
             return Outcome.FAILED;
         }
-        ItemStack igniter = pack.getItem(slot);
-        IgnitionStrategy strategy = TntCombatPolicy.classify(igniter);
+        IgnitionStrategy strategy = TntCombatPolicy.classify(pack.getItem(slot));
         if (strategy == null) {
             return Outcome.FAILED;
         }
         return switch (strategy) {
             case RIGHT_CLICK -> igniteRightClick(pos, slot);
-            case PLACE_POWER -> placePowerIgniter(pos, slot, igniter);
-            case TRAP -> placeTrapIgniter(pos, slot, igniter);
+            case PLACE_PRIME -> placePrimeIgniter(pos, slot);
         };
     }
 
@@ -287,50 +282,36 @@ public final class TntCombatGoal extends Goal implements DescribableGoal {
     }
 
     /**
-     * Place a redstone block / lever / button powered on top of the TNT so a redstone signal primes it.
-     * Levers and buttons are set FACE=FLOOR + POWERED so they feed the TNT below on placement; a redstone
-     * block powers all neighbours inherently. Consumes one of the item from the pack.
+     * A redstone-family igniter (redstone block / lever / button / pressure plate): consume one from the pack
+     * and light the TNT directly. Faithfully placing a powered component and relying on the redstone signal to
+     * reach the TNT proved unreliable across MC versions, so the mob "rigs it" off-screen and the charge just
+     * goes off — the item is still spent, so it remains gated on the mob actually carrying an igniter.
      */
-    private Outcome placePowerIgniter(BlockPos tnt, int packSlot, ItemStack igniter) {
-        BlockPos on = tnt.above();
-        Level level = mob.level();
-        if (!level.getBlockState(on).canBeReplaced()) {
-            return Outcome.FAILED; // no room above — can't seat the power source
-        }
-        BlockState state = poweredState(igniter);
-        if (state == null) {
+    private Outcome placePrimeIgniter(BlockPos tnt, int packSlot) {
+        if (!primeTnt(tnt)) {
             return Outcome.FAILED;
         }
-        level.setBlock(on, state, 3); // flag 3 → neighbour-notify primes the TNT below
         mob.getInventory().removeItem(packSlot, 1);
         return Outcome.PRIMED;
     }
 
-    /** Lay a pressure plate on top of the TNT as an armed trap (primes when something treads on it). */
-    private Outcome placeTrapIgniter(BlockPos tnt, int packSlot, ItemStack igniter) {
-        BlockPos on = tnt.above();
+    /**
+     * Replace the TNT block at {@code pos} with a fused {@link PrimedTnt} owned by the mob, with the prime
+     * sound — mirroring vanilla {@code TntBlock.explode} so the charge behaves exactly like a normally-lit one.
+     */
+    private boolean primeTnt(BlockPos pos) {
         Level level = mob.level();
-        if (!level.getBlockState(on).canBeReplaced() || !(igniter.getItem() instanceof BlockItem blockItem)) {
-            return Outcome.FAILED;
+        if (!level.getBlockState(pos).is(Blocks.TNT)) {
+            return false;
         }
-        level.setBlock(on, blockItem.getBlock().defaultBlockState(), 3);
-        mob.getInventory().removeItem(packSlot, 1);
-        return Outcome.ARMED_TRAP;
-    }
-
-    /** The placed block for a PLACE_POWER igniter, made to emit toward the TNT below (FACE=FLOOR, POWERED). */
-    private static BlockState poweredState(ItemStack igniter) {
-        if (!(igniter.getItem() instanceof BlockItem blockItem)) {
-            return null;
-        }
-        BlockState state = blockItem.getBlock().defaultBlockState();
-        if (state.hasProperty(BlockStateProperties.ATTACH_FACE)) {
-            state = state.setValue(BlockStateProperties.ATTACH_FACE, AttachFace.FLOOR);
-        }
-        if (state.hasProperty(BlockStateProperties.POWERED)) {
-            state = state.setValue(BlockStateProperties.POWERED, true);
-        }
-        return state;
+        double x = pos.getX() + 0.5;
+        double y = pos.getY();
+        double z = pos.getZ() + 0.5;
+        PrimedTnt primed = new PrimedTnt(level, x, y, z, mob);
+        level.addFreshEntity(primed);
+        level.removeBlock(pos, false);
+        level.playSound(null, x, pos.getY() + 0.5, z, SoundEvents.TNT_PRIMED, SoundSource.BLOCKS, 1.0F, 1.0F);
+        return true;
     }
 
     /** First replaceable, floor-supported candidate spot to drop the TNT, or null if none is reachable. */
@@ -351,7 +332,7 @@ public final class TntCombatGoal extends Goal implements DescribableGoal {
 
     private void enterFlee() {
         phase = Phase.FLEE;
-        fleeTicks = trap ? FLEE_TRAP_TICKS : FLEE_TICKS;
+        fleeTicks = FLEE_TICKS;
         fleeRepathTicks = 0;
         mob.getNavigation().stop();
     }
@@ -364,7 +345,6 @@ public final class TntCombatGoal extends Goal implements DescribableGoal {
                 phase = Phase.APPROACH;
                 walkTicks = 0;
                 tntPos = null;
-                trap = false;
             } else {
                 phase = Phase.DONE;
                 cooldown = POST_CYCLE_COOLDOWN;
@@ -388,8 +368,8 @@ public final class TntCombatGoal extends Goal implements DescribableGoal {
 
     /** The primed charge has blown once the TNT block is gone and no {@link PrimedTnt} lingers where we lit it. */
     private boolean detonated() {
-        if (tntPos == null || trap) {
-            return false; // a laid trap detonates on its own schedule — the flee timer bounds this cycle
+        if (tntPos == null) {
+            return false;
         }
         if (mob.level().getBlockState(tntPos).is(Blocks.TNT)) {
             return false; // still a block (shouldn't happen for a primed charge, but be safe)
@@ -409,7 +389,7 @@ public final class TntCombatGoal extends Goal implements DescribableGoal {
         String name = target != null ? target.getName().getString() : null;
         return switch (phase) {
             case APPROACH -> name != null ? "closing on " + name : "closing in";
-            case FLEE -> trap ? "backing off a trap" : "fleeing the blast";
+            case FLEE -> "fleeing the blast";
             default -> null;
         };
     }

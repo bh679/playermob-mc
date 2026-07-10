@@ -36,14 +36,14 @@ class TntCombatPolicyTest {
     void classifiesEachIgniterFamily() {
         assertSame(IgnitionStrategy.RIGHT_CLICK, TntCombatPolicy.classify(new ItemStack(Items.FLINT_AND_STEEL)), "flint & steel");
         assertSame(IgnitionStrategy.RIGHT_CLICK, TntCombatPolicy.classify(new ItemStack(Items.FIRE_CHARGE)), "fire charge");
-        assertSame(IgnitionStrategy.PLACE_POWER, TntCombatPolicy.classify(new ItemStack(Items.REDSTONE_BLOCK)), "redstone block");
-        assertSame(IgnitionStrategy.PLACE_POWER, TntCombatPolicy.classify(new ItemStack(Items.LEVER)), "lever");
-        assertSame(IgnitionStrategy.PLACE_POWER, TntCombatPolicy.classify(new ItemStack(Items.STONE_BUTTON)), "stone button");
-        assertSame(IgnitionStrategy.PLACE_POWER, TntCombatPolicy.classify(new ItemStack(Items.OAK_BUTTON)), "wooden button");
-        assertSame(IgnitionStrategy.TRAP, TntCombatPolicy.classify(new ItemStack(Items.STONE_PRESSURE_PLATE)), "stone plate");
-        assertSame(IgnitionStrategy.TRAP, TntCombatPolicy.classify(new ItemStack(Items.OAK_PRESSURE_PLATE)), "wooden plate");
-        // A weighted plate is a WeightedPressurePlateBlock — still a BasePressurePlateBlock, still a TRAP.
-        assertSame(IgnitionStrategy.TRAP, TntCombatPolicy.classify(new ItemStack(Items.HEAVY_WEIGHTED_PRESSURE_PLATE)), "weighted plate");
+        assertSame(IgnitionStrategy.PLACE_PRIME, TntCombatPolicy.classify(new ItemStack(Items.REDSTONE_BLOCK)), "redstone block");
+        assertSame(IgnitionStrategy.PLACE_PRIME, TntCombatPolicy.classify(new ItemStack(Items.LEVER)), "lever");
+        assertSame(IgnitionStrategy.PLACE_PRIME, TntCombatPolicy.classify(new ItemStack(Items.STONE_BUTTON)), "stone button");
+        assertSame(IgnitionStrategy.PLACE_PRIME, TntCombatPolicy.classify(new ItemStack(Items.OAK_BUTTON)), "wooden button");
+        assertSame(IgnitionStrategy.PLACE_PRIME, TntCombatPolicy.classify(new ItemStack(Items.STONE_PRESSURE_PLATE)), "stone plate");
+        assertSame(IgnitionStrategy.PLACE_PRIME, TntCombatPolicy.classify(new ItemStack(Items.OAK_PRESSURE_PLATE)), "wooden plate");
+        // A weighted plate is a WeightedPressurePlateBlock — still a BasePressurePlateBlock, still PLACE_PRIME.
+        assertSame(IgnitionStrategy.PLACE_PRIME, TntCombatPolicy.classify(new ItemStack(Items.HEAVY_WEIGHTED_PRESSURE_PLATE)), "weighted plate");
     }
 
     @Test
