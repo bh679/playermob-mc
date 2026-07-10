@@ -500,6 +500,24 @@
       "released": true,
       "released_in": "v0.70.0",
       "released_at": "2026-06-28T03:50:59Z"
+    },
+    {
+      "id": "tnt-combat",
+      "version": "0.71.0",
+      "type": "feat",
+      "title": "PlayerMobs turn bomber with TNT",
+      "summary": "A PlayerMob that's carrying TNT and a way to light it now fights with explosives: it rushes whoever it's fighting, drops a stick of TNT, sets it off, and sprints clear \u2014 again and again until it runs out, then falls back to its usual bow-and-blade combat.",
+      "highlights": [
+        "Lights the TNT with flint & steel or a fire charge, or by rigging a redstone block, lever, button, or pressure plate right beside it",
+        "Backs off just far enough to survive the blast, then comes straight back \u2014 no waiting around for the boom",
+        "Won't drop its TNT \u2014 or the tools to light it \u2014 when you kill it",
+        "On by default (needs the mobGriefing gamerule); toggle live with /playermob tntcombat on|off"
+      ],
+      "pr": 151,
+      "date": "2026-07-10",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
