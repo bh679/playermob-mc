@@ -518,6 +518,25 @@
       "released": true,
       "released_in": "v0.71.0",
       "released_at": "2026-07-10T09:58:07Z"
+    },
+    {
+      "id": "end-crystal-combat",
+      "version": "0.72.0",
+      "type": "feat",
+      "title": "PlayerMobs bomb with end crystals from behind cover",
+      "summary": "A PlayerMob that's carrying end crystals, obsidian, and a few blocks to hide behind now fights with the game's biggest handheld explosion: it plants a crystal on an obsidian base by its target, throws up a little wall to duck behind, raises a shield if it has one, and punches the crystal to set it off \u2014 walking away from its own blast and doing it again until it runs out, then falling back to its usual bow-and-blade combat.",
+      "highlights": [
+        "Stacks a two-block wall between itself and the crystal and crouches behind it (blocking with a shield if it has one), so it survives a point-blank blast while whoever it's fighting does not",
+        "Sets the crystal off with a real melee punch, and builds its little bunker one block at a time",
+        "Tries several angles when it rigs, so it works on hills and in tight spots, not just open flats",
+        "Won't drop its end crystals or their obsidian base when you kill it",
+        "On by default (needs the mobGriefing gamerule); toggle live with /playermob endcrystalcombat on|off"
+      ],
+      "pr": 153,
+      "date": "2026-07-10",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
