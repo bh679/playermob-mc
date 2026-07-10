@@ -518,6 +518,41 @@
       "released": true,
       "released_in": "v0.71.0",
       "released_at": "2026-07-10T09:58:07Z"
+    },
+    {
+      "id": "end-crystal-combat",
+      "version": "0.72.0",
+      "type": "feat",
+      "title": "PlayerMobs bomb with end crystals from behind cover",
+      "summary": "A PlayerMob that's carrying end crystals, obsidian, and a few blocks to hide behind now fights with the game's biggest handheld explosion: it plants a crystal on an obsidian base by its target, throws up a little wall to duck behind, raises a shield if it has one, and punches the crystal to set it off \u2014 walking away from its own blast and doing it again until it runs out, then falling back to its usual bow-and-blade combat.",
+      "highlights": [
+        "Stacks a two-block wall between itself and the crystal and crouches behind it (blocking with a shield if it has one), so it survives a point-blank blast while whoever it's fighting does not",
+        "Sets the crystal off with a real melee punch, and builds its little bunker one block at a time",
+        "Tries several angles when it rigs, so it works on hills and in tight spots, not just open flats",
+        "On by default (needs the mobGriefing gamerule); toggle live with /playermob endcrystalcombat on|off"
+      ],
+      "pr": 153,
+      "date": "2026-07-10",
+      "released": false,
+      "released_in": null,
+      "released_at": null
+    },
+    {
+      "id": "playermob-drops-everything-on-death",
+      "version": "0.72.0",
+      "type": "fix",
+      "title": "PlayerMob drops absolutely everything on death",
+      "summary": "A PlayerMob's death now drops its full backpack with zero exceptions \u2014 TNT, end crystals, obsidian, and igniters included, on top of its already-guaranteed equipped gear (weapon, off-hand, armor). Killing a bomber no longer withholds its explosives kit; it drops the whole thing, exactly like a player.",
+      "highlights": [
+        "TNT and its igniters (flint & steel, fire charge, redstone block, lever, button, pressure plate) now drop on death instead of being withheld",
+        "End crystals and their obsidian base now drop on death instead of being withheld",
+        "Equipped gear and ordinary backpack items are unaffected \u2014 already dropped at 100% before this fix"
+      ],
+      "pr": 154,
+      "date": "2026-07-10",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }

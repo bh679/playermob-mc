@@ -26,6 +26,7 @@ import games.brennan.playermob.entity.goal.RaidArmorStandsGoal;
 import games.brennan.playermob.entity.goal.RaidContainersGoal;
 import games.brennan.playermob.entity.goal.SeekAmmoGoal;
 import games.brennan.playermob.entity.goal.SkepticalWatchGoal;
+import games.brennan.playermob.entity.goal.EndCrystalCombatGoal;
 import games.brennan.playermob.entity.goal.TntCombatGoal;
 import games.brennan.playermob.entity.goal.TrainRecoveryGoal;
 import games.brennan.playermob.entity.goal.WeaponAwareAttackGoal;
@@ -701,6 +702,12 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // an igniter on hand) wins the MOVE slot while armed. When it runs out of TNT/igniters its canUse()
         // goes false and the normal fight goals take back over. Gated on mobGriefing (it places + primes TNT).
         this.goalSelector.addGoal(2, new TntCombatGoal(this, /* speed */ 1.0));
+        // Carrying end crystals + obsidian + solid cover blocks? Bomb the enemy with crystals instead — same
+        // priority-2 slot, registered right after TntCombatGoal so TNT keeps first dibs if a mob somehow holds both
+        // kits. It builds a little bunker (obsidian base + crystal, a 2-tall cover between mob and crystal), crouches
+        // behind the cover with a shield up, and punches the crystal to set it off; when it runs out of the kit its
+        // canUse() goes false and the normal fight goals take back over. Gated on mobGriefing (places blocks + explodes).
+        this.goalSelector.addGoal(2, new EndCrystalCombatGoal(this, /* speed */ 1.0));
         // Out of ammo mid-fight? Fetch a nearby dropped round before fighting — registered BEFORE the attack
         // goal at the same priority so its narrow canUse() (ranged weapon owned, no ammo, enemy not too close,
         // a round within reach) wins the MOVE slot; otherwise the attack goal runs. After a restock its

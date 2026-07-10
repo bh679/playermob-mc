@@ -76,6 +76,10 @@ import java.util.Collection;
  *   <li>{@code /playermob tntcombat [on|off]} — toggle (or report) TNT-bombing combat for this
  *       session: when {@code on}, a PlayerMob carrying TNT + a way to light it bombs its target
  *       instead of fighting with bow/melee. A session override of the config flag.</li>
+ *   <li>{@code /playermob endcrystalcombat [on|off]} — toggle (or report) end-crystal bombing combat for
+ *       this session: when {@code on}, a PlayerMob carrying end crystals + obsidian + solid cover blocks
+ *       bombs its target with end crystals instead of fighting with bow/melee. A session override of the
+ *       config flag.</li>
  *   <li>{@code /playermob naturalspawn [on|off]} — toggle (or report) the natural-spawn master
  *       switch for this session.</li>
  *   <li>{@code /playermob naturalspawn <mob> on|off|<chance>} — set a mob's companion chance
@@ -147,6 +151,10 @@ public final class ReincarnateCommand {
                     .executes(ReincarnateCommand::queryTntCombat)
                     .then(Commands.literal("on").executes(ctx -> setTntCombat(ctx, true)))
                     .then(Commands.literal("off").executes(ctx -> setTntCombat(ctx, false))))
+                .then(Commands.literal("endcrystalcombat")
+                    .executes(ReincarnateCommand::queryEndCrystalCombat)
+                    .then(Commands.literal("on").executes(ctx -> setEndCrystalCombat(ctx, true)))
+                    .then(Commands.literal("off").executes(ctx -> setEndCrystalCombat(ctx, false))))
                 .then(Commands.literal("naturalspawn")
                     .executes(ReincarnateCommand::reportNaturalSpawn)
                     .then(Commands.literal("on").executes(ctx -> setNaturalSpawnMaster(ctx, true)))
@@ -867,6 +875,23 @@ public final class ReincarnateCommand {
     private static int setTntCombat(CommandContext<CommandSourceStack> ctx, boolean enabled) {
         PlayerMobConfig.setTntCombat(enabled);
         ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob TNT combat "
+            + (enabled ? "enabled" : "disabled") + " for this session."), false);
+        return 1;
+    }
+
+    /** {@code /playermob endcrystalcombat} — report whether PlayerMobs bomb their targets with end crystals. */
+    private static int queryEndCrystalCombat(CommandContext<CommandSourceStack> ctx) {
+        boolean on = PlayerMobConfig.endCrystalCombat();
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob end-crystal combat is "
+            + (on ? "ON — a mob with end crystals + obsidian + cover blocks bombs its target"
+                  : "OFF — mobs fight with bow/melee only") + "."), false);
+        return 1;
+    }
+
+    /** {@code /playermob endcrystalcombat on|off} — flip end-crystal bombing combat for this session. */
+    private static int setEndCrystalCombat(CommandContext<CommandSourceStack> ctx, boolean enabled) {
+        PlayerMobConfig.setEndCrystalCombat(enabled);
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob end-crystal combat "
             + (enabled ? "enabled" : "disabled") + " for this session."), false);
         return 1;
     }
