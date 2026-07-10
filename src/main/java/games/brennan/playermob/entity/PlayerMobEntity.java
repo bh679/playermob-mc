@@ -3400,11 +3400,15 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private static final float GUARANTEED_EQUIPMENT_DROP_CHANCE = 2.0F;
 
     /**
-     * On death, drop the entire backpack inventory. Combined with the
-     * guaranteed {@link #getEquipmentDropChance} override below — which makes
-     * {@code super.dropCustomDeathLoot} drop every equipped slot too — the mob
-     * drops everything it was carrying, just like a player. Mirrors
+     * On death, drop the backpack inventory — <em>except</em> its TNT-bombing kit. Combined with the
+     * guaranteed {@link #getEquipmentDropChance} override below — which makes {@code super.dropCustomDeathLoot}
+     * drop every equipped slot too — the mob drops what it was carrying, just like a player. Mirrors
      * {@code Pillager.dropCustomDeathLoot} for the backpack half.
+     *
+     * <p><b>TNT kit is not lootable:</b> a PlayerMob never drops TNT, and while it still carries TNT it also
+     * keeps its igniters (flint &amp; steel / fire charge / redstone block / lever / button / pressure plate) —
+     * so killing a bomber doesn't hand the player a pile of explosives and the means to set them off. Once its
+     * TNT is spent the igniters are just ordinary tools again and drop normally. See {@link TntCombatPolicy}.</p>
      */
     //? if >=1.21.1 {
     @Override
@@ -3415,11 +3419,17 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     protected void dropCustomDeathLoot(DamageSource source, int looting, boolean recentlyHit) {
         super.dropCustomDeathLoot(source, looting, recentlyHit);
     *///?}
+        boolean carriesTnt = TntCombatPolicy.firstTntSlot(this.inventory) >= 0;
         for (int i = 0; i < this.inventory.getContainerSize(); i++) {
             ItemStack stack = this.inventory.getItem(i);
-            if (!stack.isEmpty()) {
-                this.dropAtLocation(stack);
+            if (stack.isEmpty()) {
+                continue;
             }
+            // Never drop TNT; keep the igniters too while the mob still has TNT to use them on.
+            if (stack.is(Items.TNT) || (carriesTnt && TntCombatPolicy.isIgniter(stack))) {
+                continue;
+            }
+            this.dropAtLocation(stack);
         }
         this.inventory.clearContent();
     }
