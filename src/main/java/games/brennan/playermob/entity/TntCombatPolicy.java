@@ -42,8 +42,8 @@ public final class TntCombatPolicy {
     public enum IgnitionStrategy {
         /** Right-click the TNT block with the held item (flint &amp; steel, fire charge) — vanilla primes + consumes it. */
         RIGHT_CLICK,
-        /** Spend the item and prime the TNT directly (redstone block, lever, button, pressure plate) — reliable
-         *  across MC versions where authoring a powered redstone component to feed the signal in was not. */
+        /** Place the actual component on top of the TNT in its powered/pressed state (redstone block, lever,
+         *  button, pressure plate) so a real redstone signal primes the TNT below — placed and used. */
         PLACE_PRIME
     }
 

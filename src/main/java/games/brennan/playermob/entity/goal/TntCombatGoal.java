@@ -18,10 +18,13 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.ai.util.DefaultRandomPos;
 import net.minecraft.world.entity.item.PrimedTnt;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.AttachFace;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
@@ -41,12 +44,11 @@ import java.util.EnumSet;
  * <p><b>Lighting</b> is delegated per igniter by {@link TntCombatPolicy}:
  * flint &amp; steel / fire charge right-click the TNT block through the proven, modded-safe
  * {@link CommandedUse} pipeline (vanilla {@code TntBlock.useItemOn} primes it and consumes the igniter);
- * every other igniter (redstone block / lever / button / pressure plate) is consumed from the pack and
- * primes the TNT directly — replacing the block with a fused {@link PrimedTnt}, exactly as vanilla
- * {@code TntBlock.explode} does. (Placing a pre-powered redstone component and hoping the neighbour
- * signal reaches the TNT proved unreliable across versions, so the redstone family lights it outright.)
- * TNT is only consumed on a successful light — a failed ignition rolls the placed block back so the mob
- * never litters unlit TNT.</p>
+ * a redstone block / lever / button / pressure plate is physically <em>placed and used</em> — the actual
+ * component is seated on top of the TNT in its powered/pressed state so a real redstone signal feeds the
+ * TNT and primes it (a fused {@link PrimedTnt}, just like a player rigging it). A direct-prime safety net
+ * backs that up so the charge never duds mid-loop. TNT is only consumed on a successful light — a failed
+ * ignition rolls the placed block back so the mob never litters unlit TNT.</p>
  *
  * <p>No JUMP flag (so the priority-0 {@code FloatGoal} keeps the mob afloat — see the goal-JUMP gotcha).
  * Gated on {@link PlayerMobConfig#tntCombat()} and the {@code mobGriefing} gamerule (a world-modifying
@@ -236,13 +238,14 @@ public final class TntCombatGoal extends Goal implements DescribableGoal {
         if (slot < 0) {
             return Outcome.FAILED;
         }
-        IgnitionStrategy strategy = TntCombatPolicy.classify(pack.getItem(slot));
+        ItemStack igniter = pack.getItem(slot);
+        IgnitionStrategy strategy = TntCombatPolicy.classify(igniter);
         if (strategy == null) {
             return Outcome.FAILED;
         }
         return switch (strategy) {
             case RIGHT_CLICK -> igniteRightClick(pos, slot);
-            case PLACE_PRIME -> placePrimeIgniter(pos, slot);
+            case PLACE_PRIME -> placeActivateIgniter(pos, slot, igniter);
         };
     }
 
@@ -282,22 +285,51 @@ public final class TntCombatGoal extends Goal implements DescribableGoal {
     }
 
     /**
-     * A redstone-family igniter (redstone block / lever / button / pressure plate): consume one from the pack
-     * and light the TNT directly. Faithfully placing a powered component and relying on the redstone signal to
-     * reach the TNT proved unreliable across MC versions, so the mob "rigs it" off-screen and the charge just
-     * goes off — the item is still spent, so it remains gated on the mob actually carrying an igniter.
+     * A redstone-family igniter (redstone block / lever / button / pressure plate): seat the actual component
+     * on top of the TNT in its powered/pressed state, so real redstone feeds the TNT below and primes it — the
+     * mob visibly places and uses it. Consumes one from the pack. As a safety net (the charge must never dud
+     * mid-loop) it also primes directly if the block somehow survived the neighbour update.
      */
-    private Outcome placePrimeIgniter(BlockPos tnt, int packSlot) {
-        if (!primeTnt(tnt)) {
-            return Outcome.FAILED;
+    private Outcome placeActivateIgniter(BlockPos tnt, int packSlot, ItemStack igniter) {
+        BlockPos on = tnt.above();
+        Level level = mob.level();
+        BlockState state = activatedState(igniter);
+        if (state == null || !level.getBlockState(on).canBeReplaced()) {
+            return Outcome.FAILED; // no room to seat the component
         }
+        level.setBlock(on, state, 3); // flag 3 → neighbour-notify: the powered component primes the TNT below
         mob.getInventory().removeItem(packSlot, 1);
+        if (level.getBlockState(tnt).is(Blocks.TNT)) {
+            primeTnt(tnt); // redstone didn't take (shouldn't happen) — light it outright so the cycle continues
+        }
         return Outcome.PRIMED;
     }
 
     /**
+     * The placed block for a redstone-family igniter, made to emit a redstone signal into the TNT below:
+     * FACE=FLOOR (so levers/buttons mount flat on top) and POWERED / POWER=15 (so it's already "on"/"pressed").
+     * A redstone block has no such properties — it powers its neighbours inherently.
+     */
+    private static BlockState activatedState(ItemStack igniter) {
+        if (!(igniter.getItem() instanceof BlockItem blockItem)) {
+            return null;
+        }
+        BlockState state = blockItem.getBlock().defaultBlockState();
+        if (state.hasProperty(BlockStateProperties.ATTACH_FACE)) {
+            state = state.setValue(BlockStateProperties.ATTACH_FACE, AttachFace.FLOOR);
+        }
+        if (state.hasProperty(BlockStateProperties.POWERED)) {
+            state = state.setValue(BlockStateProperties.POWERED, true);
+        }
+        if (state.hasProperty(BlockStateProperties.POWER)) {
+            state = state.setValue(BlockStateProperties.POWER, 15); // weighted pressure plates
+        }
+        return state;
+    }
+
+    /**
      * Replace the TNT block at {@code pos} with a fused {@link PrimedTnt} owned by the mob, with the prime
-     * sound — mirroring vanilla {@code TntBlock.explode} so the charge behaves exactly like a normally-lit one.
+     * sound — mirroring vanilla {@code TntBlock.explode}. Used as the redstone-ignition safety net.
      */
     private boolean primeTnt(BlockPos pos) {
         Level level = mob.level();
