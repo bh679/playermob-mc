@@ -44,6 +44,7 @@ public final class PlayerMobConfig {
     private static final String KEY_RANGED_ENGAGE_DISTANCE = "rangedEngageDistance";
     private static final String KEY_MELEE_ENGAGE_DISTANCE = "meleeEngageDistance";
     private static final String KEY_TNT_COMBAT = "tntCombat";
+    private static final String KEY_END_CRYSTAL_COMBAT = "endCrystalCombat";
 
     private static final String KEY_EXTRA_PICKUP_ITEMS = "extraPickupItems";
 
@@ -74,6 +75,8 @@ public final class PlayerMobConfig {
     public static final float DEFAULT_MELEE_ENGAGE_DISTANCE = 4.0F;
     /** A PlayerMob carrying TNT + a way to light it bombs its target instead of fighting; on by default (needs mobGriefing). */
     public static final boolean DEFAULT_TNT_COMBAT = true;
+    /** A PlayerMob carrying end crystals + obsidian + a solid cover block bombs its target with crystals; on by default (needs mobGriefing). */
+    public static final boolean DEFAULT_END_CRYSTAL_COMBAT = true;
     /** No extra pickup items by default — the mob wants only its hardcoded gear/ammo/valuable/consumable set. */
     public static final String DEFAULT_EXTRA_PICKUP_ITEMS = "";
     /** Bundled default skins are an eligible random source by default. */
@@ -179,6 +182,7 @@ public final class PlayerMobConfig {
     private static volatile float rangedEngageDistance = DEFAULT_RANGED_ENGAGE_DISTANCE;
     private static volatile float meleeEngageDistance = DEFAULT_MELEE_ENGAGE_DISTANCE;
     private static volatile boolean tntCombat = DEFAULT_TNT_COMBAT;
+    private static volatile boolean endCrystalCombat = DEFAULT_END_CRYSTAL_COMBAT;
     /** Admin-configured extra items the mob always wants; replaced wholesale on {@link #load}. */
     private static volatile WantedItemList extraPickups = WantedItemList.EMPTY;
     /** Per-mob explicit overrides (id → clamped 0–1 chance); immutable, replaced wholesale on {@link #load}. */
@@ -260,6 +264,17 @@ public final class PlayerMobConfig {
      */
     public static boolean tntCombat() {
         return tntCombat;
+    }
+
+    /**
+     * When true (default), a PlayerMob carrying end crystals, obsidian (for the crystal's base), and solid blocks (for
+     * cover) bombs the enemy it is fighting with end crystals instead of trading bow/melee blows: it seats a crystal on
+     * an obsidian base, stacks a 2-block-tall cover between itself and the crystal, crouches behind it (raising a shield
+     * if it has one), and punches the crystal to set it off — repeating until out of the kit. Also requires the
+     * {@code mobGriefing} gamerule (it places blocks and triggers real explosions). See {@code EndCrystalCombatGoal}.
+     */
+    public static boolean endCrystalCombat() {
+        return endCrystalCombat;
     }
 
     /** Distance (blocks) beyond which a PlayerMob prefers a ranged weapon over melee. See {@code equipBestWeaponForTarget}. */
@@ -399,6 +414,14 @@ public final class PlayerMobConfig {
     }
 
     /**
+     * Toggle end-crystal combat at runtime (e.g. from {@code /playermob endcrystalcombat on|off}). A session override —
+     * not written back to the file, which stays the startup default.
+     */
+    public static void setEndCrystalCombat(boolean enabled) {
+        endCrystalCombat = enabled;
+    }
+
+    /**
      * Toggle a skin source at runtime (e.g. from {@code /playermob skin source <bundled|online|local> on|off}).
      * A session override — not written back to the file, which stays the startup default.
      */
@@ -472,6 +495,7 @@ public final class PlayerMobConfig {
             rangedEngageDistance = v.rangedEngageDistance();
             meleeEngageDistance = v.meleeEngageDistance();
             tntCombat = v.tntCombat();
+            endCrystalCombat = v.endCrystalCombat();
             extraPickups = v.extraPickups();
             naturalSpawnScales = v.naturalSpawnScales();
             skinSourceBundled = v.skinSourceBundled();
@@ -484,12 +508,13 @@ public final class PlayerMobConfig {
                 KEY_TRAIN_DIG_THROUGH, trainDigThrough,
                 KEY_TRAIN_FOLLOW_LOVED_PLAYER, trainFollowLovedPlayer,
                 KEY_NATURAL_SPAWN_ENABLED, naturalSpawnEnabled, naturalSpawnScales.size());
-            LOGGER.info("[{}] combat config: {}={}, {}={}, {}={}, {}={}, {}={}",
+            LOGGER.info("[{}] combat config: {}={}, {}={}, {}={}, {}={}, {}={}, {}={}",
                 PlayerMob.MOD_ID,
                 KEY_REQUIRE_ARROWS, requireArrows, KEY_SEEK_ARROWS_WHEN_EMPTY, seekArrowsWhenEmpty,
                 KEY_RANGED_ENGAGE_DISTANCE, rangedEngageDistance,
                 KEY_MELEE_ENGAGE_DISTANCE, meleeEngageDistance,
-                KEY_TNT_COMBAT, tntCombat);
+                KEY_TNT_COMBAT, tntCombat,
+                KEY_END_CRYSTAL_COMBAT, endCrystalCombat);
         } catch (IOException | RuntimeException e) {
             LOGGER.warn("[{}] failed to load {}; using defaults", PlayerMob.MOD_ID, FILE, e);
         }
@@ -501,6 +526,7 @@ public final class PlayerMobConfig {
                   AutoNameMode autoNameMode,
                   boolean requireArrows, boolean seekArrowsWhenEmpty,
                   float rangedEngageDistance, float meleeEngageDistance, boolean tntCombat,
+                  boolean endCrystalCombat,
                   WantedItemList extraPickups,
                   Map<String, Float> naturalSpawnScales,
                   boolean skinSourceBundled, boolean skinSourceOnline, boolean skinSourceLocal,
@@ -519,6 +545,7 @@ public final class PlayerMobConfig {
             parseBool(props.getProperty(KEY_SEEK_ARROWS_WHEN_EMPTY), DEFAULT_SEEK_ARROWS_WHEN_EMPTY),
             engage[0], engage[1],
             parseBool(props.getProperty(KEY_TNT_COMBAT), DEFAULT_TNT_COMBAT),
+            parseBool(props.getProperty(KEY_END_CRYSTAL_COMBAT), DEFAULT_END_CRYSTAL_COMBAT),
             WantedItemList.parse(props.getProperty(KEY_EXTRA_PICKUP_ITEMS, DEFAULT_EXTRA_PICKUP_ITEMS)),
             parseScales(props),
             parseBool(props.getProperty(KEY_SKIN_SOURCE_BUNDLED), DEFAULT_SKIN_SOURCE_BUNDLED),
@@ -670,6 +697,13 @@ public final class PlayerMobConfig {
             .append("#   TNT block, lights it, and sprints clear — repeating until out of TNT, then reverting to\n")
             .append("#   normal bow/melee combat. Also requires the mobGriefing gamerule (it places + primes real\n")
             .append("#   TNT). Toggle live with /playermob tntcombat on|off (session override). Default true.\n")
+            .append("# endCrystalCombat: when true, a PlayerMob carrying end crystals, obsidian (for the crystal's\n")
+            .append("#   base), and solid blocks (for cover) bombs its target with end crystals: it seats a crystal on\n")
+            .append("#   an obsidian base, stacks a 2-block-tall cover between itself and the crystal, crouches behind\n")
+            .append("#   it (raising a shield if it has one), and punches the crystal to detonate it — repeating until\n")
+            .append("#   out of the kit, then reverting to normal bow/melee combat. Also requires the mobGriefing\n")
+            .append("#   gamerule (it places blocks + triggers real explosions). Toggle live with\n")
+            .append("#   /playermob endcrystalcombat on|off (session override). Default true.\n")
             .append("# extraPickupItems: extra items the mob ALWAYS picks up (off the floor and out of chests)\n")
             .append("#   and hoards in its backpack, beyond the built-in weapons/armor/ammo/valuables/food it\n")
             .append("#   already grabs. List item ids and/or item tags, separated by commas or spaces. Prefix a\n")
@@ -694,6 +728,7 @@ public final class PlayerMobConfig {
             .append(KEY_RANGED_ENGAGE_DISTANCE).append("=").append(DEFAULT_RANGED_ENGAGE_DISTANCE).append("\n")
             .append(KEY_MELEE_ENGAGE_DISTANCE).append("=").append(DEFAULT_MELEE_ENGAGE_DISTANCE).append("\n")
             .append(KEY_TNT_COMBAT).append("=").append(DEFAULT_TNT_COMBAT).append("\n")
+            .append(KEY_END_CRYSTAL_COMBAT).append("=").append(DEFAULT_END_CRYSTAL_COMBAT).append("\n")
             .append(KEY_EXTRA_PICKUP_ITEMS).append("=").append(DEFAULT_EXTRA_PICKUP_ITEMS).append("\n")
             .append(KEY_SKIN_SOURCE_BUNDLED).append("=").append(DEFAULT_SKIN_SOURCE_BUNDLED).append("\n")
             .append(KEY_SKIN_SOURCE_ONLINE).append("=").append(DEFAULT_SKIN_SOURCE_ONLINE).append("\n")

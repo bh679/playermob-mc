@@ -26,6 +26,7 @@ import games.brennan.playermob.entity.goal.RaidArmorStandsGoal;
 import games.brennan.playermob.entity.goal.RaidContainersGoal;
 import games.brennan.playermob.entity.goal.SeekAmmoGoal;
 import games.brennan.playermob.entity.goal.SkepticalWatchGoal;
+import games.brennan.playermob.entity.goal.EndCrystalCombatGoal;
 import games.brennan.playermob.entity.goal.TntCombatGoal;
 import games.brennan.playermob.entity.goal.TrainRecoveryGoal;
 import games.brennan.playermob.entity.goal.WeaponAwareAttackGoal;
@@ -701,6 +702,12 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // an igniter on hand) wins the MOVE slot while armed. When it runs out of TNT/igniters its canUse()
         // goes false and the normal fight goals take back over. Gated on mobGriefing (it places + primes TNT).
         this.goalSelector.addGoal(2, new TntCombatGoal(this, /* speed */ 1.0));
+        // Carrying end crystals + obsidian + solid cover blocks? Bomb the enemy with crystals instead — same
+        // priority-2 slot, registered right after TntCombatGoal so TNT keeps first dibs if a mob somehow holds both
+        // kits. It builds a little bunker (obsidian base + crystal, a 2-tall cover between mob and crystal), crouches
+        // behind the cover with a shield up, and punches the crystal to set it off; when it runs out of the kit its
+        // canUse() goes false and the normal fight goals take back over. Gated on mobGriefing (places blocks + explodes).
+        this.goalSelector.addGoal(2, new EndCrystalCombatGoal(this, /* speed */ 1.0));
         // Out of ammo mid-fight? Fetch a nearby dropped round before fighting — registered BEFORE the attack
         // goal at the same priority so its narrow canUse() (ranged weapon owned, no ammo, enemy not too close,
         // a round within reach) wins the MOVE slot; otherwise the attack goal runs. After a restock its
@@ -3409,6 +3416,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * keeps its igniters (flint &amp; steel / fire charge / redstone block / lever / button / pressure plate) —
      * so killing a bomber doesn't hand the player a pile of explosives and the means to set them off. Once its
      * TNT is spent the igniters are just ordinary tools again and drop normally. See {@link TntCombatPolicy}.</p>
+     *
+     * <p><b>End-crystal kit is not lootable either:</b> likewise a PlayerMob never drops end crystals, and while it
+     * still carries a crystal it keeps its obsidian too (the crystal's base). The plain cover block it hides behind
+     * (dirt, cobblestone, …) is not special and drops normally. See {@link EndCrystalCombatPolicy}.</p>
      */
     //? if >=1.21.1 {
     @Override
@@ -3420,13 +3431,16 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         super.dropCustomDeathLoot(source, looting, recentlyHit);
     *///?}
         boolean carriesTnt = TntCombatPolicy.firstTntSlot(this.inventory) >= 0;
+        boolean carriesCrystal = EndCrystalCombatPolicy.firstCrystalSlot(this.inventory) >= 0;
         for (int i = 0; i < this.inventory.getContainerSize(); i++) {
             ItemStack stack = this.inventory.getItem(i);
             if (stack.isEmpty()) {
                 continue;
             }
-            // Never drop TNT; keep the igniters too while the mob still has TNT to use them on.
-            if (stack.is(Items.TNT) || (carriesTnt && TntCombatPolicy.isIgniter(stack))) {
+            // Never drop TNT or end crystals; keep each bomb's own primer too while the mob still carries that bomb —
+            // the TNT igniters, and the crystal's obsidian base — so a slain bomber doesn't hand the player a ready kit.
+            if (stack.is(Items.TNT) || (carriesTnt && TntCombatPolicy.isIgniter(stack))
+                    || stack.is(Items.END_CRYSTAL) || (carriesCrystal && stack.is(Items.OBSIDIAN))) {
                 continue;
             }
             this.dropAtLocation(stack);
