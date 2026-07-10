@@ -25,7 +25,6 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.AttachFace;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
-import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.EnumSet;
@@ -39,16 +38,20 @@ import java.util.EnumSet;
  * <p>One outer Goal owns MOVE+LOOK for the whole bomb cycle (like {@link WeaponAwareAttackGoal} owns
  * the slot across weapon switches), running:</p>
  *
- * <pre>APPROACH → place TNT + light it → FLEE the blast → (loop while still armed)</pre>
+ * <pre>APPROACH → place TNT + light it → back off clear of the blast → (loop while armed, no idling for the boom)</pre>
+ *
+ * <p>It does <em>not</em> wait for a charge to explode before laying the next — as soon as it's a safe distance
+ * from every live {@link PrimedTnt} it lit, it re-engages (and it won't lay a fresh charge while standing in the
+ * blast of one still cooking). Against a moving target that reads as a rapid string of bombing runs.</p>
  *
  * <p><b>Lighting</b> is delegated per igniter by {@link TntCombatPolicy}:
  * flint &amp; steel / fire charge right-click the TNT block through the proven, modded-safe
  * {@link CommandedUse} pipeline (vanilla {@code TntBlock.useItemOn} primes it and consumes the igniter);
  * a redstone block / lever / button / pressure plate is physically <em>placed and used</em> — the actual
- * component is seated on top of the TNT in its powered/pressed state so a real redstone signal feeds the
- * TNT and primes it (a fused {@link PrimedTnt}, just like a player rigging it). A direct-prime safety net
- * backs that up so the charge never duds mid-loop. TNT is only consumed on a successful light — a failed
- * ignition rolls the placed block back so the mob never litters unlit TNT.</p>
+ * component is seated on the ground beside the TNT in its powered/pressed state so a real redstone signal
+ * primes it (a fused {@link PrimedTnt}, just like a player rigging it), and it stays put through the fuse.
+ * A direct-prime safety net backs that up so the charge never duds mid-loop. TNT is only consumed on a
+ * successful light — a failed ignition rolls the placed block back so the mob never litters unlit TNT.</p>
  *
  * <p>No JUMP flag (so the priority-0 {@code FloatGoal} keeps the mob afloat — see the goal-JUMP gotcha).
  * Gated on {@link PlayerMobConfig#tntCombat()} and the {@code mobGriefing} gamerule (a world-modifying
@@ -59,14 +62,14 @@ public final class TntCombatGoal extends Goal implements DescribableGoal {
     /** How close (squared) the mob gets before it drops the TNT — ~3.5 blocks, so the charge lands on the enemy. */
     private static final double APPROACH_REACH_SQR = 12.25;
     private static final int WALK_TIMEOUT_TICKS = 200;       // 10s to reach the target before giving up
-    private static final int FLEE_TICKS = 90;                // ~fuse (80) + margin: wait out the primed TNT before re-arming
+    private static final int FLEE_TICKS = 90;                // safety cap: give up backing off after ~4.5s if boxed in
     private static final double FLEE_SPEED = 1.4;            // sprint clear — the blast is lethal
     private static final int FLEE_REPATH_INTERVAL = 8;       // re-pick a retreat point every 0.4s
     private static final int RETREAT_RADIUS = 10;
     private static final int RETREAT_VERTICAL = 6;
     /** Clear-of-the-blast distance (squared) — ~11 blocks, comfortably past a TNT's (power 4) ~7-8-block hurt
-     *  radius. Once this far the mob stops sprinting and just waits out the fuse, so it stays near the fight
-     *  instead of bolting away, while keeping enough margin not to routinely blow itself up. */
+     *  radius. The mob only backs off until no live charge is within this range, then re-engages immediately —
+     *  it doesn't idle waiting for the fuse, so it keeps bombing/fighting as long as it's clear of its own TNT. */
     private static final double BLAST_SAFE_SQR = 121.0;
     private static final int POST_CYCLE_COOLDOWN = 10;       // brief settle after a completed bomb before re-arming
     private static final int FAIL_COOLDOWN = 40;             // 2s pause after a failed placement, so we don't thrash
@@ -84,7 +87,6 @@ public final class TntCombatGoal extends Goal implements DescribableGoal {
     private int fleeTicks;
     private int fleeRepathTicks;
     private int cooldown;
-    private BlockPos tntPos;
 
     public TntCombatGoal(PlayerMobEntity mob, double speed) {
         this.mob = mob;
@@ -142,14 +144,12 @@ public final class TntCombatGoal extends Goal implements DescribableGoal {
     public void start() {
         phase = Phase.APPROACH;
         walkTicks = 0;
-        tntPos = null;
     }
 
     @Override
     public void stop() {
         mob.getNavigation().stop();
         phase = Phase.DONE;
-        tntPos = null;
         // Hand the mob back a proper weapon; WeaponAwareAttackGoal re-selects ranged/melee on its next tick.
         mob.equipBestMeleeInHand();
     }
@@ -177,7 +177,10 @@ public final class TntCombatGoal extends Goal implements DescribableGoal {
         mob.getLookControl().setLookAt(target, 30.0F, 30.0F);
         if (mob.distanceToSqr(target) <= APPROACH_REACH_SQR) {
             mob.getNavigation().stop();
-            if (placeAndIgnite(target)) {
+            if (nearLiveTnt()) {
+                // A charge it lit is still cooking right here — clear the blast before laying another.
+                enterFlee();
+            } else if (placeAndIgnite(target)) {
                 enterFlee();
             } else {
                 // Couldn't get a charge down — stand down and let the normal fight goal take over for a beat.
@@ -222,7 +225,6 @@ public final class TntCombatGoal extends Goal implements DescribableGoal {
             return false;
         }
         pack.removeItem(tntSlot, 1);
-        this.tntPos = pos;
         mob.swing(InteractionHand.MAIN_HAND);
         return true;
     }
@@ -286,23 +288,45 @@ public final class TntCombatGoal extends Goal implements DescribableGoal {
 
     /**
      * A redstone-family igniter (redstone block / lever / button / pressure plate): seat the actual component
-     * on top of the TNT in its powered/pressed state, so real redstone feeds the TNT below and primes it — the
-     * mob visibly places and uses it. Consumes one from the pack. As a safety net (the charge must never dud
-     * mid-loop) it also primes directly if the block somehow survived the neighbour update.
+     * on the ground right beside the TNT in its powered/pressed state, so real redstone feeds the TNT and primes
+     * it — the mob visibly places and uses it, and (unlike an on-top component) it stays put through the whole
+     * fuse instead of popping the instant the TNT loses its support. Consumes one from the pack. As a safety net
+     * (the charge must never dud mid-loop) it also primes directly if the block somehow survived the update.
      */
     private Outcome placeActivateIgniter(BlockPos tnt, int packSlot, ItemStack igniter) {
-        BlockPos on = tnt.above();
-        Level level = mob.level();
         BlockState state = activatedState(igniter);
-        if (state == null || !level.getBlockState(on).canBeReplaced()) {
-            return Outcome.FAILED; // no room to seat the component
+        if (state == null) {
+            return Outcome.FAILED;
         }
-        level.setBlock(on, state, 3); // flag 3 → neighbour-notify: the powered component primes the TNT below
+        Level level = mob.level();
+        BlockPos spot = componentSpot(tnt);
+        if (spot == null) {
+            return Outcome.FAILED; // nowhere to seat the component
+        }
+        level.setBlock(spot, state, 3); // flag 3 → neighbour-notify: the powered component primes the adjacent TNT
         mob.getInventory().removeItem(packSlot, 1);
         if (level.getBlockState(tnt).is(Blocks.TNT)) {
             primeTnt(tnt); // redstone didn't take (shouldn't happen) — light it outright so the cycle continues
         }
         return Outcome.PRIMED;
+    }
+
+    /**
+     * A floor-supported spot to seat the redstone component right beside the TNT, so it stays visible through the
+     * whole fuse (a component ON the TNT would pop the instant the TNT primes and loses its support). Prefers a
+     * ground-level horizontal neighbour; falls back to on-top only if the mob is boxed in on all sides.
+     */
+    private BlockPos componentSpot(BlockPos tnt) {
+        Level level = mob.level();
+        for (Direction dir : Direction.Plane.HORIZONTAL) {
+            BlockPos side = tnt.relative(dir);
+            if (level.getBlockState(side).canBeReplaced()
+                    && level.getBlockState(side.below()).isFaceSturdy(level, side.below(), Direction.UP)) {
+                return side;
+            }
+        }
+        BlockPos on = tnt.above();
+        return level.getBlockState(on).canBeReplaced() ? on : null;
     }
 
     /**
@@ -369,45 +393,51 @@ public final class TntCombatGoal extends Goal implements DescribableGoal {
         mob.getNavigation().stop();
     }
 
+    /**
+     * Back off only until the mob is clear of every live charge it lit, then re-engage <em>immediately</em> —
+     * no idling to watch the fuse burn down. The mob keeps bombing/fighting as long as it isn't standing in its
+     * own blast; a {@link #FLEE_TICKS} cap covers the rare case where it can't get clear (boxed in).
+     */
     private void tickFlee() {
-        Vec3 danger = tntPos != null ? Vec3.atCenterOf(tntPos) : mob.position();
-        if (--fleeTicks <= 0 || detonated()) {
+        PrimedTnt danger = nearestLiveCharge();
+        if (danger == null || --fleeTicks <= 0) {
             if (armed()) {
-                // Still carrying — go again.
                 phase = Phase.APPROACH;
                 walkTicks = 0;
-                tntPos = null;
             } else {
                 phase = Phase.DONE;
                 cooldown = POST_CYCLE_COOLDOWN;
             }
             return;
         }
-        // Sprint straight away from the charge only until clear of the blast, then hold and wait it out — so the
-        // mob stays near the fight and re-engages promptly rather than bolting across the map on every cycle.
-        if (tntPos != null && mob.distanceToSqr(danger) >= BLAST_SAFE_SQR) {
-            mob.getNavigation().stop();
-            return;
-        }
         if (++fleeRepathTicks >= FLEE_REPATH_INTERVAL || mob.getNavigation().isDone()) {
             fleeRepathTicks = 0;
-            Vec3 away = DefaultRandomPos.getPosAway(mob, RETREAT_RADIUS, RETREAT_VERTICAL, danger);
+            Vec3 away = DefaultRandomPos.getPosAway(mob, RETREAT_RADIUS, RETREAT_VERTICAL, danger.position());
             if (away != null) {
                 mob.getNavigation().moveTo(away.x, away.y, away.z, FLEE_SPEED);
             }
         }
     }
 
-    /** The primed charge has blown once the TNT block is gone and no {@link PrimedTnt} lingers where we lit it. */
-    private boolean detonated() {
-        if (tntPos == null) {
-            return false;
+    /** True while a live primed TNT sits within blast range of the mob (so it shouldn't lay another there). */
+    private boolean nearLiveTnt() {
+        return nearestLiveCharge() != null;
+    }
+
+    /** The nearest live {@link PrimedTnt} within {@link #BLAST_SAFE_SQR} of the mob, or {@code null} if it's clear. */
+    private PrimedTnt nearestLiveCharge() {
+        double range = Math.sqrt(BLAST_SAFE_SQR);
+        PrimedTnt nearest = null;
+        double best = BLAST_SAFE_SQR;
+        for (PrimedTnt t : mob.level().getEntitiesOfClass(
+                PrimedTnt.class, mob.getBoundingBox().inflate(range), PrimedTnt::isAlive)) {
+            double d = mob.distanceToSqr(t);
+            if (d < best) {
+                best = d;
+                nearest = t;
+            }
         }
-        if (mob.level().getBlockState(tntPos).is(Blocks.TNT)) {
-            return false; // still a block (shouldn't happen for a primed charge, but be safe)
-        }
-        AABB box = new AABB(tntPos).inflate(1.5);
-        return mob.level().getEntitiesOfClass(PrimedTnt.class, box).isEmpty();
+        return nearest;
     }
 
     @Override
