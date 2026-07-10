@@ -55,12 +55,16 @@ public final class TntCombatGoal extends Goal implements DescribableGoal {
     /** How close (squared) the mob gets before it drops the TNT — ~3.5 blocks, so the charge lands on the enemy. */
     private static final double APPROACH_REACH_SQR = 12.25;
     private static final int WALK_TIMEOUT_TICKS = 200;       // 10s to reach the target before giving up
-    private static final int FLEE_TICKS = 90;                // ~fuse (80) + margin: run until the primed TNT blows
+    private static final int FLEE_TICKS = 90;                // ~fuse (80) + margin: wait out the primed TNT before re-arming
     private static final int FLEE_TRAP_TICKS = 30;           // a laid trap won't blow on our schedule — a short backpedal
     private static final double FLEE_SPEED = 1.4;            // sprint clear — the blast is lethal
     private static final int FLEE_REPATH_INTERVAL = 8;       // re-pick a retreat point every 0.4s
-    private static final int RETREAT_RADIUS = 12;
+    private static final int RETREAT_RADIUS = 10;
     private static final int RETREAT_VERTICAL = 6;
+    /** Clear-of-the-blast distance (squared) — ~11 blocks, comfortably past a TNT's (power 4) ~7-8-block hurt
+     *  radius. Once this far the mob stops sprinting and just waits out the fuse, so it stays near the fight
+     *  instead of bolting away, while keeping enough margin not to routinely blow itself up. */
+    private static final double BLAST_SAFE_SQR = 121.0;
     private static final int POST_CYCLE_COOLDOWN = 10;       // brief settle after a completed bomb before re-arming
     private static final int FAIL_COOLDOWN = 40;             // 2s pause after a failed placement, so we don't thrash
 
@@ -365,6 +369,12 @@ public final class TntCombatGoal extends Goal implements DescribableGoal {
                 phase = Phase.DONE;
                 cooldown = POST_CYCLE_COOLDOWN;
             }
+            return;
+        }
+        // Sprint straight away from the charge only until clear of the blast, then hold and wait it out — so the
+        // mob stays near the fight and re-engages promptly rather than bolting across the map on every cycle.
+        if (tntPos != null && mob.distanceToSqr(danger) >= BLAST_SAFE_SQR) {
+            mob.getNavigation().stop();
             return;
         }
         if (++fleeRepathTicks >= FLEE_REPATH_INTERVAL || mob.getNavigation().isDone()) {
