@@ -539,7 +539,7 @@
     },
     {
       "id": "playermob-drops-everything-on-death",
-      "version": "0.72.0",
+      "version": "0.73.0",
       "type": "fix",
       "title": "PlayerMob drops absolutely everything on death",
       "summary": "A PlayerMob's death now drops its full backpack with zero exceptions \u2014 TNT, end crystals, obsidian, and igniters included, on top of its already-guaranteed equipped gear (weapon, off-hand, armor). Killing a bomber no longer withholds its explosives kit; it drops the whole thing, exactly like a player.",
@@ -548,7 +548,7 @@
         "End crystals and their obsidian base now drop on death instead of being withheld",
         "Equipped gear and ordinary backpack items are unaffected \u2014 already dropped at 100% before this fix"
       ],
-      "pr": 154,
+      "pr": 155,
       "date": "2026-07-10",
       "released": false,
       "released_in": null,
