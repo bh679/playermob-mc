@@ -20,9 +20,8 @@ import games.brennan.playermob.entity.goal.AttackOrder;
 import games.brennan.playermob.entity.goal.Order;
 import games.brennan.playermob.entity.goal.OrderType;
 import games.brennan.playermob.skin.LocalSkinFolder;
-import games.brennan.playermob.skin.LocalSkinRef;
 import games.brennan.playermob.skin.PlayerMobSkinRegistry;
-import games.brennan.playermob.skin.PlayerSkinResolver;
+import games.brennan.playermob.skin.SkinNameApplier;
 import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -32,7 +31,6 @@ import net.minecraft.commands.arguments.blocks.BlockStateArgument;
 import net.minecraft.commands.arguments.coordinates.Vec3Argument;
 import net.minecraft.commands.arguments.item.ItemArgument;
 import net.minecraft.core.BlockPos;
-import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
@@ -1111,26 +1109,11 @@ public final class ReincarnateCommand {
         // names one, the mob wears it immediately. Otherwise <displayName> is treated as a player
         // name and that player's skin is resolved off-thread, applied when it lands.
         boolean localSkin = LocalSkinFolder.resolve(name) != null;
-        if (localSkin) {
-            mob.setSkinTextureUrl(LocalSkinRef.encode(name));
+        SkinNameApplier.apply(source.getServer(), name, mob, () -> {
             if (autoName) {
                 mob.applyNameplate(name);
             }
-        } else {
-            MinecraftServer server = source.getServer();
-            PlayerSkinResolver.resolveAsync(server, name, opt -> {
-                if (mob.isRemoved()) {
-                    return;
-                }
-                opt.ifPresent(resolved -> {
-                    mob.setSkinTextureUrl(resolved.url());
-                    mob.setSkinSlim(resolved.slim());
-                    if (autoName) {
-                        mob.applyNameplate(name);
-                    }
-                });
-            });
-        }
+        });
         String who = customName != null
             ? "Summoned a PlayerMob named \"" + customName + "\""
             : "Summoned a PlayerMob";

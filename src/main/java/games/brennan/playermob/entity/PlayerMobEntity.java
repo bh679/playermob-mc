@@ -40,6 +40,7 @@ import games.brennan.playermob.skin.SkinDisplayName;
 import games.brennan.playermob.skin.PlayerMobSkin;
 import games.brennan.playermob.skin.PlayerMobSkinRegistry;
 import games.brennan.playermob.skin.SkinModel;
+import games.brennan.playermob.skin.SkinNameApplier;
 import games.brennan.playermob.skin.SkinSourceSelector;
 import games.brennan.playermob.compat.GameRuleCompat;
 import games.brennan.playermob.compat.ItemDataCompat;
@@ -292,6 +293,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private static final String TAG_SKIN_INDEX = "SkinIndex";
     private static final String TAG_SKIN_TEXTURE_URL = "SkinTextureUrl";
     private static final String TAG_SKIN_SLIM = "SkinSlim";
+    private static final String TAG_SKIN_PLAYER_NAME = "SkinPlayerName";
     private static final String TAG_CLOSES_DOORS = "ClosesDoors";
     private static final String TAG_TRAIN_EXPLORE_DIR = "TrainExploreDir";
     private static final String TAG_TRAIN_PAIR_PARTNER = "TrainPairPartner";
@@ -369,6 +371,15 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * is actually present, so a trait-only egg still rolls a random skin.
      */
     private boolean skinExplicit;
+
+    /**
+     * A player name to resolve into a skin on the next server tick — set by {@link #readCustomTag} when a
+     * {@code /summon} (or entity-egg {@code entity_data}) carries a {@code SkinPlayerName} tag. Deliberately
+     * <b>not</b> persisted: it's a one-shot input, consumed by {@link #resolvePendingSkinPlayerName} the
+     * moment it's read, same as {@code /playermob summon}'s own async skin apply (see
+     * {@link games.brennan.playermob.skin.SkinNameApplier}).
+     */
+    private String pendingSkinPlayerName;
 
     /**
      * Transient (never saved): when {@code true}, {@link #finalizeSpawn} skips the generic skin-source
@@ -802,6 +813,23 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // entity — it froze at the start of a swing, so punch/attack swings never animated. Advance
         // it each tick (both sides) so commanded and combat swings play out like a real player's.
         updateSwingTime();
+        resolvePendingSkinPlayerName();
+    }
+
+    /**
+     * Kick off the async skin lookup for a {@link #pendingSkinPlayerName} set by {@link #readCustomTag} —
+     * covers both a fresh {@code /summon ... {SkinPlayerName:"..."}} (which skips {@code finalizeSpawn}
+     * entirely when NBT is supplied) and an entity egg / Dungeon Train spawn (whose {@code entity_data} is
+     * merged before {@code finalizeSpawn} runs). Entity has no reliable "just added to a ServerLevel" hook
+     * in this version, so this piggybacks on the first server tick instead; a no-op once resolved (or on
+     * the client, where this field is never set).
+     */
+    private void resolvePendingSkinPlayerName() {
+        if (pendingSkinPlayerName != null && level() instanceof ServerLevel serverLevel) {
+            String name = pendingSkinPlayerName;
+            pendingSkinPlayerName = null;
+            SkinNameApplier.apply(serverLevel.getServer(), name, this);
+        }
     }
 
     @Override
@@ -1350,6 +1378,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     public void setDeferAutoName(boolean defer) {
         this.deferAutoName = defer;
     }
+
 
     /**
      * If the configured {@link AutoNameMode} covers this spawn's category, give the mob a nameplate drawn
@@ -3372,6 +3401,17 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             setSkinTextureUrl(NbtCompat.getStringOr(tag, TAG_SKIN_TEXTURE_URL, ""));
             setSkinSlim(NbtCompat.getBooleanOr(tag, TAG_SKIN_SLIM, false));
             skinExplicit = true;
+        }
+        // Summon-by-player-name: resolved off-thread on the next server tick (see
+        // resolvePendingSkinPlayerName), not here — readAdditionalSaveData has no guaranteed
+        // server-thread access. Skipped when a skin key above already pinned skinExplicit, so an
+        // explicit SkinTextureUrl wins.
+        if (!skinExplicit && NbtCompat.containsOfType(tag, TAG_SKIN_PLAYER_NAME, Tag.TAG_STRING)) {
+            String name = NbtCompat.getStringOr(tag, TAG_SKIN_PLAYER_NAME, "");
+            if (!name.isBlank()) {
+                pendingSkinPlayerName = name;
+                skinExplicit = true;
+            }
         }
 
         recentlyExploredBlocks.clear();
