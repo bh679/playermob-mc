@@ -553,6 +553,21 @@
       "released": true,
       "released_in": "v0.73.0",
       "released_at": "2026-07-10T13:06:35Z"
+    },
+    {
+      "id": "summon-by-player-name-nbt",
+      "version": "0.74.0",
+      "type": "feat",
+      "title": "Summon a PlayerMob wearing a named player's skin via NBT",
+      "summary": "A raw /summon (or entity egg) can now carry a SkinPlayerName tag to wear a named player's real skin, composable with any other NBT (attributes, health, etc.) in the same command.",
+      "highlights": [
+        "Local skin-folder files still take priority; otherwise the name is resolved against a real Mojang skin, same as /playermob summon"
+      ],
+      "pr": 157,
+      "date": "2026-07-14",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
