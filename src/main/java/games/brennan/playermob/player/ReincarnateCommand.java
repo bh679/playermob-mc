@@ -16,6 +16,8 @@ import games.brennan.playermob.entity.AutoNameMode;
 import games.brennan.playermob.entity.DispositionTraits;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.entity.PlayerMobSummon;
+import games.brennan.playermob.entity.StayAnchor;
+import games.brennan.playermob.entity.StayNearPolicy;
 import games.brennan.playermob.entity.goal.AttackOrder;
 import games.brennan.playermob.entity.goal.Order;
 import games.brennan.playermob.entity.goal.OrderType;
@@ -66,6 +68,10 @@ import java.util.Collection;
  *       {@code config/playermob/skins}) if one matches, otherwise a player name whose skin is resolved.
  *       Append {@code named} to also give the mob a nameplate — {@code customName} if supplied, otherwise
  *       {@code displayName}.</li>
+ *   <li>{@code /playermob stay <name> ( off | here | <pos> | <target> ) [<radius>]} — tether a
+ *       PlayerMob near an anchor (a fixed position, or a live player / named PlayerMob) so it won't
+ *       wander more than {@code radius} blocks (default 32) away; {@code off} releases it. The anchor
+ *       persists in the mob's NBT (also authorable via {@code /summon …{PlayerMobData:{StayNear:{…}}}}).</li>
  *   <li>{@code /playermob debug spawnlog [on|off]} — toggle (or report) the colour-coded
  *       Dungeon-Train auto-spawn chat log for this session.</li>
  *   <li>{@code /playermob unlimitedammo [on|off]} — toggle (or report) global unlimited ammo for
@@ -110,6 +116,7 @@ public final class ReincarnateCommand {
                 .requires(source -> source.hasPermission(2))
                 //?}
                 .then(orderTree(buildContext))
+                .then(stayTree())
                 .then(Commands.literal("reincarnate")
                     .then(Commands.argument("player", GameProfileArgument.gameProfile())
                         .executes(ReincarnateCommand::reincarnate)))
@@ -347,6 +354,109 @@ public final class ReincarnateCommand {
                         .suggests(TARGET_SUGGESTIONS)
                         .then(Commands.argument("block", BlockStateArgument.block(buildContext))
                             .executes(ReincarnateCommand::orderPlaceEntity)))));
+    }
+
+    // ---- /playermob stay <name> ( off | here | <pos> | <target> ) [<radius>] --------------------
+
+    /**
+     * Builds the {@code stay} subtree: {@code /playermob stay <name> ( off | here | <pos> | <target> )
+     * [<radius>]}. Tethers a PlayerMob so it won't wander more than {@code radius} blocks (default
+     * {@value StayNearPolicy#DEFAULT_RADIUS}) from an anchor — {@code here}/{@code <pos>} pin a fixed
+     * spot, {@code <target>} pins a live player or named PlayerMob, {@code off} releases the tether.
+     * The {@code <pos>} (vec3) branch binds before the {@code <target>} (word) branch, exactly like
+     * the {@code walk} subtree, so {@code ~ ~ ~} sets an anchor "here" and a bare word is a target.
+     */
+    private static LiteralArgumentBuilder<CommandSourceStack> stayTree() {
+        return Commands.literal("stay")
+            .then(Commands.argument("name", StringArgumentType.word())
+                .suggests(MOB_NAME_SUGGESTIONS)
+                .then(Commands.literal("off").executes(ReincarnateCommand::stayOff))
+                .then(Commands.literal("here")
+                    .executes(ReincarnateCommand::stayHere)
+                    .then(radiusArg().executes(ReincarnateCommand::stayHere)))
+                .then(Commands.argument("pos", Vec3Argument.vec3())
+                    .executes(ReincarnateCommand::stayPos)
+                    .then(radiusArg().executes(ReincarnateCommand::stayPos)))
+                .then(Commands.argument("target", StringArgumentType.word())
+                    .suggests(TARGET_SUGGESTIONS)
+                    .executes(ReincarnateCommand::stayEntity)
+                    .then(radiusArg().executes(ReincarnateCommand::stayEntity))));
+    }
+
+    /** A fresh {@code radius} argument node bounded to the policy's settable range (consumed per use). */
+    private static RequiredArgumentBuilder<CommandSourceStack, Integer> radiusArg() {
+        return Commands.argument("radius",
+            IntegerArgumentType.integer(StayNearPolicy.MIN_RADIUS, StayNearPolicy.MAX_RADIUS));
+    }
+
+    /** The supplied radius, or {@link StayNearPolicy#DEFAULT_RADIUS} when the optional arg is absent. */
+    private static int stayRadius(CommandContext<CommandSourceStack> ctx) {
+        return has(ctx, "radius")
+            ? IntegerArgumentType.getInteger(ctx, "radius")
+            : StayNearPolicy.DEFAULT_RADIUS;
+    }
+
+    /** {@code /playermob stay <name> off} — release the tether. */
+    private static int stayOff(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
+        if (mob == null) {
+            return 0;
+        }
+        mob.clearStayAnchor();
+        String who = label(mob);
+        source.sendSuccess(() -> Component.literal(who + " will now roam freely."), true);
+        return 1;
+    }
+
+    /** {@code /playermob stay <name> here [<radius>]} — tether to the mob's current position. */
+    private static int stayHere(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
+        if (mob == null) {
+            return 0;
+        }
+        return anchorAt(source, mob, mob.blockPosition(), stayRadius(ctx));
+    }
+
+    /** {@code /playermob stay <name> <pos> [<radius>]} — tether to a fixed position. */
+    private static int stayPos(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
+        if (mob == null) {
+            return 0;
+        }
+        BlockPos pos = BlockPos.containing(Vec3Argument.getVec3(ctx, "pos"));
+        return anchorAt(source, mob, pos, stayRadius(ctx));
+    }
+
+    /** Set a position tether and report it. */
+    private static int anchorAt(CommandSourceStack source, PlayerMobEntity mob, BlockPos pos, int radius) {
+        mob.setStayAnchor(StayAnchor.ofPosition(pos, radius));
+        String who = label(mob);
+        source.sendSuccess(() -> Component.literal(who + " will stay within " + radius + " blocks of "
+            + pos.getX() + " " + pos.getY() + " " + pos.getZ() + "."), true);
+        return 1;
+    }
+
+    /** {@code /playermob stay <name> <target> [<radius>]} — tether to a live player or named PlayerMob. */
+    private static int stayEntity(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
+        if (mob == null) {
+            return 0;
+        }
+        LivingEntity target = resolveTarget(source, mob, StringArgumentType.getString(ctx, "target"));
+        if (target == null) {
+            return 0;
+        }
+        int radius = stayRadius(ctx);
+        mob.setStayAnchor(StayAnchor.ofEntity(target.getUUID(), radius));
+        String who = label(mob);
+        String targetName = target.getName().getString();
+        source.sendSuccess(() -> Component.literal(
+            who + " will stay within " + radius + " blocks of " + targetName + "."), true);
+        return 1;
     }
 
     /** An entity-directed action literal (punch / gift / greet) taking a {@code <target>}. */

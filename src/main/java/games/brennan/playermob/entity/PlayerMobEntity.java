@@ -26,6 +26,7 @@ import games.brennan.playermob.entity.goal.RaidArmorStandsGoal;
 import games.brennan.playermob.entity.goal.RaidContainersGoal;
 import games.brennan.playermob.entity.goal.SeekAmmoGoal;
 import games.brennan.playermob.entity.goal.SkepticalWatchGoal;
+import games.brennan.playermob.entity.goal.StayNearGoal;
 import games.brennan.playermob.entity.goal.EndCrystalCombatGoal;
 import games.brennan.playermob.entity.goal.TntCombatGoal;
 import games.brennan.playermob.entity.goal.TrainRecoveryGoal;
@@ -302,6 +303,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private static final String TAG_POS = "Pos";
     private static final String TAG_UUID = "UUID";
     private static final String TAG_TICK = "Tick";
+    private static final String TAG_STAY_NEAR = "StayNear";
 
     // ---- Fields -----------------------------------------------------------
 
@@ -435,6 +437,29 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     /** Clear the pending order — called by {@link CommandedActionGoal} once it's done. */
     public void clearOrder() {
         this.pendingOrder = null;
+    }
+
+    /**
+     * The stay-near tether keeping this mob within a radius of an anchor (a fixed position or a live
+     * entity), or {@code null} when it may roam freely. Persisted in {@code PlayerMobData/StayNear};
+     * read each tick by {@link StayNearGoal}. Set/cleared by {@code /playermob stay …} or authored in
+     * spawn NBT.
+     */
+    private StayAnchor stayAnchor;
+
+    /** The mob's stay-near tether, or {@code null} if it roams freely. */
+    public StayAnchor getStayAnchor() {
+        return this.stayAnchor;
+    }
+
+    /** Tether this mob near {@code anchor} (a position or entity + radius). */
+    public void setStayAnchor(StayAnchor anchor) {
+        this.stayAnchor = anchor;
+    }
+
+    /** Remove the stay-near tether — the mob roams freely again. */
+    public void clearStayAnchor() {
+        this.stayAnchor = null;
     }
 
     /**
@@ -733,6 +758,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // fights is then automatic: following parks the mob beside the loved one where the
         // target goals acquire foes. See FollowLovedOneGoal / FollowLovedOnePolicy.
         this.goalSelector.addGoal(2, new FollowLovedOneGoal(this));
+        // Stay-near tether: keep the mob within its anchor's radius. Priority 2 like FollowLovedOne
+        // so it preempts the own-tasks (raid 3 … stroll 8) that cause wandering, yet self-gates on
+        // "no target" (registered after the attack goal) so combat wins and the mob only walks back
+        // once the fight ends. No-op whenever the mob has no anchor or is already inside its radius.
+        this.goalSelector.addGoal(2, new StayNearGoal(this));
         // EatFoodGoal added BEFORE the raid goals at the same priority so
         // its canUse() is evaluated first — a low-HP mob with food prefers
         // eating over walking to the next chest.
@@ -3369,6 +3399,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             entities.add(entry);
         }
         tag.put(TAG_EXPLORED_ENTITIES, entities);
+
+        // Stay-near tether — additive. Only written when tethered (most mobs aren't), so an
+        // untethered mob round-trips no key (matches the TrainExploreDir / SkinTextureUrl pattern).
+        if (stayAnchor != null) {
+            CompoundTag stay = new CompoundTag();
+            stayAnchor.save(stay);
+            tag.put(TAG_STAY_NEAR, stay);
+        }
     }
 
     /** Read every PlayerMob custom field from {@code tag}. Version-agnostic (CompoundTag + NbtCompat). */
@@ -3434,6 +3472,12 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
                 }
             }
         }
+
+        // Stay-near tether — additive. Missing key ⇒ null ⇒ roams freely (every pre-feature mob).
+        // Present ⇒ rebuild the anchor; StayAnchor.load returns null for a malformed/empty compound.
+        this.stayAnchor = NbtCompat.containsOfType(tag, TAG_STAY_NEAR, Tag.TAG_COMPOUND)
+            ? StayAnchor.load(NbtCompat.getCompoundOrEmpty(tag, TAG_STAY_NEAR))
+            : null;
     }
 
     // ---- Death drops -----------------------------------------------------
