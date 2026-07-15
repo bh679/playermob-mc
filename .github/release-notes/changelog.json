@@ -568,6 +568,23 @@
       "released": true,
       "released_in": "v0.74.0",
       "released_at": "2026-07-14T04:31:03Z"
+    },
+    {
+      "id": "neutral-mob-truce",
+      "version": "0.75.0",
+      "type": "fix",
+      "title": "PlayerMobs stop attacking neutral mobs unprovoked",
+      "summary": "PlayerMobs used to charge and attack zombified piglins on sight. Now they leave neutral mobs \u2014 zombified piglins, endermen, piglins, iron golems \u2014 alone unless the mob turns hostile first, just like these mobs leave players alone until provoked. PlayerMobs still defend themselves when attacked, and still hunt genuinely hostile mobs like zombies and skeletons.",
+      "highlights": [
+        "Zombified piglins, endermen and piglins are no longer attacked on sight",
+        "PlayerMobs still fight back if a neutral mob turns on them",
+        "Genuinely hostile mobs (zombies, skeletons, creepers\u2026) are still engaged as before"
+      ],
+      "pr": 159,
+      "date": "2026-07-15",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
