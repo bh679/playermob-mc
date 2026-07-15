@@ -77,6 +77,7 @@ import net.minecraft.world.level.block.entity.ShulkerBoxBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Mob;
 //? if >=26 {
 /*import net.minecraft.world.entity.EntitySpawnReason;
 *///?} else {
@@ -1667,6 +1668,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         TargetCategory category = TargetCategory.classify(entity);
         if (category == null) {
             return Reaction.IGNORE;
+        }
+        // A neutral mob is left alone until it actually turns hostile toward this mob
+        // (it's now targeting us). Only then is it engaged proactively — as a hostile
+        // — so a brave mob fights the aggroed piglin and a timid one flees it. Being
+        // hit without a prior target is still covered by the hurt/retaliation path.
+        if (category == TargetCategory.NEUTRAL_MOBS
+                && entity instanceof Mob mob && mob.getTarget() == this) {
+            category = TargetCategory.HOSTILE_MOBS;
         }
         float feeling = category == TargetCategory.PLAYERS
             ? feelings.feelingToward(entity.getUUID())

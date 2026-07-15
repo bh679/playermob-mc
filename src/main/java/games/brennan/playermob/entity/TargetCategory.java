@@ -1,6 +1,7 @@
 package games.brennan.playermob.entity;
 
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.NeutralMob;
 import net.minecraft.world.entity.animal.Animal;
 import net.minecraft.world.entity.monster.Enemy;
 //? if >=26 {
@@ -29,6 +30,14 @@ public enum TargetCategory {
     /** Vanilla hostile mobs ({@link Enemy} — zombies, skeletons, creepers, …). */
     HOSTILE_MOBS,
 
+    /**
+     * Vanilla neutral mobs ({@link NeutralMob} — zombified piglins, endermen,
+     * piglins, iron golems, …): harmless until provoked, so never proactively
+     * attacked. Retaliation still applies once one actually turns hostile — see
+     * {@link DispositionResolver#resolve} and {@code PlayerMobEntity.reactionToward}.
+     */
+    NEUTRAL_MOBS,
+
     /** Passive farm/wild animals ({@link Animal}). */
     ANIMALS,
 
@@ -44,8 +53,11 @@ public enum TargetCategory {
      * them and every path (attack, flee, greet, watch) ignores them — mirroring
      * vanilla's {@code EntitySelector.NO_CREATIVE_OR_SPECTATOR}. Order matters:
      * the PlayerMob check is first (it's also an {@code Enemy}); villagers before
-     * animals; the hostile check last so a future hostile animal still classifies
-     * as an animal.
+     * animals; the {@link NeutralMob} check sits after animals (so neutral-but-passive
+     * mobs like wolves/bees, which are {@code Animal}, stay {@link #ANIMALS}) and
+     * before the {@code Enemy} check (so a neutral {@code Enemy} like a zombified
+     * piglin classifies as {@link #NEUTRAL_MOBS}, not {@link #HOSTILE_MOBS}); the
+     * hostile check last so a future hostile animal still classifies as an animal.
      */
     public static TargetCategory classify(LivingEntity entity) {
         if (entity instanceof PlayerMobEntity) return PLAYERS; // own kind — never creative/spectator
@@ -56,6 +68,7 @@ public enum TargetCategory {
         }
         if (entity instanceof AbstractVillager) return VILLAGERS;
         if (entity instanceof Animal) return ANIMALS;
+        if (entity instanceof NeutralMob) return NEUTRAL_MOBS;
         if (entity instanceof Enemy) return HOSTILE_MOBS;
         return null;
     }

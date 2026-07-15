@@ -10,6 +10,9 @@ package games.brennan.playermob.entity;
  * <h2>Model</h2>
  * <ul>
  *   <li><b>Hostile mobs</b> → fight or flee by fight/flight (no bubble).</li>
+ *   <li><b>Neutral mobs</b> → always ignore proactively (harmless until provoked). The
+ *       entity re-treats one as hostile only once it actually turns on the mob; being
+ *       hit is handled by the retaliation path, not here.</li>
  *   <li><b>Animals / villagers</b> → greet if friendly, else ignore (never proactively
  *       attacked; hunger-hunting is a separate goal).</li>
  *   <li><b>Players / PlayerMobs</b>:
@@ -113,6 +116,11 @@ public final class DispositionResolver {
         switch (category) {
             case HOSTILE_MOBS:
                 return fightFlight >= FF_FIGHT ? Reaction.FIGHT : Reaction.FLEE;
+            case NEUTRAL_MOBS:
+                // Harmless until provoked — never acquired proactively. Once a neutral
+                // mob actually turns on the mob, the entity reclassifies it to
+                // HOSTILE_MOBS before calling resolve, so this stays a pure "leave it be".
+                return Reaction.IGNORE;
             case ANIMALS:
             case VILLAGERS:
                 return friendliness >= FRIEND_GREET ? Reaction.GREET : Reaction.IGNORE;

@@ -61,6 +61,19 @@ class DispositionResolverTest {
         assertEquals(Reaction.FLEE, resolve(4, 9, 5, TargetCategory.HOSTILE_MOBS, 9));
     }
 
+    // ---- neutral mobs: never proactively attacked, whatever the traits ----
+
+    @Test
+    void neutralMobsAlwaysIgnoredProactively() {
+        // A neutral mob (zombified piglin, enderman, …) is harmless until provoked, so
+        // resolve never returns FIGHT/FLEE for it — regardless of fight/flight, distance,
+        // or friendliness. (The entity reclassifies an already-aggroed one to HOSTILE_MOBS
+        // before calling resolve; retaliation on a hit is a separate path.)
+        assertEquals(Reaction.IGNORE, resolve(10, 0, 5, TargetCategory.NEUTRAL_MOBS, 1));   // fearless, point-blank
+        assertEquals(Reaction.IGNORE, resolve(0, 10, 5, TargetCategory.NEUTRAL_MOBS, 1));   // timid, point-blank
+        assertEquals(Reaction.IGNORE, resolve(5, 5, 5, TargetCategory.NEUTRAL_MOBS, 16));   // balanced, far
+    }
+
     // ---- animals / villagers: greet-if-friendly else ignore, never attacked ----
 
     @Test
