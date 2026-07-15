@@ -568,6 +568,24 @@
       "released": true,
       "released_in": "v0.74.0",
       "released_at": "2026-07-14T04:31:03Z"
+    },
+    {
+      "id": "durable-orders",
+      "version": "0.75.0",
+      "type": "feat",
+      "title": "Orders stick until they're done",
+      "summary": "Commands you give a PlayerMob (walk, greet, gift, steal, use, place, punch) no longer get forgotten if they take a while or the mob is interrupted. The mob now keeps the task and finishes it \u2014 reacting to threats along the way and picking the order back up afterward.",
+      "highlights": [
+        "Orders persist until executed, instead of being dropped after ~10 seconds",
+        "By default the mob fights or flees a threat mid-task, then resumes the order",
+        "New flags: 'for <n> s' sets how long to keep trying, 'forever' never gives up, 'nonstop' ignores distractions",
+        "Each mob remembers its own default timeout / interruptibility (settable via NBT)"
+      ],
+      "pr": 161,
+      "date": "2026-07-15",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
