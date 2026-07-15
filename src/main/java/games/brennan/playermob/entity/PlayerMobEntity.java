@@ -297,6 +297,8 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private static final String TAG_SKIN_PLAYER_NAME = "SkinPlayerName";
     private static final String TAG_CLOSES_DOORS = "ClosesDoors";
     private static final String TAG_TRAIN_EXPLORE_DIR = "TrainExploreDir";
+    private static final String TAG_ORDER_TIMEOUT = "OrderTimeout";
+    private static final String TAG_ORDER_INTERRUPTIBLE = "OrderInterruptible";
     private static final String TAG_TRAIN_PAIR_PARTNER = "TrainPairPartner";
     private static final String TAG_EXPLORED_BLOCKS = "ExploredBlocks";
     private static final String TAG_EXPLORED_ENTITIES = "ExploredEntities";
@@ -416,6 +418,21 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private Order pendingOrder;
 
     /**
+     * The {@code tickCount} at which {@link #pendingOrder} was issued — used by
+     * {@link #tickOrderTimeout()} to abandon an order that can't be executed within its
+     * {@link Order#timeoutTicks()} window. Transient server-only AI state.
+     */
+    private int orderStartTick;
+
+    /**
+     * Per-mob defaults for the {@code /playermob order} timeout / interruptibility, applied when the
+     * command omits the {@code for <n> s} / {@code forever} / {@code nonstop} flags. Persisted in NBT
+     * (unlike the transient live order) so a summoned or {@code /data}-configured mob keeps them.
+     */
+    private int orderTimeoutDefaultTicks = Order.DEFAULT_TIMEOUT_TICKS;
+    private boolean orderInterruptibleDefault = true;
+
+    /**
      * A commanded {@link AttackOrder} (from {@code /playermob order ... attack}), monitored each
      * server tick by {@link #tickAttackOrder()} rather than via a goal. Mutually exclusive with
      * {@link #pendingOrder}. Transient server-only AI state — never persisted.
@@ -425,6 +442,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     /** Place a one-off order for this mob to carry out (replaces any pending order). */
     public void setOrder(Order order) {
         this.pendingOrder = order;
+        this.orderStartTick = this.tickCount;   // start the timeout clock for tickOrderTimeout
         this.attackOrder = null;   // a movement order supersedes a commanded attack
     }
 
@@ -436,6 +454,32 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     /** Clear the pending order — called by {@link CommandedActionGoal} once it's done. */
     public void clearOrder() {
         this.pendingOrder = null;
+    }
+
+    /**
+     * Abandon a pending order that has outlived its {@link Order#timeoutTicks()} window (default 2
+     * min; {@code < 0} = never). Called each server tick from {@link #customServerAiStep()} beside
+     * {@link #tickAttackOrder()} — the single owner of order expiry, so the order survives interruptions
+     * and re-approaches for its whole lifetime rather than being dropped by a local walk timeout.
+     */
+    private void tickOrderTimeout() {
+        Order o = this.pendingOrder;
+        if (o == null || o.timeoutTicks() < 0) {
+            return;
+        }
+        if (this.tickCount - this.orderStartTick >= o.timeoutTicks()) {
+            this.pendingOrder = null;
+        }
+    }
+
+    /** The mob's default order-timeout (ticks) applied when a command omits the {@code for}/{@code forever} flag. */
+    public int getOrderTimeoutDefaultTicks() {
+        return this.orderTimeoutDefaultTicks;
+    }
+
+    /** The mob's default order interruptibility applied when a command omits the {@code nonstop} flag. */
+    public boolean isOrderInterruptibleDefault() {
+        return this.orderInterruptibleDefault;
     }
 
     /**
@@ -847,6 +891,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             setTarget(null);   // recovering back onto a train preempts all combat
         }
         tickAttackOrder();   // enforce a commanded attack's stop limit (duration / hearts / hit-back)
+        tickOrderTimeout();  // abandon a movement order that outlived its timeout (default 2 min)
         latchTrainExploreDirection();
 
         // Tick down the door-close hold (armed by stuck-recovery, on or off a train) so a door it
@@ -3340,6 +3385,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // a save without this key reads back false ⇒ wide (the old bundled-mob look).
         tag.putBoolean(TAG_SKIN_SLIM, isSkinSlim());
         tag.putBoolean(TAG_CLOSES_DOORS, this.closesDoors);
+        // Per-mob order defaults (timeout / interruptibility) applied when a /playermob order command
+        // omits the flags. Additive — a save without these keys reads back the 2-min / interruptible
+        // defaults. The live pending order itself is transient and never persisted.
+        tag.putInt(TAG_ORDER_TIMEOUT, this.orderTimeoutDefaultTicks);
+        tag.putBoolean(TAG_ORDER_INTERRUPTIBLE, this.orderInterruptibleDefault);
         // Train march direction — additive. Only written once latched (!= 0) so a
         // mob that never boarded a train round-trips no key (matches the URL-skin
         // additive pattern above).
@@ -3398,6 +3448,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         }
         // Missing key (pre-door-feature saves) ⇒ false ⇒ leave-open. Additive.
         this.closesDoors = NbtCompat.getBooleanOr(tag, TAG_CLOSES_DOORS, false);
+        // Missing keys ⇒ the 2-min / interruptible order defaults (pre-durable-orders saves). Additive.
+        this.orderTimeoutDefaultTicks = NbtCompat.getIntOr(tag, TAG_ORDER_TIMEOUT, Order.DEFAULT_TIMEOUT_TICKS);
+        this.orderInterruptibleDefault = NbtCompat.getBooleanOr(tag, TAG_ORDER_INTERRUPTIBLE, true);
         // Missing key ⇒ 0 ⇒ unlatched ⇒ re-derived on the next train boarding. Additive.
         this.trainExploreDir = NbtCompat.getIntOr(tag, TAG_TRAIN_EXPLORE_DIR, 0);
         // Missing key ⇒ null ⇒ no pair (every pre-pair-feature mob). Additive.

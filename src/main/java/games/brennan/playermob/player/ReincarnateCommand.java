@@ -327,11 +327,10 @@ public final class ReincarnateCommand {
             .then(Commands.argument("name", StringArgumentType.word())
                 .suggests(MOB_NAME_SUGGESTIONS)
                 .then(Commands.literal("walk")
-                    .then(Commands.argument("pos", Vec3Argument.vec3())
-                        .executes(ReincarnateCommand::orderWalkPos))
-                    .then(Commands.argument("target", StringArgumentType.word())
-                        .suggests(TARGET_SUGGESTIONS)
-                        .executes(ReincarnateCommand::orderWalkEntity)))
+                    .then(orderFlags(Commands.argument("pos", Vec3Argument.vec3()),
+                        ReincarnateCommand::orderWalkPos))
+                    .then(orderFlags(Commands.argument("target", StringArgumentType.word())
+                        .suggests(TARGET_SUGGESTIONS), ReincarnateCommand::orderWalkEntity)))
                 .then(entityAction("punch", OrderType.PUNCH))
                 .then(entityAction("punchat", OrderType.PUNCH_AT))
                 .then(attackSubtree(buildContext))
@@ -341,21 +340,20 @@ public final class ReincarnateCommand {
                 .then(useSubtree(buildContext))
                 .then(Commands.literal("place")
                     .then(Commands.argument("pos", Vec3Argument.vec3())
-                        .then(Commands.argument("block", BlockStateArgument.block(buildContext))
-                            .executes(ReincarnateCommand::orderPlacePos)))
+                        .then(orderFlags(Commands.argument("block", BlockStateArgument.block(buildContext)),
+                            ReincarnateCommand::orderPlacePos)))
                     .then(Commands.argument("target", StringArgumentType.word())
                         .suggests(TARGET_SUGGESTIONS)
-                        .then(Commands.argument("block", BlockStateArgument.block(buildContext))
-                            .executes(ReincarnateCommand::orderPlaceEntity)))));
+                        .then(orderFlags(Commands.argument("block", BlockStateArgument.block(buildContext)),
+                            ReincarnateCommand::orderPlaceEntity)))));
     }
 
     /** An entity-directed action literal (punch / gift / greet) taking a {@code <target>}. */
     private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack> entityAction(
             String name, OrderType type) {
         return Commands.literal(name)
-            .then(Commands.argument("target", StringArgumentType.word())
-                .suggests(TARGET_SUGGESTIONS)
-                .executes(ctx -> orderEntity(ctx, type)));
+            .then(orderFlags(Commands.argument("target", StringArgumentType.word())
+                .suggests(TARGET_SUGGESTIONS), (ctx, t, i) -> orderEntity(ctx, type, t, i)));
     }
 
     // ---- attack subtree: attack <target> [kill|forever|return|<n> s|<n> hearts] [with <weapon> [spawn]] ----
@@ -434,6 +432,53 @@ public final class ReincarnateCommand {
         } catch (CommandSyntaxException e) {
             return ItemStack.EMPTY;
         }
+    }
+
+    // ---- shared order flags: [for <n> (s|seconds) | forever] [nonstop] on every movement order ----
+
+    /** Sentinel timeout meaning "no flag given — fall back to the mob's NBT default". */
+    private static final int ORDER_TIMEOUT_UNSET = Integer.MIN_VALUE;
+
+    /** A movement-order executor that also carries the resolved order flags (sentinels = use defaults). */
+    @FunctionalInterface
+    private interface OrderExec {
+        int run(CommandContext<CommandSourceStack> ctx, int timeoutTicks, Boolean interruptible);
+    }
+
+    /**
+     * Place {@code base} on {@code mob}, applying the flag-resolved lifetime / interruptibility — or the
+     * mob's NBT defaults when a flag was omitted ({@code ORDER_TIMEOUT_UNSET} / {@code null}).
+     * {@code timeoutTicks < 0} means "never time out" (the {@code forever} flag).
+     */
+    private static void placeOrder(PlayerMobEntity mob, Order base, int timeoutTicks, Boolean interruptible) {
+        int t = timeoutTicks == ORDER_TIMEOUT_UNSET ? mob.getOrderTimeoutDefaultTicks() : timeoutTicks;
+        boolean i = interruptible == null ? mob.isOrderInterruptibleDefault() : interruptible;
+        mob.setOrder(base.withSettings(t, i));
+    }
+
+    /**
+     * Attach the optional trailing order flags to a terminal {@code node}, all routing back to
+     * {@code exec}: {@code for <n> (s|seconds)} sets the timeout, {@code forever} disables it, and
+     * {@code nonstop} makes the order non-interruptible. Composable (e.g. {@code … for 30 s nonstop}).
+     * Mirrors the {@link #attackTail} pattern — the executor lambdas carry the settings explicitly, so
+     * no read-back of matched literals is needed.
+     */
+    private static <T extends ArgumentBuilder<CommandSourceStack, T>> T orderFlags(T node, OrderExec exec) {
+        node.executes(ctx -> exec.run(ctx, ORDER_TIMEOUT_UNSET, null));
+        node.then(Commands.literal("nonstop").executes(ctx -> exec.run(ctx, ORDER_TIMEOUT_UNSET, false)));
+        RequiredArgumentBuilder<CommandSourceStack, Integer> secs =
+            Commands.argument("timeoutSecs", IntegerArgumentType.integer(1, 1_000_000));
+        for (String unit : new String[]{"s", "seconds"}) {
+            secs.then(Commands.literal(unit)
+                .executes(ctx -> exec.run(ctx, IntegerArgumentType.getInteger(ctx, "timeoutSecs") * 20, null))
+                .then(Commands.literal("nonstop")
+                    .executes(ctx -> exec.run(ctx, IntegerArgumentType.getInteger(ctx, "timeoutSecs") * 20, false))));
+        }
+        node.then(Commands.literal("for").then(secs));
+        node.then(Commands.literal("forever")
+            .executes(ctx -> exec.run(ctx, -1, null))
+            .then(Commands.literal("nonstop").executes(ctx -> exec.run(ctx, -1, false))));
+        return node;
     }
 
     /** Execute an attack order: resolve mob + target, handle the optional weapon, then strike or sustain. */
@@ -568,7 +613,8 @@ public final class ReincarnateCommand {
     }
 
     /** {@code /playermob order <name> (punch|gift|greet) <target>} (attack has its own subtree). */
-    private static int orderEntity(CommandContext<CommandSourceStack> ctx, OrderType type) {
+    private static int orderEntity(CommandContext<CommandSourceStack> ctx, OrderType type,
+                                   int timeoutTicks, Boolean interruptible) {
         CommandSourceStack source = ctx.getSource();
         PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
         if (mob == null) {
@@ -580,7 +626,7 @@ public final class ReincarnateCommand {
         }
         String who = label(mob);
         String targetName = target.getName().getString();
-        mob.setOrder(Order.toward(type, target));
+        placeOrder(mob, Order.toward(type, target), timeoutTicks, interruptible);
         source.sendSuccess(() -> Component.literal(who + " ordered to " + verb(type) + " " + targetName + "."), true);
         return 1;
     }
@@ -592,15 +638,15 @@ public final class ReincarnateCommand {
     private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack> stealSubtree() {
         RequiredArgumentBuilder<CommandSourceStack, Integer> amount =
             Commands.argument("amount", IntegerArgumentType.integer(1, 1_000_000));
-        amount.then(Commands.literal("s").executes(ctx -> orderSteal(ctx, Order.FleeUnit.SECONDS)));
-        amount.then(Commands.literal("seconds").executes(ctx -> orderSteal(ctx, Order.FleeUnit.SECONDS)));
-        amount.then(Commands.literal("b").executes(ctx -> orderSteal(ctx, Order.FleeUnit.BLOCKS)));
-        amount.then(Commands.literal("blocks").executes(ctx -> orderSteal(ctx, Order.FleeUnit.BLOCKS)));
-        return Commands.literal("steal")
-            .then(Commands.argument("target", StringArgumentType.word())
-                .suggests(TARGET_SUGGESTIONS)
-                .executes(ctx -> orderSteal(ctx, Order.FleeUnit.NONE))
-                .then(amount));
+        amount.then(orderFlags(Commands.literal("s"), (ctx, t, i) -> orderSteal(ctx, Order.FleeUnit.SECONDS, t, i)));
+        amount.then(orderFlags(Commands.literal("seconds"), (ctx, t, i) -> orderSteal(ctx, Order.FleeUnit.SECONDS, t, i)));
+        amount.then(orderFlags(Commands.literal("b"), (ctx, t, i) -> orderSteal(ctx, Order.FleeUnit.BLOCKS, t, i)));
+        amount.then(orderFlags(Commands.literal("blocks"), (ctx, t, i) -> orderSteal(ctx, Order.FleeUnit.BLOCKS, t, i)));
+        RequiredArgumentBuilder<CommandSourceStack, String> target =
+            Commands.argument("target", StringArgumentType.word()).suggests(TARGET_SUGGESTIONS);
+        orderFlags(target, (ctx, t, i) -> orderSteal(ctx, Order.FleeUnit.NONE, t, i));
+        target.then(amount);
+        return Commands.literal("steal").then(target);
     }
 
     /**
@@ -612,14 +658,14 @@ public final class ReincarnateCommand {
             CommandBuildContext buildContext) {
         return Commands.literal("use")
             .then(Commands.argument("pos", Vec3Argument.vec3())
-                .then(Commands.argument("item", ItemArgument.item(buildContext))
-                    .executes(ctx -> orderUsePos(ctx, false))
-                    .then(Commands.literal("spawn").executes(ctx -> orderUsePos(ctx, true)))))
+                .then(orderFlags(Commands.argument("item", ItemArgument.item(buildContext)),
+                        (ctx, t, i) -> orderUsePos(ctx, false, t, i))
+                    .then(orderFlags(Commands.literal("spawn"), (ctx, t, i) -> orderUsePos(ctx, true, t, i)))))
             .then(Commands.argument("target", StringArgumentType.word())
                 .suggests(TARGET_SUGGESTIONS)
-                .then(Commands.argument("item", ItemArgument.item(buildContext))
-                    .executes(ctx -> orderUseEntity(ctx, false))
-                    .then(Commands.literal("spawn").executes(ctx -> orderUseEntity(ctx, true)))));
+                .then(orderFlags(Commands.argument("item", ItemArgument.item(buildContext)),
+                        (ctx, t, i) -> orderUseEntity(ctx, false, t, i))
+                    .then(orderFlags(Commands.literal("spawn"), (ctx, t, i) -> orderUseEntity(ctx, true, t, i)))));
     }
 
     /**
@@ -640,7 +686,8 @@ public final class ReincarnateCommand {
     }
 
     /** {@code /playermob order <name> use <pos> <item> [spawn]}. */
-    private static int orderUsePos(CommandContext<CommandSourceStack> ctx, boolean spawn) {
+    private static int orderUsePos(CommandContext<CommandSourceStack> ctx, boolean spawn,
+                                   int timeoutTicks, Boolean interruptible) {
         CommandSourceStack source = ctx.getSource();
         PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
         if (mob == null) {
@@ -651,7 +698,7 @@ public final class ReincarnateCommand {
         if (!provisionItem(source, mob, item, spawn)) {
             return 0;
         }
-        mob.setOrder(Order.use(pos, item));
+        placeOrder(mob, Order.use(pos, item), timeoutTicks, interruptible);
         String who = label(mob);
         String itemName = item.getHoverName().getString();
         source.sendSuccess(() -> Component.literal(who + " ordered to use " + itemName + " at "
@@ -660,7 +707,8 @@ public final class ReincarnateCommand {
     }
 
     /** {@code /playermob order <name> use <target> <item> [spawn]}. */
-    private static int orderUseEntity(CommandContext<CommandSourceStack> ctx, boolean spawn) {
+    private static int orderUseEntity(CommandContext<CommandSourceStack> ctx, boolean spawn,
+                                      int timeoutTicks, Boolean interruptible) {
         CommandSourceStack source = ctx.getSource();
         PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
         if (mob == null) {
@@ -674,7 +722,7 @@ public final class ReincarnateCommand {
         if (!provisionItem(source, mob, item, spawn)) {
             return 0;
         }
-        mob.setOrder(Order.use(target, item));
+        placeOrder(mob, Order.use(target, item), timeoutTicks, interruptible);
         String who = label(mob);
         String itemName = item.getHoverName().getString();
         String targetName = target.getName().getString();
@@ -686,15 +734,15 @@ public final class ReincarnateCommand {
     private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack> giftSubtree(
             CommandBuildContext buildContext) {
         return Commands.literal("gift")
-            .then(Commands.argument("target", StringArgumentType.word())
-                .suggests(TARGET_SUGGESTIONS)
-                .executes(ctx -> orderGift(ctx, false))
-                .then(Commands.argument("item", ItemArgument.item(buildContext))
-                    .executes(ctx -> orderGift(ctx, true))));
+            .then(orderFlags(Commands.argument("target", StringArgumentType.word())
+                    .suggests(TARGET_SUGGESTIONS), (ctx, t, i) -> orderGift(ctx, false, t, i))
+                .then(orderFlags(Commands.argument("item", ItemArgument.item(buildContext)),
+                    (ctx, t, i) -> orderGift(ctx, true, t, i))));
     }
 
     /** {@code /playermob order <name> gift <target> [<item>]}. */
-    private static int orderGift(CommandContext<CommandSourceStack> ctx, boolean withItem) {
+    private static int orderGift(CommandContext<CommandSourceStack> ctx, boolean withItem,
+                                 int timeoutTicks, Boolean interruptible) {
         CommandSourceStack source = ctx.getSource();
         PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
         if (mob == null) {
@@ -705,7 +753,8 @@ public final class ReincarnateCommand {
             return 0;
         }
         ItemStack item = withItem ? itemStack(ctx, "item") : ItemStack.EMPTY;
-        mob.setOrder(item.isEmpty() ? Order.toward(OrderType.GIFT, target) : Order.gift(target, item));
+        placeOrder(mob, item.isEmpty() ? Order.toward(OrderType.GIFT, target) : Order.gift(target, item),
+            timeoutTicks, interruptible);
         String who = label(mob);
         String targetName = target.getName().getString();
         String what = item.isEmpty() ? "a gift" : item.getHoverName().getString();
@@ -714,7 +763,8 @@ public final class ReincarnateCommand {
     }
 
     /** {@code /playermob order <name> steal <target> [<n> s|blocks]}. */
-    private static int orderSteal(CommandContext<CommandSourceStack> ctx, Order.FleeUnit unit) {
+    private static int orderSteal(CommandContext<CommandSourceStack> ctx, Order.FleeUnit unit,
+                                  int timeoutTicks, Boolean interruptible) {
         CommandSourceStack source = ctx.getSource();
         PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
         if (mob == null) {
@@ -725,7 +775,7 @@ public final class ReincarnateCommand {
             return 0;
         }
         int amount = unit == Order.FleeUnit.NONE ? 0 : IntegerArgumentType.getInteger(ctx, "amount");
-        mob.setOrder(Order.steal(target, amount, unit));
+        placeOrder(mob, Order.steal(target, amount, unit), timeoutTicks, interruptible);
         String who = label(mob);
         String targetName = target.getName().getString();
         String fleeNote = switch (unit) {
@@ -738,14 +788,14 @@ public final class ReincarnateCommand {
     }
 
     /** {@code /playermob order <name> walk <pos>}. */
-    private static int orderWalkPos(CommandContext<CommandSourceStack> ctx) {
+    private static int orderWalkPos(CommandContext<CommandSourceStack> ctx, int timeoutTicks, Boolean interruptible) {
         CommandSourceStack source = ctx.getSource();
         PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
         if (mob == null) {
             return 0;
         }
         Vec3 pos = Vec3Argument.getVec3(ctx, "pos");
-        mob.setOrder(Order.walkTo(BlockPos.containing(pos)));
+        placeOrder(mob, Order.walkTo(BlockPos.containing(pos)), timeoutTicks, interruptible);
         String who = label(mob);
         source.sendSuccess(() -> Component.literal(who + " ordered to walk to "
             + (int) pos.x + " " + (int) pos.y + " " + (int) pos.z + "."), true);
@@ -753,7 +803,7 @@ public final class ReincarnateCommand {
     }
 
     /** {@code /playermob order <name> walk <target>}. */
-    private static int orderWalkEntity(CommandContext<CommandSourceStack> ctx) {
+    private static int orderWalkEntity(CommandContext<CommandSourceStack> ctx, int timeoutTicks, Boolean interruptible) {
         CommandSourceStack source = ctx.getSource();
         PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
         if (mob == null) {
@@ -763,7 +813,7 @@ public final class ReincarnateCommand {
         if (target == null) {
             return 0;
         }
-        mob.setOrder(Order.walkTo(target));
+        placeOrder(mob, Order.walkTo(target), timeoutTicks, interruptible);
         String who = label(mob);
         String targetName = target.getName().getString();
         source.sendSuccess(() -> Component.literal(who + " ordered to walk to " + targetName + "."), true);
@@ -771,7 +821,7 @@ public final class ReincarnateCommand {
     }
 
     /** {@code /playermob order <name> place <pos> <block>}. */
-    private static int orderPlacePos(CommandContext<CommandSourceStack> ctx) {
+    private static int orderPlacePos(CommandContext<CommandSourceStack> ctx, int timeoutTicks, Boolean interruptible) {
         CommandSourceStack source = ctx.getSource();
         PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
         if (mob == null) {
@@ -779,11 +829,11 @@ public final class ReincarnateCommand {
         }
         BlockPos pos = BlockPos.containing(Vec3Argument.getVec3(ctx, "pos"));
         BlockState state = BlockStateArgument.getBlock(ctx, "block").getState();
-        return issuePlace(source, mob, pos, state);
+        return issuePlace(source, mob, pos, state, timeoutTicks, interruptible);
     }
 
     /** {@code /playermob order <name> place <target> <block>} — chase the live target, place at its feet. */
-    private static int orderPlaceEntity(CommandContext<CommandSourceStack> ctx) {
+    private static int orderPlaceEntity(CommandContext<CommandSourceStack> ctx, int timeoutTicks, Boolean interruptible) {
         CommandSourceStack source = ctx.getSource();
         PlayerMobEntity mob = resolveMob(source, StringArgumentType.getString(ctx, "name"));
         if (mob == null) {
@@ -794,7 +844,7 @@ public final class ReincarnateCommand {
             return 0;
         }
         BlockState state = BlockStateArgument.getBlock(ctx, "block").getState();
-        mob.setOrder(Order.placeAt(target, state));
+        placeOrder(mob, Order.placeAt(target, state), timeoutTicks, interruptible);
         String who = label(mob);
         String block = state.getBlock().getName().getString();
         String targetName = target.getName().getString();
@@ -802,8 +852,9 @@ public final class ReincarnateCommand {
         return 1;
     }
 
-    private static int issuePlace(CommandSourceStack source, PlayerMobEntity mob, BlockPos pos, BlockState state) {
-        mob.setOrder(Order.place(pos, state));
+    private static int issuePlace(CommandSourceStack source, PlayerMobEntity mob, BlockPos pos, BlockState state,
+                                  int timeoutTicks, Boolean interruptible) {
+        placeOrder(mob, Order.place(pos, state), timeoutTicks, interruptible);
         String who = label(mob);
         String block = state.getBlock().getName().getString();
         source.sendSuccess(() -> Component.literal(who + " ordered to place " + block + " at "

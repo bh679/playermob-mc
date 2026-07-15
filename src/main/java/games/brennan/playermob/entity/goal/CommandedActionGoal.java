@@ -1,6 +1,7 @@
 package games.brennan.playermob.entity.goal;
 
 import games.brennan.playermob.entity.PlayerMobEntity;
+import games.brennan.playermob.entity.Reaction;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.EquipmentSlot;
@@ -35,7 +36,10 @@ import java.util.EnumSet;
  */
 public final class CommandedActionGoal extends Goal implements DescribableGoal {
 
-    private static final int WALK_TIMEOUT_TICKS = 200;   // 10s to reach the target before giving up
+    // How far to scan for a threat worth yielding an interruptible order to (matches the flee goal's
+    // detectRange = fleeDistance 10 + DETECT_RANGE_BONUS 6). The order itself never times out here —
+    // PlayerMobEntity#tickOrderTimeout bounds the whole order lifetime.
+    private static final double FLEE_DETECT_RANGE = 16.0;
     private static final double ENTITY_REACH_SQR = 9.0;  // 3 blocks — close enough to punch/gift/greet/steal
     private static final double WALK_ARRIVE_SQR = 4.0;    // 2 blocks — "arrived" at a position
     private static final double PLACE_REACH_SQR = 20.25;  // 4.5 blocks — close enough to place
@@ -67,7 +71,6 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
 
     private Order order;
     private Phase phase = Phase.DONE;
-    private int walkTicks;
 
     // Greeting crouch state (mirrors FriendlyGreetGoal).
     private int crouchesTarget;
@@ -98,18 +101,34 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
 
     @Override
     public boolean canUse() {
-        return mob.getOrder() != null;
+        Order pending = mob.getOrder();
+        // An interruptible order defers to a live threat (combat / flee) so the mob reacts first,
+        // then re-acquires and resumes once the threat clears. A nonstop order starts regardless.
+        return pending != null && !(pending.interruptible() && reactionActive());
     }
 
     @Override
     public boolean canContinueToUse() {
-        if (order == null || phase == Phase.DONE) {
+        // The order was timed out by tickOrderTimeout, or replaced by a newer one — let go of the
+        // stale one (the goal caches `order`, so it wouldn't otherwise notice the entity cleared it).
+        if (order == null || mob.getOrder() != order || phase == Phase.DONE) {
             return false;
         }
         if (phase == Phase.FLEE) {
-            return true;   // finish the getaway even if the victim has gone
+            return true;   // the steal getaway is itself the action — never treat it as an interruption
+        }
+        // Yield to a reaction mid-order (interruptible only) so combat/flee take over; the order
+        // stays pending and this goal restarts from PATH once the threat is gone.
+        if (order.interruptible() && reactionActive()) {
+            return false;
         }
         return targetAlive();
+    }
+
+    /** True while a live threat (a combat target, or something to flee) warrants dropping the order. */
+    private boolean reactionActive() {
+        return mob.getTarget() != null
+            || mob.nearestWhereReaction(Reaction.FLEE, FLEE_DETECT_RANGE) != null;
     }
 
     /** An entity-directed order ends early if its target vanishes; position orders never do. */
@@ -122,7 +141,6 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
     public void start() {
         this.order = mob.getOrder();
         this.phase = Phase.PATH;
-        this.walkTicks = 0;
         this.struck = false;
     }
 
@@ -176,11 +194,8 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
             enterAct();
             return;
         }
-        if (++walkTicks > WALK_TIMEOUT_TICKS) {
-            // Couldn't reach it in time — abandon the order rather than stall forever.
-            phase = Phase.DONE;
-            return;
-        }
+        // No local give-up here: the order persists until it's executed or PlayerMobEntity#tickOrderTimeout
+        // abandons it (default 2 min). Re-path every tick so a moving/blocked target is still pursued.
         LivingEntity target = order.targetEntity();
         if (target != null) {
             mob.getNavigation().moveTo(target, speed);
@@ -387,7 +402,12 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
     public void stop() {
         mob.setCrouching(false);
         mob.getNavigation().stop();
-        mob.clearOrder();   // an order is one-shot — consumed whether it completed or was interrupted
+        // Consume the order only on genuine completion (every action routes through phase == DONE).
+        // A yield/interruption or a newer order leaves phase at PATH/ACT, so the pending order stays
+        // put and this goal re-acquires it later (bounded by PlayerMobEntity#tickOrderTimeout).
+        if (phase == Phase.DONE && mob.getOrder() == order) {
+            mob.clearOrder();
+        }
         this.order = null;
         this.phase = Phase.DONE;
     }
