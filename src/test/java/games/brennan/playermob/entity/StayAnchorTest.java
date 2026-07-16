@@ -63,6 +63,53 @@ class StayAnchorTest {
     }
 
     @Test
+    void playerNameAnchorRoundTrips() {
+        StayAnchor saved = StayAnchor.ofPlayerName("Steve", 16);
+
+        CompoundTag tag = new CompoundTag();
+        saved.save(tag);
+
+        StayAnchor loaded = StayAnchor.load(tag);
+        assertTrue(loaded != null);
+        assertTrue(loaded.isEntity()); // a named player is a live-entity anchor
+        assertEquals(16, loaded.radius());
+        // A player-name anchor writes AnchorPlayer only.
+        assertTrue(tag.contains("AnchorPlayer"));
+        assertFalse(tag.contains("AnchorEntity"));
+        assertFalse(tag.contains("AnchorPos"));
+    }
+
+    @Test
+    void blankPlayerNameIsNoAnchor() {
+        // A hand-authored AnchorPlayer:"" carries no target — treat as no anchor, not an empty tether.
+        CompoundTag tag = new CompoundTag();
+        tag.putString("AnchorPlayer", "");
+        tag.putInt("Radius", 16);
+        assertNull(StayAnchor.load(tag));
+    }
+
+    @Test
+    void loadPrecedenceEntityOverPlayerOverPos() {
+        // AnchorEntity wins over both others.
+        UUID id = new UUID(0xAAAAL, 0xBBBBL);
+        CompoundTag all = new CompoundTag();
+        StayAnchor.ofEntity(id, 20).save(all); // writes AnchorEntity + Radius
+        all.putString("AnchorPlayer", "Steve");
+        all.putLong("AnchorPos", BlockPos.ZERO.asLong());
+        assertTrue(StayAnchor.load(all).isEntity());
+        assertEquals(20, StayAnchor.load(all).radius()); // the UUID form's radius, not a default
+
+        // AnchorPlayer wins over AnchorPos when no UUID is present.
+        CompoundTag playerAndPos = new CompoundTag();
+        playerAndPos.putString("AnchorPlayer", "Alex");
+        playerAndPos.putLong("AnchorPos", BlockPos.ZERO.asLong());
+        playerAndPos.putInt("Radius", 12);
+        StayAnchor loaded = StayAnchor.load(playerAndPos);
+        assertTrue(loaded.isEntity()); // resolved as the player-name (live-entity) form, not the position
+        assertEquals(12, loaded.radius());
+    }
+
+    @Test
     void radiusIsClampedOnLoad() {
         // A hand-authored / tampered NBT with an out-of-range radius is clamped, not trusted.
         CompoundTag tooBig = new CompoundTag();

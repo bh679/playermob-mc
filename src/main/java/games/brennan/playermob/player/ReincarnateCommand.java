@@ -28,11 +28,13 @@ import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.commands.arguments.CompoundTagArgument;
 import net.minecraft.commands.arguments.GameProfileArgument;
 import net.minecraft.commands.arguments.blocks.BlockStateArgument;
 import net.minecraft.commands.arguments.coordinates.Vec3Argument;
 import net.minecraft.commands.arguments.item.ItemArgument;
 import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
@@ -128,21 +130,30 @@ public final class ReincarnateCommand {
                         // Suggest local-folder skin names (you can also type any player name).
                         .suggests(LOCAL_SKIN_SUGGESTIONS)
                         .executes(ctx -> summon(ctx, false))
-                        // `named [<customName>]` gives the mob a nameplate (defaults to displayName);
-                        // attached at every level so it can follow any arg combo. Literals bind before
-                        // the vec3/int args, so it never clashes with `pos`/the trait numbers.
+                        // `named [<customName>]`, `stay …`, and `{NBT}` are mutually-exclusive tails
+                        // attached at every level so any of them can follow any arg combo. `named`/`stay`
+                        // are literals (bind before the vec3/int args) and `{NBT}` starts with `{`, so
+                        // none clashes with `pos`/the trait numbers.
                         .then(namedFlag())
+                        .then(summonStaySubtree())
+                        .then(summonNbtArg())
                         // Position chains before the traits (and a number alone would be ambiguous with
                         // a vec3 coord), so use `~ ~ ~` to set traits "here" — mirrors /summon's [pos].
                         .then(Commands.argument("pos", Vec3Argument.vec3())
                             .executes(ctx -> summon(ctx, false))
                             .then(namedFlag())
+                            .then(summonStaySubtree())
+                            .then(summonNbtArg())
                             .then(Commands.argument("friendliness", IntegerArgumentType.integer(0, 10))
                                 .executes(ctx -> summon(ctx, false))
                                 .then(namedFlag())
+                                .then(summonStaySubtree())
+                                .then(summonNbtArg())
                                 .then(Commands.argument("fightFlight", IntegerArgumentType.integer(0, 10))
                                     .executes(ctx -> summon(ctx, false))
-                                    .then(namedFlag()))))))
+                                    .then(namedFlag())
+                                    .then(summonStaySubtree())
+                                    .then(summonNbtArg()))))))
                 .then(Commands.literal("debug")
                     .then(Commands.literal("spawnlog")
                         .executes(ReincarnateCommand::querySpawnLog)
@@ -1233,6 +1244,96 @@ public final class ReincarnateCommand {
     }
 
     /**
+     * The {@code stay ( off | here | <anchorPos> | <anchorTarget> ) [<radius>]} tail on
+     * {@code /playermob summon} — spawn the mob, then tether it exactly as {@code /playermob stay} would.
+     * The anchor nodes are named {@code anchorPos}/{@code anchorTarget} (not {@code pos}/{@code target})
+     * so they never collide with the summon chain's own {@code pos}. {@code off}/{@code here} literals
+     * bind before the vec3, and the vec3 ({@code anchorPos}) binds before the word ({@code anchorTarget}),
+     * mirroring {@link #stayTree()}.
+     */
+    private static LiteralArgumentBuilder<CommandSourceStack> summonStaySubtree() {
+        return Commands.literal("stay")
+            .then(Commands.literal("off").executes(ReincarnateCommand::summonStayOff))
+            .then(Commands.literal("here")
+                .executes(ReincarnateCommand::summonStayHere)
+                .then(radiusArg().executes(ReincarnateCommand::summonStayHere)))
+            .then(Commands.argument("anchorPos", Vec3Argument.vec3())
+                .executes(ReincarnateCommand::summonStayPos)
+                .then(radiusArg().executes(ReincarnateCommand::summonStayPos)))
+            .then(Commands.argument("anchorTarget", StringArgumentType.word())
+                .suggests(TARGET_SUGGESTIONS)
+                .executes(ReincarnateCommand::summonStayTarget)
+                .then(radiusArg().executes(ReincarnateCommand::summonStayTarget)));
+    }
+
+    /**
+     * The {@code {NBT}} tail on {@code /playermob summon} — spawn the mob, then merge the given compound
+     * as PlayerMob custom data via {@link PlayerMobEntity#applyCustomData}. Same layout as vanilla
+     * {@code /summon} entity_data <em>for the running MC version</em> (flat {@code StayNear:{…}} on
+     * ≤1.21.1; {@code PlayerMobData:{StayNear:{…}}} on 26.x). Applies PlayerMob custom keys + inventory
+     * only — not arbitrary vanilla entity fields (Health/Motion); use {@code /data merge entity} for those.
+     */
+    private static RequiredArgumentBuilder<CommandSourceStack, CompoundTag> summonNbtArg() {
+        return Commands.argument("nbt", CompoundTagArgument.compoundTag())
+            .executes(ReincarnateCommand::summonNbt);
+    }
+
+    /** Builds the anchor for a summon {@code stay} branch given the freshly-spawned mob, or {@code null}. */
+    @FunctionalInterface
+    private interface SummonAnchorFactory {
+        StayAnchor build(PlayerMobEntity mob, CommandContext<CommandSourceStack> ctx);
+    }
+
+    private static int summonStayOff(CommandContext<CommandSourceStack> ctx) {
+        return summonWithAnchor(ctx, (m, c) -> null);
+    }
+
+    private static int summonStayHere(CommandContext<CommandSourceStack> ctx) {
+        return summonWithAnchor(ctx, (m, c) -> StayAnchor.ofPosition(m.blockPosition(), stayRadius(c)));
+    }
+
+    private static int summonStayPos(CommandContext<CommandSourceStack> ctx) {
+        return summonWithAnchor(ctx, (m, c) ->
+            StayAnchor.ofPosition(BlockPos.containing(Vec3Argument.getVec3(c, "anchorPos")), stayRadius(c)));
+    }
+
+    private static int summonStayTarget(CommandContext<CommandSourceStack> ctx) {
+        return summonWithAnchor(ctx, (m, c) -> {
+            LivingEntity target = resolveTarget(c.getSource(), m, StringArgumentType.getString(c, "anchorTarget"));
+            return target == null ? null : StayAnchor.ofEntity(target.getUUID(), stayRadius(c));
+        });
+    }
+
+    /**
+     * Spawn the mob (untethered on failure), then set the anchor the factory builds (a {@code null}
+     * factory result leaves it roaming — the {@code stay off} case, or a {@code <target>} that couldn't
+     * be resolved). Reports the tether when one is set.
+     */
+    private static int summonWithAnchor(CommandContext<CommandSourceStack> ctx, SummonAnchorFactory factory) {
+        PlayerMobEntity mob = createSummon(ctx, false, m -> {
+            StayAnchor anchor = factory.build(m, ctx);
+            if (anchor != null) {
+                m.setStayAnchor(anchor);
+            }
+        });
+        if (mob == null) {
+            return 0;
+        }
+        StayAnchor set = mob.getStayAnchor();
+        if (set != null && mob.level() instanceof ServerLevel level) {
+            String who = label(mob);
+            ctx.getSource().sendSuccess(() -> Component.literal(
+                who + " will stay within " + set.radius() + " blocks of " + set.label(level) + "."), true);
+        }
+        return 1;
+    }
+
+    private static int summonNbt(CommandContext<CommandSourceStack> ctx) {
+        CompoundTag tag = CompoundTagArgument.getCompoundTag(ctx, "nbt");
+        return createSummon(ctx, false, mob -> mob.applyCustomData(tag)) != null ? 1 : 0;
+    }
+
+    /**
      * Whether the parsed command actually supplied the named (optional) argument. Brigadier's
      * {@code getArgument} throws when an argument node wasn't part of the matched path, so a thrown
      * {@link IllegalArgumentException} means "absent" (the per-version {@code getArguments()} map is
@@ -1259,6 +1360,17 @@ public final class ReincarnateCommand {
      * visible nameplate — {@code customName} if supplied, otherwise {@code displayName}.</p>
      */
     private static int summon(CommandContext<CommandSourceStack> ctx, boolean nameMob) {
+        return createSummon(ctx, nameMob, null) != null ? 1 : 0;
+    }
+
+    /**
+     * Spawn a PlayerMob and return it (or {@code null} after reporting the failure). Shared by the plain
+     * {@code summon}, the {@code stay} tails, and the {@code {NBT}} tail. The optional {@code beforeSkin}
+     * hook runs after the mob exists and has its nameplate but <em>before</em> the async skin resolution
+     * kicks off — the right window to apply spawn NBT or a tether so an NBT-supplied skin still wins.
+     */
+    private static PlayerMobEntity createSummon(CommandContext<CommandSourceStack> ctx, boolean nameMob,
+                                                java.util.function.Consumer<PlayerMobEntity> beforeSkin) {
         CommandSourceStack source = ctx.getSource();
         String name = StringArgumentType.getString(ctx, "displayName");
         Vec3 pos = has(ctx, "pos") ? Vec3Argument.getVec3(ctx, "pos") : null;
@@ -1276,11 +1388,16 @@ public final class ReincarnateCommand {
         PlayerMobEntity mob = PlayerMobSummon.summon(level, at.x, at.y, at.z, yRot, fightFlight, friendliness);
         if (mob == null) {
             source.sendFailure(Component.literal("Could not create a PlayerMob."));
-            return 0;
+            return null;
         }
         if (customName != null) {
             mob.setCustomName(Component.literal(customName));
             mob.setCustomNameVisible(true);
+        }
+        // Apply spawn NBT / tether now — after the nameplate, before the async skin apply below — so an
+        // NBT-supplied skin key still wins the race with the name-resolved skin.
+        if (beforeSkin != null) {
+            beforeSkin.accept(mob);
         }
         // Auto-name (when the mode covers command spawns and no explicit `named` was given): label the mob
         // with its source <name|file> once the real skin has loaded — never off the temporary rolled skin
@@ -1303,7 +1420,7 @@ public final class ReincarnateCommand {
             ? who + " wearing local skin '" + name + "'."
             : who + " for " + name + " — resolving skin…";
         source.sendSuccess(() -> Component.literal(label), true);
-        return 1;
+        return mob;
     }
 
     /** Resolve the first matched profile, or send a failure and return {@code null}.
