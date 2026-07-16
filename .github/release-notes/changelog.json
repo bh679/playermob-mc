@@ -619,6 +619,23 @@
       "released": true,
       "released_in": "v0.77.0",
       "released_at": "2026-07-16T01:40:00Z"
+    },
+    {
+      "id": "modded-ranged-weapons",
+      "version": "0.78.0",
+      "type": "feat",
+      "title": "PlayerMobs can wield modded firearms like MusketMod muskets",
+      "summary": "PlayerMobs can now use guns from other mods \u2014 muskets, pistols and the like \u2014 not just vanilla bows and crossbows. Point them at a supported firearm in the new moddedRangedWeapons config and a mob will pick it up, keep it, draw it when an enemy is at range, and fire it with the mod's own bullets. Just like a real musketeer, it stops to reload before every shot (with the mod's reload animation and sounds), then fires. It draws from real ammo it's carrying, so it falls back to melee when it runs dry.",
+      "highlights": [
+        "Off by default \u2014 an admin lists the guns and their ammo in the moddedRangedWeapons config; MusketMod is the tested reference (all variants: musket, bayonet, scope, blunderbuss, pistol)",
+        "Full reload before every shot, using the mod's own loading animation and sounds \u2014 no instant firing",
+        "Fires the mod's real projectile and spends real ammo; works with any mod's firearm without extra code, and mobs can be armed via /item replace (mainhand gun + offhand cartridges) or by picking guns and ammo off the floor"
+      ],
+      "pr": 165,
+      "date": "2026-07-16",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
