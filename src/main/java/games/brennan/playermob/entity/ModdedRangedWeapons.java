@@ -37,11 +37,13 @@ public final class ModdedRangedWeapons {
     public static final ModdedRangedWeapons EMPTY = new ModdedRangedWeapons(List.of());
 
     /**
-     * Ticks a mob holds a modded firearm to load/aim it when an entry omits an explicit override. Governs both
-     * the between-shots cadence and how far the fake-player driver overshoots the item's loading stages, so it's
-     * set generously — most muzzle-loaders finish loading well within this.
+     * Reload time in ticks a mob spends loading a modded firearm before each shot when an entry omits an explicit
+     * override. The mob "uses" the weapon for this long so the mod runs its real staged reload (animation +
+     * sounds); it must be at least the weapon's own reload duration or the shot won't be loaded in time. 45t
+     * (~2.25s) covers a default MusketMod musket (3 stages × 10t, ~40t for a mob). Tune per weapon with the
+     * optional third config field.
      */
-    public static final int DEFAULT_HOLD_TICKS = 40;
+    public static final int DEFAULT_HOLD_TICKS = 45;
 
     private static final int MIN_HOLD_TICKS = 5;
     private static final int MAX_HOLD_TICKS = 200;

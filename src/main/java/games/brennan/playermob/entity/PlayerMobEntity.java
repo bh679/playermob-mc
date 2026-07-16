@@ -3927,58 +3927,28 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     }
 
     /**
-     * A non-hotbar fake-player inventory slot to stage lent ammo in. It must not be a hotbar slot (0–8): for a
-     * {@code Player} the main hand IS the selected hotbar slot, so staging ammo there would collide with the
-     * held weapon. Slot 9 (first row of the main inventory) is always safe, and MusketMod's {@code findAmmo}
-     * still scans it.
+     * Consume one round of the modded {@code weapon}'s ammo — from the backpack first, else the off hand. Called
+     * by {@link ModdedRangedAttackGoal} when the mob loads a round to begin its (real-time) reload, so a shot
+     * costs exactly one cartridge. A no-op if the mob carries no matching ammo.
      */
-    private static final int MODDED_AMMO_LEND_SLOT = 9;
-
-    /**
-     * Lend the mob's first matching modded-weapon ammo stack into {@code actor}'s (fake player) inventory so the
-     * mod's own {@code use}/reload code can find and consume it while {@link ModdedRangedAttackGoal} drives the
-     * shot. Staged in a dedicated non-hotbar slot ({@link #MODDED_AMMO_LEND_SLOT}) so it can't collide with the
-     * held weapon. The caller clears the shared fake player first. Returns true if any ammo was lent; pair every
-     * lend with {@link #reclaimLentAmmo} to return the unspent remainder.
-     */
-    public boolean lendModdedAmmo(ServerPlayer actor, ItemStack weapon) {
-        ItemStack ammo;
+    public void consumeOneModdedAmmo(ItemStack weapon) {
         int slot = firstModdedAmmoSlot(weapon);
         if (slot >= 0) {
-            ammo = this.inventory.getItem(slot);
-            this.inventory.setItem(slot, ItemStack.EMPTY);
+            ItemStack stack = this.inventory.getItem(slot);
+            stack.shrink(1);
+            if (stack.isEmpty()) {
+                this.inventory.setItem(slot, ItemStack.EMPTY);
+            }
             this.inventory.setChanged();
-        } else {
-            // Fall back to the off hand (command-armed mobs) — the unspent remainder is reclaimed to the backpack.
-            ItemStack off = getOffhandItem();
-            if (off.isEmpty() || !PlayerMobConfig.moddedRanged().ammoMatches(weapon, off)) {
-                return false;
-            }
-            ammo = off;
-            setItemSlot(EquipmentSlot.OFFHAND, ItemStack.EMPTY);
+            return;
         }
-        actor.getInventory().setItem(MODDED_AMMO_LEND_SLOT, ammo);
-        return true;
-    }
-
-    /**
-     * Return the unspent lent ammo from {@code actor}'s staging slot to the mob's backpack (dropping any
-     * overflow), then clear the actor's inventory and main hand. Pairs with {@link #lendModdedAmmo}: whatever the
-     * modded weapon didn't consume is returned, so a shot costs exactly the mod's real ammo cost. Only the
-     * staging slot is reclaimed — the held weapon (in the actor's hotbar/main-hand slot) is written back to the
-     * mob separately by the caller.
-     */
-    public void reclaimLentAmmo(ServerPlayer actor) {
-        var inv = actor.getInventory();
-        ItemStack remaining = inv.getItem(MODDED_AMMO_LEND_SLOT);
-        if (!remaining.isEmpty()) {
-            ItemStack leftover = EquipmentEvaluator.addToContainer(this.inventory, remaining);
-            if (!leftover.isEmpty()) {
-                dropAtLocation(leftover);
+        ItemStack off = getOffhandItem();
+        if (!off.isEmpty() && PlayerMobConfig.moddedRanged().ammoMatches(weapon, off)) {
+            off.shrink(1);
+            if (off.isEmpty()) {
+                setItemSlot(EquipmentSlot.OFFHAND, ItemStack.EMPTY);
             }
         }
-        inv.clearContent();
-        actor.setItemSlot(EquipmentSlot.MAINHAND, ItemStack.EMPTY);
     }
 
     /**
