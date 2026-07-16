@@ -59,7 +59,9 @@ public final class ModdedGunFire {
         if (actor == null) {
             return false;
         }
-        // Lend a real round from the backpack so the mod's own use/reload code can find + consume it.
+        // Start from a clean shared fake player, then lend a real round from the backpack so the mod's own
+        // use/reload code can find + consume it (into a dedicated non-hotbar slot — see lendModdedAmmo).
+        actor.getInventory().clearContent();
         if (!mob.lendModdedAmmo(actor, weapon)) {
             return false;
         }

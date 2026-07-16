@@ -111,6 +111,8 @@ dependencies {
     // = the exact Modrinth version id for MusketMod 1.5.4 NeoForge 1.21.1.
     if (mc == "1.21.1" && project.hasProperty("musketCompatTest")) {
         "modRuntimeOnly"("maven.modrinth:musket-mod:hro6S6DK")
+        // MusketMod depends on Cloth Config (izKINKFg = cloth-config 15.0.140 neoforge 1.21.1).
+        "modRuntimeOnly"("maven.modrinth:cloth-config:izKINKFg")
     }
 
     // `namedElements` is Loom's remap-namespace classpath variant — it only exists in the

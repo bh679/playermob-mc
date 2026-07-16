@@ -101,6 +101,23 @@ public final class ModdedRangedWeapons {
         return false;
     }
 
+    /**
+     * True if {@code candidate} is ammo for <em>any</em> configured modded weapon (weapon-agnostic). Used so a
+     * PlayerMob hoards modded cartridges/magazines off the floor and out of chests the way it hoards arrows —
+     * otherwise it could draw a firearm it can never feed.
+     */
+    public boolean isModdedAmmo(ItemStack candidate) {
+        if (candidate.isEmpty()) {
+            return false;
+        }
+        for (Binding b : bindings) {
+            if (b.ammo.matches(candidate)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** True if {@code candidate} is ammo the given modded {@code weapon} accepts (per its binding). */
     public boolean ammoMatches(ItemStack weapon, ItemStack candidate) {
         if (weapon.isEmpty() || candidate.isEmpty()) {

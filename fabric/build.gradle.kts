@@ -151,6 +151,8 @@ dependencies {
     // ----------------------------------------------------------------------
     if (mc == "1.21.1" && project.hasProperty("musketCompatTest")) {
         "modRuntimeOnly"("maven.modrinth:musket-mod:qTBFjQQI")
+        // MusketMod hard-depends on Cloth Config on Fabric (HpMb5wGb = cloth-config 15.0.140 fabric 1.21.1).
+        "modRuntimeOnly"("maven.modrinth:cloth-config:HpMb5wGb")
     }
 }
 

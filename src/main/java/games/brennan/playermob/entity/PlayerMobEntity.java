@@ -3913,14 +3913,21 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     }
 
     /**
+     * A non-hotbar fake-player inventory slot to stage lent ammo in. It must not be a hotbar slot (0–8): for a
+     * {@code Player} the main hand IS the selected hotbar slot, so staging ammo there would collide with the
+     * held weapon. Slot 9 (first row of the main inventory) is always safe, and MusketMod's {@code findAmmo}
+     * still scans it.
+     */
+    private static final int MODDED_AMMO_LEND_SLOT = 9;
+
+    /**
      * Lend the mob's first matching modded-weapon ammo stack into {@code actor}'s (fake player) inventory so the
      * mod's own {@code use}/reload code can find and consume it while {@link ModdedRangedAttackGoal} drives the
-     * shot. Clears the actor's inventory first (it's shared per level). Returns true if any ammo was lent; pair
-     * every lend with {@link #reclaimLentAmmo} to return the unspent remainder.
+     * shot. Staged in a dedicated non-hotbar slot ({@link #MODDED_AMMO_LEND_SLOT}) so it can't collide with the
+     * held weapon. The caller clears the shared fake player first. Returns true if any ammo was lent; pair every
+     * lend with {@link #reclaimLentAmmo} to return the unspent remainder.
      */
     public boolean lendModdedAmmo(ServerPlayer actor, ItemStack weapon) {
-        var inv = actor.getInventory();
-        inv.clearContent();
         int slot = firstModdedAmmoSlot(weapon);
         if (slot < 0) {
             return false;
@@ -3928,24 +3935,24 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         ItemStack ammo = this.inventory.getItem(slot);
         this.inventory.setItem(slot, ItemStack.EMPTY);
         this.inventory.setChanged();
-        inv.add(ammo);
+        actor.getInventory().setItem(MODDED_AMMO_LEND_SLOT, ammo);
         return true;
     }
 
     /**
-     * Move everything left in {@code actor}'s inventory back into the mob's backpack (dropping any overflow),
-     * then clear the actor's inventory and main hand. Pairs with {@link #lendModdedAmmo}: whatever the modded
-     * weapon didn't consume is returned, so a shot costs exactly the mod's real ammo cost.
+     * Return the unspent lent ammo from {@code actor}'s staging slot to the mob's backpack (dropping any
+     * overflow), then clear the actor's inventory and main hand. Pairs with {@link #lendModdedAmmo}: whatever the
+     * modded weapon didn't consume is returned, so a shot costs exactly the mod's real ammo cost. Only the
+     * staging slot is reclaimed — the held weapon (in the actor's hotbar/main-hand slot) is written back to the
+     * mob separately by the caller.
      */
     public void reclaimLentAmmo(ServerPlayer actor) {
         var inv = actor.getInventory();
-        for (int i = 0; i < inv.getContainerSize(); i++) {
-            ItemStack stack = inv.getItem(i);
-            if (!stack.isEmpty()) {
-                ItemStack leftover = EquipmentEvaluator.addToContainer(this.inventory, stack);
-                if (!leftover.isEmpty()) {
-                    dropAtLocation(leftover);
-                }
+        ItemStack remaining = inv.getItem(MODDED_AMMO_LEND_SLOT);
+        if (!remaining.isEmpty()) {
+            ItemStack leftover = EquipmentEvaluator.addToContainer(this.inventory, remaining);
+            if (!leftover.isEmpty()) {
+                dropAtLocation(leftover);
             }
         }
         inv.clearContent();
@@ -3981,10 +3988,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
 
     /**
      * Whether the mob wants {@code stack} as ranged ammo to hoard: arrows always (any ranged weapon may use
-     * them), plus fireworks when it owns a crossbow to fire them with. Drives floor pickup and the ammo seek.
+     * them), fireworks when it owns a crossbow to fire them with, plus any ammo of a configured modded firearm
+     * (cartridges, magazines) so the mob can restock a musket the same way it restocks arrows. Drives floor
+     * pickup and the ammo seek.
      */
     public boolean wantsAsAmmo(ItemStack stack) {
-        return RangedAmmo.isArrow(stack) || (RangedAmmo.isFirework(stack) && ownsCrossbow());
+        return RangedAmmo.isArrow(stack)
+            || (RangedAmmo.isFirework(stack) && ownsCrossbow())
+            || PlayerMobConfig.moddedRanged().isModdedAmmo(stack);
     }
 
     // ---- Sounds (player-like — mirrors vanilla Player exactly) -----------
