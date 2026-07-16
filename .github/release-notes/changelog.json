@@ -602,6 +602,23 @@
       "released": true,
       "released_in": "v0.76.0",
       "released_at": "2026-07-15T23:21:09Z"
+    },
+    {
+      "id": "fire-water-bucket",
+      "version": "0.77.0",
+      "type": "feat",
+      "title": "Burning PlayerMobs run for water \u2014 or douse themselves with a bucket",
+      "summary": "A PlayerMob that catches fire now drops everything to save itself. If there's water close by it sprints in; if it's carrying a water bucket it dumps it at its feet, stands in the puddle to put the flames out, then scoops the water back up once it's safe. It won't get distracted or give up until it's no longer burning.",
+      "highlights": [
+        "Sprints straight to nearby water the instant it catches fire, ignoring everything else until it's safe",
+        "Carrying a water bucket (in hand or backpack)? It empties it at its own feet, douses itself, then picks the water back up",
+        "On by default \u2014 toggle with /playermob extinguishwithbucket on|off, or the extinguishWithBucket config option"
+      ],
+      "pr": 163,
+      "date": "2026-07-16",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
