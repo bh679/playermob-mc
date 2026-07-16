@@ -2,6 +2,7 @@ package games.brennan.playermob;
 
 import com.mojang.logging.LogUtils;
 import games.brennan.playermob.entity.AutoNameMode;
+import games.brennan.playermob.entity.ModdedRangedWeapons;
 import games.brennan.playermob.entity.WantedItemList;
 import org.slf4j.Logger;
 
@@ -48,6 +49,7 @@ public final class PlayerMobConfig {
     private static final String KEY_EXTINGUISH_WITH_BUCKET = "extinguishWithBucket";
 
     private static final String KEY_EXTRA_PICKUP_ITEMS = "extraPickupItems";
+    private static final String KEY_MODDED_RANGED_WEAPONS = "moddedRangedWeapons";
 
     private static final String KEY_SKIN_SOURCE_BUNDLED = "skinSourceBundled";
     private static final String KEY_SKIN_SOURCE_ONLINE = "skinSourceOnline";
@@ -82,6 +84,8 @@ public final class PlayerMobConfig {
     public static final boolean DEFAULT_EXTINGUISH_WITH_BUCKET = true;
     /** No extra pickup items by default — the mob wants only its hardcoded gear/ammo/valuable/consumable set. */
     public static final String DEFAULT_EXTRA_PICKUP_ITEMS = "";
+    /** No modded ranged weapons recognised by default — only vanilla bows/crossbows are ranged out of the box. */
+    public static final String DEFAULT_MODDED_RANGED_WEAPONS = "";
     /** Bundled default skins are an eligible random source by default. */
     public static final boolean DEFAULT_SKIN_SOURCE_BUNDLED = true;
     /** Online skins (datapack / by-name / external registry) are an eligible random source by default. */
@@ -189,6 +193,8 @@ public final class PlayerMobConfig {
     private static volatile boolean extinguishWithBucket = DEFAULT_EXTINGUISH_WITH_BUCKET;
     /** Admin-configured extra items the mob always wants; replaced wholesale on {@link #load}. */
     private static volatile WantedItemList extraPickups = WantedItemList.EMPTY;
+    /** Admin-configured modded ranged weapons + their ammo; replaced wholesale on {@link #load}. */
+    private static volatile ModdedRangedWeapons moddedRanged = ModdedRangedWeapons.EMPTY;
     /** Per-mob explicit overrides (id → clamped 0–1 chance); immutable, replaced wholesale on {@link #load}. */
     private static volatile Map<String, Float> naturalSpawnScales = Map.of();
     private static volatile boolean skinSourceBundled = DEFAULT_SKIN_SOURCE_BUNDLED;
@@ -307,6 +313,16 @@ public final class PlayerMobConfig {
      */
     public static WantedItemList extraPickups() {
         return extraPickups;
+    }
+
+    /**
+     * Admin-configured modded ranged weapons (firearms from other mods) and the ammo each fires. Lets a mob
+     * classify, draw, and fire non-vanilla ranged weapons — e.g. MusketMod muskets. Configured via
+     * {@code moddedRangedWeapons} as {@code weapon>ammo[>holdTicks]} entries. Empty by default. See
+     * {@code ModdedRangedAttackGoal} and {@code PlayerMobEntity#hasRangedAmmo}.
+     */
+    public static ModdedRangedWeapons moddedRanged() {
+        return moddedRanged;
     }
 
     /**
@@ -519,6 +535,7 @@ public final class PlayerMobConfig {
             endCrystalCombat = v.endCrystalCombat();
             extinguishWithBucket = v.extinguishWithBucket();
             extraPickups = v.extraPickups();
+            moddedRanged = v.moddedRanged();
             naturalSpawnScales = v.naturalSpawnScales();
             skinSourceBundled = v.skinSourceBundled();
             skinSourceOnline = v.skinSourceOnline();
@@ -551,6 +568,7 @@ public final class PlayerMobConfig {
                   float rangedEngageDistance, float meleeEngageDistance, boolean tntCombat,
                   boolean endCrystalCombat, boolean extinguishWithBucket,
                   WantedItemList extraPickups,
+                  ModdedRangedWeapons moddedRanged,
                   Map<String, Float> naturalSpawnScales,
                   boolean skinSourceBundled, boolean skinSourceOnline, boolean skinSourceLocal,
                   float customSkinChance) {}
@@ -571,6 +589,7 @@ public final class PlayerMobConfig {
             parseBool(props.getProperty(KEY_END_CRYSTAL_COMBAT), DEFAULT_END_CRYSTAL_COMBAT),
             parseBool(props.getProperty(KEY_EXTINGUISH_WITH_BUCKET), DEFAULT_EXTINGUISH_WITH_BUCKET),
             WantedItemList.parse(props.getProperty(KEY_EXTRA_PICKUP_ITEMS, DEFAULT_EXTRA_PICKUP_ITEMS)),
+            ModdedRangedWeapons.parse(props.getProperty(KEY_MODDED_RANGED_WEAPONS, DEFAULT_MODDED_RANGED_WEAPONS)),
             parseScales(props),
             parseBool(props.getProperty(KEY_SKIN_SOURCE_BUNDLED), DEFAULT_SKIN_SOURCE_BUNDLED),
             parseBool(props.getProperty(KEY_SKIN_SOURCE_ONLINE), DEFAULT_SKIN_SOURCE_ONLINE),
@@ -737,6 +756,13 @@ public final class PlayerMobConfig {
             .append("#   already grabs. List item ids and/or item tags, separated by commas or spaces. Prefix a\n")
             .append("#   tag with #; a bare path with no namespace assumes minecraft. Empty by default.\n")
             .append("#   Example: extraPickupItems=#scguns:ammo, scguns:assault_rifle, minecraft:diamond_block\n")
+            .append("# moddedRangedWeapons: firearms from other mods a PlayerMob should treat as ranged weapons\n")
+            .append("#   (not just vanilla bows/crossbows) — it draws them at range and fires them with the mod's\n")
+            .append("#   own logic (real bullets, real ammo). Comma-separated entries; each binds a weapon to its\n")
+            .append("#   ammo with '>', with an optional third field for load/aim ticks: weapon>ammo>holdTicks.\n")
+            .append("#   Each side is an item id or a #-prefixed item tag (bare path assumes minecraft); the mob\n")
+            .append("#   must carry the ammo to fire (like arrows for a bow). Empty by default.\n")
+            .append("#   Example: moddedRangedWeapons=musketmod:musket>musketmod:cartridge, musketmod:pistol>musketmod:cartridge>25\n")
             .append("# skinSourceBundled / skinSourceOnline / skinSourceLocal: which skin sources a random\n")
             .append("#   PlayerMob may draw from. bundled = the built-in default skins; online = datapack /\n")
             .append("#   by-name / external-mod skins; local = PNG files you drop in config/playermob/skins.\n")
@@ -759,6 +785,7 @@ public final class PlayerMobConfig {
             .append(KEY_END_CRYSTAL_COMBAT).append("=").append(DEFAULT_END_CRYSTAL_COMBAT).append("\n")
             .append(KEY_EXTINGUISH_WITH_BUCKET).append("=").append(DEFAULT_EXTINGUISH_WITH_BUCKET).append("\n")
             .append(KEY_EXTRA_PICKUP_ITEMS).append("=").append(DEFAULT_EXTRA_PICKUP_ITEMS).append("\n")
+            .append(KEY_MODDED_RANGED_WEAPONS).append("=").append(DEFAULT_MODDED_RANGED_WEAPONS).append("\n")
             .append(KEY_SKIN_SOURCE_BUNDLED).append("=").append(DEFAULT_SKIN_SOURCE_BUNDLED).append("\n")
             .append(KEY_SKIN_SOURCE_ONLINE).append("=").append(DEFAULT_SKIN_SOURCE_ONLINE).append("\n")
             .append(KEY_SKIN_SOURCE_LOCAL).append("=").append(DEFAULT_SKIN_SOURCE_LOCAL).append("\n")

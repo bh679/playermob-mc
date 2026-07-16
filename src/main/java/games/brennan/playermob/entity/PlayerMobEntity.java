@@ -3891,7 +3891,65 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * ({@link #equipBestWeaponForTarget}), both ranged combat goals, and {@code SeekAmmoGoal}.
      */
     public boolean hasRangedAmmo(ItemStack weapon) {
+        // Modded firearms always need their real ammo carried — "infinite ammo" (requireArrows=false) can't
+        // synthesize an arbitrary mod's cartridge item, and the fake-player fire drive lends a real round from
+        // the backpack to the mod's own consume logic (see ModdedRangedAttackGoal).
+        if (PlayerMobConfig.moddedRanged().isRangedWeapon(weapon)) {
+            return firstModdedAmmoSlot(weapon) >= 0;
+        }
         return !PlayerMobConfig.requireArrows() || RangedAmmo.hasAmmoFor(this.inventory, weapon);
+    }
+
+    /** First backpack slot holding ammo the given modded ranged {@code weapon} accepts (per config), or -1. */
+    private int firstModdedAmmoSlot(ItemStack weapon) {
+        ModdedRangedWeapons registry = PlayerMobConfig.moddedRanged();
+        for (int i = 0; i < this.inventory.getContainerSize(); i++) {
+            ItemStack stack = this.inventory.getItem(i);
+            if (!stack.isEmpty() && registry.ammoMatches(weapon, stack)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Lend the mob's first matching modded-weapon ammo stack into {@code actor}'s (fake player) inventory so the
+     * mod's own {@code use}/reload code can find and consume it while {@link ModdedRangedAttackGoal} drives the
+     * shot. Clears the actor's inventory first (it's shared per level). Returns true if any ammo was lent; pair
+     * every lend with {@link #reclaimLentAmmo} to return the unspent remainder.
+     */
+    public boolean lendModdedAmmo(ServerPlayer actor, ItemStack weapon) {
+        var inv = actor.getInventory();
+        inv.clearContent();
+        int slot = firstModdedAmmoSlot(weapon);
+        if (slot < 0) {
+            return false;
+        }
+        ItemStack ammo = this.inventory.getItem(slot);
+        this.inventory.setItem(slot, ItemStack.EMPTY);
+        this.inventory.setChanged();
+        inv.add(ammo);
+        return true;
+    }
+
+    /**
+     * Move everything left in {@code actor}'s inventory back into the mob's backpack (dropping any overflow),
+     * then clear the actor's inventory and main hand. Pairs with {@link #lendModdedAmmo}: whatever the modded
+     * weapon didn't consume is returned, so a shot costs exactly the mod's real ammo cost.
+     */
+    public void reclaimLentAmmo(ServerPlayer actor) {
+        var inv = actor.getInventory();
+        for (int i = 0; i < inv.getContainerSize(); i++) {
+            ItemStack stack = inv.getItem(i);
+            if (!stack.isEmpty()) {
+                ItemStack leftover = EquipmentEvaluator.addToContainer(this.inventory, stack);
+                if (!leftover.isEmpty()) {
+                    dropAtLocation(leftover);
+                }
+            }
+        }
+        inv.clearContent();
+        actor.setItemSlot(EquipmentSlot.MAINHAND, ItemStack.EMPTY);
     }
 
     /**

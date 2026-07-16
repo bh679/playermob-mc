@@ -81,9 +81,9 @@ configurations {
 
 repositories {
     mavenCentral()
-    // Source for the opt-in Better Combat / Better Mob Combat compat-test stack (see the
-    // `-PbmcCompatTest` block in dependencies). Only consulted when that flag is set.
-    if (project.hasProperty("bmcCompatTest")) {
+    // Source for the opt-in compat-test stacks (Better Combat via `-PbmcCompatTest`, MusketMod via
+    // `-PmusketCompatTest`). Only consulted when one of those flags is set.
+    if (project.hasProperty("bmcCompatTest") || project.hasProperty("musketCompatTest")) {
         maven("https://api.modrinth.com/maven")
     }
 }
@@ -136,6 +136,21 @@ dependencies {
         // version IDs instead: wboV6qEY = bmc 1.3.0 fabric, suabW0rX = mpa 1.3.3 fabric.
         "modRuntimeOnly"("maven.modrinth:mob-player-animator:suabW0rX")
         "modRuntimeOnly"("maven.modrinth:better-mob-combat:wboV6qEY")
+    }
+
+    // ----------------------------------------------------------------------
+    // Opt-in MusketMod compat test. Loads ewewukek's Musket Mod into the dev
+    // client so a PlayerMob can be handed a `musketmod:musket` + cartridges and
+    // verified firing real bullets (the `moddedRangedWeapons` feature). Enable:
+    //   ./gradlew :fabric:1.21.1:runClient -PmusketCompatTest
+    // `modRuntimeOnly` → dev RUNTIME only; never compiled against (the fire path
+    // is fully generic — no MusketMod imports), never in the published jar. Gated
+    // to MC 1.21.1, the only node MusketMod targets here. `qTBFjQQI` = the exact
+    // Modrinth version id for MusketMod 1.5.4 Fabric 1.21.1 (bare version numbers
+    // are ambiguous across loaders — see the Better-Mob-Combat note above).
+    // ----------------------------------------------------------------------
+    if (mc == "1.21.1" && project.hasProperty("musketCompatTest")) {
+        "modRuntimeOnly"("maven.modrinth:musket-mod:qTBFjQQI")
     }
 }
 

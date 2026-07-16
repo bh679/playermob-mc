@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity;
 
+import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.compat.ItemDataCompat;
 import games.brennan.playermob.compat.ItemKindCompat;
 import net.minecraft.tags.ItemTags;
@@ -158,6 +159,8 @@ public final class ItemPickupPolicy {
         if (ItemKindCompat.isPickaxe(stack)) return WeaponCategory.PICKAXE;
         if (item instanceof AxeItem) return WeaponCategory.AXE;
         if (item instanceof BowItem || item instanceof CrossbowItem) return WeaponCategory.RANGED;
+        // Admin-configured modded firearms (MusketMod muskets, gun-mod rifles, …) are ranged too.
+        if (PlayerMobConfig.moddedRanged().isRangedWeapon(stack)) return WeaponCategory.RANGED;
         return null;
     }
 
@@ -198,8 +201,9 @@ public final class ItemPickupPolicy {
         return Integer.compare(enchantmentScore(a), enchantmentScore(b));
     }
 
-    /** Crossbows out-rank bows; anything else is 0. */
+    /** Modded firearms out-rank crossbows, which out-rank bows; anything else is 0. */
     private static int rangedRank(ItemStack stack) {
+        if (PlayerMobConfig.moddedRanged().isRangedWeapon(stack)) return 3;
         if (stack.getItem() instanceof CrossbowItem) return 2;
         if (stack.getItem() instanceof BowItem) return 1;
         return 0;

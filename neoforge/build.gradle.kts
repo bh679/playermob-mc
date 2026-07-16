@@ -103,6 +103,16 @@ dependencies {
 
     }
 
+    // --- Opt-in MusketMod compat test (see the Fabric build for the full note) ---
+    // Loads ewewukek's Musket Mod into the dev client so a PlayerMob can be verified firing a real
+    // musket (the `moddedRangedWeapons` feature). Enable:
+    //   ./gradlew :neoforge:1.21.1:runClient -PmusketCompatTest
+    // `modRuntimeOnly` → dev RUNTIME only; never compiled against, never in the published jar. `hro6S6DK`
+    // = the exact Modrinth version id for MusketMod 1.5.4 NeoForge 1.21.1.
+    if (mc == "1.21.1" && project.hasProperty("musketCompatTest")) {
+        "modRuntimeOnly"("maven.modrinth:musket-mod:hro6S6DK")
+    }
+
     // `namedElements` is Loom's remap-namespace classpath variant — it only exists in the
     // obfuscated build. Under no-remap (deobfuscated 26.x) there's no remap namespace, so we
     // compile against the common project's default variant instead. `transformProduction*`

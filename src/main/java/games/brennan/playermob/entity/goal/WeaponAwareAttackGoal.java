@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
@@ -40,6 +41,7 @@ public final class WeaponAwareAttackGoal extends Goal implements DescribableGoal
     private final PlayerMobEntity mob;
     private final PlayerMobCrossbowAttackGoal crossbow;
     private final PlayerMobBowAttackGoal bow;
+    private final ModdedRangedAttackGoal moddedRanged;
     private final MeleeAttackGoal melee;
 
     /** The currently-running delegate, or {@code null} when nothing has started. */
@@ -60,6 +62,7 @@ public final class WeaponAwareAttackGoal extends Goal implements DescribableGoal
         // interval arg.
         this.crossbow = new PlayerMobCrossbowAttackGoal(mob, speed, rangedAttackRange);
         this.bow = new PlayerMobBowAttackGoal(mob, speed, rangedAttackRange);
+        this.moddedRanged = new ModdedRangedAttackGoal(mob, speed, rangedAttackRange);
         this.melee = new MeleeAttackGoal(mob, speed, true);
         // We claim every flag any delegate might need so the selector reserves
         // them for us. Inner-goal flags are irrelevant — they're not selector-managed.
@@ -73,7 +76,10 @@ public final class WeaponAwareAttackGoal extends Goal implements DescribableGoal
 
     @Override
     public String subObjective() {
-        String mode = active == crossbow ? "crossbow" : active == bow ? "bow" : "melee";
+        String mode = active == crossbow ? "crossbow"
+            : active == bow ? "bow"
+            : active == moddedRanged ? "firearm"
+            : "melee";
         LivingEntity target = mob.getTarget();
         return target != null ? mode + " → " + target.getName().getString() : mode;
     }
@@ -158,6 +164,8 @@ public final class WeaponAwareAttackGoal extends Goal implements DescribableGoal
         if (mob.hasRangedAmmo(mainhand)) {
             if (mainhand.is(Items.CROSSBOW)) return crossbow;
             if (mainhand.is(Items.BOW)) return bow;
+            // Configured modded firearm (MusketMod, gun mods) — fire it via its own use logic.
+            if (PlayerMobConfig.moddedRanged().isRangedWeapon(mainhand)) return moddedRanged;
         }
         return melee;
     }

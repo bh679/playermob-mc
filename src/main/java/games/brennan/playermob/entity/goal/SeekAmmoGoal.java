@@ -72,6 +72,9 @@ public final class SeekAmmoGoal extends Goal implements DescribableGoal {
         LivingEntity enemy = mob.getTarget();
         if (enemy == null || !enemy.isAlive()) return false;             // only during combat
         if (!mob.ownsRangedWeapon()) return false;                       // only worth it with a ranged weapon
+        // Modded firearm ammo (cartridges, magazines, …) isn't scavengeable via the arrow/firework scan below —
+        // don't chase floor arrows a musket can't fire. Idle pickup (extraPickupItems) can restock those instead.
+        if (PlayerMobConfig.moddedRanged().isRangedWeapon(mob.bestRangedWeaponStack())) return false;
         if (mob.hasRangedAmmo(mob.bestRangedWeaponStack())) return false; // only when we can't fire it
         if (mob.distanceToSqr(enemy) <= TOO_CLOSE_SQR) return false;      // enemy too close → melee instead
 

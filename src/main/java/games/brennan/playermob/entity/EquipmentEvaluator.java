@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity;
 
+import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.compat.ItemDataCompat;
 import games.brennan.playermob.compat.ItemKindCompat;
 import net.minecraft.world.Container;
@@ -72,6 +73,7 @@ public final class EquipmentEvaluator {
             || item instanceof BowItem
             || item instanceof CrossbowItem
             || item instanceof ShieldItem
+            || PlayerMobConfig.moddedRanged().isRangedWeapon(stack)
             || ItemKindCompat.isArmor(stack);
     }
 
@@ -111,7 +113,8 @@ public final class EquipmentEvaluator {
         if (armor > 0) return armor;
 
         Item item = stack.getItem();
-        if (item instanceof BowItem || item instanceof CrossbowItem) return BOW_BASE_SCORE;
+        if (item instanceof BowItem || item instanceof CrossbowItem
+                || PlayerMobConfig.moddedRanged().isRangedWeapon(stack)) return BOW_BASE_SCORE;
         return 0;
     }
 
