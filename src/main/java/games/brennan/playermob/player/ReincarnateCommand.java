@@ -78,6 +78,9 @@ import java.util.Collection;
  *       this session: when {@code on}, a PlayerMob carrying end crystals + obsidian + solid cover blocks
  *       bombs its target with end crystals instead of fighting with bow/melee. A session override of the
  *       config flag.</li>
+ *   <li>{@code /playermob huntforfood [on|off]} — toggle (or report) animal-hunting for this session:
+ *       when {@code on}, a hungry PlayerMob hunts a nearby adult food animal (cow/pig/chicken/sheep/rabbit)
+ *       for meat; {@code off} leaves animals alone entirely. A session override of the config flag.</li>
  *   <li>{@code /playermob naturalspawn [on|off]} — toggle (or report) the natural-spawn master
  *       switch for this session.</li>
  *   <li>{@code /playermob naturalspawn <mob> on|off|<chance>} — set a mob's companion chance
@@ -157,6 +160,10 @@ public final class ReincarnateCommand {
                     .executes(ReincarnateCommand::queryExtinguishWithBucket)
                     .then(Commands.literal("on").executes(ctx -> setExtinguishWithBucket(ctx, true)))
                     .then(Commands.literal("off").executes(ctx -> setExtinguishWithBucket(ctx, false))))
+                .then(Commands.literal("huntforfood")
+                    .executes(ReincarnateCommand::queryHuntForFood)
+                    .then(Commands.literal("on").executes(ctx -> setHuntForFood(ctx, true)))
+                    .then(Commands.literal("off").executes(ctx -> setHuntForFood(ctx, false))))
                 .then(Commands.literal("naturalspawn")
                     .executes(ReincarnateCommand::reportNaturalSpawn)
                     .then(Commands.literal("on").executes(ctx -> setNaturalSpawnMaster(ctx, true)))
@@ -962,6 +969,23 @@ public final class ReincarnateCommand {
     private static int setExtinguishWithBucket(CommandContext<CommandSourceStack> ctx, boolean enabled) {
         PlayerMobConfig.setExtinguishWithBucket(enabled);
         ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob bucket self-extinguish "
+            + (enabled ? "enabled" : "disabled") + " for this session."), false);
+        return 1;
+    }
+
+    /** {@code /playermob huntforfood} — report whether hungry PlayerMobs hunt nearby food animals. */
+    private static int queryHuntForFood(CommandContext<CommandSourceStack> ctx) {
+        boolean on = PlayerMobConfig.huntForFood();
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob animal-hunting is "
+            + (on ? "ON — hungry mobs hunt nearby food animals for meat"
+                  : "OFF — mobs leave animals alone") + "."), false);
+        return 1;
+    }
+
+    /** {@code /playermob huntforfood on|off} — flip animal-hunting for this session. */
+    private static int setHuntForFood(CommandContext<CommandSourceStack> ctx, boolean enabled) {
+        PlayerMobConfig.setHuntForFood(enabled);
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob animal-hunting "
             + (enabled ? "enabled" : "disabled") + " for this session."), false);
         return 1;
     }
