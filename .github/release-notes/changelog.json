@@ -669,6 +669,24 @@
       "released": false,
       "released_in": null,
       "released_at": null
+    },
+    {
+      "id": "summon-stay-nbt-anchor",
+      "version": "0.81.0",
+      "type": "feat",
+      "title": "Summon PlayerMobs pre-tethered \u2014 stay option, spawn NBT, and player-name anchors",
+      "summary": "You can now tether a PlayerMob the moment you summon it, instead of only after it already exists. /playermob summon gains a 'stay' option that pins the new mob to where it spawns, to a set of coordinates, or to a player or another PlayerMob \u2014 each with an optional radius. A new AnchorPlayer name key lets you tether by player name in spawn NBT, so you no longer need a raw UUID or a packed coordinate number; the mob follows that player as they move and reconnects to them after a relog. And /playermob summon now accepts raw {NBT} to bake in traits, skin, and the tether in one go.",
+      "highlights": [
+        "New: /playermob summon <name> stay ( off | here | <pos> | <target> ) [radius] \u2014 tether a mob the instant it spawns",
+        "Tether by player NAME in spawn NBT via the new AnchorPlayer key \u2014 a friendly alternative to a raw UUID or a packed AnchorPos coordinate",
+        "Player/entity anchors follow the same leash-not-glue behaviour: the mob yields to combat, then walks back once it drifts beyond the radius",
+        "Optional {NBT} on /playermob summon bakes in traits, skin, and the stay tether at spawn"
+      ],
+      "pr": 170,
+      "date": "2026-07-16",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
