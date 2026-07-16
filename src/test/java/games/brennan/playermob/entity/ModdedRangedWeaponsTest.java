@@ -59,6 +59,21 @@ class ModdedRangedWeaponsTest {
     }
 
     @Test
+    void oneEntryCoversManyWeaponVariantsSharingAmmo() {
+        // The weapon side may list several ids (space-separated) that all share one ammo — e.g. every MusketMod
+        // firearm variant firing cartridges. Stand-in vanilla ids: three "guns", one "cartridge".
+        ModdedRangedWeapons reg = ModdedRangedWeapons.parse(
+            "minecraft:diamond_sword minecraft:iron_sword minecraft:golden_sword>minecraft:arrow");
+        assertEquals(1, reg.size(), "one binding");
+        assertTrue(reg.isRangedWeapon(new ItemStack(Items.DIAMOND_SWORD)), "variant 1 is ranged");
+        assertTrue(reg.isRangedWeapon(new ItemStack(Items.IRON_SWORD)), "variant 2 is ranged");
+        assertTrue(reg.isRangedWeapon(new ItemStack(Items.GOLDEN_SWORD)), "variant 3 is ranged");
+        assertFalse(reg.isRangedWeapon(new ItemStack(Items.STONE_SWORD)), "unlisted variant is not ranged");
+        assertTrue(reg.ammoMatches(new ItemStack(Items.IRON_SWORD), new ItemStack(Items.ARROW)),
+            "every listed variant accepts the shared ammo");
+    }
+
+    @Test
     void defaultAndExplicitHoldTicks() {
         ModdedRangedWeapons def = ModdedRangedWeapons.parse("minecraft:diamond_sword>minecraft:arrow");
         assertEquals(ModdedRangedWeapons.DEFAULT_HOLD_TICKS, def.holdTicks(new ItemStack(Items.DIAMOND_SWORD)));
