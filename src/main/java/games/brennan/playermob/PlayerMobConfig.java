@@ -47,6 +47,7 @@ public final class PlayerMobConfig {
     private static final String KEY_TNT_COMBAT = "tntCombat";
     private static final String KEY_END_CRYSTAL_COMBAT = "endCrystalCombat";
     private static final String KEY_EXTINGUISH_WITH_BUCKET = "extinguishWithBucket";
+    private static final String KEY_HUNT_FOR_FOOD = "huntForFood";
 
     private static final String KEY_EXTRA_PICKUP_ITEMS = "extraPickupItems";
     private static final String KEY_MODDED_RANGED_WEAPONS = "moddedRangedWeapons";
@@ -82,6 +83,8 @@ public final class PlayerMobConfig {
     public static final boolean DEFAULT_END_CRYSTAL_COMBAT = true;
     /** A PlayerMob on fire and holding a water bucket douses itself with it; on by default. */
     public static final boolean DEFAULT_EXTINGUISH_WITH_BUCKET = true;
+    /** A hungry PlayerMob hunts nearby food animals (cow/pig/chicken/sheep/rabbit); on by default. */
+    public static final boolean DEFAULT_HUNT_FOR_FOOD = true;
     /** No extra pickup items by default — the mob wants only its hardcoded gear/ammo/valuable/consumable set. */
     public static final String DEFAULT_EXTRA_PICKUP_ITEMS = "";
     /** No modded ranged weapons recognised by default — only vanilla bows/crossbows are ranged out of the box. */
@@ -191,6 +194,7 @@ public final class PlayerMobConfig {
     private static volatile boolean tntCombat = DEFAULT_TNT_COMBAT;
     private static volatile boolean endCrystalCombat = DEFAULT_END_CRYSTAL_COMBAT;
     private static volatile boolean extinguishWithBucket = DEFAULT_EXTINGUISH_WITH_BUCKET;
+    private static volatile boolean huntForFood = DEFAULT_HUNT_FOR_FOOD;
     /** Admin-configured extra items the mob always wants; replaced wholesale on {@link #load}. */
     private static volatile WantedItemList extraPickups = WantedItemList.EMPTY;
     /** Admin-configured modded ranged weapons + their ammo; replaced wholesale on {@link #load}. */
@@ -294,6 +298,15 @@ public final class PlayerMobConfig {
      */
     public static boolean extinguishWithBucket() {
         return extinguishWithBucket;
+    }
+
+    /**
+     * When true (default), a PlayerMob that {@code wantsFood()} (no food carried, or hurt and low on
+     * carried nutrition) hunts a nearby adult food animal (cow/pig/chicken/sheep/rabbit) as its attack
+     * target, letting the existing weapon-aware attack goal do the kill. See {@code HuntForFoodGoal}.
+     */
+    public static boolean huntForFood() {
+        return huntForFood;
     }
 
     /** Distance (blocks) beyond which a PlayerMob prefers a ranged weapon over melee. See {@code equipBestWeaponForTarget}. */
@@ -459,6 +472,14 @@ public final class PlayerMobConfig {
     }
 
     /**
+     * Toggle animal-hunting at runtime (e.g. from {@code /playermob huntforfood on|off}). A session
+     * override — not written back to the file, which stays the startup default.
+     */
+    public static void setHuntForFood(boolean enabled) {
+        huntForFood = enabled;
+    }
+
+    /**
      * Toggle a skin source at runtime (e.g. from {@code /playermob skin source <bundled|online|local> on|off}).
      * A session override — not written back to the file, which stays the startup default.
      */
@@ -534,6 +555,7 @@ public final class PlayerMobConfig {
             tntCombat = v.tntCombat();
             endCrystalCombat = v.endCrystalCombat();
             extinguishWithBucket = v.extinguishWithBucket();
+            huntForFood = v.huntForFood();
             extraPickups = v.extraPickups();
             moddedRanged = v.moddedRanged();
             naturalSpawnScales = v.naturalSpawnScales();
@@ -547,14 +569,15 @@ public final class PlayerMobConfig {
                 KEY_TRAIN_DIG_THROUGH, trainDigThrough,
                 KEY_TRAIN_FOLLOW_LOVED_PLAYER, trainFollowLovedPlayer,
                 KEY_NATURAL_SPAWN_ENABLED, naturalSpawnEnabled, naturalSpawnScales.size());
-            LOGGER.info("[{}] combat config: {}={}, {}={}, {}={}, {}={}, {}={}, {}={}, {}={}",
+            LOGGER.info("[{}] combat config: {}={}, {}={}, {}={}, {}={}, {}={}, {}={}, {}={}, {}={}",
                 PlayerMob.MOD_ID,
                 KEY_REQUIRE_ARROWS, requireArrows, KEY_SEEK_ARROWS_WHEN_EMPTY, seekArrowsWhenEmpty,
                 KEY_RANGED_ENGAGE_DISTANCE, rangedEngageDistance,
                 KEY_MELEE_ENGAGE_DISTANCE, meleeEngageDistance,
                 KEY_TNT_COMBAT, tntCombat,
                 KEY_END_CRYSTAL_COMBAT, endCrystalCombat,
-                KEY_EXTINGUISH_WITH_BUCKET, extinguishWithBucket);
+                KEY_EXTINGUISH_WITH_BUCKET, extinguishWithBucket,
+                KEY_HUNT_FOR_FOOD, huntForFood);
         } catch (IOException | RuntimeException e) {
             LOGGER.warn("[{}] failed to load {}; using defaults", PlayerMob.MOD_ID, FILE, e);
         }
@@ -566,7 +589,7 @@ public final class PlayerMobConfig {
                   AutoNameMode autoNameMode,
                   boolean requireArrows, boolean seekArrowsWhenEmpty,
                   float rangedEngageDistance, float meleeEngageDistance, boolean tntCombat,
-                  boolean endCrystalCombat, boolean extinguishWithBucket,
+                  boolean endCrystalCombat, boolean extinguishWithBucket, boolean huntForFood,
                   WantedItemList extraPickups,
                   ModdedRangedWeapons moddedRanged,
                   Map<String, Float> naturalSpawnScales,
@@ -588,6 +611,7 @@ public final class PlayerMobConfig {
             parseBool(props.getProperty(KEY_TNT_COMBAT), DEFAULT_TNT_COMBAT),
             parseBool(props.getProperty(KEY_END_CRYSTAL_COMBAT), DEFAULT_END_CRYSTAL_COMBAT),
             parseBool(props.getProperty(KEY_EXTINGUISH_WITH_BUCKET), DEFAULT_EXTINGUISH_WITH_BUCKET),
+            parseBool(props.getProperty(KEY_HUNT_FOR_FOOD), DEFAULT_HUNT_FOR_FOOD),
             WantedItemList.parse(props.getProperty(KEY_EXTRA_PICKUP_ITEMS, DEFAULT_EXTRA_PICKUP_ITEMS)),
             ModdedRangedWeapons.parse(props.getProperty(KEY_MODDED_RANGED_WEAPONS, DEFAULT_MODDED_RANGED_WEAPONS)),
             parseScales(props),
@@ -751,6 +775,11 @@ public final class PlayerMobConfig {
             .append("#   bucket empties it onto the ground, jumps in to douse itself, then a short while after\n")
             .append("#   the fire is out scoops the water back into the bucket. Toggle live with\n")
             .append("#   /playermob extinguishwithbucket on|off (session override). Default true.\n")
+            .append("# huntForFood: when true, a hungry PlayerMob (no food carried, or hurt and low on carried\n")
+            .append("#   nutrition) hunts a nearby adult food animal (cow, pig, chicken, sheep, rabbit) as its\n")
+            .append("#   attack target, letting its weapon do the kill, then eats the drops. Set false to leave\n")
+            .append("#   animals alone entirely. Toggle live with /playermob huntforfood on|off (session\n")
+            .append("#   override). Default true.\n")
             .append("# extraPickupItems: extra items the mob ALWAYS picks up (off the floor and out of chests)\n")
             .append("#   and hoards in its backpack, beyond the built-in weapons/armor/ammo/valuables/food it\n")
             .append("#   already grabs. List item ids and/or item tags, separated by commas or spaces. Prefix a\n")
@@ -786,6 +815,7 @@ public final class PlayerMobConfig {
             .append(KEY_TNT_COMBAT).append("=").append(DEFAULT_TNT_COMBAT).append("\n")
             .append(KEY_END_CRYSTAL_COMBAT).append("=").append(DEFAULT_END_CRYSTAL_COMBAT).append("\n")
             .append(KEY_EXTINGUISH_WITH_BUCKET).append("=").append(DEFAULT_EXTINGUISH_WITH_BUCKET).append("\n")
+            .append(KEY_HUNT_FOR_FOOD).append("=").append(DEFAULT_HUNT_FOR_FOOD).append("\n")
             .append(KEY_EXTRA_PICKUP_ITEMS).append("=").append(DEFAULT_EXTRA_PICKUP_ITEMS).append("\n")
             .append(KEY_MODDED_RANGED_WEAPONS).append("=").append(DEFAULT_MODDED_RANGED_WEAPONS).append("\n")
             .append(KEY_SKIN_SOURCE_BUNDLED).append("=").append(DEFAULT_SKIN_SOURCE_BUNDLED).append("\n")

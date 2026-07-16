@@ -653,6 +653,22 @@
       "released": false,
       "released_in": null,
       "released_at": null
+    },
+    {
+      "id": "hunt-for-food-toggle",
+      "version": "0.80.0",
+      "type": "feat",
+      "title": "New setting to stop PlayerMobs from hunting animals",
+      "summary": "Hungry PlayerMobs hunt nearby cows, pigs, chickens, sheep, and rabbits for meat when they're low on food. That's now optional \u2014 admins can turn it off entirely if they'd rather their PlayerMobs leave the local wildlife alone.",
+      "highlights": [
+        "On by default, matching existing behaviour \u2014 toggle live with /playermob huntforfood on|off, or set huntForFood=false in the config to disable it permanently",
+        "Turning it off mid-hunt makes the mob drop the chase immediately, even with an animal already targeted"
+      ],
+      "pr": 168,
+      "date": "2026-07-16",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
