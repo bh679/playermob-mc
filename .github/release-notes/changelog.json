@@ -636,6 +636,23 @@
       "released": true,
       "released_in": "v0.78.0",
       "released_at": "2026-07-16T05:13:35Z"
+    },
+    {
+      "id": "stay-near-tether",
+      "version": "0.79.0",
+      "type": "feat",
+      "title": "Keep a PlayerMob near a spot or companion (stay-near tether)",
+      "summary": "PlayerMobs can now be tethered so they won't wander off. Give a mob a stay-near anchor \u2014 a fixed position or a live entity (you or another PlayerMob) \u2014 plus a radius, and it stays within it: when it drifts (or gets dragged by a fight) past the edge, it walks back, then goes right back to doing its own thing inside the ring.",
+      "highlights": [
+        "New command: /playermob stay <name> ( off | here | <pos> | <target> ) [radius] \u2014 default radius 32 blocks (1\u2013256).",
+        "The tether yields to combat \u2014 a mob will chase an enemy past its ring, then walk back to its anchor once the fight is over.",
+        "The anchor survives save/load and can be baked into spawn NBT (PlayerMobData/StayNear), so summoned or egg-spawned mobs can come pre-tethered."
+      ],
+      "pr": 160,
+      "date": "2026-07-16",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
