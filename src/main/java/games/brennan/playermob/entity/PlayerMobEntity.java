@@ -3895,9 +3895,23 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // synthesize an arbitrary mod's cartridge item, and the fake-player fire drive lends a real round from
         // the backpack to the mod's own consume logic (see ModdedRangedAttackGoal).
         if (PlayerMobConfig.moddedRanged().isRangedWeapon(weapon)) {
-            return firstModdedAmmoSlot(weapon) >= 0;
+            return hasModdedAmmoFor(weapon);
         }
         return !PlayerMobConfig.requireArrows() || RangedAmmo.hasAmmoFor(this.inventory, weapon);
+    }
+
+    /**
+     * Whether the mob carries ammo the given modded {@code weapon} accepts — in its backpack or its off hand.
+     * The off hand is checked so an admin can arm a mob entirely with commands
+     * ({@code /item replace entity … weapon.offhand with <cartridge>}); the backpack is otherwise fillable only
+     * by floor pickup.
+     */
+    private boolean hasModdedAmmoFor(ItemStack weapon) {
+        if (firstModdedAmmoSlot(weapon) >= 0) {
+            return true;
+        }
+        ItemStack off = getOffhandItem();
+        return !off.isEmpty() && PlayerMobConfig.moddedRanged().ammoMatches(weapon, off);
     }
 
     /** First backpack slot holding ammo the given modded ranged {@code weapon} accepts (per config), or -1. */
@@ -3928,13 +3942,21 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * lend with {@link #reclaimLentAmmo} to return the unspent remainder.
      */
     public boolean lendModdedAmmo(ServerPlayer actor, ItemStack weapon) {
+        ItemStack ammo;
         int slot = firstModdedAmmoSlot(weapon);
-        if (slot < 0) {
-            return false;
+        if (slot >= 0) {
+            ammo = this.inventory.getItem(slot);
+            this.inventory.setItem(slot, ItemStack.EMPTY);
+            this.inventory.setChanged();
+        } else {
+            // Fall back to the off hand (command-armed mobs) — the unspent remainder is reclaimed to the backpack.
+            ItemStack off = getOffhandItem();
+            if (off.isEmpty() || !PlayerMobConfig.moddedRanged().ammoMatches(weapon, off)) {
+                return false;
+            }
+            ammo = off;
+            setItemSlot(EquipmentSlot.OFFHAND, ItemStack.EMPTY);
         }
-        ItemStack ammo = this.inventory.getItem(slot);
-        this.inventory.setItem(slot, ItemStack.EMPTY);
-        this.inventory.setChanged();
         actor.getInventory().setItem(MODDED_AMMO_LEND_SLOT, ammo);
         return true;
     }
