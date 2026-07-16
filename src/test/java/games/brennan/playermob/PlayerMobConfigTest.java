@@ -318,6 +318,21 @@ class PlayerMobConfigTest {
     }
 
     @Test
+    void extinguishWithBucketDefaultsOnAndTogglesAtRuntime() {
+        assertTrue(PlayerMobConfig.DEFAULT_EXTINGUISH_WITH_BUCKET, "bucket self-extinguish is on by default");
+        assertTrue(PlayerMobConfig.parse(new Properties()).extinguishWithBucket(), "missing key → default true");
+        assertFalse(PlayerMobConfig.parse(props("extinguishWithBucket", "false")).extinguishWithBucket());
+        try {
+            PlayerMobConfig.setExtinguishWithBucket(false);
+            assertFalse(PlayerMobConfig.extinguishWithBucket());
+            PlayerMobConfig.setExtinguishWithBucket(true);
+            assertTrue(PlayerMobConfig.extinguishWithBucket());
+        } finally {
+            PlayerMobConfig.setExtinguishWithBucket(PlayerMobConfig.DEFAULT_EXTINGUISH_WITH_BUCKET); // don't leak
+        }
+    }
+
+    @Test
     void customSkinChanceDefaultsAndParsesAndClamps() {
         assertEquals(0.40F, PlayerMobConfig.DEFAULT_CUSTOM_SKIN_CHANCE, 1e-6);
         assertEquals(0.40F, PlayerMobConfig.parse(new Properties()).customSkinChance(), 1e-6,

@@ -153,6 +153,10 @@ public final class ReincarnateCommand {
                     .executes(ReincarnateCommand::queryEndCrystalCombat)
                     .then(Commands.literal("on").executes(ctx -> setEndCrystalCombat(ctx, true)))
                     .then(Commands.literal("off").executes(ctx -> setEndCrystalCombat(ctx, false))))
+                .then(Commands.literal("extinguishwithbucket")
+                    .executes(ReincarnateCommand::queryExtinguishWithBucket)
+                    .then(Commands.literal("on").executes(ctx -> setExtinguishWithBucket(ctx, true)))
+                    .then(Commands.literal("off").executes(ctx -> setExtinguishWithBucket(ctx, false))))
                 .then(Commands.literal("naturalspawn")
                     .executes(ReincarnateCommand::reportNaturalSpawn)
                     .then(Commands.literal("on").executes(ctx -> setNaturalSpawnMaster(ctx, true)))
@@ -941,6 +945,23 @@ public final class ReincarnateCommand {
     private static int setEndCrystalCombat(CommandContext<CommandSourceStack> ctx, boolean enabled) {
         PlayerMobConfig.setEndCrystalCombat(enabled);
         ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob end-crystal combat "
+            + (enabled ? "enabled" : "disabled") + " for this session."), false);
+        return 1;
+    }
+
+    /** {@code /playermob extinguishwithbucket} — report whether PlayerMobs douse themselves with a held water bucket. */
+    private static int queryExtinguishWithBucket(CommandContext<CommandSourceStack> ctx) {
+        boolean on = PlayerMobConfig.extinguishWithBucket();
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob bucket self-extinguish is "
+            + (on ? "ON — a burning mob holding a water bucket empties it and jumps in"
+                  : "OFF — mobs just burn") + "."), false);
+        return 1;
+    }
+
+    /** {@code /playermob extinguishwithbucket on|off} — flip bucket self-extinguishing for this session. */
+    private static int setExtinguishWithBucket(CommandContext<CommandSourceStack> ctx, boolean enabled) {
+        PlayerMobConfig.setExtinguishWithBucket(enabled);
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob bucket self-extinguish "
             + (enabled ? "enabled" : "disabled") + " for this session."), false);
         return 1;
     }

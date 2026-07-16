@@ -15,6 +15,7 @@ import games.brennan.playermob.entity.goal.DefendLovedOneGoal;
 import games.brennan.playermob.entity.goal.DigThroughGoal;
 import games.brennan.playermob.entity.goal.DoorOperationGoal;
 import games.brennan.playermob.entity.goal.EatFoodGoal;
+import games.brennan.playermob.entity.goal.FireBucketGoal;
 import games.brennan.playermob.entity.goal.FleeFromCategoryGoal;
 import games.brennan.playermob.entity.goal.FollowLovedOneGoal;
 import games.brennan.playermob.entity.goal.FriendlyGreetGoal;
@@ -718,6 +719,15 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     @Override
     protected void registerGoals() {
         this.goalSelector.addGoal(0, new FloatGoal(this));
+        // On fire? Get to water — priority 0 (same tier as FloatGoal, which only holds the JUMP
+        // flag so there's no conflict) so this preempts literally everything else, including an
+        // explicit player order and train recovery: a same-priority goal can never interrupt
+        // another once it's running (vanilla GoalSelector only lets a STRICTLY higher-priority
+        // goal preempt), so at priority 1 this could get starved mid-sequence — stuck approaching
+        // water, or never starting at all — by any other priority-1 goal already holding
+        // MOVE/LOOK. Priority 0 guarantees it always wins that slot the instant it's on fire.
+        // No-op unless on fire. See FireBucketGoal.
+        this.goalSelector.addGoal(0, new FireBucketGoal(this, /* speed */ 1.4)); // sprint to water — it's on fire
         // An explicit player order (/playermob order ...) overrides autonomous behaviour.
         // Added before the other priority-1 goals so it wins the MOVE/LOOK slot while it runs;
         // no-op (canUse false) whenever there's no pending order, so normal AI is unaffected.
