@@ -687,6 +687,21 @@
       "released": true,
       "released_in": "v0.81.0",
       "released_at": "2026-07-16T10:34:31Z"
+    },
+    {
+      "id": "skin-player-name-egg-reliable",
+      "version": "0.82.0",
+      "type": "fix",
+      "title": "Player-name skins now apply reliably on spawn eggs",
+      "summary": "Giving a PlayerMob a specific player's skin through a spawn egg's SkinPlayerName tag now works every time. Previously the skin would occasionally come out as a random player instead of the one you asked for.",
+      "highlights": [
+        "SkinPlayerName on a spawn egg reliably applies that player's skin",
+        "Plain spawn eggs still roll a varied random skin as before"
+      ],
+      "date": "2026-07-17",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
