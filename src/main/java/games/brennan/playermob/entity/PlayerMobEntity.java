@@ -3507,16 +3507,23 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // Backward compat: 0.2.0 saves have no SkinTextureUrl tag. Missing key
         // ⇒ URL stays the default "" ⇒ renderer uses the legacy bundled-
         // vanilla path keyed off SkinIndex. New v2 mobs round-trip the URL.
+        boolean urlLoaded = false;
         if (NbtCompat.containsOfType(tag, TAG_SKIN_TEXTURE_URL, Tag.TAG_STRING)) {
             setSkinTextureUrl(NbtCompat.getStringOr(tag, TAG_SKIN_TEXTURE_URL, ""));
             setSkinSlim(NbtCompat.getBooleanOr(tag, TAG_SKIN_SLIM, false));
             skinExplicit = true;
+            urlLoaded = true;
         }
         // Summon-by-player-name: resolved off-thread on the next server tick (see
         // resolvePendingSkinPlayerName), not here — readAdditionalSaveData has no guaranteed
-        // server-thread access. Skipped when a skin key above already pinned skinExplicit, so an
-        // explicit SkinTextureUrl wins.
-        if (!skinExplicit && NbtCompat.containsOfType(tag, TAG_SKIN_PLAYER_NAME, Tag.TAG_STRING)) {
+        // server-thread access. Gated on urlLoaded (not skinExplicit) so an explicit
+        // SkinTextureUrl still wins, but a bare SkinIndex does NOT block the name: a spawn
+        // egg's entity_data is applied via CustomData.loadInto, which pre-saves the entity
+        // (always writing SkinIndex:0) before merging the egg's tag — that injected index
+        // would otherwise trip skinExplicit and silently drop SkinPlayerName. When the async
+        // lookup lands it overwrites the rolled/bundled skin; skinExplicit stays set so
+        // finalizeSpawn's rollSpawnDefaults skips the random roll in the meantime.
+        if (!urlLoaded && NbtCompat.containsOfType(tag, TAG_SKIN_PLAYER_NAME, Tag.TAG_STRING)) {
             String name = NbtCompat.getStringOr(tag, TAG_SKIN_PLAYER_NAME, "");
             if (!name.isBlank()) {
                 pendingSkinPlayerName = name;
