@@ -1446,6 +1446,17 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         ReincarnationRecord echo = isEventSpawn(reason) && !skinExplicit
             ? PlayerReincarnation.maybeReincarnateOnSpawn(this, world) : null;
         rollSpawnDefaults(world.getRandom(), echo != null);
+        // A SkinPlayerName from the egg's entity_data is normally resolved off-thread on the first
+        // tick (resolvePendingSkinPlayerName). But finalizeSpawn runs BEFORE the entity is tracked
+        // to clients, so if the skin is already known (a local file, or a player already in the
+        // resolver cache — the common repeat-spawn case) bake it in now: the spawn packet then
+        // carries the real skin, with no default-skin frame and no race between the async apply and
+        // the spawn packet (the cause of an intermittent default skin on egg-spawned mobs). An
+        // uncached name stays pending for the async path.
+        if (pendingSkinPlayerName != null
+                && SkinNameApplier.applyIfImmediate(pendingSkinPlayerName, this)) {
+            pendingSkinPlayerName = null;
+        }
         boolean companion = maybeSpawnFriendPair(world, reason, echo);
         if (isEventSpawn(reason)) {
             DtSpawnDebug.report(world.getLevel(), this, echo != null, companion);
