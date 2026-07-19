@@ -264,6 +264,13 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
     /** Rescan cadence for the (world-static) climb route — see findClimbRoute. */
     private static final int CLIMB_RESCAN_TICKS = 20;
     /**
+     * How close to the top of the flight counts as having arrived. Paired with the height test in
+     * {@link #tickClimb()}: on a spiral the mob crosses deck height while still most of a turn short
+     * of the landing, so height alone would stop it on the stairs rather than at the top where it can
+     * board. 1.5 is "standing on the landing", not merely near it.
+     */
+    private static final double CLIMB_ARRIVE_DIST = 1.5;
+    /**
      * Hard cap on full-A* {@code createPath} probes per route scan. Each one is orders of magnitude
      * dearer than a block lookup, and the scan band is ~100 columns, so probing them all would cost
      * more than the tower it saves. Missing a staircase further along the rail just falls through to
@@ -325,6 +332,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
     private ClimbRoute climbRoute;     // cached existing way up; world-static, see ClimbRoute
     private int climbScanTick = 0;     // mob.tickCount of the last route scan (rescan cadence)
     private double bestClimbY = -1.0e9;   // highest Y reached on the route (watermark)
+    private double bestClimbDist = Double.MAX_VALUE;  // closest approach to the route top (watermark)
     private int gatherBreakTicks = 0;
     private int breakTicksTotal = 0;   // 0 = not yet sized for the current gather target
     private int toolReadyTick = 0;     // tick the post-tool-swap pause ends
@@ -446,6 +454,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         climbRoute = null;
         climbScanTick = 0;
         bestClimbY = -1.0e9;
+        bestClimbDist = Double.MAX_VALUE;
         bestApproachDist = Double.MAX_VALUE;
         bestApproachY = -1.0e9;
         bestStairsY = -1.0e9;
@@ -901,6 +910,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
             climbRoute = route;
             phase = Phase.CLIMB;
             bestClimbY = -1.0e9;
+            bestClimbDist = Double.MAX_VALUE;
             return;
         }
         if (BlockSourcePolicy.bridgeBlockCount(mob.getInventory()) >= blocksNeeded()) {
@@ -1063,12 +1073,15 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         }
         clearClimbObstruction(box);               // foliage over a staircase stalls this like it does BRIDGE
         BlockPos top = climbRoute.top();
-        // Success is reaching the DECK, not the top of the route — those are not the same thing, and
-        // testing against the route top let a mob stop climbing below the carriage floor, too low to
-        // board from. (BRIDGE goes TOWER_ABOVE_DECK higher still for wall clearance; a route can't be
-        // extended like a tower can, so deck level is the best this phase can offer — tryBoardNow at
-        // the top of tick() takes any opening that comes into reach from here.)
-        if (mob.getY() >= box.minY - 0.1) {
+        // Finished only when the mob is BOTH high enough AND actually at the top of the flight.
+        //
+        // Height alone is not enough, and on DT's spiral staircases it is actively wrong: the flight
+        // wraps around a central core, so the mob passes deck height while it is still most of a turn
+        // away from the top landing. Stopping there parked it on a tread partway round — and because
+        // waitForOpening halts navigation and zeroes horizontal velocity, it just stood on the stairs
+        // instead of walking the last few blocks up to where it could actually board.
+        double topDist = Math.hypot(mob.getX() - (top.getX() + 0.5), mob.getZ() - (top.getZ() + 0.5));
+        if (mob.getY() >= box.minY - 0.1 && topDist <= CLIMB_ARRIVE_DIST) {
             waitForOpening(box);
             return;
         }
@@ -1084,10 +1097,17 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         } else {
             tickTreads();
         }
-        // Progress = a new HIGHEST point on the route (watermark). Climbing is slow and a ladder ticks
-        // at a steady +0.2, so a tick-over-tick test would read as a stall on any hitch.
+        // Progress = a new HIGHEST point on the route, OR a new CLOSEST approach to the top (both
+        // watermarks). Climbing is slow and a ladder ticks at a steady +0.2, so a tick-over-tick test
+        // would read as a stall on any hitch. The horizontal half matters now that the phase runs on
+        // past deck height: the final walk around to the landing gains no height at all, and without
+        // it that stretch would sit there burning down the stall timer.
         if (mob.getY() > bestClimbY + 0.05) {
             bestClimbY = mob.getY();
+            markProgress();
+        }
+        if (topDist < bestClimbDist - 0.05) {
+            bestClimbDist = topDist;
             markProgress();
         }
     }
