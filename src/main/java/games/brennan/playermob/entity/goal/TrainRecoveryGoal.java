@@ -22,6 +22,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.pathfinder.Node;
 import net.minecraft.world.level.pathfinder.Path;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -1205,12 +1206,22 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
             for (int out = 1; out <= CLIMB_SCAN_OUT && probes < CLIMB_MAX_PATH_PROBES; out++) {
                 int cz = Mth.floor(faceZ) + step * out;
                 BlockPos top = new BlockPos(mx + dx, deckY, cz);
-                if (!hasDryHeadroom(level, top.below())) continue;   // nowhere to stand up there
+                // There must be something to STAND on up there. hasDryHeadroom only proves the cells
+                // above are clear, which thin air satisfies perfectly — so without this a point ten
+                // blocks up in the air beside an elevated track counted as a landing.
+                if (level.getBlockState(top.below()).getCollisionShape(level, top.below()).isEmpty()) continue;
+                if (!hasDryHeadroom(level, top.below())) continue;   // and room to stand in
                 probes++;
                 Path path = mob.getNavigation().createPath(top, 0);
-                if (path != null && path.canReach()) {
-                    return new ClimbRoute(mob.blockPosition(), top, false);
-                }
+                if (path == null || !path.canReach()) continue;
+                // And the path must actually END up there. Pathing to a target it can't stand at gets
+                // SNAPPED DOWN to the nearest reachable node — so canReach() alone happily reported
+                // success for the ground underneath the track. The mob then walked to a patch of dirt
+                // under the rails, gained no height, and sat there labelled "taking the stairs"
+                // nowhere near a staircase. Compare the end node's height to what we asked for.
+                Node end = path.getEndNode();
+                if (end == null || end.y < top.getY() - 1) continue;
+                return new ClimbRoute(mob.blockPosition(), top, false);
             }
             if (probes >= CLIMB_MAX_PATH_PROBES) break;
         }
