@@ -333,6 +333,21 @@ class PlayerMobConfigTest {
     }
 
     @Test
+    void huntForFoodDefaultsOnAndTogglesAtRuntime() {
+        assertTrue(PlayerMobConfig.DEFAULT_HUNT_FOR_FOOD, "animal-hunting is on by default");
+        assertTrue(PlayerMobConfig.parse(new Properties()).huntForFood(), "missing key → default true");
+        assertFalse(PlayerMobConfig.parse(props("huntForFood", "false")).huntForFood());
+        try {
+            PlayerMobConfig.setHuntForFood(false);
+            assertFalse(PlayerMobConfig.huntForFood());
+            PlayerMobConfig.setHuntForFood(true);
+            assertTrue(PlayerMobConfig.huntForFood());
+        } finally {
+            PlayerMobConfig.setHuntForFood(PlayerMobConfig.DEFAULT_HUNT_FOR_FOOD); // don't leak into other tests
+        }
+    }
+
+    @Test
     void customSkinChanceDefaultsAndParsesAndClamps() {
         assertEquals(0.40F, PlayerMobConfig.DEFAULT_CUSTOM_SKIN_CHANCE, 1e-6);
         assertEquals(0.40F, PlayerMobConfig.parse(new Properties()).customSkinChance(), 1e-6,

@@ -64,6 +64,36 @@ class SkinPlayerNameNbtTest {
     }
 
     @Test
+    void bareSkinIndexDoesNotBlockPlayerName_spawnEggMergeShape() {
+        // The spawn-egg path applies entity_data via CustomData.loadInto, which pre-saves the
+        // freshly-created entity (writeCustomTag always writes SkinIndex) BEFORE merging the egg's
+        // tag — so readCustomTag sees SkinIndex:0 alongside the caller's SkinPlayerName. A bare
+        // index must NOT suppress the name (only an explicit resolved URL does). We mirror the
+        // readCustomTag precedence: index → url(sets urlLoaded) → name gated on !urlLoaded.
+        CompoundTag tag = new CompoundTag();
+        tag.putInt("SkinIndex", 0);
+        tag.putString("SkinPlayerName", "generikb");
+
+        boolean urlLoaded = false;
+        if (NbtCompat.containsOfType(tag, "SkinIndex", NbtCompat.ANY_NUMERIC)) {
+            // index consumed, but this alone must not block the name
+        }
+        if (NbtCompat.containsOfType(tag, "SkinTextureUrl", Tag.TAG_STRING)) {
+            urlLoaded = true;
+        }
+        String pendingSkinPlayerName = null;
+        if (!urlLoaded && NbtCompat.containsOfType(tag, "SkinPlayerName", Tag.TAG_STRING)) {
+            String name = NbtCompat.getStringOr(tag, "SkinPlayerName", "");
+            if (!name.isBlank()) {
+                pendingSkinPlayerName = name;
+            }
+        }
+
+        assertEquals("generikb", pendingSkinPlayerName,
+            "a spawn egg's merge-injected SkinIndex must not swallow the SkinPlayerName");
+    }
+
+    @Test
     void blankPlayerNameIsIgnored() {
         CompoundTag tag = new CompoundTag();
         tag.putString("SkinPlayerName", "   ");

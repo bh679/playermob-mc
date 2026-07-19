@@ -638,8 +638,91 @@
       "released_at": "2026-07-16T05:13:35Z"
     },
     {
-      "id": "playermob-train-recovery-fixes",
+      "id": "stay-near-tether",
       "version": "0.79.0",
+      "type": "feat",
+      "title": "Keep a PlayerMob near a spot or companion (stay-near tether)",
+      "summary": "PlayerMobs can now be tethered so they won't wander off. Give a mob a stay-near anchor \u2014 a fixed position or a live entity (you or another PlayerMob) \u2014 plus a radius, and it stays within it: when it drifts (or gets dragged by a fight) past the edge, it walks back, then goes right back to doing its own thing inside the ring.",
+      "highlights": [
+        "New command: /playermob stay <name> ( off | here | <pos> | <target> ) [radius] \u2014 default radius 32 blocks (1\u2013256).",
+        "The tether yields to combat \u2014 a mob will chase an enemy past its ring, then walk back to its anchor once the fight is over.",
+        "The anchor survives save/load and can be baked into spawn NBT (PlayerMobData/StayNear), so summoned or egg-spawned mobs can come pre-tethered."
+      ],
+      "pr": 160,
+      "date": "2026-07-16",
+      "released": true,
+      "released_in": "v0.80.0",
+      "released_at": "2026-07-16T10:32:12Z"
+    },
+    {
+      "id": "hunt-for-food-toggle",
+      "version": "0.80.0",
+      "type": "feat",
+      "title": "New setting to stop PlayerMobs from hunting animals",
+      "summary": "Hungry PlayerMobs hunt nearby cows, pigs, chickens, sheep, and rabbits for meat when they're low on food. That's now optional \u2014 admins can turn it off entirely if they'd rather their PlayerMobs leave the local wildlife alone.",
+      "highlights": [
+        "On by default, matching existing behaviour \u2014 toggle live with /playermob huntforfood on|off, or set huntForFood=false in the config to disable it permanently",
+        "Turning it off mid-hunt makes the mob drop the chase immediately, even with an animal already targeted"
+      ],
+      "pr": 168,
+      "date": "2026-07-16",
+      "released": true,
+      "released_in": "v0.80.0",
+      "released_at": "2026-07-16T10:32:12Z"
+    },
+    {
+      "id": "summon-stay-nbt-anchor",
+      "version": "0.81.0",
+      "type": "feat",
+      "title": "Summon PlayerMobs pre-tethered \u2014 stay option, spawn NBT, and player-name anchors",
+      "summary": "You can now tether a PlayerMob the moment you summon it, instead of only after it already exists. /playermob summon gains a 'stay' option that pins the new mob to where it spawns, to a set of coordinates, or to a player or another PlayerMob \u2014 each with an optional radius. A new AnchorPlayer name key lets you tether by player name in spawn NBT, so you no longer need a raw UUID or a packed coordinate number; the mob follows that player as they move and reconnects to them after a relog. And /playermob summon now accepts raw {NBT} to bake in traits, skin, and the tether in one go.",
+      "highlights": [
+        "New: /playermob summon <name> stay ( off | here | <pos> | <target> ) [radius] \u2014 tether a mob the instant it spawns",
+        "Tether by player NAME in spawn NBT via the new AnchorPlayer key \u2014 a friendly alternative to a raw UUID or a packed AnchorPos coordinate",
+        "Player/entity anchors follow the same leash-not-glue behaviour: the mob yields to combat, then walks back once it drifts beyond the radius",
+        "Optional {NBT} on /playermob summon bakes in traits, skin, and the stay tether at spawn"
+      ],
+      "pr": 170,
+      "date": "2026-07-16",
+      "released": true,
+      "released_in": "v0.81.0",
+      "released_at": "2026-07-16T10:34:31Z"
+    },
+    {
+      "id": "skin-player-name-egg-reliable",
+      "version": "0.82.0",
+      "type": "fix",
+      "title": "Player-name skins now apply reliably on spawn eggs",
+      "summary": "Giving a PlayerMob a specific player's skin through a spawn egg's SkinPlayerName tag now works every time. Previously the skin would occasionally come out as a random player instead of the one you asked for.",
+      "highlights": [
+        "SkinPlayerName on a spawn egg reliably applies that player's skin",
+        "Plain spawn eggs still roll a varied random skin as before"
+      ],
+      "date": "2026-07-17",
+      "released": true,
+      "released_in": "v0.82.0",
+      "released_at": "2026-07-17T16:46:33Z"
+    },
+    {
+      "id": "gap-proportionate-carriage-hop",
+      "version": "0.83.0",
+      "type": "fix",
+      "title": "PlayerMobs step over carriage gaps instead of leaping them",
+      "summary": "PlayerMobs crossing between train carriage groups now take a hop sized to the actual gap. Dungeon Train tightened the seams between carriages, but PlayerMobs kept using the same big sprint-leap they needed for the old wider gaps \u2014 so they'd sail across a hand's-width seam. They now step over it.",
+      "highlights": [
+        "Cross-carriage hops are sized to the real gap \u2014 about half the height and half the distance at Dungeon Train's current spacing",
+        "Wider gaps still get the full sprint jump, so nothing changes where the longer leap is actually needed",
+        "Fixed a mob briefly getting stuck in its crossing state after landing on a very narrow gap"
+      ],
+      "pr": 175,
+      "date": "2026-07-19",
+      "released": false,
+      "released_in": null,
+      "released_at": null
+    },
+    {
+      "id": "playermob-train-recovery-fixes",
+      "version": "0.83.0",
       "type": "fix",
       "title": "PlayerMobs find their way back onto the train",
       "summary": "A PlayerMob that falls onto the tracks now works its way back aboard instead of getting stuck. It bridges off the rails when there is a drop, builds a pillar up beside the passing carriages, and waits for a clear opening before jumping in.",
@@ -649,6 +732,7 @@
         "Boarding waits for a genuine opening, so mobs stop leaping into carriage walls or through gaps.",
         "A mob with nothing to build from is given a few planks so it can bridge out and climb back on."
       ],
+      "pr": 177,
       "date": "2026-07-19",
       "released": false,
       "released_in": null,

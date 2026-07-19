@@ -140,6 +140,11 @@ public final class PlayerSkinResolver {
         } else {
             Optional<NameId> base = lookupByName(server, nameOrUuid.trim());
             if (base.isEmpty()) {
+                // Name → UUID miss: unknown username, or the (rate-limited) Mojang name API
+                // was unreachable. The caller falls back to a bundled skin; this WARN is the
+                // only breadcrumb explaining a "player-name skin didn't apply" report.
+                LOGGER.warn("[playermob] skin name '{}' did not resolve to a Mojang account "
+                    + "(unknown name or name API unreachable); using fallback skin", nameOrUuid);
                 return Optional.empty();
             }
             id = base.get().id();
@@ -147,6 +152,10 @@ public final class PlayerSkinResolver {
         }
         MinecraftProfileTexture skin = fetchSkin(server, id, name);
         if (skin == null || skin.getUrl() == null || skin.getUrl().isEmpty()) {
+            // UUID → texture miss: the account has no skin, or the session/textures service
+            // was unreachable. Same graceful fallback; logged so it isn't silent.
+            LOGGER.warn("[playermob] no skin texture for '{}' ({}) — account has none or the "
+                + "textures service was unreachable; using fallback skin", nameOrUuid, id);
             return Optional.empty();
         }
         return Optional.of(new Resolved(skin.getUrl(), "slim".equals(skin.getMetadata("model"))));

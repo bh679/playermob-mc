@@ -27,6 +27,7 @@ import games.brennan.playermob.entity.goal.RaidArmorStandsGoal;
 import games.brennan.playermob.entity.goal.RaidContainersGoal;
 import games.brennan.playermob.entity.goal.SeekAmmoGoal;
 import games.brennan.playermob.entity.goal.SkepticalWatchGoal;
+import games.brennan.playermob.entity.goal.StayNearGoal;
 import games.brennan.playermob.entity.goal.EndCrystalCombatGoal;
 import games.brennan.playermob.entity.goal.TntCombatGoal;
 import games.brennan.playermob.entity.goal.TrainRecoveryGoal;
@@ -306,6 +307,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private static final String TAG_POS = "Pos";
     private static final String TAG_UUID = "UUID";
     private static final String TAG_TICK = "Tick";
+    private static final String TAG_STAY_NEAR = "StayNear";
 
     // ---- Fields -----------------------------------------------------------
 
@@ -392,6 +394,16 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * name asynchronously) — so the command names the mob once that skin lands rather than off the rolled one.
      */
     private boolean deferAutoName;
+
+    /**
+     * Transient (never saved): set in {@link #finalizeSpawn} for a spawn-egg spawn. On 1.21.1 a spawn egg
+     * merges its {@code entity_data} AFTER {@code finalizeSpawn}, so the {@code customSkinChance} URL roll is
+     * deferred to the first tick ({@link #resolvePendingSkinPlayerName}) — by when the egg's skin directive
+     * (a {@code SkinPlayerName} or an authored {@code SkinTextureUrl}) is known and suppresses the roll. Left
+     * {@code false} for every other spawn (which roll their URL skin in {@code finalizeSpawn} as before), and
+     * never persisted, so a saved mob never re-rolls its skin on world load.
+     */
+    private boolean eggAwaitingSkinRoll;
 
     /**
      * Server tick of the last moment this mob stood on a train carriage, or a
@@ -481,6 +493,29 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     /** The mob's default order interruptibility applied when a command omits the {@code nonstop} flag. */
     public boolean isOrderInterruptibleDefault() {
         return this.orderInterruptibleDefault;
+    }
+
+    /**
+     * The stay-near tether keeping this mob within a radius of an anchor (a fixed position or a live
+     * entity), or {@code null} when it may roam freely. Persisted in {@code PlayerMobData/StayNear};
+     * read each tick by {@link StayNearGoal}. Set/cleared by {@code /playermob stay …} or authored in
+     * spawn NBT.
+     */
+    private StayAnchor stayAnchor;
+
+    /** The mob's stay-near tether, or {@code null} if it roams freely. */
+    public StayAnchor getStayAnchor() {
+        return this.stayAnchor;
+    }
+
+    /** Tether this mob near {@code anchor} (a position or entity + radius). */
+    public void setStayAnchor(StayAnchor anchor) {
+        this.stayAnchor = anchor;
+    }
+
+    /** Remove the stay-near tether — the mob roams freely again. */
+    public void clearStayAnchor() {
+        this.stayAnchor = null;
     }
 
     /**
@@ -788,6 +823,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // fights is then automatic: following parks the mob beside the loved one where the
         // target goals acquire foes. See FollowLovedOneGoal / FollowLovedOnePolicy.
         this.goalSelector.addGoal(2, new FollowLovedOneGoal(this));
+        // Stay-near tether: keep the mob within its anchor's radius. Priority 2 like FollowLovedOne
+        // so it preempts the own-tasks (raid 3 … stroll 8) that cause wandering, yet self-gates on
+        // "no target" (registered after the attack goal) so combat wins and the mob only walks back
+        // once the fight ends. No-op whenever the mob has no anchor or is already inside its radius.
+        this.goalSelector.addGoal(2, new StayNearGoal(this));
         // EatFoodGoal added BEFORE the raid goals at the same priority so
         // its canUse() is evaluated first — a low-HP mob with food prefers
         // eating over walking to the next chest.
@@ -872,18 +912,31 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     }
 
     /**
-     * Kick off the async skin lookup for a {@link #pendingSkinPlayerName} set by {@link #readCustomTag} —
-     * covers both a fresh {@code /summon ... {SkinPlayerName:"..."}} (which skips {@code finalizeSpawn}
-     * entirely when NBT is supplied) and an entity egg / Dungeon Train spawn (whose {@code entity_data} is
-     * merged before {@code finalizeSpawn} runs). Entity has no reliable "just added to a ServerLevel" hook
-     * in this version, so this piggybacks on the first server tick instead; a no-op once resolved (or on
-     * the client, where this field is never set).
+     * First-server-tick skin settling. Two jobs, both server-side (this field/flag are never set on the
+     * client), each a one-shot no-op once done. Entity has no reliable "just added to a ServerLevel" hook in
+     * this version, so this piggybacks on the first tick.
+     *
+     * <ol>
+     *   <li>Resolve a {@link #pendingSkinPlayerName} (a {@code SkinPlayerName} the egg / {@code /summon} NBT
+     *       named but that wasn't already cached) off-thread via {@link SkinNameApplier}.</li>
+     *   <li>Run the {@code customSkinChance} URL roll deferred from {@link #finalizeSpawn} for a spawn egg
+     *       (see {@link #eggAwaitingSkinRoll}), but only if the egg specified no skin of its own — no pending
+     *       name and still the empty (bundled-index) URL. A name or authored URL wins.</li>
+     * </ol>
      */
     private void resolvePendingSkinPlayerName() {
         if (pendingSkinPlayerName != null && level() instanceof ServerLevel serverLevel) {
             String name = pendingSkinPlayerName;
             pendingSkinPlayerName = null;
             SkinNameApplier.apply(serverLevel.getServer(), name, this);
+        }
+        if (eggAwaitingSkinRoll && level() instanceof ServerLevel serverLevel) {
+            eggAwaitingSkinRoll = false;
+            // Only roll when the egg carried no skin directive: a SkinPlayerName leaves pending set
+            // (handled above) or already baked a URL; an authored SkinTextureUrl leaves a non-empty URL.
+            if (pendingSkinPlayerName == null && getSkinTextureUrl().isEmpty()) {
+                rollCustomSkinUrl(serverLevel.getRandom());
+            }
         }
     }
 
@@ -1412,10 +1465,18 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // a chance to embody a stored past life instead of a fresh random mob. Applying the
         // snapshot here (before the rolls) pins skin + traits explicit, so the rolls below
         // skip — same path as the reincarnation egg. Skipped when a skin is already loaded
-        // (egg / Skin* summon), so it never clobbers an explicit identity.
+        // (a Skin* summon), so it never clobbers an explicit identity.
         ReincarnationRecord echo = isEventSpawn(reason) && !skinExplicit
             ? PlayerReincarnation.maybeReincarnateOnSpawn(this, world) : null;
-        rollSpawnDefaults(world.getRandom(), echo != null);
+        // A spawn egg's entity_data is merged AFTER finalizeSpawn on 1.21.1 (vanilla
+        // EntityType.create runs finalizeSpawn, THEN the stack-config consumer / CustomData.loadInto
+        // → readCustomTag). So a URL skin rolled here would be pre-saved by loadInto and then mistaken
+        // for an authored SkinTextureUrl in readCustomTag, clobbering the egg's SkinPlayerName. Roll
+        // only the bundled index for egg spawns and defer the URL roll to the first tick (see
+        // eggAwaitingSkinRoll / resolvePendingSkinPlayerName), by when the egg's skin directive
+        // (a name or an authored URL) is known and can suppress the roll.
+        rollSpawnDefaults(world.getRandom(), echo != null, !isSpawnEggSpawn(reason));
+        this.eggAwaitingSkinRoll = isSpawnEggSpawn(reason);
         boolean companion = maybeSpawnFriendPair(world, reason, echo);
         if (isEventSpawn(reason)) {
             DtSpawnDebug.report(world.getLevel(), this, echo != null, companion);
@@ -1472,11 +1533,15 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * {@link #finalizeSpawn} so a {@link #maybeSpawnFriendPair} companion, which is created
      * with {@code EntityType.create} (and so never runs {@code finalizeSpawn}), still gets a
      * normal mob's randomised look and personality.
+     *
+     * @param rollUrlSkin whether to draw a {@code customSkinChance} online/local URL skin now. False for
+     *                    spawn eggs, whose {@code entity_data} is merged AFTER this runs — a URL rolled
+     *                    here would be mistaken for an authored skin and clobber the egg's SkinPlayerName.
+     *                    Those defer the URL roll to the first tick (see {@link #resolvePendingSkinPlayerName}).
      */
-    private void rollSpawnDefaults(RandomSource random, boolean reincarnated) {
+    private void rollSpawnDefaults(RandomSource random, boolean reincarnated, boolean rollUrlSkin) {
         // Keep a skin already loaded from NBT (a reincarnation egg's snapshot, or a
-        // /summon with a Skin* tag). A spawn egg merges its entity_data BEFORE
-        // finalizeSpawn, so without this guard the roll would clobber that skin.
+        // /summon with a Skin* tag).
         if (!skinExplicit) {
             setSkinIndex(random.nextInt(SKIN_COUNT));
             // Bundled defaults: roll the arm model independently of the name, ~50/50.
@@ -1485,26 +1550,8 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             // per-name model — we mirror that coin-flip. A URL skin (below) overrides
             // this with its own authored model.
             setSkinSlim(random.nextBoolean());
-            // Pick a skin across the three enabled sources (bundled base / online registry / local
-            // folder) via the pure selector. Bundled stays the base; the customSkinChance override now
-            // draws uniformly from the combined online+local pool. Snapshot both lists once so the
-            // index the selector returns indexes the same list we read.
-            List<PlayerMobSkin> online = PlayerMobSkinRegistry.all();
-            List<String> local = LocalSkinFolder.list();
-            SkinSourceSelector.Choice choice = SkinSourceSelector.choose(
-                PlayerMobConfig.skinSourceBundled(),
-                PlayerMobConfig.skinSourceOnline(),
-                PlayerMobConfig.skinSourceLocal(),
-                online.size(), local.size(), PlayerMobConfig.customSkinChance(),
-                random::nextInt, () -> random.nextFloat());
-            switch (choice.kind()) {
-                case ONLINE -> {
-                    PlayerMobSkin skin = online.get(choice.index());
-                    setSkinTextureUrl(skin.textureUrl());
-                    setSkinSlim(skin.model() == SkinModel.SLIM);
-                }
-                case LOCAL -> setSkinTextureUrl(LocalSkinRef.encode(local.get(choice.index())));
-                case BUNDLED -> { /* keep the bundled index rolled above */ }
+            if (rollUrlSkin) {
+                rollCustomSkinUrl(random);
             }
         }
         // Roll any trait not pinned by a spawn egg's entity_data or /summon NBT
@@ -1515,6 +1562,33 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // unless a reincarnation already restored it from the past life's snapshot.
         if (!reincarnated) {
             this.closesDoors = random.nextBoolean();
+        }
+    }
+
+    /**
+     * With probability {@link PlayerMobConfig#customSkinChance()}, override the bundled index skin with a
+     * URL skin drawn uniformly across the enabled online-registry + local-folder pool via the pure
+     * {@link SkinSourceSelector}. A BUNDLED outcome leaves the already-rolled index untouched. Shared by
+     * {@link #rollSpawnDefaults} and the deferred egg roll on the first tick
+     * ({@link #resolvePendingSkinPlayerName}). Snapshots both lists once so the selector's index matches.
+     */
+    private void rollCustomSkinUrl(RandomSource random) {
+        List<PlayerMobSkin> online = PlayerMobSkinRegistry.all();
+        List<String> local = LocalSkinFolder.list();
+        SkinSourceSelector.Choice choice = SkinSourceSelector.choose(
+            PlayerMobConfig.skinSourceBundled(),
+            PlayerMobConfig.skinSourceOnline(),
+            PlayerMobConfig.skinSourceLocal(),
+            online.size(), local.size(), PlayerMobConfig.customSkinChance(),
+            random::nextInt, () -> random.nextFloat());
+        switch (choice.kind()) {
+            case ONLINE -> {
+                PlayerMobSkin skin = online.get(choice.index());
+                setSkinTextureUrl(skin.textureUrl());
+                setSkinSlim(skin.model() == SkinModel.SLIM);
+            }
+            case LOCAL -> setSkinTextureUrl(LocalSkinRef.encode(local.get(choice.index())));
+            case BUNDLED -> { /* keep the bundled index rolled above */ }
         }
     }
 
@@ -1551,6 +1625,22 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     *///?} else {
     private static boolean isEventSpawn(MobSpawnType reason) {
         return reason == MobSpawnType.EVENT;
+    }
+    //?}
+
+    /**
+     * Whether {@code reason} is a spawn-egg spawn. Its {@code entity_data} is merged AFTER
+     * {@code finalizeSpawn}, so the URL-skin roll is deferred to the first tick for these (see
+     * {@link #eggAwaitingSkinRoll}). Version-bridged like {@link #isEventSpawn}.
+     */
+    //? if >=26 {
+    /*private static boolean isSpawnEggSpawn(EntitySpawnReason reason) {
+        // 26.x renamed MobSpawnType.SPAWN_EGG → EntitySpawnReason.SPAWN_ITEM_USE.
+        return reason == EntitySpawnReason.SPAWN_ITEM_USE;
+    }
+    *///?} else {
+    private static boolean isSpawnEggSpawn(MobSpawnType reason) {
+        return reason == MobSpawnType.SPAWN_EGG;
     }
     //?}
 
@@ -1601,7 +1691,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             return false;
         }
         placeCompanion(friend);
-        friend.rollSpawnDefaults(world.getRandom(), false);
+        // A companion is created via EntityType.create (no egg entity_data to follow), so it takes a
+        // normal full roll here — URL skin included.
+        friend.rollSpawnDefaults(world.getRandom(), false, true);
         linkAsFriends(friend);
         level.addFreshEntity(friend);
         return true;
@@ -3438,6 +3530,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             entities.add(entry);
         }
         tag.put(TAG_EXPLORED_ENTITIES, entities);
+
+        // Stay-near tether — additive. Only written when tethered (most mobs aren't), so an
+        // untethered mob round-trips no key (matches the TrainExploreDir / SkinTextureUrl pattern).
+        if (stayAnchor != null) {
+            CompoundTag stay = new CompoundTag();
+            stayAnchor.save(stay);
+            tag.put(TAG_STAY_NEAR, stay);
+        }
     }
 
     /** Read every PlayerMob custom field from {@code tag}. Version-agnostic (CompoundTag + NbtCompat). */
@@ -3469,20 +3569,29 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // Backward compat: 0.2.0 saves have no SkinTextureUrl tag. Missing key
         // ⇒ URL stays the default "" ⇒ renderer uses the legacy bundled-
         // vanilla path keyed off SkinIndex. New v2 mobs round-trip the URL.
+        boolean urlLoaded = false;
         if (NbtCompat.containsOfType(tag, TAG_SKIN_TEXTURE_URL, Tag.TAG_STRING)) {
             setSkinTextureUrl(NbtCompat.getStringOr(tag, TAG_SKIN_TEXTURE_URL, ""));
             setSkinSlim(NbtCompat.getBooleanOr(tag, TAG_SKIN_SLIM, false));
             skinExplicit = true;
+            urlLoaded = true;
         }
-        // Summon-by-player-name: resolved off-thread on the next server tick (see
-        // resolvePendingSkinPlayerName), not here — readAdditionalSaveData has no guaranteed
-        // server-thread access. Skipped when a skin key above already pinned skinExplicit, so an
-        // explicit SkinTextureUrl wins.
-        if (!skinExplicit && NbtCompat.containsOfType(tag, TAG_SKIN_PLAYER_NAME, Tag.TAG_STRING)) {
+        // Summon-by-player-name. Gated on urlLoaded (not skinExplicit) so an explicit SkinTextureUrl
+        // still wins, but a bare SkinIndex does NOT block the name: a spawn egg's entity_data is applied
+        // via CustomData.loadInto, which pre-saves the entity (always writing SkinIndex) before merging
+        // the egg's tag — that injected index would otherwise trip skinExplicit and silently drop the
+        // name. If the skin is already known (a local file, or a player already in the resolver cache —
+        // the common repeat-spawn case), bake it in synchronously HERE: readCustomTag runs before the
+        // entity is tracked to clients, so the spawn packet carries the real skin — no default frame, no
+        // race. Otherwise keep it pending for the off-thread first-tick resolve (see
+        // resolvePendingSkinPlayerName); readAdditionalSaveData has no guaranteed server-thread access.
+        if (!urlLoaded && NbtCompat.containsOfType(tag, TAG_SKIN_PLAYER_NAME, Tag.TAG_STRING)) {
             String name = NbtCompat.getStringOr(tag, TAG_SKIN_PLAYER_NAME, "");
             if (!name.isBlank()) {
-                pendingSkinPlayerName = name;
                 skinExplicit = true;
+                if (!SkinNameApplier.applyIfImmediate(name, this)) {
+                    pendingSkinPlayerName = name;
+                }
             }
         }
 
@@ -3506,6 +3615,12 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
                 }
             }
         }
+
+        // Stay-near tether — additive. Missing key ⇒ null ⇒ roams freely (every pre-feature mob).
+        // Present ⇒ rebuild the anchor; StayAnchor.load returns null for a malformed/empty compound.
+        this.stayAnchor = NbtCompat.containsOfType(tag, TAG_STAY_NEAR, Tag.TAG_COMPOUND)
+            ? StayAnchor.load(NbtCompat.getCompoundOrEmpty(tag, TAG_STAY_NEAR))
+            : null;
     }
 
     // ---- Death drops -----------------------------------------------------

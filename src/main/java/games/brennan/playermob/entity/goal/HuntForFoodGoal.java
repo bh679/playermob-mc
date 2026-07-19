@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.ForagePolicy;
 import games.brennan.playermob.entity.PlayerMobEntity;
@@ -27,7 +28,9 @@ import net.minecraft.world.entity.animal.Animal;
  *
  * <p>Unlike {@link HarvestCropsGoal}, hunting is <b>not</b> gated on the
  * {@code mobGriefing} gamerule — killing a mob isn't a block change, and vanilla
- * hostiles attack regardless of that rule.</p>
+ * hostiles attack regardless of that rule. It is gated on
+ * {@link PlayerMobConfig#huntForFood()} (default on) — see
+ * {@code /playermob huntforfood on|off}.</p>
  */
 public final class HuntForFoodGoal extends NearestAttackableTargetGoal<Animal> {
 
@@ -51,6 +54,7 @@ public final class HuntForFoodGoal extends NearestAttackableTargetGoal<Animal> {
 
     @Override
     public boolean canUse() {
+        if (!PlayerMobConfig.huntForFood()) return false;
         if (!playerMob.wantsFood()) return false;
         // Stand down if there's food to collect or eat right now: chasing the
         // next animal (combat, priority 2) would preempt the priority-3 collect
@@ -62,8 +66,9 @@ public final class HuntForFoodGoal extends NearestAttackableTargetGoal<Animal> {
 
     @Override
     public boolean canContinueToUse() {
-        // Disengage the instant the mob is fed — drop the hunt and get back to
-        // whatever it was doing rather than finishing an now-pointless kill.
-        return playerMob.wantsFood() && super.canContinueToUse();
+        // Disengage the instant the mob is fed, or the config is turned off mid-hunt —
+        // drop the hunt and get back to whatever it was doing rather than finishing a
+        // now-pointless (or now-disallowed) kill.
+        return PlayerMobConfig.huntForFood() && playerMob.wantsFood() && super.canContinueToUse();
     }
 }
