@@ -636,6 +636,23 @@
       "released": true,
       "released_in": "v0.78.0",
       "released_at": "2026-07-16T05:13:35Z"
+    },
+    {
+      "id": "playermob-train-recovery-fixes",
+      "version": "0.79.0",
+      "type": "fix",
+      "title": "PlayerMobs find their way back onto the train",
+      "summary": "A PlayerMob that falls onto the tracks now works its way back aboard instead of getting stuck. It bridges off the rails when there is a drop, builds a pillar up beside the passing carriages, and waits for a clear opening before jumping in.",
+      "highlights": [
+        "Mobs stranded on the track bed no longer stand on the edge indefinitely \u2014 they place a block and step off.",
+        "Mobs beside the line build straight up rather than pacing alongside the train.",
+        "Boarding waits for a genuine opening, so mobs stop leaping into carriage walls or through gaps.",
+        "A mob with nothing to build from is given a few planks so it can bridge out and climb back on."
+      ],
+      "date": "2026-07-19",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
