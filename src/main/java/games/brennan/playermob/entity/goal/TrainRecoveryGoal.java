@@ -93,17 +93,16 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      */
     private static final int MAX_PLACEMENTS = 32;
     /**
-     * Tower until the mob's block Y reaches {@code floor(carriage.minY) + this}, i.e. TWO blocks
-     * above the deck's walking surface, before boarding. Deck-level footing leaves a walled
-     * carriage's wall in the way; two clear blocks let the mob drop in through an opening
-     * (flatbed / hole) from above.
+     * Tower until the mob's block Y reaches {@code floor(carriage.minY) + this} — TWO blocks above
+     * the TRACK BED, level with the deck's walking surface. That is enough to get aboard; building
+     * any higher just burns blocks and time while the train pulls away.
      *
-     * <p>Calibrated from measurement, not arithmetic: a carriage logs {@code minY = 77.99} while
-     * its boarding foot Y is 79, so the walking surface is 79 and {@code floor(77.99) = 77}. The
-     * previous value of 3 stopped the mob at 80 — only ONE block up — which is why it kept
-     * clipping walls on the way in.</p>
+     * <p>Mind the reference point: this counts blocks above the RAILS, not above the deck. A
+     * carriage logs {@code minY = 77.99}, so {@code floor(...) = 77} — the height a mob stands at
+     * when it lands on the track bed — while the deck walking surface is 79. A value of 4 therefore
+     * towered the mob to 81, four blocks above the tracks and needlessly tall.</p>
      */
-    private static final int TOWER_ABOVE_DECK = 4;
+    private static final int TOWER_ABOVE_DECK = 2;
     /** Extra bridge blocks to gather beyond the bare climb — a cushion so a tower never runs short. */
     private static final int BLOCK_BUFFER = 5;
     /**
@@ -132,14 +131,14 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      */
     private static final int NO_SAFE_EXIT_GRANT_TICKS = 40;
     /**
-     * How long to hold beside the deck hoping an opening slides into reach before towering higher
-     * (15s). Generous on purpose: a mob at deck level waiting for a gap in a long carriage is doing
-     * exactly the right thing, and a short bound kicked it into a pointless GATHER mid-wait. The
-     * infinite ride this originally guarded against is now prevented upstream by
-     * {@link #DECK_HEIGHT_TOLERANCE} (a mob BELOW the deck climbs instead of waiting), with
-     * {@link #GLOBAL_ABANDON_TICKS} as the hard backstop.
+     * How long to hold hoping an opening slides into reach before raising the tower target (5s).
+     * Deliberately short now that timing out CLIMBS rather than wandering off to gather: when the
+     * mob is too low to see any landing at all, every tick spent waiting is ground lost to a train
+     * that never stops. Long enough that a genuine gap in a passing carriage still gets taken.
+     * The infinite ride this originally guarded against is prevented upstream by
+     * {@link #DECK_HEIGHT_TOLERANCE}, with {@link #GLOBAL_ABANDON_TICKS} as the hard backstop.
      */
-    private static final int WAIT_FOR_OPENING_TICKS = 300;
+    private static final int WAIT_FOR_OPENING_TICKS = 100;
     /**
      * How far below the deck floor still counts as "already up at deck height, just wait".
      * Deliberately tight: the old 1.0 tolerance mis-classified a mob a FULL block below the deck
@@ -193,6 +192,12 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      */
     private static final double PILLAR_BACK_INSET = 0.25;
     /**
+     * Once a boarding leap starts, keep steering at the opening for this many ticks even though the
+     * mob is airborne (and so no longer "ready" by the standing-height test). Without it the mob
+     * abandons its own jump the tick it leaves the ground.
+     */
+    private static final int BOARD_COMMIT_TICKS = 12;
+    /**
      * Lay the step-off as a short STRIP of this many blocks along the direction of travel, all in
      * one go, rather than a single block. A 1-wide target is easy to miss: the train carries the
      * mob ~0.1 blocks/tick while it steps diagonally across, so a small timing error slid it right
@@ -239,6 +244,8 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
     private int recoveryGrantsUsed = 0;            // mercy plank grants spent this recovery (max MAX_RECOVERY_GRANTS)
     private int wedgedOnBedTicks = 0;              // ticks continuously stuck on the bed; resets only on leaving it / stepping off
     private int waitingTicks = 0;                  // consecutive ticks held beside the deck waiting for an opening
+    private int boardCommitTicks = 0;              // ticks remaining in a committed boarding leap
+    private int towerPlacements = 0;               // blocks placed while TOWERING (excludes the step off the bed)
     private int bridgeStallTicks = 0;              // ticks in BRIDGE with no placement and no height gained
     private double lastBridgeY = -1.0e9;           // mob y at the last BRIDGE progress check
     private int lastBridgePlacements = -1;         // placementsUsed at the last BRIDGE progress check
@@ -377,6 +384,8 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         recoveryGrantsUsed = 0;
         wedgedOnBedTicks = 0;
         waitingTicks = 0;
+        boardCommitTicks = 0;
+        towerPlacements = 0;
         bridgeStallTicks = 0;
         lastBridgeY = -1.0e9;
         lastBridgePlacements = -1;
@@ -504,11 +513,11 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
                 waitForOpening(box);
                 return;
             }
-            // Still no opening: tower a little higher (maybe a wall is in the way) rather than
-            // going off to gather — we're in position, we just need to clear the lip.
-            trace("approach WAIT timed out after {} ticks → tower higher", waitingTicks);
+            // Still no opening. The tower height is a HARD cap (two blocks over the rails), so we
+            // do not climb any higher — keep holding and take the first opening that comes. If none
+            // ever does, the stall/global backstops release the mob rather than it building a spire.
+            trace("approach WAIT timed out after {} ticks — holding at capped tower height", waitingTicks);
             waitingTicks = 0;
-            commitToBuildUp();
             return;
         }
         waitingTicks = 0;   // not holding station → the wait clock only counts consecutive ticks
@@ -594,13 +603,22 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      * the wall and lands back where it started — a loop that never boards and, because the attempt
      * short-circuits the tick, never lets it tower any higher either.
      *
-     * <p>So: board once the planned tower height is reached ({@link #TOWER_ABOVE_DECK}, two blocks
-     * over the deck), or — if we are out of material and cannot climb further — from whatever
-     * height we did reach, provided it is at least deck level.</p>
+     * <p>Ready when: the capped tower height is reached ({@link #TOWER_ABOVE_DECK}, two blocks over
+     * the rails — never higher); OR the mob is already a block up and has not laid a single tower
+     * block, in which case it is high enough as it stands and building would be pure waste; OR it
+     * is out of material and at least at deck level, so this is as high as it will ever get.</p>
      */
     private boolean readyToBoard(AABB box) {
-        if (mob.blockPosition().getY() >= Mth.floor(box.minY) + TOWER_ABOVE_DECK) {
-            return true;
+        if (!mob.onGround()) {
+            return false;   // standing height only — an airborne sample reads a block high
+        }
+        int trackY = Mth.floor(box.minY);
+        int y = mob.blockPosition().getY();
+        if (y >= trackY + TOWER_ABOVE_DECK) {
+            return true;                       // reached the cap
+        }
+        if (towerPlacements == 0 && y >= trackY + 1) {
+            return true;                       // already a block up and never towered — don't start
         }
         return BlockSourcePolicy.bridgeBlockCount(mob.getInventory()) <= 0
             && mob.getY() >= box.minY - DECK_HEIGHT_TOLERANCE;
@@ -883,8 +901,12 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      * beneath it, switch to pillaring up beside it (jump-stack), then hop across.
      */
     private void tickStairs(int slot, AABB box) {
-        if (mob.blockPosition().getY() >= Mth.floor(box.minY) + TOWER_ABOVE_DECK) {
-            waitForOpening(box);                       // towered clear; tryBoardNow leaps when an opening is in reach
+        // Judged on the ground only — see tickJumpStack: an airborne sample reads a block high and
+        // aborts the climb at the apex of every hop.
+        // readyToBoard, not a raw height test: it also covers "already a block up and never
+        // towered", so a mob that starts high enough never lays a block at all.
+        if (readyToBoard(box)) {
+            waitForOpening(box);                       // high enough; tryBoardNow leaps when an opening is in reach
             return;
         }
         BlockPos place = BlockSourcePolicy.nextBridgePos(mob.blockPosition(), box);
@@ -905,6 +927,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         lookAt(place);
         if (tryPlaceBridgeBlock(place, slot)) {
             placementsUsed++;
+            towerPlacements++;
             markProgress();
         }
     }
@@ -933,11 +956,17 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      * which a staircase out into the air can't support.
      */
     private void tickJumpStack(int slot, AABB box) {
-        if (mob.blockPosition().getY() >= Mth.floor(box.minY) + TOWER_ABOVE_DECK) {
-            // Tower is tall enough: hold station and take the first clear opening.
-            traceTick("jumpStack TOWER TOP mobBlockY={} deckMinY={} threshold={} blocks={} → wait for opening",
+        // Tower height is judged by where the mob is STANDING, never mid-jump. Testing the
+        // instantaneous Y made the apex of every hop read as "tall enough", returning before the
+        // placement below could fill the vacated foot space — so the mob bounced between N and N+1
+        // forever, holding blocks it could never spend and permanently one block short.
+        // readyToBoard, not a raw height test: it also covers "already a block up and never
+        // towered", so a mob that starts high enough never lays a block at all.
+        if (readyToBoard(box)) {
+            // High enough (capped): hold station and take the first clear opening.
+            traceTick("jumpStack TOWER TOP mobBlockY={} deckMinY={} cap={} towerPlaced={} blocks={} → wait for opening",
                     mob.blockPosition().getY(), f(box.minY),
-                    Mth.floor(box.minY) + TOWER_ABOVE_DECK,
+                    Mth.floor(box.minY) + TOWER_ABOVE_DECK, towerPlacements,
                     BlockSourcePolicy.bridgeBlockCount(mob.getInventory()));
             waitForOpening(box);                       // tryBoardNow leaps when an opening is in reach
             return;
@@ -978,6 +1007,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
             lookAt(pillarColumn);
             if (tryPlaceBridgeBlock(pillarColumn, slot)) {
                 placementsUsed++;
+                towerPlacements++;
                 pillarColumn = null;
                 markProgress();
             }
@@ -992,13 +1022,19 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      * collecting blocks. Returns false when it isn't yet high enough / no opening is in reach.
      */
     private boolean tryBoardNow(AABB box) {
-        if (!readyToBoard(box)) {
+        // A leap is COMMITTED once started: readyToBoard only passes with both feet on the tower,
+        // so without a latch the mob would stop steering the instant it left the ground — halfway
+        // through its own jump. The latch keeps it tracking the (moving) opening through the arc.
+        boolean committed = boardCommitTicks > 0;
+        if (!committed && !readyToBoard(box)) {
             return false;
         }
         Vec3 spot = TrainConfinement.boardingSpot(mob, box);
         if (spot == null) {
+            boardCommitTicks = 0;      // opening gone — abandon the attempt, don't sail on blind
             return false;
         }
+        boardCommitTicks = committed ? boardCommitTicks - 1 : BOARD_COMMIT_TICKS;
         // Aim at the spot EXACTLY as validated. Do not lead it: boardingSpot checked that a
         // specific carriage column has a floor and clear headroom at its position right now, and
         // that check is only meaningful for that position. Offsetting the aim by a predicted
