@@ -9,18 +9,23 @@ import games.brennan.playermob.entity.ItemPickupPolicy;
 import games.brennan.playermob.entity.MiningMath;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundSource;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.pathfinder.Path;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.shapes.VoxelShape;
 
 import java.util.EnumSet;
 import java.util.List;
@@ -39,7 +44,7 @@ import java.util.List;
  * lost. That trade-off was chosen deliberately (issue #35).</p>
  *
  * <p><b>Phase machine</b> (re-resolves the moving carriage box every tick):
- * SWIM_TO_SHORE → APPROACH → BRIDGE → GATHER → CRAFT. Registered at goalSelector
+ * SWIM_TO_SHORE → APPROACH → CLIMB / BRIDGE → GATHER → CRAFT. Registered at goalSelector
  * priority 1 so it preempts combat (@2): falling off is existential. It still yields to
  * {@link net.minecraft.world.entity.ai.goal.FloatGoal} (@0) so a mob bridging
  * over water swims instead of drowning. All world mutation (place + gather) is
@@ -50,6 +55,11 @@ import java.util.List;
  * climbed out — every later phase assumes footing, so none of them work from the water.
  * A mob with no shore in range is abandoned by the stall backstop like any other
  * hopeless case.</p>
+ *
+ * <p>APPROACH prefers CLIMB over BRIDGE whenever an existing way up is in reach: DT stamps
+ * spiral staircases (slabs + stairs) and ladder columns beside elevated track, topping out at
+ * carriage-floor level, and walking one is both faster and cheaper than paving a new tower.
+ * Free route beats building; building beats gathering.</p>
  *
  * <p>Fires only when the mob actually <em>fell off</em> — it was on a train
  * within {@link PlayerMobEntity#RECOVERY_WINDOW_TICKS} and isn't now — so a
@@ -147,8 +157,70 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
     private static final double SHORE_TRACK_BIAS = 2.0;
     /** Cells of clear, water-free air a standing spot needs above its footing (the mob is 2 tall). */
     private static final int SHORE_HEADROOM = 2;
+    /**
+     * Flat surcharge for a bank whose Z sits INSIDE the carriage's Z-span. Large enough that any
+     * off-span bank in scan range wins outright, small enough that an on-span bank is still chosen
+     * over nothing at all. See {@link #shoreCost} for why the span is a trap rather than a prize.
+     */
+    private static final double ON_TRACK_SHORE_PENALTY = 64.0;
+    /**
+     * How many times one recovery may fall back in the water before we give up. The oscillation this
+     * bounds (climb out → APPROACH walks back in → swim out again) refreshed the stall timer on every
+     * leg, so it ran the full 5-minute GLOBAL_ABANDON_TICKS in front of the player. Three attempts is
+     * generous for a genuine slip off a wet bank and decisive for a real loop; abandoning is the
+     * documented best-effort contract, not a failure.
+     */
+    private static final int MAX_SWIM_REENTRIES = 3;
+    /**
+     * Max vertical rise, in blocks, from one tread to the next for a series to count as climbable.
+     * 1.0 matches what vanilla nav will actually do: {@code WalkNodeEvaluator} caps the neighbour
+     * delta at {@code floor(max(1.0, maxUpStep))} = 1 and jumps up to {@code max(1.125, maxUpStep)},
+     * so a full-block rise is fine and a slab spiral (0.5 per tread) is trivial. Deliberately NOT
+     * the mob's 0.6 step height — that would reject the full-block treads nav handles happily.
+     */
+    private static final double CLIMB_MAX_RISE = 1.0;
+    /** Minimum consecutive climbable cells for a ladder column to count as a route. */
+    private static final int CLIMB_MIN_LADDER = 3;
+    /**
+     * How far along the track (±X) to look for an existing staircase/ladder. DT stamps its
+     * `pillars/adjunct_stairs` modules at most once per ~100 blocks and only on elevated track, so
+     * "no route" is the common answer — this bound keeps the miss cheap rather than chasing a
+     * structure that is usually not there.
+     */
+    private static final int CLIMB_SCAN_X = 16;
+    /**
+     * How far out from the carriage face to sweep for a route. DT's staircase footprint is 3 wide
+     * starting one block off the track corridor, so 1..3 covers it exactly.
+     */
+    private static final int CLIMB_SCAN_OUT = 3;
+    /** Rescan cadence for the (world-static) climb route — see findClimbRoute. */
+    private static final int CLIMB_RESCAN_TICKS = 20;
+    /**
+     * Hard cap on full-A* {@code createPath} probes per route scan. Each one is orders of magnitude
+     * dearer than a block lookup, and the scan band is ~100 columns, so probing them all would cost
+     * more than the tower it saves. Missing a staircase further along the rail just falls through to
+     * BRIDGE — the behaviour before this phase existed.
+     */
+    private static final int CLIMB_MAX_PATH_PROBES = 6;
 
-    private enum Phase { IDLE, SWIM_TO_SHORE, APPROACH, BRIDGE, GATHER, CRAFT }
+    private enum Phase { IDLE, SWIM_TO_SHORE, APPROACH, CLIMB, BRIDGE, GATHER, CRAFT }
+
+    /**
+     * An existing way up that the mob can use instead of building one: either a ladder column or a
+     * series of treads (DT's slab/stairs spiral). {@code base} is where the mob walks to, {@code top}
+     * is the surface it ends on, {@code ladder} picks which tick handler drives the ascent — vanilla
+     * nav climbs treads unaided but cannot path a ladder at all.
+     *
+     * <p>World-space and <b>static</b>: these are worldgen structures beside the track, so unlike
+     * {@code target.worldBox()} a found route never needs re-resolving. Only its <em>relevance</em>
+     * expires, as the carriage slides past it.</p>
+     *
+     * <p>{@code base} is meaningful for the ladder case only — it's the rung to walk to. For treads
+     * the pathfinder owns the whole approach, so nothing reads it; it is captured (as the mob's
+     * position at scan time, hence stale immediately) purely to keep one record shape. Don't build
+     * on it for treads.</p>
+     */
+    private record ClimbRoute(BlockPos base, BlockPos top, boolean ladder) { }
 
     private final PlayerMobEntity mob;
     private final double moveSpeed;
@@ -161,6 +233,13 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
     private int lastProgressTick = 0;            // totalTicks at the last gather / place / step-closer
     private double lastApproachDist = Double.MAX_VALUE;  // mob→approach-spot dist last APPROACH tick
     private double lastApproachY = -1.0e9;        // mob Y last APPROACH tick (height-gain = progress)
+    // Watermarks — BEST seen this phase, not last tick. markProgress() must mean "measurably better
+    // than anything achieved so far"; the last-tick form below is only for the stuck detectors, which
+    // legitimately want per-tick deltas. See the markProgress javadoc.
+    private double bestApproachDist = Double.MAX_VALUE;
+    private double bestApproachY = -1.0e9;
+    private double bestStairsY = -1.0e9;          // highest foot Y reached while building/climbing stairs
+    private int stairsStuckTicks = 0;             // consecutive stairs ticks with no height gain
     private int approachStuckTicks = 0;
     private int missTicks = 0;                     // consecutive ticks the carriage was out of range
     private boolean wasOnTracks = false;           // last tick's onTracks(); resets approach trackers on transition
@@ -172,6 +251,10 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
     private BlockPos shorePoint;       // dry land we're swimming to; null = none found in range
     private int shoreScanTick = 0;     // mob.tickCount of the last shore scan (rescan cadence)
     private double lastShoreDist = Double.MAX_VALUE;  // BEST mob→shore dist so far (watermark, not last tick)
+    private int swimReentries = 0;     // times this recovery has fallen back in the water (loop bound)
+    private ClimbRoute climbRoute;     // cached existing way up; world-static, see ClimbRoute
+    private int climbScanTick = 0;     // mob.tickCount of the last route scan (rescan cadence)
+    private double bestClimbY = -1.0e9;   // highest Y reached on the route (watermark)
     private int gatherBreakTicks = 0;
     private int breakTicksTotal = 0;   // 0 = not yet sized for the current gather target
     private int toolReadyTick = 0;     // tick the post-tool-swap pause ends
@@ -202,6 +285,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         return switch (phase) {
             case SWIM_TO_SHORE -> "swimming to shore";
             case APPROACH -> "approaching";
+            case CLIMB -> climbRoute != null && climbRoute.ladder() ? "climbing a ladder" : "taking the stairs";
             case BRIDGE -> "bridging";
             case GATHER -> "gathering blocks";
             case CRAFT -> "crafting";
@@ -282,6 +366,14 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         shorePoint = null;
         shoreScanTick = 0;
         lastShoreDist = Double.MAX_VALUE;
+        swimReentries = 0;
+        climbRoute = null;
+        climbScanTick = 0;
+        bestClimbY = -1.0e9;
+        bestApproachDist = Double.MAX_VALUE;
+        bestApproachY = -1.0e9;
+        bestStairsY = -1.0e9;
+        stairsStuckTicks = 0;
         mob.setRecovering(true);   // off the train, re-boarding is the mob's sole focus (no combat)
         if (isAfloat()) {
             enterSwimToShore();    // fell in the drink — get out of the water before anything else
@@ -300,6 +392,8 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         }
         pillarColumn = null;
         shorePoint = null;
+        climbRoute = null;
+        clearSwimPosture();   // vanilla never clears these for a Mob — see applySwimPosture
         phase = Phase.IDLE;
         phaseTicks = 0;
         cooldown = POST_COOLDOWN_TICKS;
@@ -323,6 +417,13 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         // would drop it into tickGetOffTracks and it would paddle sideways forever instead of
         // making for the bank.
         if (isAfloat() && phase != Phase.SWIM_TO_SHORE) {
+            // Bounded: a mob that keeps ending up back in the water is in the climb-out/walk-back-in
+            // loop, not making progress. Every leg of that loop used to call markProgress(), so the
+            // stall detector never fired and it ran the full 5-minute global timeout in plain sight.
+            if (++swimReentries > MAX_SWIM_REENTRIES) {
+                stop();
+                return;
+            }
             enterSwimToShore();
         }
         if (phase == Phase.SWIM_TO_SHORE) {
@@ -352,6 +453,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         }
         switch (phase) {
             case APPROACH -> tickApproach();
+            case CLIMB -> tickClimb();
             case BRIDGE -> tickBridge();
             case GATHER -> tickGather();
             case CRAFT -> tickCraft();
@@ -373,15 +475,20 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         shoreScanTick = 0;
         lastShoreDist = Double.MAX_VALUE;
         mob.getNavigation().stop();
-        markProgress();            // hitting the water is a state change, not a stall
+        // Deliberately NO markProgress(): falling in the water is a state CHANGE, not an achievement.
+        // Marking here is precisely what let the climb-out/fall-back-in loop reset the stall timer on
+        // every lap. The swim's own distance watermark marks once the mob actually closes on a bank.
     }
 
     /** Enter (or re-enter) APPROACH, resetting the approach progress trackers. */
     private void enterApproach() {
+        clearSwimPosture();        // out of the water — stop sprinting / swimming-posed on land
         phase = Phase.APPROACH;
         phaseTicks = 0;
         lastApproachDist = Double.MAX_VALUE;
+        bestApproachDist = Double.MAX_VALUE;
         lastApproachY = -1.0e9;
+        bestApproachY = -1.0e9;
         approachStuckTicks = 0;
         shorePoint = null;
     }
@@ -399,6 +506,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      */
     private void tickSwimToShore() {
         AABB box = target.worldBox();
+        applySwimPosture();
         // Cadence, not per-tick: this is a few hundred block lookups on a requiresUpdateEveryTick
         // goal. Rescan on entry, then once a second as the mob drifts and the train slides on.
         if (shorePoint == null || mob.tickCount - shoreScanTick >= SHORE_RESCAN_TICKS) {
@@ -407,7 +515,8 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
             if (found != null && !found.equals(shorePoint)) {
                 shorePoint = found;
                 lastShoreDist = Double.MAX_VALUE;   // new target → restart the progress watermark
-                markProgress();                     // committing to a fresh target is forward motion
+                // No markProgress(): PICKING a target isn't reaching one. A mob that re-targets every
+                // rescan while getting nowhere should still time out.
             }
         }
         if (shorePoint == null) {
@@ -436,6 +545,51 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         if (dist < lastShoreDist - 0.05) {
             lastShoreDist = dist;
             markProgress();
+        }
+    }
+
+    /**
+     * Make the mob swim like a <em>player</em> rather than paddling upright at a walk. Two separate
+     * vanilla mechanisms, both of which a {@link net.minecraft.world.entity.Mob} misses entirely:
+     *
+     * <p><b>Speed.</b> {@code LivingEntity.travel} picks its horizontal water drag as
+     * {@code isSprinting() ? 0.9F : getWaterSlowDown()} (0.8F), against a flat 0.02 accel — so
+     * terminal speed is {@code 0.02/(1-drag)}: <b>0.10 blocks/tick not sprinting, 0.20 sprinting,
+     * exactly double</b>. Nothing ever sets sprinting on a swimming mob, which is the whole of the
+     * "swims SUPER slowly" report.</p>
+     *
+     * <p><b>Animation.</b> {@code isVisuallySwimming()} is {@code hasPose(Pose.SWIMMING)}, and that
+     * pose is assigned in exactly ONE place in the entity hierarchy — {@code Player.updatePlayerPose}.
+     * A Mob can never reach it on its own, so {@code swimAmount} decays to 0 and the model never
+     * leans into the stroke. Setting the pose directly is what drives the vanilla {@code PlayerModel}
+     * the renderer already uses, so the animation comes for free.</p>
+     *
+     * <p>Deliberately NOT chasing {@code Entity.updateSwimming}'s swim <em>flag</em>: entering it
+     * requires {@code isUnderWater()} (eyes submerged), which a surface swimmer held up by
+     * {@code FloatGoal} never is. The pose is the lever that works at the surface. Equally
+     * deliberately not touching {@code WATER_MOVEMENT_EFFICIENCY} — at 1.0 it yields ~0.58
+     * blocks/tick (~11.6 b/s), which is absurd.</p>
+     *
+     * <p>{@link #clearSwimPosture()} MUST undo both on the way out — nothing else resets sprinting
+     * on a Mob, so a mob that reached the bank would otherwise sprint around on land forever.</p>
+     */
+    private void applySwimPosture() {
+        mob.setSprinting(true);
+        if (!mob.hasPose(Pose.SWIMMING)) {
+            mob.setPose(Pose.SWIMMING);
+        }
+    }
+
+    /**
+     * Undo {@link #applySwimPosture()}. Called on every exit from the swim — reaching the bank
+     * ({@link #enterApproach()}) and the goal ending ({@link #stop()}) — because vanilla will not
+     * clear either flag for a Mob. The entity declares no per-pose dimensions (see
+     * {@code PlayerMobEntity}'s crouch handling), so the pose swap never resizes the hitbox.
+     */
+    private void clearSwimPosture() {
+        mob.setSprinting(false);
+        if (mob.hasPose(Pose.SWIMMING)) {
+            mob.setPose(Pose.STANDING);
         }
     }
 
@@ -478,7 +632,15 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      * static so it can be unit-tested the way the policy classes are.
      */
     static double shoreCost(AABB box, double mobX, double mobZ, double x, double z) {
-        return Math.hypot(x - mobX, z - mobZ) + SHORE_TRACK_BIAS * distToTrackLine(box, z);
+        double gap = distToTrackLine(box, z);
+        // A bank INSIDE the track Z-span is a trap, not a prize. onTracks() is a pure Z-span test, so
+        // a mob that climbs out there immediately reads as "standing on the tracks" and APPROACH hands
+        // it to tickGetOffTracks — which, where the line crosses water, walks it straight back into the
+        // lake. It then swims to the same bank and loops. Scoring the span at zero made that trap the
+        // scorer's OPTIMUM; ON_TRACK_SHORE_PENALTY makes an off-span bank win whenever one exists,
+        // while still leaving an on-span bank reachable (finite cost) if it is genuinely all there is.
+        double trap = gap <= 0.0 ? ON_TRACK_SHORE_PENALTY : 0.0;
+        return Math.hypot(x - mobX, z - mobZ) + SHORE_TRACK_BIAS * gap + trap;
     }
 
     /**
@@ -545,17 +707,33 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         // slides, the chosen spot shifts and the mob heads to the new one — it only commits to
         // bridging once it's actually standing at the current best spot.
         Vec3 spot = approachPoint(box);
+        if (spot == null) {
+            // No dry launch spot anywhere beside the carriage (the line is crossing open water).
+            // There is nothing to walk to — committing here lets CLIMB/BRIDGE/GATHER have a go from
+            // where we stand, rather than navigating into the lake and starting the swim loop again.
+            commitFromApproach();
+            return;
+        }
         if (phaseTicks % PATH_REISSUE_TICKS == 0 || mob.getNavigation().isDone()) {
             mob.getNavigation().moveTo(spot.x, spot.y, spot.z, moveSpeed);
             mob.getLookControl().setLookAt(spot.x, spot.y, spot.z);
         }
         double distToSpot = Math.hypot(mob.getX() - spot.x, mob.getZ() - spot.z);
-        // Progress = closing on the chosen spot OR gaining height (walking up terrain counts).
+        // Stuck detection is per-tick (did we move at all since last tick?)...
         if (distToSpot < lastApproachDist - 0.05 || mob.getY() > lastApproachY + 0.05) {
             approachStuckTicks = 0;
-            markProgress();
         } else {
             approachStuckTicks++;
+        }
+        // ...but PROGRESS is a watermark: measurably closer or higher than the best achieved so far.
+        // The per-tick form used to double as the progress test, and enterApproach resets
+        // lastApproachDist to MAX_VALUE — so the first tick after every re-entry marked progress
+        // unconditionally, which is what let the climb-out/walk-back-in loop hold the stall detector
+        // open indefinitely.
+        if (distToSpot < bestApproachDist - 0.05 || mob.getY() > bestApproachY + 0.05) {
+            bestApproachDist = Math.min(bestApproachDist, distToSpot);
+            bestApproachY = Math.max(bestApproachY, mob.getY());
+            markProgress();
         }
         lastApproachDist = distToSpot;
         lastApproachY = mob.getY();
@@ -575,8 +753,20 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
     private void commitFromApproach() {
         phaseTicks = 0;
         approachStuckTicks = 0;
+        // An existing way up beats both alternatives outright: it costs no blocks, needs no gathering
+        // trip, and DT's staircases top out exactly at carriage-floor level beside the track — which
+        // is the boarding position. Only build when there's nothing to walk up.
+        ClimbRoute route = resolveClimbRoute();
+        if (route != null) {
+            climbRoute = route;
+            phase = Phase.CLIMB;
+            bestClimbY = -1.0e9;
+            return;
+        }
         if (BlockSourcePolicy.bridgeBlockCount(mob.getInventory()) >= blocksNeeded()) {
             phase = Phase.BRIDGE;
+            bestStairsY = -1.0e9;
+            stairsStuckTicks = 0;
         } else {
             phase = Phase.GATHER;
             gatherTargetPos = null;
@@ -614,7 +804,21 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
             offZ = nWalk ? northOff : southOff;               // exactly one side is a clean step-off → take it
         } else {
             boolean nearNorth = Math.abs(mob.getZ() - box.minZ) <= Math.abs(mob.getZ() - box.maxZ);
-            offZ = nearNorth ? northOff : southOff;           // both or neither → nearer side
+            // Both sides unwalkable: a DROP is fine (placeOffBedStep below bridges it), but WATER is
+            // not — stepping off into a lake starts the swim-out/walk-back-in loop all over again.
+            // Prefer a dry side if either is dry; if the line is crossing open water on both sides,
+            // hold on the bed and let the stall backstop end it rather than wading in.
+            boolean nDry = offBedFootingY(mx, box.minY, northOff) != Double.NEGATIVE_INFINITY;
+            boolean sDry = offBedFootingY(mx, box.minY, southOff) != Double.NEGATIVE_INFINITY;
+            if (!nWalk && !nDry && !sDry) {
+                mob.getNavigation().stop();
+                return;                                       // open water both sides — don't step in
+            }
+            if (nDry != sDry) {
+                offZ = nDry ? northOff : southOff;            // exactly one dry side → take it
+            } else {
+                offZ = nearNorth ? northOff : southOff;       // both or neither → nearer side
+            }
         }
         int stepZ = offZ <= mz ? -1 : 1;
         double targetY = groundSurfaceY(mx, box.minY, offZ);
@@ -622,13 +826,18 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
             mob.getNavigation().moveTo(mx + 0.5, targetY, offZ + 0.5, moveSpeed);
             mob.getLookControl().setLookAt(mx + 0.5, targetY, offZ + 0.5);
         }
-        // Progress = closing the perpendicular gap to the off-side column.
+        // Stuck detection is per-tick; PROGRESS is the watermark (closer to the off-side column than
+        // we have ever been). enterApproach resets lastApproachDist to MAX_VALUE, so the per-tick form
+        // marked unconditionally on the first tick after every re-entry.
         double dist = Math.abs(mob.getZ() - (offZ + 0.5));
         if (dist < lastApproachDist - 0.05) {
             approachStuckTicks = 0;
-            markProgress();
         } else {
             approachStuckTicks++;
+        }
+        if (dist < bestApproachDist - 0.05) {
+            bestApproachDist = dist;
+            markProgress();
         }
         lastApproachDist = dist;
         // Wedged at the bed edge (a drop beside an elevated line) → lay a step block to cross.
@@ -685,6 +894,207 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         return y != Double.NEGATIVE_INFINITY && y <= footY + 1.0 && y >= footY - 3.0;
     }
 
+    // ---- CLIMB ------------------------------------------------------------
+
+    /**
+     * Walk up an existing route instead of building one. Two mechanically DIFFERENT ascents behind
+     * one phase, because vanilla treats them nothing alike:
+     *
+     * <p><b>Treads (DT's slab/stairs spiral) need no help at all.</b> {@code WalkNodeEvaluator} caps
+     * a neighbour's vertical delta at 1 and jumps up to 1.125, so a half-block-per-tread spiral is
+     * ordinary walking to the pathfinder. All this phase does is point navigation at the top and stop
+     * BRIDGE from hijacking the mob into paving a redundant tower beside a perfectly good staircase —
+     * which is exactly what it used to do.</p>
+     *
+     * <p><b>Ladders are invisible to the pathfinder.</b> {@code WalkNodeEvaluator} never looks at
+     * {@code BlockTags.CLIMBABLE}, {@code PathType} has no climbable value, and {@code getNeighbors}
+     * only iterates horizontals — there are no vertical edges in the path graph at all, so a ladder
+     * column is just "open air" and {@code moveTo(top)} silently fails. Climbing is a physics
+     * behaviour, not a pathfinding one: {@code LivingEntity} clamps Y velocity to +0.2/tick when
+     * {@code onClimbable() && (horizontalCollision || jumping)}. So we walk to the base with nav, then
+     * drive the ascent off the nav graph with the jump flag — the same MoveControl-not-nav trick
+     * {@link #tryBoardNow} already uses.</p>
+     */
+    private void tickClimb() {
+        AABB box = target.worldBox();
+        if (climbRoute == null) {                 // route expired/cleared → re-assess from scratch
+            enterApproach();
+            return;
+        }
+        clearClimbObstruction(box);               // foliage over a staircase stalls this like it does BRIDGE
+        BlockPos top = climbRoute.top();
+        // Success is reaching the DECK, not the top of the route — those are not the same thing, and
+        // testing against the route top let a mob stop climbing below the carriage floor, too low to
+        // board from. (BRIDGE goes TOWER_ABOVE_DECK higher still for wall clearance; a route can't be
+        // extended like a tower can, so deck level is the best this phase can offer — tryBoardNow at
+        // the top of tick() takes any opening that comes into reach from here.)
+        if (mob.getY() >= box.minY - 0.1) {
+            waitForOpening(box);
+            return;
+        }
+        // The route is worldgen and does NOT move, but the CARRIAGE does — once the train has slid
+        // beyond boarding reach of the stair top, this route is no longer a way back on.
+        if (Math.abs(top.getX() + 0.5 - (box.minX + box.maxX) / 2.0) > ABANDON_DISTANCE) {
+            climbRoute = null;
+            enterApproach();
+            return;
+        }
+        if (climbRoute.ladder()) {
+            tickLadder();
+        } else {
+            tickTreads();
+        }
+        // Progress = a new HIGHEST point on the route (watermark). Climbing is slow and a ladder ticks
+        // at a steady +0.2, so a tick-over-tick test would read as a stall on any hitch.
+        if (mob.getY() > bestClimbY + 0.05) {
+            bestClimbY = mob.getY();
+            markProgress();
+        }
+    }
+
+    /** Nav-driven ascent: vanilla pathfinding climbs treads unaided, so just aim it at the top. */
+    private void tickTreads() {
+        BlockPos top = climbRoute.top();
+        if (phaseTicks % PATH_REISSUE_TICKS == 0 || mob.getNavigation().isDone()) {
+            mob.getNavigation().moveTo(top.getX() + 0.5, top.getY(), top.getZ() + 0.5, moveSpeed);
+        }
+        mob.getLookControl().setLookAt(top.getX() + 0.5, top.getY(), top.getZ() + 0.5);
+    }
+
+    /**
+     * Physics-driven ascent: walk into the ladder column and hold the jump flag. {@code jumping} is
+     * one of the two ways to satisfy vanilla's climb gate (the other is pressing into the wall), and
+     * it's the reliable one for a mob that nav can't hold flush against the backing block.
+     *
+     * <p>Note this sets the jump FLAG on the entity — it does not claim {@link Flag#JUMP} on the
+     * goal, which would stop FloatGoal (see the constructor). Different mechanisms entirely.</p>
+     */
+    private void tickLadder() {
+        BlockPos base = climbRoute.base();
+        double cx = base.getX() + 0.5, cz = base.getZ() + 0.5;
+        mob.getLookControl().setLookAt(cx, mob.getEyeY(), cz);
+        if (mob.onClimbable()) {
+            // On the ladder: stop navigating (the path graph has no rung to aim at) and let the
+            // climb clamp carry us up, nudging inward so we stay in the column.
+            //
+            // It MUST be getJumpControl().jump(), not setJumping(true). Mob.serverAiStep runs
+            // goalSelector.tick() (us) and THEN jumpControl.tick(), which unconditionally does
+            // `mob.setJumping(this.jump)` — so a flag we set directly is clobbered back to false in
+            // the same tick, before travel() ever reads it. Going through the control is what makes
+            // it survive to the climb clamp; it's also why the flag can never get stuck on.
+            mob.getNavigation().stop();
+            mob.getJumpControl().jump();
+            mob.getMoveControl().setWantedPosition(cx, mob.getY() + 1.0, cz, moveSpeed);
+            return;
+        }
+        if (phaseTicks % PATH_REISSUE_TICKS == 0 || mob.getNavigation().isDone()) {
+            mob.getNavigation().moveTo(cx, base.getY(), cz, moveSpeed);   // ordinary walk to the foot
+        }
+    }
+
+    /** Cached route lookup on a cadence — the structure is world-static, so this is pure rescan cost. */
+    private ClimbRoute resolveClimbRoute() {
+        if (climbRoute == null || mob.tickCount - climbScanTick >= CLIMB_RESCAN_TICKS) {
+            climbScanTick = mob.tickCount;
+            climbRoute = findClimbRoute(target.worldBox());
+        }
+        return climbRoute;
+    }
+
+    /**
+     * Nearest existing way up to deck level beside the track, or {@code null} if there is none —
+     * which is the COMMON answer: DT stamps these roughly once per 100 blocks and only where the
+     * track runs on pillars, so this must stay cheap on the miss.
+     *
+     * <p>Sweeps the band just outside the carriage's near Z face ({@link #CLIMB_SCAN_OUT} deep,
+     * matching DT's 3-wide staircase footprint) over a bounded X window, and prefers whichever
+     * candidate is nearest. Ladder columns are checked first — they're an unambiguous single-block
+     * test, where a tread series needs the whole column walked.</p>
+     */
+    private ClimbRoute findClimbRoute(AABB box) {
+        if (!(mob.level() instanceof ServerLevel level)) return null;
+        boolean nearNorth = Math.abs(mob.getZ() - box.minZ) <= Math.abs(mob.getZ() - box.maxZ);
+        double faceZ = nearNorth ? box.minZ : box.maxZ;
+        int step = nearNorth ? -1 : 1;
+        int deckY = Mth.floor(box.minY);
+        int mx = mob.blockPosition().getX();
+        // Pass 1 — ladders, everywhere in the band. Pure block lookups, so it's cheap to sweep the
+        // whole window. Ladders MUST be found this way: the pathfinder is blind to them (see
+        // tickClimb), so the path probe in pass 2 can never turn one up.
+        ClimbRoute ladder = null;
+        double ladderDist = Double.MAX_VALUE;
+        for (int out = 1; out <= CLIMB_SCAN_OUT; out++) {
+            int cz = Mth.floor(faceZ) + step * out;
+            for (int dx = -CLIMB_SCAN_X; dx <= CLIMB_SCAN_X; dx++) {
+                int cx = mx + dx;
+                double d = Math.hypot(cx + 0.5 - mob.getX(), cz + 0.5 - mob.getZ());
+                if (d >= ladderDist) continue;
+                ClimbRoute r = ladderAt(level, cx, cz, deckY);
+                if (r == null) continue;
+                ladderDist = d;
+                ladder = r;
+            }
+        }
+        if (ladder != null) return ladder;
+        // Pass 2 — treads, via the pathfinder, STRICTLY BOUNDED. createPath runs a full A* and is far
+        // too expensive to fire per candidate column (the band is ~100 of them), so probe only the
+        // few deck-level spots nearest the mob and accept that a staircase further along the rail is
+        // missed. A miss just falls through to BRIDGE, which is the old behaviour — no regression.
+        int probes = 0;
+        for (int dx : nearestFirstOffsets()) {
+            for (int out = 1; out <= CLIMB_SCAN_OUT && probes < CLIMB_MAX_PATH_PROBES; out++) {
+                int cz = Mth.floor(faceZ) + step * out;
+                BlockPos top = new BlockPos(mx + dx, deckY, cz);
+                if (!hasDryHeadroom(level, top.below())) continue;   // nowhere to stand up there
+                probes++;
+                Path path = mob.getNavigation().createPath(top, 0);
+                if (path != null && path.canReach()) {
+                    return new ClimbRoute(mob.blockPosition(), top, false);
+                }
+            }
+            if (probes >= CLIMB_MAX_PATH_PROBES) break;
+        }
+        return null;
+    }
+
+    /**
+     * X offsets to probe, nearest the mob first, so the bounded probe budget is spent on the columns
+     * most likely to be the staircase the mob is standing at the foot of.
+     */
+    private static int[] nearestFirstOffsets() {
+        return new int[] { 0, 1, -1, 2, -2, 3, -3 };
+    }
+
+    /**
+     * A ladder route in column {@code (x, z)} reaching {@code deckY}, or {@code null} — an unbroken
+     * {@link BlockTags#CLIMBABLE} run of at least {@link #CLIMB_MIN_LADDER} that tops out at the deck.
+     */
+    private ClimbRoute ladderAt(ServerLevel level, int x, int z, int deckY) {
+        BlockPos.MutableBlockPos c = new BlockPos.MutableBlockPos();
+        int runStart = -1, run = 0, bestStart = -1, bestTop = Integer.MIN_VALUE;
+        // Scan past the deck: DT's ladder columns top out AT carriage-floor level, and we want the
+        // real top of the run. Returning on the first qualifying y instead (the obvious way to write
+        // this) always reported deckY-1 for any ladder taller than CLIMB_MIN_LADDER, because the
+        // run-length test is already satisfied long before the top — which made tickClimb hand off to
+        // waitForOpening a block and a half BELOW the deck, too low to board from.
+        for (int y = mob.blockPosition().getY() - 2; y <= deckY + 1; y++) {
+            c.set(x, y, z);
+            if (level.getBlockState(c).is(BlockTags.CLIMBABLE)) {
+                if (run == 0) runStart = y;
+                run++;
+                if (run >= CLIMB_MIN_LADDER && y >= deckY - 1) {
+                    bestStart = runStart;
+                    bestTop = y;                    // keep going — take the HIGHEST rung, not the first
+                }
+            } else {
+                run = 0;
+            }
+        }
+        return bestTop == Integer.MIN_VALUE
+            ? null
+            : new ClimbRoute(new BlockPos(x, bestStart, z), new BlockPos(x, bestTop, z), true);
+    }
+
     // ---- BRIDGE -----------------------------------------------------------
 
     private void tickBridge() {
@@ -737,12 +1147,39 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
             return;
         }
         // Steer onto the next step (toward the carriage), rising with the mob — never back
-        // toward the ground approach point.
-        mob.getNavigation().moveTo(place.getX() + 0.5, place.getY() + 1.0, place.getZ() + 0.5, moveSpeed);
+        // toward the ground approach point. Gated to the same cadence every other phase uses:
+        // re-pathing every tick to a cell one block away, whose direction flips as the train slides,
+        // reads in-game as the mob standing still twitching.
+        if (phaseTicks % PATH_REISSUE_TICKS == 0 || mob.getNavigation().isDone()) {
+            mob.getNavigation().moveTo(place.getX() + 0.5, place.getY() + 1.0, place.getZ() + 0.5, moveSpeed);
+        }
+        // Height watermark. This phase was the ONLY one without a stuck detector: the standable-step
+        // branch below used to markProgress() unconditionally every tick, with no evidence the mob had
+        // actually climbed anything — which both looked like idling and held the 30s stall detector
+        // open forever, leaving the 5-minute global timeout as the only way out.
+        if (mob.getY() > bestStairsY + 0.05) {
+            bestStairsY = mob.getY();
+            stairsStuckTicks = 0;
+            markProgress();
+        } else {
+            stairsStuckTicks++;
+        }
+        if (stairsStuckTicks > APPROACH_STUCK_LIMIT) {
+            // Not gaining height on this staircase — pillar up beside it instead of retrying forever.
+            stairsStuckTicks = 0;
+            tickJumpStack(slot, box);
+            return;
+        }
         // Already a usable step here (existing stairs/terrain — possibly one this or another
         // mob built)? Climb it instead of rebuilding; just walk on, no placement.
         if (isStandableStep(place)) {
-            markProgress();
+            return;
+        }
+        // A solid-but-unreplaceable block (vanilla stairs, a slab, a fence) can never be built on:
+        // tryPlaceBridgeBlock would fail its canBeReplaced() check every attempt and the mob would
+        // stand there doing nothing. Pillar up beside it instead.
+        if (!mob.level().getBlockState(place).canBeReplaced()) {
+            tickJumpStack(slot, box);
             return;
         }
         if (phaseTicks % PLACE_INTERVAL_TICKS != 0) return;   // let it climb the previous step
@@ -762,9 +1199,17 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
     private boolean isStandableStep(BlockPos pos) {
         if (!(mob.level() instanceof ServerLevel level)) return false;
         BlockState s = level.getBlockState(pos);
-        if (!s.isCollisionShapeFullBlock(level, pos)) return false;
-        // Submerged terrain is not a step. isCollisionShapeFullBlock is true for a stone block at
-        // the bottom of a lake, and water clears a collision-only headroom test, so without this the
+        // Step-up feasibility is a HEIGHT question, not a block-type one. The old test here was
+        // isCollisionShapeFullBlock, which is true only of a 1x1x1 cube — so every slab and every
+        // stairs block failed it, and DT's slab/stairs spiral staircases were invisible as steps.
+        // The mob stood on a perfectly good staircase and tried to pave a new one. Measure the
+        // shape's actual top instead (a bottom slab reads 0.5), the same way vanilla's
+        // WalkNodeEvaluator.getFloorLevel does.
+        VoxelShape shape = s.getCollisionShape(level, pos);
+        if (shape.isEmpty()) return false;
+        if (pos.getY() + shape.max(Direction.Axis.Y) - mob.getY() > CLIMB_MAX_RISE) return false;
+        // Submerged terrain is not a step. A stone block at the bottom of a lake has a perfectly
+        // good collision shape, and water clears a collision-only headroom test, so without this the
         // mob mistakes the lakebed for a finished staircase and stalls against it.
         if (!s.getFluidState().isEmpty()) return false;
         if (BlockSourcePolicy.isProtectedTrackBlock(s)) return false;
@@ -843,7 +1288,11 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         mob.setDeltaMovement(0.0, dm.y, 0.0);
         mob.getLookControl().setLookAt(
             (box.minX + box.maxX) / 2.0, box.minY + 1.0, (box.minZ + box.maxZ) / 2.0);
-        markProgress();
+        // No markProgress(): standing still IS the behaviour here, so marking made this an infinite
+        // hold. A mob correctly parked at deck height gets the stall window (30s) for an opening to
+        // arrive — at 0.1 blocks/tick that is ~60 blocks of train sliding past, many carriages. If
+        // nothing boardable comes by in that time, this spot isn't working and abandoning is right.
+        // tryBoardNow marks when it actually leaps.
     }
 
     /** True if {@code pos}'s column lies within the carriage footprint (i.e. under the deck). */
@@ -955,7 +1404,8 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
             phaseTicks = 0;
             mob.getNavigation().moveTo(
                 gatherTargetPos.getX() + 0.5, gatherTargetPos.getY(), gatherTargetPos.getZ() + 0.5, moveSpeed);
-            markProgress();    // committing to a fresh target is forward motion, not a stall
+            // No markProgress(): picking a block to walk to isn't gathering one. Reaching it and
+            // breaking it both mark (see tickGather's in-reach branch), which is the real work.
             return;
         }
         // Block changed/destroyed since we picked it.
@@ -1137,6 +1587,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
 
     private void moveTowardCarriage() {
         Vec3 p = approachPoint(target.worldBox());
+        if (p == null) return;   // nothing dry to walk to — tickApproach handles it next tick
         mob.getNavigation().moveTo(p.x, p.y, p.z, moveSpeed);
     }
 
@@ -1160,6 +1611,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         // Step OUT perpendicular to the track until the ground is off the rails/bed. The mob
         // can't board while standing on the tracks, so it launches and towers from beside them.
         double tz = faceZ + step;
+        boolean foundDry = false;
         for (int i = 1; i <= OFF_TRACK_MAX_STEPS; i++) {
             tz = faceZ + step * i;
             // Off the bed AND on dry land. Now that surfaceIsTrack reports false for a water column
@@ -1167,9 +1619,16 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
             // WATER column out and launch the mob from a lake — so require real dry footing too.
             if (!surfaceIsTrack(centerX, box.minY, tz)
                     && offBedFootingY(Mth.floor(centerX), box.minY, Mth.floor(tz)) != Double.NEGATIVE_INFINITY) {
+                foundDry = true;
                 break;                          // first off-track dry column out — launch from here
             }
         }
+        // NOTHING dry within reach of the face — every column out is water or void. The loop used to
+        // fall out here with tz still pointing at that last water column, and groundSurfaceY would
+        // then mask the void sentinel with the mob's own Y, so the "launch spot" was a plausible-looking
+        // point in the middle of a lake. APPROACH navigated to it, the mob swam, climbed out, and came
+        // straight back — the oscillation. Say so instead of inventing a spot.
+        if (!foundDry) return null;
         // Scan along the carriage length (at this off-track offset) for higher ground.
         double bestX = centerX;
         double bestGroundY = groundSurfaceY(bestX, box.minY, tz);
@@ -1315,7 +1774,20 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
             && mob.getY() >= box.minY - 0.5;
     }
 
-    /** Note forward progress so the stall-abandon timer ({@link #STALL_ABANDON_TICKS}) resets. */
+    /**
+     * Note forward progress so the stall-abandon timer ({@link #STALL_ABANDON_TICKS}) resets.
+     *
+     * <p><b>Only call this for progress the mob has actually ACHIEVED</b> — a block placed, a block
+     * broken, a leap taken, or a new best distance/height on a watermark. Never for an intention (a
+     * fresh target picked) or a state change (fell in the water, changed phase). Those were the
+     * original callers, and because every lap of a stuck loop passed through one of them, the 30s
+     * stall detector could never fire — leaving {@link #GLOBAL_ABANDON_TICKS} (5 minutes) as the
+     * effective bound on every wedged mob, in full view of the player.</p>
+     *
+     * <p>"Watermark" means better than the best achieved so far this phase, not better than last
+     * tick. A per-tick test looks equivalent but is not: any phase re-entry resets the last-tick
+     * baseline, so the first tick after it always reports progress.</p>
+     */
     private void markProgress() {
         lastProgressTick = totalTicks;
     }
