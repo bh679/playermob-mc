@@ -29,6 +29,7 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
     @Override public Vec3 boardingSpot(Entity self, AABB carriageBox) { return null; }
 }
 *///?} else {
+import com.mojang.logging.LogUtils;
 import games.brennan.dungeontrain.ship.ManagedShip;
 import games.brennan.dungeontrain.ship.Shipyards;
 import games.brennan.dungeontrain.train.Trains;
@@ -61,6 +62,7 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3d;
 import org.joml.Vector3dc;
 import org.joml.primitives.AABBdc;
+import org.slf4j.Logger;
 
 import java.util.Map;
 import java.util.UUID;
@@ -111,6 +113,9 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
      * enough not to claim a mob standing in the gap between groups.
      */
     private static final double RIDE_MARGIN = 1.0;
+
+    /** Diagnostics for why a boarding spot could not be found (gated on debugSpawnLog). */
+    private static final Logger LOGGER = LogUtils.getLogger();
 
     /** How far around the mob to look for a door it's standing against. */
     private static final int DOOR_REACH = 2;
@@ -220,7 +225,21 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
     }
 
     /** Horizontal blocks the mob can clear in one leap when boarding from atop its tower. */
-    private static final int BOARD_REACH = 3;
+    private static final int BOARD_REACH = 4;
+
+    /**
+     * How far ABOVE {@code deckY} to look for a carriage's standable floor. {@code deckY} is
+     * {@code floor(carriage.minY)} — the TRACK level, the underside of the carriage — while the
+     * deck a mob actually stands on sits a couple of blocks higher (floor blocks at deckY+1, walking
+     * surface deckY+2 on a typical carriage). Scanning only deckY+1 found the common case and
+     * reported "no floor" for anything with a raised deck, which is why every in-reach column was
+     * being rejected.
+     *
+     * <p>Kept at 2, not higher: the scan takes the HIGHEST solid it finds, so reaching further up
+     * starts returning wall tops as "floor" and would aim the mob at the top of a wall instead of
+     * the deck inside it.</p>
+     */
+    private static final int FLOOR_SCAN_ABOVE_DECK = 2;
 
     @Override
     public Vec3 boardingSpot(Entity self, AABB carriageWorldBox) {
@@ -251,6 +270,7 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         int hiZ = Mth.ceil(bb.maxZ()) - 1;
         Vec3 best = null;
         double bestDistSq = Double.MAX_VALUE;
+        int scanned = 0, rejReach = 0, rejNoFloor = 0, rejTooHigh = 0, rejMargin = 0, rejCorridor = 0;
         for (int xi = loX; xi <= hiX; xi++) {
             for (int zi = loZ; zi <= hiZ; zi++) {
                 double wx = xi + 0.5;
@@ -258,17 +278,33 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
                 double hdx = wx - mx;
                 double hdz = wz - mz;
                 double horizSq = hdx * hdx + hdz * hdz;
+                scanned++;
                 if (horizSq > (double) BOARD_REACH * BOARD_REACH) {
+                    rejReach++;
                     continue;                               // out of jump reach
                 }
                 Double footY = dropInFootY(ship, level, wx, wz, deckY, mobFootY);
                 if (footY == null) {
+                    rejNoFloor++;
                     continue;
                 }
                 if (footY > mobFootY + 1) {
+                    rejTooHigh++;
                     continue;                               // landing is higher than the mob can hop up to
                 }
+                // Require a FLOOR a block either side along the travel axis. The carriage slides
+                // roughly a block while the mob is in the air, so a spot validated at the lip of a
+                // gap (carriage seam, open flatbed edge) is not where the mob actually comes down —
+                // it drops straight through. Only the floor matters here: running the full drop-in
+                // test on the neighbours also demanded clear headroom over them, which any adjacent
+                // wall fails, and rejected otherwise perfectly good landings.
+                if (!hasFloorNear(ship, level, wx - 1.0, wz, deckY)
+                        || !hasFloorNear(ship, level, wx + 1.0, wz, deckY)) {
+                    rejMargin++;
+                    continue;
+                }
                 if (!corridorClear(ship, level, mx, mz, wx, wz, mobFootY)) {
+                    rejCorridor++;
                     continue;                               // a too-tall wall blocks the leap
                 }
                 double dy = footY - my;
@@ -278,6 +314,10 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
                     best = new Vec3(wx, footY, wz);
                 }
             }
+        }
+        if (best == null && PlayerMobConfig.debugSpawnLog() && self.tickCount % 20 == 0) {
+            LOGGER.info("[BoardScan #{}] NO SPOT mobFootY={} deckY={} scanned={} reject: reach={} noFloor={} tooHigh={} margin={} corridor={}",
+                self.getId(), mobFootY, deckY, scanned, rejReach, rejNoFloor, rejTooHigh, rejMargin, rejCorridor);
         }
         return best;
     }
@@ -291,10 +331,25 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
      * roofed/walled above the mob. Reads go through {@link ManagedShip#worldToShip} — the
      * carriage's blocks live in its sub-level coordinate space.
      */
+    /**
+     * True if the carriage column at world {@code (wx, wz)} has something solid to stand on near
+     * deck level. Floor only — no headroom requirement — so it can be used to check that the cells
+     * either side of a landing are also ground, without demanding they be open above.
+     */
+    private static boolean hasFloorNear(ManagedShip ship, ServerLevel level,
+                                        double wx, double wz, int deckY) {
+        for (int fy = deckY + FLOOR_SCAN_ABOVE_DECK; fy >= deckY - 1; fy--) {
+            if (shipSolid(ship, level, wx, fy, wz)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static Double dropInFootY(ManagedShip ship, ServerLevel level,
                                       double wx, double wz, int deckY, int mobFootY) {
         Integer floorY = null;
-        for (int fy = deckY + 1; fy >= deckY - 1; fy--) {
+        for (int fy = deckY + FLOOR_SCAN_ABOVE_DECK; fy >= deckY - 1; fy--) {
             if (shipSolid(ship, level, wx, fy, wz)) {
                 floorY = fy;
                 break;
@@ -304,9 +359,13 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
             return null;                                    // nothing to land on
         }
         int footY = floorY + 1;
-        // Open from the stand position up to (at least) the mob's height — the mob is above
-        // everything here and can drop straight in.
-        int top = Math.max(mobFootY, footY + 1);
+        // Clear for the MOB'S OWN HEIGHT at the landing — enough that it can stand there. This
+        // used to scan all the way up to the mob's current feet, which made every extra block of
+        // tower STRICTER: a taller tower demanded a taller clear column and rejected landings that
+        // were perfectly fine to stand in, so climbing higher actively hurt the odds of boarding.
+        // The approach itself is corridorClear's job — it tests the way in at the mob's height, so
+        // a roof between the mob and the column is still caught there.
+        int top = footY + 1;
         for (int y = footY; y <= top; y++) {
             if (shipSolid(ship, level, wx, y, wz)) {
                 return null;
@@ -425,24 +484,22 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         return new Vec3(targetX, self.getY(), centerZ);
     }
 
-    @Override
-    public Vec3 nextGroupTarget(Entity self, int dir) {
-        if (!(self.level() instanceof ServerLevel level)) {
-            return null;
-        }
-        Trains.Carriage current = carriageAt(self);
-        if (current == null) {
-            return null;
-        }
+    /**
+     * The adjacent group of the <em>same</em> train, just beyond {@code current}'s boundary in
+     * {@code dir}: marching down ({@code dir < 0}) the same-train group whose rooms sit entirely
+     * below ours, nearest to the gap; marching up ({@code dir > 0}), the nearest one above.
+     * pIdx is monotonic along world-X across the whole train, so the current group is excluded
+     * automatically by these range tests. {@code null} at the genuine end of the train.
+     *
+     * <p>Shared by {@link #nextGroupTarget} (which aims at a room in it) and
+     * {@link #groupGapWidth} (which measures the clearance to it), so the two can never
+     * disagree about <em>which</em> group is being crossed to.</p>
+     */
+    private static Trains.Carriage adjacentGroup(ServerLevel level, Trains.Carriage current, int dir) {
         UUID trainId = current.provider().getTrainId();
         int myLow = current.provider().getPIdx();
         int myHigh = current.provider().getGroupHighestPIdx();
 
-        // The adjacent group of the *same* train, just beyond our boundary in `dir`:
-        // marching down (dir < 0) we want the same-train group whose rooms sit
-        // entirely below ours, nearest to the gap; marching up (dir > 0), the nearest
-        // one above. pIdx is monotonic along world-X across the whole train, so the
-        // current group is excluded automatically by these range tests.
         Trains.Carriage best = null;
         for (Trains.Carriage c : Trains.allCarriages(level)) {
             if (c == current || !trainId.equals(c.provider().getTrainId())) {
@@ -460,6 +517,47 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
                 }
             }
         }
+        return best;
+    }
+
+    @Override
+    public double groupGapWidth(Entity self, int dir) {
+        if (!(self.level() instanceof ServerLevel level)) {
+            return UNKNOWN_GAP;
+        }
+        Trains.Carriage current = carriageAt(self);
+        if (current == null) {
+            return UNKNOWN_GAP;
+        }
+        Trains.Carriage best = adjacentGroup(level, current, dir);
+        if (best == null) {
+            return UNKNOWN_GAP; // genuine end of the train this way
+        }
+        AABBdc mine = current.ship().worldAABB();
+        AABBdc theirs = best.ship().worldAABB();
+        if (mine == null || theirs == null) {
+            return UNKNOWN_GAP;
+        }
+        // Marching down we sit above them, so the clearance is our min minus their max;
+        // marching up, the reverse. The same minX/maxX subtraction Dungeon Train's own
+        // CarriageGroupGap debug HUD uses, so the two agree on screen.
+        double gap = dir < 0 ? mine.minX() - theirs.maxX()
+                             : theirs.minX() - mine.maxX();
+        // Clamp: overlapping or jittering AABBs must not yield a negative, which would read
+        // as UNKNOWN_GAP and silently restore the full sprint jump.
+        return Math.max(0.0, gap);
+    }
+
+    @Override
+    public Vec3 nextGroupTarget(Entity self, int dir) {
+        if (!(self.level() instanceof ServerLevel level)) {
+            return null;
+        }
+        Trains.Carriage current = carriageAt(self);
+        if (current == null) {
+            return null;
+        }
+        Trains.Carriage best = adjacentGroup(level, current, dir);
         if (best == null) {
             return null; // genuine end of the train this way
         }

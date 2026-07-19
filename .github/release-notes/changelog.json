@@ -702,6 +702,41 @@
       "released": true,
       "released_in": "v0.82.0",
       "released_at": "2026-07-17T16:46:33Z"
+    },
+    {
+      "id": "gap-proportionate-carriage-hop",
+      "version": "0.83.0",
+      "type": "fix",
+      "title": "PlayerMobs step over carriage gaps instead of leaping them",
+      "summary": "PlayerMobs crossing between train carriage groups now take a hop sized to the actual gap. Dungeon Train tightened the seams between carriages, but PlayerMobs kept using the same big sprint-leap they needed for the old wider gaps \u2014 so they'd sail across a hand's-width seam. They now step over it.",
+      "highlights": [
+        "Cross-carriage hops are sized to the real gap \u2014 about half the height and half the distance at Dungeon Train's current spacing",
+        "Wider gaps still get the full sprint jump, so nothing changes where the longer leap is actually needed",
+        "Fixed a mob briefly getting stuck in its crossing state after landing on a very narrow gap"
+      ],
+      "pr": 175,
+      "date": "2026-07-19",
+      "released": true,
+      "released_in": "v0.83.0",
+      "released_at": "2026-07-19T12:20:34Z"
+    },
+    {
+      "id": "playermob-train-recovery-fixes",
+      "version": "0.83.0",
+      "type": "fix",
+      "title": "PlayerMobs find their way back onto the train",
+      "summary": "A PlayerMob that falls onto the tracks now works its way back aboard instead of getting stuck. It bridges off the rails when there is a drop, builds a pillar up beside the passing carriages, and waits for a clear opening before jumping in.",
+      "highlights": [
+        "Mobs stranded on the track bed no longer stand on the edge indefinitely \u2014 they place a block and step off.",
+        "Mobs beside the line build straight up rather than pacing alongside the train.",
+        "Boarding waits for a genuine opening, so mobs stop leaping into carriage walls or through gaps.",
+        "A mob with nothing to build from is given a few planks so it can bridge out and climb back on."
+      ],
+      "pr": 177,
+      "date": "2026-07-19",
+      "released": true,
+      "released_in": "v0.83.0",
+      "released_at": "2026-07-19T12:20:34Z"
     }
   ]
 }

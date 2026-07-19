@@ -20,6 +20,12 @@ import net.minecraft.world.phys.Vec3;
  * (a real arc, not a floor-skim) matters: Sable only sticks a riding mob to a carriage while it is
  * grounded, so a low skim re-grounds on the origin and gets re-grabbed mid-leap.</p>
  *
+ * <p><b>Sized to the gap.</b> The arc scales to the measured seam width
+ * ({@link TrainConfinement#groupGapWidth}, read once at {@link #launch}), because Dungeon Train
+ * v0.471.0 tightened inter-group gaps to ~0.4 blocks and a fixed ~3.8-block sprint leap across a
+ * hand's-width seam looked absurd. A wide or unmeasurable gap keeps the original sprint-jump
+ * values, so this is a no-op wherever the seam isn't measurably tight.</p>
+ *
  * <p><b>Lifecycle</b> — single leap at a time, owned by one goal instance:</p>
  * <ol>
  *   <li>{@link #trackCarry} each tick while standing/settling at the gap edge.</li>
@@ -46,12 +52,38 @@ final class GapLeap {
     // clear a normal carriage-group gap the way a sprinting player does. Confirmed via in-game
     // trajectory diagnostics (#54): the earlier "gentle floor-skim" re-grounded on the origin and
     // stalled, and a held-altitude hover floated too high and too far.
-    private static final double SPRINT_SPEED = 0.38; // horizontal sprint toward the target, on top of carry
-    private static final double LAUNCH_UP = 0.42;    // vanilla jump impulse; gravity arcs the rest
+    static final double SPRINT_SPEED = 0.38; // horizontal sprint toward the target, on top of carry
+    static final double LAUNCH_UP = 0.42;    // vanilla jump impulse; gravity arcs the rest
+
+    // Gap-proportionate hop. Dungeon Train v0.471.0 tightened inter-group seams from ~1.0 blocks
+    // to ~0.4 (min 0.3, max 0.5), which made the sprint jump above read as comically oversized: it
+    // always travelled SPRINT_SPEED * airtime ~= 3.8 blocks regardless of the gap, because
+    // launchVelocity normalises to a fixed speed and the target only sets *direction*, never
+    // magnitude. For a measurably tight gap we scale both the impulse and the sustained speed to
+    // the gap; a wide or unmeasurable gap keeps the exact values above, so the flee escape and any
+    // older/wider spacing behave bit-identically to before.
+    /** Gaps at or below this (blocks) get the small step-over hop. Covers DT's 0.3-0.5 plus AABB
+     *  jitter, while leaving wider spacing on the proven sprint jump. */
+    static final double SMALL_GAP_THRESHOLD = 1.5;
+    /** Step-over impulse: ~7.5 ticks airborne, peak ~0.56 blocks. Deliberately kept well above
+     *  skim height — per #54 a low skim re-grounds on the origin and gets re-grabbed mid-leap. */
+    static final double HOP_UP = 0.30;
+    /** Blocks past the far edge to aim for: the launch point is the nav-done position, short of
+     *  the true edge, and the mob must land on deck rather than on the lip. Erring long means a
+     *  slight overshoot onto the far deck rather than falling short into the gap. */
+    static final double LANDING_MARGIN = 1.5;
+    /** Speed floor, so a near-zero gap can't produce a hop so slow the train carry dominates. */
+    static final double MIN_HOP_SPEED = 0.10;
+    /** Vanilla gravity, for the airtime estimate. */
+    static final double GRAVITY_PER_TICK = 0.08;
+    /** Grace before the grounded-landing check, so the launch tick isn't read as a landing. */
+    private static final int MIN_AIRBORNE_TICKS = 3;
 
     private boolean launched = false;
     private boolean leftOrigin = false;
     private int flightTicks = 0;
+    /** Sustained horizontal speed for the current hop, sized to the gap at {@link #launch}. */
+    private double hopSpeed = SPRINT_SPEED;
     private Vec3 target;
 
     // Train carry tracking: the mob's world displacement per tick while riding == the
@@ -89,20 +121,27 @@ final class GapLeap {
     }
 
     /**
-     * Sprint-jump takeoff toward {@code target}: a sprint toward it plus the frozen train carry,
-     * with a vanilla jump up. From here gravity does the arc (see {@link #tickFlight}) — a normal
-     * player sprint jump. Marks the mob as crossing so the leap can't be preempted mid-air.
+     * Takeoff toward {@code target}: a sprint toward it plus the frozen train carry, with a jump
+     * up. From here gravity does the arc (see {@link #tickFlight}) — a normal player sprint jump.
+     * Marks the mob as crossing so the leap can't be preempted mid-air.
+     *
+     * <p>The arc is sized to {@code gapWidth} (blocks, from
+     * {@link TrainConfinement#groupGapWidth}): a tight Dungeon-Train seam gets a small step-over,
+     * a wide or {@link TrainConfinement#UNKNOWN_GAP} one the full sprint jump. The gap is read
+     * once, here — like the carry it is frozen for the flight, never re-queried mid-air.</p>
      */
-    void launch(PlayerMobEntity mob, Vec3 target) {
+    void launch(PlayerMobEntity mob, Vec3 target, double gapWidth) {
         this.launched = true;
         this.leftOrigin = false;
         this.flightTicks = 0;
         this.target = target;
         this.launchCarry = measuredCarry; // freeze the train's carry velocity for the airborne phase
+        double rise = hopRise(gapWidth);
+        this.hopSpeed = hopSpeed(gapWidth, rise);
         mob.setCrossingGap(true);
         mob.getNavigation().stop();
-        Vec3 fwd = launchVelocity(mob.position(), target, SPRINT_SPEED, 0.0);
-        mob.setDeltaMovement(launchCarry.x + fwd.x, LAUNCH_UP, launchCarry.z + fwd.z);
+        Vec3 fwd = launchVelocity(mob.position(), target, hopSpeed, 0.0);
+        mob.setDeltaMovement(launchCarry.x + fwd.x, rise, launchCarry.z + fwd.z);
     }
 
     /**
@@ -115,6 +154,15 @@ final class GapLeap {
      */
     boolean tickFlight(PlayerMobEntity mob) {
         flightTicks++;
+
+        // Back on solid ground: the reliable landing signal for a small hop. Neither signal below
+        // fires at a tight seam — the mob's AABB may never leave a carriage box (so leftOrigin
+        // never sets) and a short hop never gets within REACH_DISTANCE_SQR of the far room's
+        // *centre* — which would strand the goal until FLIGHT_TIMEOUT_TICKS. MIN_AIRBORNE_TICKS
+        // covers the launch tick itself; a mid-flight roof landing means we're already across.
+        if (flightTicks >= MIN_AIRBORNE_TICKS && mob.onGround()) {
+            return true;
+        }
 
         boolean confined = TrainConfinement.isConfined(mob);
 
@@ -137,7 +185,7 @@ final class GapLeap {
         target = target.add(launchCarry);
         mob.getLookControl().setLookAt(target.x, target.y, target.z);
 
-        Vec3 fwd = launchVelocity(mob.position(), target, SPRINT_SPEED, 0.0);
+        Vec3 fwd = launchVelocity(mob.position(), target, hopSpeed, 0.0);
         Vec3 v = mob.getDeltaMovement();
         mob.setDeltaMovement(launchCarry.x + fwd.x, v.y, launchCarry.z + fwd.z);
         return false;
@@ -153,6 +201,43 @@ final class GapLeap {
         havePrevPos = false;
         measuredCarry = Vec3.ZERO;
         launchCarry = Vec3.ZERO;
+        hopSpeed = SPRINT_SPEED;
+    }
+
+    /**
+     * Vertical launch impulse for a gap of {@code gapWidth} blocks: a small step-over rise for a
+     * measurably tight seam, the full sprint-jump impulse for a wide gap or an unmeasurable one
+     * ({@link TrainConfinement#UNKNOWN_GAP}, i.e. off-train or without Dungeon Train).
+     *
+     * <p>Pure function of its input, so the trajectory tuning stays unit-testable — the same
+     * reason {@link #launchVelocity} is static.</p>
+     */
+    static double hopRise(double gapWidth) {
+        return isSmallGap(gapWidth) ? HOP_UP : LAUNCH_UP;
+    }
+
+    /**
+     * Horizontal speed that carries the mob {@code gapWidth + LANDING_MARGIN} blocks during the
+     * airtime of a {@code vy} impulse under vanilla gravity, clamped to
+     * {@code [MIN_HOP_SPEED, SPRINT_SPEED]}. A wide or unmeasurable gap yields the full sprint
+     * speed unchanged.
+     *
+     * <p>Airtime for an impulse {@code vy} is {@code 2 * vy / GRAVITY_PER_TICK} ticks (up and back
+     * down to launch height), so distance is {@code speed * airtime} — invert that for the speed
+     * that just covers the gap plus the landing margin.</p>
+     */
+    static double hopSpeed(double gapWidth, double vy) {
+        if (!isSmallGap(gapWidth)) {
+            return SPRINT_SPEED;
+        }
+        double airTicks = 2.0 * vy / GRAVITY_PER_TICK;
+        double needed = gapWidth + LANDING_MARGIN;
+        return Math.min(SPRINT_SPEED, Math.max(MIN_HOP_SPEED, needed / airTicks));
+    }
+
+    /** A gap small enough to step over: measurable (non-negative) and within the threshold. */
+    private static boolean isSmallGap(double gapWidth) {
+        return gapWidth >= 0.0 && gapWidth <= SMALL_GAP_THRESHOLD;
     }
 
     /**

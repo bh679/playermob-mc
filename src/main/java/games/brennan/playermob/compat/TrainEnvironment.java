@@ -128,6 +128,34 @@ public interface TrainEnvironment {
     Vec3 nextGroupTarget(Entity self, int dir);
 
     /**
+     * Sentinel returned by {@link #groupGapWidth} when the gap can't be measured —
+     * off-train, without a train mod, or when either carriage AABB is unresolvable.
+     * Negative so it can never be confused with a real (clamped non-negative) gap;
+     * callers fall back to the full sprint jump, the behaviour that shipped before
+     * hops became gap-proportionate.
+     */
+    double UNKNOWN_GAP = -1.0;
+
+    /**
+     * The world-X clearance in blocks between this carriage group's bounding box and
+     * the adjacent same-train group's in march direction {@code dir} — the physical gap a
+     * mob must clear to cross — or {@link #UNKNOWN_GAP} if it can't be measured.
+     *
+     * <p>This is the same quantity Dungeon Train's own {@code CarriageGroupGap} debug HUD
+     * displays, computed the same way, so the two agree on screen. DT targets ~0.4 blocks
+     * (min 0.3, max 0.5) since its v0.471.0 seam tightening.</p>
+     *
+     * <p>Used by {@code GapLeap} to size the hop to the gap rather than always firing a full
+     * sprint jump. Like {@link #nextGroupTarget} the carriages move, so this is a one-tick
+     * snapshot — query it at the moment of launch (it is deliberately <em>not</em> re-queried
+     * mid-flight; see {@code GapLeap#tickFlight}).</p>
+     *
+     * <p>A no-op default reporting {@link #UNKNOWN_GAP}, so {@link #ABSENT} and every
+     * non-Dungeon-Train environment inherit the pre-existing full-jump behaviour unchanged.</p>
+     */
+    default double groupGapWidth(Entity self, int dir) { return UNKNOWN_GAP; }
+
+    /**
      * If {@code self} is on a train and standing against a closed door, open it —
      * wooden doors directly, power-operated (iron/copper) doors by operating their
      * adjacent control. A no-op default (off-train environments do nothing); the
