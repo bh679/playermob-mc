@@ -1,5 +1,7 @@
 package games.brennan.playermob.entity.goal;
 
+import com.mojang.logging.LogUtils;
+import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.compat.GameRuleCompat;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.compat.TrainEnvironment;
@@ -16,11 +18,13 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import org.slf4j.Logger;
 
 import java.util.EnumSet;
 import java.util.List;
@@ -104,6 +108,67 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
     private static final int MAX_GATHER_BELOW_DECK = 10;
     /** Ticks between bridge placements, leaving time to climb the previous step. */
     private static final int PLACE_INTERVAL_TICKS = 10;
+    /**
+     * Mercy grant for the one softlock the mob can't dig its way out of: wedged over a drop at the
+     * bed edge with a genuinely empty backpack and nothing reachable to gather. After being stuck
+     * there this long (~10s), hand it {@link #RECOVERY_GRANT_PLANKS} planks — once per recovery —
+     * so it can lay the single step-off block and leave the rails. Not a rescue: it still has to
+     * climb back aboard on its own, before {@link #STALL_ABANDON_TICKS} (30s) abandons recovery.
+     */
+    private static final int NO_BLOCK_GRANT_TICKS = 200;
+    /** Planks granted by the wedged-over-a-drop mercy grant — enough to bridge the step off the bed. */
+    private static final int RECOVERY_GRANT_PLANKS = 5;
+    /**
+     * Grant delay when the mob is genuinely TRAPPED on the bed — neither side offers a safe
+     * step-off, so it can neither walk away nor gather anything. Waiting the full
+     * {@link #NO_BLOCK_GRANT_TICKS} achieves nothing there, so it gets its planks promptly (2s)
+     * and bridges out one block.
+     */
+    private static final int NO_SAFE_EXIT_GRANT_TICKS = 40;
+    /**
+     * How long to hold beside the deck hoping an opening slides into reach before towering higher
+     * (15s). Generous on purpose: a mob at deck level waiting for a gap in a long carriage is doing
+     * exactly the right thing, and a short bound kicked it into a pointless GATHER mid-wait. The
+     * infinite ride this originally guarded against is now prevented upstream by
+     * {@link #DECK_HEIGHT_TOLERANCE} (a mob BELOW the deck climbs instead of waiting), with
+     * {@link #GLOBAL_ABANDON_TICKS} as the hard backstop.
+     */
+    private static final int WAIT_FOR_OPENING_TICKS = 300;
+    /**
+     * How far below the deck floor still counts as "already up at deck height, just wait".
+     * Deliberately tight: the old 1.0 tolerance mis-classified a mob a FULL block below the deck
+     * as level with it, so it waited for an opening it could never reach instead of climbing.
+     */
+    private static final double DECK_HEIGHT_TOLERANCE = 0.25;
+    /**
+     * Lead the step-off block this many ticks down the line. The train carries the mob forward
+     * while it steps sideways, so a block laid at the mob's CURRENT x is already behind it by the
+     * time it crosses — it drifts past its own bridge and never gets off. Placing ahead by roughly
+     * the travel during the step puts the block where the mob will actually be.
+     */
+    private static final int STEP_LEAD_TICKS = 12;
+    /** Cap the lead so a speed spike can't fling the step block far down the line. */
+    private static final int MAX_STEP_LEAD = 4;
+    /**
+     * Largest per-tick x change treated as genuine train carry. A real train moves ~0.1 blocks/tick;
+     * anything beyond this is a carriage re-anchor / sub-level coordinate switch, not travel, and
+     * must not poison the drift average used to lead block placement.
+     */
+    private static final double MAX_PLAUSIBLE_DRIFT = 1.0;
+    /**
+     * Lay the step-off as a short STRIP of this many blocks along the direction of travel, all in
+     * one go, rather than a single block. A 1-wide target is easy to miss: the train carries the
+     * mob ~0.1 blocks/tick while it steps diagonally across, so a small timing error slid it right
+     * past its own landing and it never got off. A strip gives it a landing zone it can't overshoot.
+     */
+    private static final int STEP_STRIP_WIDTH = 3;
+    /**
+     * Mercy grants allowed per recovery. Two, because the job has two distinct stages that each
+     * need material and the mob can obtain none itself out here: bridging OUT off the bed, then
+     * building UP to deck height. Still bounded — it is not an unlimited block supply, and
+     * {@link #MAX_PLACEMENTS} caps total placement regardless.
+     */
+    private static final int MAX_RECOVERY_GRANTS = 2;
     /** Gather scan cube half-extent and reach. */
     private static final int GATHER_SCAN_RADIUS = 8;
     private static final double GATHER_REACH_SQR = 9.0;     // 3 blocks
@@ -115,6 +180,10 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
     private static final int POST_COOLDOWN_TICKS = 40;
 
     private enum Phase { IDLE, APPROACH, BRIDGE, GATHER, CRAFT }
+
+    private static final Logger LOGGER = LogUtils.getLogger();
+    /** Throttle for the per-tick off-tracks trace (ticks) — one-shot events log immediately. */
+    private static final int TRACE_INTERVAL_TICKS = 10;
 
     private final PlayerMobEntity mob;
     private final double moveSpeed;
@@ -130,6 +199,11 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
     private int approachStuckTicks = 0;
     private int missTicks = 0;                     // consecutive ticks the carriage was out of range
     private boolean wasOnTracks = false;           // last tick's onTracks(); resets approach trackers on transition
+    private int recoveryGrantsUsed = 0;            // mercy plank grants spent this recovery (max MAX_RECOVERY_GRANTS)
+    private int wedgedOnBedTicks = 0;              // ticks continuously stuck on the bed; resets only on leaving it / stepping off
+    private int waitingTicks = 0;                  // consecutive ticks held beside the deck waiting for an opening
+    private double lastMobX = Double.NaN;          // previous tick's x, for measuring carried drift
+    private double driftPerTickX = 0.0;            // smoothed forward drift (blocks/tick) imparted by the moving train
 
     /** Re-resolved every evaluation/tick — the carriage moves. */
     private TrainEnvironment.ReboardTarget target;
@@ -155,6 +229,33 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
     @Override
     public String objective() {
         return "Returning to train";
+    }
+
+    // ---- Diagnostics (gated behind PlayerMobConfig.debugSpawnLog) ----------
+    // TEMPORARY: instrumentation for the "PlayerMob wedged on the track edge, never steps one
+    // block off" bug. Enable with debugSpawnLog=true in playermob config. Remove once diagnosed.
+
+    private boolean traceOn() {
+        return PlayerMobConfig.debugSpawnLog();
+    }
+
+    /** Immediate diagnostic line for one-shot events (side chosen, placement, grant, phase flip). */
+    private void trace(String fmt, Object... args) {
+        if (!traceOn()) return;
+        Object[] all = new Object[args.length + 1];
+        all[0] = mob.getId();
+        System.arraycopy(args, 0, all, 1, args.length);
+        LOGGER.info("[TrainRecovery #{}] " + fmt, all);
+    }
+
+    /** Throttled per-tick diagnostic line (every {@link #TRACE_INTERVAL_TICKS} ticks). */
+    private void traceTick(String fmt, Object... args) {
+        if (!traceOn() || totalTicks % TRACE_INTERVAL_TICKS != 0) return;
+        trace(fmt, args);
+    }
+
+    private static String f(double d) {
+        return String.format("%.2f", d);
     }
 
     @Override
@@ -233,14 +334,22 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         approachStuckTicks = 0;
         missTicks = 0;
         wasOnTracks = false;
+        recoveryGrantsUsed = 0;
+        wedgedOnBedTicks = 0;
+        waitingTicks = 0;
+        lastMobX = Double.NaN;
+        driftPerTickX = 0.0;
         gatherTargetPos = null;
         pillarColumn = null;
         mob.setRecovering(true);   // off the train, re-boarding is the mob's sole focus (no combat)
         moveTowardCarriage();
+        trace("START pos=({},{},{}) onTracks={}", mob.getBlockX(), mob.getBlockY(), mob.getBlockZ(), onTracks());
     }
 
     @Override
     public void stop() {
+        trace("STOP after {} ticks (phase={} placed={} stuck={} sinceProgress={})",
+                totalTicks, phase, placementsUsed, approachStuckTicks, totalTicks - lastProgressTick);
         mob.getNavigation().stop();
         if (gatherTargetPos != null) {
             mob.level().destroyBlockProgress(mob.getId(), gatherTargetPos, -1);  // clear cracking overlay
@@ -264,6 +373,12 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         if (target == null) return;
         totalTicks++;
         phaseTicks++;
+        AABB tbox = target.worldBox();
+        traceTick("tick phase={} onTracks={} isAboard={} pos=({},{},{}) zSpan=[{}..{}] stuck={} wedged={} waiting={} placed={} granted={}",
+                phase, onTracks(), isAboard(tbox),
+                mob.getBlockX(), mob.getBlockY(), mob.getBlockZ(),
+                f(tbox.minZ), f(tbox.maxZ), approachStuckTicks, wedgedOnBedTicks, waitingTicks,
+                placementsUsed, recoveryGrantsUsed);
         // Top priority once OFF the tracks: if we can already board from here (high enough + an
         // opening in reach), just do it — don't tower or gather when a hop will do. Never board
         // while standing on the rails/bed: the bed is static and the carriage is moving, so a leap
@@ -301,6 +416,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
             lastApproachDist = Double.MAX_VALUE;
             lastApproachY = -1.0e9;
             approachStuckTicks = 0;
+            if (!on) wedgedOnBedTicks = 0;   // genuinely left the bed → clear the wedged-dwell clock
             wasOnTracks = on;
         }
         // #1 PRIORITY while on the rails/bed: get off the SIDE of the tracks. Nothing else — tower,
@@ -315,8 +431,36 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         // Don't climb back DOWN to the ground launch spot to gather — hold here and let an opening
         // slide into reach; tryBoardNow (top of tick) leaps the moment one does. (≤2.5 keeps us
         // inside boarding reach so a hop can land.)
-        if (mob.getY() >= box.minY - 1.0 && horizontalDistToBox(box) <= 2.5) {
-            waitForOpening(box);
+        // Genuinely up at deck level and right beside the carriage → hold briefly and let an
+        // opening slide into reach (tryBoardNow leaps the moment one does). Bounded: if none comes
+        // within WAIT_FOR_OPENING_TICKS, stop waiting and tower up instead. The tolerance is tight
+        // on purpose — a mob a full block BELOW the deck must climb, not wait (it never boards).
+        if (mob.getY() >= box.minY - DECK_HEIGHT_TOLERANCE && horizontalDistToBox(box) <= 2.5) {
+            waitingTicks++;
+            traceTick("approach WAIT-FOR-OPENING mobY={} deckMinY={} horizDist={} waiting={}/{}",
+                    f(mob.getY()), f(box.minY), f(horizontalDistToBox(box)),
+                    waitingTicks, WAIT_FOR_OPENING_TICKS);
+            if (waitingTicks <= WAIT_FOR_OPENING_TICKS) {
+                waitForOpening(box);
+                return;
+            }
+            // Still no opening: tower a little higher (maybe a wall is in the way) rather than
+            // going off to gather — we're in position, we just need to clear the lip.
+            trace("approach WAIT timed out after {} ticks → tower higher", waitingTicks);
+            waitingTicks = 0;
+            commitToBuildUp();
+            return;
+        }
+        waitingTicks = 0;   // not beside the deck → the wait clock only counts consecutive ticks
+        // Already hard up against the carriage but BELOW deck level — typically standing on the
+        // step block we just bridged out onto, over a drop. There is no better ground to walk to
+        // (approachPoint would send us off toward the canyon floor), so BUILD UP from here until
+        // we can drop onto the deck. tryBoardNow (top of tick) takes any opening that slides past.
+        if (horizontalDistToBox(box) <= 2.5 && mob.getY() < box.minY - DECK_HEIGHT_TOLERANCE) {
+            traceTick("approach adjacent-but-low → BUILD UP (mobY={} deckMinY={} horizDist={} blocks={})",
+                    f(mob.getY()), f(box.minY), f(horizontalDistToBox(box)),
+                    BlockSourcePolicy.bridgeBlockCount(mob.getInventory()));
+            commitToBuildUp();
             return;
         }
         // Walk to the HIGHEST ground beside the track (least climb), and only start the tower
@@ -339,6 +483,12 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         } else {
             approachStuckTicks++;
         }
+        traceTick("approach pos=({},{},{}) spot=({},{},{}) distToSpot={} lastDist={} mobY={} lastY={} deckMinY={} horizDist={} stuck={}/{} -> commit={}",
+                mob.getBlockX(), mob.getBlockY(), mob.getBlockZ(),
+                f(spot.x), f(spot.y), f(spot.z), f(distToSpot), f(lastApproachDist),
+                f(mob.getY()), f(lastApproachY), f(box.minY), f(horizontalDistToBox(box)),
+                approachStuckTicks, APPROACH_STUCK_LIMIT,
+                (distToSpot <= 1.6 || approachStuckTicks > APPROACH_STUCK_LIMIT));
         lastApproachDist = distToSpot;
         lastApproachY = mob.getY();
         // At the (re-assessed) best spot, or can't get closer → commit (we're already off the
@@ -354,6 +504,39 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      * plus the buffer ({@link #blocksNeeded()} = climb + {@link #BLOCK_BUFFER}). If short, go
      * GATHER until we have enough first, rather than starting a tower that runs out partway up.
      */
+    /**
+     * Commit to towering from where we stand (beside the deck, over a drop). Unlike
+     * {@link #commitFromApproach} this does NOT demand {@link #blocksNeeded()} up front: out here
+     * there is nothing to gather, so insisting on a full climb-plus-buffer just sent a mob that
+     * already held usable blocks off on a futile GATHER wander while the train left. Tower with
+     * whatever we have; {@link #tickBridge} falls back to CRAFT/GATHER (and the mercy grant) if it
+     * genuinely runs dry partway up.
+     */
+    /**
+     * True when the mob is already in position to board: at/above deck level and hard against the
+     * carriage. In that state it needs an OPENING, not more blocks — anything that sends it off to
+     * gather from here is wasted time it does not have while the train keeps moving.
+     */
+    private boolean atBoardingHeight(AABB box) {
+        return mob.getY() >= box.minY - DECK_HEIGHT_TOLERANCE && horizontalDistToBox(box) <= 2.5;
+    }
+
+    private void commitToBuildUp() {
+        phaseTicks = 0;
+        approachStuckTicks = 0;
+        int have = BlockSourcePolicy.bridgeBlockCount(mob.getInventory());
+        if (have <= 0) {
+            grantRecoveryPlanks("build up beside deck with empty backpack");
+            have = BlockSourcePolicy.bridgeBlockCount(mob.getInventory());
+        }
+        if (have > 0) {
+            phase = Phase.BRIDGE;
+        } else {
+            phase = Phase.GATHER;
+            gatherTargetPos = null;
+        }
+    }
+
     private void commitFromApproach() {
         phaseTicks = 0;
         approachStuckTicks = 0;
@@ -380,6 +563,22 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      * {@link #onTracks()} false, and the normal off-track APPROACH→tower→board resumes next tick.</p>
      */
     private void tickGetOffTracks(AABB box) {
+        wedgedOnBedTicks++;   // reliable "stuck on the bed" clock — reset only on leaving it (tickApproach) or stepping off
+        // Measure how fast the train is carrying the mob down the line (it rides the bed, so its own
+        // x delta IS the drift). Smoothed so a single jittery tick doesn't skew the placement lead.
+        double curX = mob.getX();
+        if (!Double.isNaN(lastMobX)) {
+            double dx = curX - lastMobX;
+            // Ignore implausible jumps: a carriage re-anchor / sub-level coordinate switch can move
+            // the mob many blocks in one tick, which would poison the average and fling the step
+            // block far down the line (observed drift=3.41/tick against a ~0.1 train).
+            if (Math.abs(dx) <= MAX_PLAUSIBLE_DRIFT) {
+                driftPerTickX = driftPerTickX * 0.8 + dx * 0.2;
+            } else {
+                driftPerTickX = 0.0;   // resync rather than trust a teleport
+            }
+        }
+        lastMobX = curX;
         int mx = mob.blockPosition().getX();
         int mz = mob.blockPosition().getZ();
         int footY = mob.blockPosition().getY();
@@ -399,7 +598,12 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
             offZ = nearNorth ? northOff : southOff;           // both or neither → nearer side
         }
         int stepZ = offZ <= mz ? -1 : 1;
-        double targetY = groundSurfaceY(mx, box.minY, offZ);
+        boolean noSafeExit = !nWalk && !sWalk;
+        // When neither side is walkable we are BRIDGING out, not stepping down: the step block is
+        // laid level with the bed, so aim at our own foot height. Aiming at groundSurfaceY there
+        // pointed navigation at the canyon floor ~20 blocks below — an unreachable target, so the
+        // mob never walked onto the block it had just placed and re-placed forever.
+        double targetY = noSafeExit ? footY : groundSurfaceY(mx, box.minY, offZ);
         if (phaseTicks % PATH_REISSUE_TICKS == 0 || mob.getNavigation().isDone()) {
             mob.getNavigation().moveTo(mx + 0.5, targetY, offZ + 0.5, moveSpeed);
             mob.getLookControl().setLookAt(mx + 0.5, targetY, offZ + 0.5);
@@ -413,9 +617,15 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
             approachStuckTicks++;
         }
         lastApproachDist = dist;
-        // Wedged at the bed edge (a drop beside an elevated line) → lay a step block to cross.
-        if (approachStuckTicks > APPROACH_STUCK_LIMIT) {
-            placeOffBedStep(box, stepZ);
+        traceTick("getOff pos=({},{},{}) zSpan=[{}..{}] northOff={}(walk={}) southOff={}(walk={}) -> offZ={} stepZ={} targetY={} dist={} stuck={}/{} navDone={}",
+                mx, footY, mz, f(box.minZ), f(box.maxZ),
+                northOff, nWalk, southOff, sWalk, offZ, stepZ, f(targetY),
+                f(dist), approachStuckTicks, APPROACH_STUCK_LIMIT, mob.getNavigation().isDone());
+        // No safe step-off on EITHER side (elevated line, drop both ways) → don't flail waiting to
+        // get stuck first; bridge straight out one block. Otherwise only bridge once genuinely
+        // wedged at the edge.
+        if (noSafeExit || approachStuckTicks > APPROACH_STUCK_LIMIT) {
+            placeOffBedStep(box, stepZ, noSafeExit);
         }
     }
 
@@ -428,25 +638,61 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      * carriage-/track-protected {@link #tryPlaceBridgeBlock}; with no placeable block it can't bridge
      * a void, so it leaves it to the stall backstop (best-effort).
      */
-    private void placeOffBedStep(AABB box, int stepZ) {
+    private void placeOffBedStep(AABB box, int stepZ, boolean noSafeExit) {
         BlockPos foot = mob.blockPosition();
         int placeZ = foot.getZ() + stepZ;
         double placeCenterZ = placeZ + 0.5;
         if (placeCenterZ >= box.minZ && placeCenterZ <= box.maxZ) {
+            traceTick("offBedStep SKIP nextCell-still-in-footprint foot=({},{},{}) stepZ={} placeZ={} placeCenterZ={} zSpan=[{}..{}]",
+                    foot.getX(), foot.getY(), foot.getZ(), stepZ, placeZ, f(placeCenterZ), f(box.minZ), f(box.maxZ));
             return;                              // next cell still inside the track footprint — keep walking
         }
         int slot = bridgeBlockSlot();
-        if (slot < 0 || phaseTicks % PLACE_INTERVAL_TICKS != 0) {
-            return;                              // no block to bridge a void, or pacing placement
+        int bridgeBlocks = BlockSourcePolicy.bridgeBlockCount(mob.getInventory());
+        traceTick("offBedStep foot=({},{},{}) stepZ={} placeZ={} slot={} bridgeBlocks={} placementsUsed={} phaseTicks%{}={}",
+                foot.getX(), foot.getY(), foot.getZ(), stepZ, placeZ, slot, bridgeBlocks,
+                placementsUsed, PLACE_INTERVAL_TICKS, phaseTicks % PLACE_INTERVAL_TICKS);
+        if (slot < 0) {
+            // Nothing placeable. If the mob has been wedged here ~10s with a genuinely empty
+            // backpack (no blocks AND no logs to craft), hand it planks once so it can bridge the
+            // single step off the bed — the one softlock it can't dig its way out of. Otherwise
+            // leave it to the stall backstop (best-effort). See NO_BLOCK_GRANT_TICKS.
+            // Trapped (no safe exit either side) → grant promptly; it can neither walk away nor
+            // gather on the bed, so a longer wait accomplishes nothing.
+            int grantAfter = noSafeExit ? NO_SAFE_EXIT_GRANT_TICKS : NO_BLOCK_GRANT_TICKS;
+            if (wedgedOnBedTicks > grantAfter) {
+                grantRecoveryPlanks("wedged on bed " + wedgedOnBedTicks + " ticks, noSafeExit=" + noSafeExit);
+            }
+            return;
         }
-        // One below the mob's feet, so the block's top is level with the bed surface for a flat step.
-        BlockPos step = new BlockPos(foot.getX(), foot.getY() - 1, placeZ);
+        if (phaseTicks % PLACE_INTERVAL_TICKS != 0) {
+            return;                              // pacing placement
+        }
+        // One below the mob's feet (so the top is level with the bed for a flat step), and led
+        // forward by the train's carry so the mob doesn't drift past its own bridge mid-step.
+        int lead = Mth.clamp((int) Math.round(driftPerTickX * STEP_LEAD_TICKS), -MAX_STEP_LEAD, MAX_STEP_LEAD);
+        BlockPos step = new BlockPos(foot.getX() + lead, foot.getY() - 1, placeZ);
         lookAt(step);
-        if (tryPlaceBridgeBlock(step, slot)) {
-            placementsUsed++;
+        // Lay the whole strip THIS tick (not one per PLACE_INTERVAL): laying them ten ticks apart
+        // just trails blocks behind the drifting mob, which is what it kept missing.
+        int laid = 0;
+        for (int i = 0; i < STEP_STRIP_WIDTH; i++) {
+            if (placementsUsed >= MAX_PLACEMENTS) break;
+            int s = bridgeBlockSlot();
+            if (s < 0) break;                                  // out of material — strip is as wide as it gets
+            BlockPos p = new BlockPos(step.getX() + i, step.getY(), placeZ);
+            if (tryPlaceBridgeBlock(p, s)) {
+                placementsUsed++;
+                laid++;
+            }
+        }
+        trace("offBedStep STRIP laid={} from {} (width={} drift={}/tick lead={})",
+                laid, step, STEP_STRIP_WIDTH, f(driftPerTickX), lead);
+        if (laid > 0) {
             approachStuckTicks = 0;
+            wedgedOnBedTicks = 0;            // stepped off — clear the wedged-dwell clock
             markProgress();
-            // Nudge onto the new step (off the bed); next tick onTracks() flips false.
+            // Aim at the near end of the strip; the mob drifts along it rather than past it.
             mob.getNavigation().moveTo(step.getX() + 0.5, step.getY() + 1.0, step.getZ() + 0.5, moveSpeed);
         }
     }
@@ -458,7 +704,11 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      * past the face is off it regardless of what the bed is built from.
      */
     private int offBedColumn(AABB box, int dir) {
-        return dir < 0 ? Mth.floor(box.minZ) - 1 : Mth.ceil(box.maxZ);
+        // Round to the nearest integer face, NOT floor/ceil: a carriage box can carry a sub-block
+        // epsilon (minZ logs as -0.00), and floor(-0.0001)-1 = -2 aims the mob two cells into the
+        // void instead of the one cell just past the face. Math.round is robust to ±epsilon on
+        // either face — north = first cell below minZ, south = first cell at/above maxZ.
+        return dir < 0 ? (int) Math.round(box.minZ) - 1 : (int) Math.round(box.maxZ);
     }
 
     /** True if off-bed column {@code (x,z)} has footing the mob can step to without bridging (≤1 up, ≤3 down). */
@@ -476,6 +726,15 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         // pillars straight up with nav OFF (otherwise the mob walks off its own 1-wide tower).
         int slot = bridgeBlockSlot();              // non-log placeable; non-gravity preferred
         if (slot < 0) {
+            // Out of blocks, but the tower already reached boarding height → we don't need more
+            // material, we need an opening. Hand back to APPROACH so it holds position and takes
+            // the first opening that slides past, instead of wandering off to gather.
+            if (atBoardingHeight(box)) {
+                trace("bridge out-of-blocks but AT boarding height → hold for opening");
+                phase = Phase.APPROACH;
+                phaseTicks = 0;
+                return;
+            }
             // No directly-placeable block — craft logs into planks if we have any,
             // otherwise go gather one.
             if (firstCraftableLogSlot() >= 0) {
@@ -622,6 +881,12 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         mob.setDeltaMovement(0.0, dm.y, 0.0);
         mob.getLookControl().setLookAt(
             (box.minX + box.maxX) / 2.0, box.minY + 1.0, (box.minZ + box.maxZ) / 2.0);
+        // Waiting HERE counts as progress: entry is gated on being genuinely at deck level and
+        // against the carriage (DECK_HEIGHT_TOLERANCE), so the mob is correctly positioned and
+        // boarding the moment an opening passes — the 30s stall-abandon must not cut that short.
+        // The original infinite-ride bug was a mob a full block BELOW the deck reaching this
+        // branch; that can no longer happen. GLOBAL_ABANDON_TICKS (5 min) remains the hard cap,
+        // and it is NOT reset by markProgress.
         markProgress();
     }
 
@@ -690,16 +955,16 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      */
     private boolean tryPlaceBridgeBlock(BlockPos pos, int slot) {
         if (!(mob.level() instanceof ServerLevel level)) return false;
-        if (!mobGriefingOn()) return false;
+        if (!mobGriefingOn()) { trace("place REJECT mobGriefing-off @{}", pos); return false; }
         ItemStack stack = mob.getInventory().getItem(slot);
-        if (!(stack.getItem() instanceof BlockItem blockItem)) return false;
+        if (!(stack.getItem() instanceof BlockItem blockItem)) { trace("place REJECT slot-not-block @{} slot={}", pos, slot); return false; }
 
         BlockState existing = level.getBlockState(pos);
-        if (!existing.canBeReplaced()) return false;
-        if (BlockSourcePolicy.isProtectedTrackBlock(existing)) return false;
+        if (!existing.canBeReplaced()) { trace("place REJECT not-replaceable @{} existing={}", pos, existing.getBlock()); return false; }
+        if (BlockSourcePolicy.isProtectedTrackBlock(existing)) { trace("place REJECT protected-track @{} existing={}", pos, existing.getBlock()); return false; }
         AABB cell = new AABB(pos);
-        if (target != null && target.worldBox().intersects(cell)) return false;   // never the carriage box
-        if (!level.getEntities(mob, cell).isEmpty()) return false;                 // don't suffocate anything
+        if (target != null && target.worldBox().intersects(cell)) { trace("place REJECT intersects-carriage @{} carriage={}", pos, target.worldBox()); return false; }   // never the carriage box
+        if (!level.getEntities(mob, cell).isEmpty()) { trace("place REJECT cell-occupied @{}", pos); return false; }                 // don't suffocate anything
 
         BlockState state = blockItem.getBlock().defaultBlockState();
         level.setBlock(pos, state, Block.UPDATE_ALL);
@@ -719,8 +984,11 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         if (gatherTargetPos == null) {
             gatherTargetPos = findGatherTarget();
             if (gatherTargetPos == null) {
-                // Nothing more reachable — bridge with whatever we've collected, or give up.
-                if (BlockSourcePolicy.bridgeBlockCount(mob.getInventory()) > 0) {
+                // Nothing more reachable — bridge with whatever we've collected. With an empty
+                // backpack and nothing gatherable (beside a moving deck, over a drop) the mob
+                // can't climb the last block aboard, so grant it planks once rather than abandon.
+                if (BlockSourcePolicy.bridgeBlockCount(mob.getInventory()) > 0
+                        || grantRecoveryPlanks("nothing gatherable, empty backpack")) {
                     phase = Phase.BRIDGE;
                     phaseTicks = 0;
                 } else {
@@ -1057,6 +1325,23 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         return mob.getX() >= box.minX && mob.getX() <= box.maxX
             && mob.getZ() >= box.minZ && mob.getZ() <= box.maxZ
             && mob.getY() >= box.minY - 0.5;
+    }
+
+    /**
+     * Mercy grant: hand the mob {@link #RECOVERY_GRANT_PLANKS} planks, once per recovery, when it
+     * is provably unable to obtain a block itself — trapped on the bed with no safe step-off, or
+     * beside the deck with nothing reachable to gather. Without a block it can neither bridge out
+     * nor climb the last block aboard, and would ride the line forever. Returns true if granted.
+     */
+    private boolean grantRecoveryPlanks(String why) {
+        if (recoveryGrantsUsed >= MAX_RECOVERY_GRANTS) return false;
+        if (BlockSourcePolicy.bridgeBlockCount(mob.getInventory()) > 0) return false;
+        EquipmentEvaluator.addToContainer(
+                mob.getInventory(), new ItemStack(Items.OAK_PLANKS, RECOVERY_GRANT_PLANKS));
+        recoveryGrantsUsed++;
+        markProgress();          // fresh work window; the planks are placed from next tick
+        trace("GRANT {} planks #{}/{} ({})", RECOVERY_GRANT_PLANKS, recoveryGrantsUsed, MAX_RECOVERY_GRANTS, why);
+        return true;
     }
 
     /** Note forward progress so the stall-abandon timer ({@link #STALL_ABANDON_TICKS}) resets. */
