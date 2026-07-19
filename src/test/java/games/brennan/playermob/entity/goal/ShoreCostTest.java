@@ -29,8 +29,8 @@ class ShoreCostTest {
         // Climbing out inside the carriage Z-span lands the mob on the track bed, and
         // tickGetOffTracks then has to sidestep it off before it can do anything — so at equal
         // distance, prefer the bank just beside the bed.
-        double onSpan = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 6.0, 0.0);
-        double offSpan = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 6.0, 2.0);
+        double onSpan = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 6.0, 0.0, 0.0);
+        double offSpan = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 6.0, 2.0, 0.0);
         assertTrue(offSpan < onSpan, "same swim, off-span wins (" + offSpan + " < " + onSpan + ")");
     }
 
@@ -40,8 +40,8 @@ class ShoreCostTest {
         // against. The penalty was 64 — larger than the entire scan radius — so ANY off-span
         // candidate beat every on-span one regardless of distance, and the mob visibly swam past
         // the obvious nearby shore to reach a far one. A close bank must still win comfortably.
-        double closeOnSpan = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 2.0, 0.0);
-        double farOffSpan = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 11.0, 4.5);
+        double closeOnSpan = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 2.0, 0.0, 0.0);
+        double farOffSpan = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 11.0, 4.5, 0.0);
         assertTrue(closeOnSpan < farOffSpan,
             "a bank 2 blocks away must beat one 11 blocks away even on-span ("
                 + closeOnSpan + " < " + farOffSpan + ")");
@@ -50,8 +50,8 @@ class ShoreCostTest {
     @Test
     void nearestWinsBetweenTwoBanksEquallyPlacedRelativeToTheTrack() {
         // The headline requirement: closest shore. With the track term equal, distance decides.
-        double near = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 3.0, 3.0);
-        double far = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 9.0, 3.0);
+        double near = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 3.0, 3.0, 0.0);
+        double far = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 9.0, 3.0, 0.0);
         assertTrue(near < far, "nearest shore wins when both sit the same distance off the track");
     }
 
@@ -80,8 +80,8 @@ class ShoreCostTest {
         // co-equal weighting is what made the mob swim past obvious nearby shores, which is the
         // behaviour being fixed. Getting out of the water is the urgent part; being near the rails
         // is a convenience for the phase that follows.
-        double nearer = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 0.0, 6.0);   // 6 away, 4.5 off track
-        double besideRails = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 8.0, 2.0); // 8 away, 0.5 off
+        double nearer = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 0.0, 6.0, 0.0);   // 6 away, 4.5 off track
+        double besideRails = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 8.0, 2.0, 0.0); // 8 away, 0.5 off
         assertTrue(nearer < besideRails,
             "the nearer bank must win (" + nearer + " < " + besideRails + ")");
     }
@@ -92,8 +92,8 @@ class ShoreCostTest {
         // nearest bank is perpendicular to the rails (big gap) while the lake runs long in the
         // track direction (gap ~0). Equal weighting paid the mob to swim 15 blocks along the track
         // rather than 5 to the obvious bank beside it.
-        double obviousBank = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 0.0, 5.0);   // 5 away, perpendicular
-        double farAlongTrack = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 15.0, 2.5); // 15 away, along the rails
+        double obviousBank = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 0.0, 5.0, 0.0);   // 5 away, perpendicular
+        double farAlongTrack = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 15.0, 2.5, 0.0); // 15 away, along the rails
         assertTrue(obviousBank < farAlongTrack,
             "the near perpendicular bank must beat the distant one along the rails ("
                 + obviousBank + " < " + farAlongTrack + ")");
@@ -104,9 +104,30 @@ class ShoreCostTest {
         // With NO track-side bank in range, the nearest dry land still wins outright — an off-track
         // candidate is never rejected, only penalised, so a mob in a lake with banks only on one
         // far side still has somewhere to go.
-        double near = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 0.0, 6.0);
-        double far = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 0.0, 9.0);
+        double near = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 0.0, 6.0, 0.0);
+        double far = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 0.0, 9.0, 0.0);
         assertTrue(near < far, "between two equally off-track banks the nearer one wins");
+    }
+
+    @Test
+    void aLowBankBeatsATallerOneEvenIfTheTallOneIsCloser() {
+        // "Sometimes it runs for a shoreline that is too tall." Climbing out onto a 1-block step is
+        // trivial; hauling up a 4-block cliff face is slow and often impossible, so height above the
+        // waterline is a real cost — worth a couple of blocks of extra swimming per block of rise.
+        double tallAndClose = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 4.0, 4.0, 4.0);
+        double lowAndFarther = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 7.0, 4.0, 1.0);
+        assertTrue(lowAndFarther < tallAndClose,
+            "a low bank a bit further out must beat a cliff (" + lowAndFarther + " < " + tallAndClose + ")");
+    }
+
+    @Test
+    void riseOnlyCountsUpwards() {
+        // A bank at or below the waterline carries no rise penalty — and a negative rise must never
+        // become a discount that outbids a genuinely better candidate.
+        assertEquals(
+            TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 5.0, 4.0, 0.0),
+            TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 5.0, 4.0, -3.0),
+            1.0e-9, "below-waterline rise is clamped to zero, not rewarded");
     }
 
     @Test
@@ -114,8 +135,8 @@ class ShoreCostTest {
         // Two candidates at the SAME Z share an identical penalty, so the difference between their
         // scores is exactly the difference in swim distance. Pins the distance half of the formula
         // so a future bias tweak can't silently change what "distance" means.
-        double atSeven = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 7.0, 5.0);
-        double atThree = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 3.0, 5.0);
+        double atSeven = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 7.0, 5.0, 0.0);
+        double atThree = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 3.0, 5.0, 0.0);
         assertEquals(Math.hypot(7.0, 5.0) - Math.hypot(3.0, 5.0), atSeven - atThree, 1.0e-9);
     }
 }

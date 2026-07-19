@@ -136,11 +136,41 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      */
     private static final int SHORE_SCAN_RADIUS = 12;
     /**
-     * Vertical band of the shore search, relative to the swimming mob's feet: a bank the mob can
-     * climb out onto is at or just above the waterline, never far below it.
+     * Vertical band of the shore search, measured from the <b>water surface</b> — not the mob. A
+     * bank you can climb out onto sits at the waterline by definition, so that is the only sensible
+     * anchor.
+     *
+     * <p>This used to be relative to the mob's feet, which broke precisely when the mob was deepest
+     * in trouble: swimming down in deep water put the entire band underwater, every column hit fluid
+     * before any footing, and the search returned NOTHING — so the mob fell back to paddling toward
+     * the track line and never got out at all. In mid-depth water the band straddled the surface, so
+     * the only columns that qualified were ones whose land reached into its upper part: the search
+     * literally could not see a low, close bank and picked a tall distant one instead.</p>
      */
     private static final int SHORE_SCAN_UP = 4;
     private static final int SHORE_SCAN_DOWN = 3;
+    /** How far up to look for the water surface above a submerged mob before giving up. */
+    private static final int SHORE_SURFACE_SCAN = 32;
+    /**
+     * Cost per block a bank rises above the waterline. Climbing out of water onto a 1-block step is
+     * easy; hauling up a 4-block cliff face is slow and often impossible, so a low bank is worth
+     * real extra swimming. This is what stops it making for a "too tall" shoreline.
+     */
+    private static final double SHORE_RISE_BIAS = 1.5;
+    /**
+     * Consecutive ticks of footing before the swim is considered finished. Hysteresis, because
+     * {@code onGround()} flickers as a swimmer scrapes a submerged ledge — but see isAshore: the
+     * test can NOT also demand being out of the water, or a mob wading the shallows at the shore
+     * edge (on ground AND in water) matches neither afloat nor ashore and swims on the spot forever.
+     */
+    private static final int SHORE_GROUNDED_TICKS = 5;
+    /**
+     * A recovery that ended less than this ago counts as the same attempt for the purposes of
+     * {@link #MAX_SWIM_REENTRIES}. Without it the re-entry bound is trivially defeated: the goal
+     * stops, waits out POST_COOLDOWN_TICKS, starts again with the counter reset, and the mob resumes
+     * exactly the same in-and-out loop indefinitely.
+     */
+    private static final int SWIM_ATTEMPT_LINK_TICKS = 200;
     /**
      * Rescan cadence (1s). {@link #requiresUpdateEveryTick()} is true and the shore sweep is
      * hundreds of block lookups, so it must NOT run per tick — but the train slides on and the mob
@@ -289,7 +319,9 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
     private BlockPos shorePoint;       // dry land we're swimming to; null = none found in range
     private int shoreScanTick = 0;     // mob.tickCount of the last shore scan (rescan cadence)
     private double lastShoreDist = Double.MAX_VALUE;  // BEST mob→shore dist so far (watermark, not last tick)
-    private int swimReentries = 0;     // times this recovery has fallen back in the water (loop bound)
+    private int swimReentries = 0;     // times this ATTEMPT has fallen back in the water (loop bound)
+    private int swimStopTick = -100000; // mob.tickCount when the last recovery ended (attempt linking)
+    private int groundedTicks = 0;     // consecutive ticks with footing while swimming
     private ClimbRoute climbRoute;     // cached existing way up; world-static, see ClimbRoute
     private int climbScanTick = 0;     // mob.tickCount of the last route scan (rescan cadence)
     private double bestClimbY = -1.0e9;   // highest Y reached on the route (watermark)
@@ -404,7 +436,13 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         shorePoint = null;
         shoreScanTick = 0;
         lastShoreDist = Double.MAX_VALUE;
-        swimReentries = 0;
+        // Only a genuinely FRESH attempt clears the re-entry budget. A recovery that ended moments ago
+        // and restarted after the cooldown is the same mob in the same predicament, and resetting here
+        // is what let it defeat MAX_SWIM_REENTRIES and loop in and out of the water indefinitely.
+        if (mob.tickCount - swimStopTick > SWIM_ATTEMPT_LINK_TICKS) {
+            swimReentries = 0;
+        }
+        groundedTicks = 0;
         climbRoute = null;
         climbScanTick = 0;
         bestClimbY = -1.0e9;
@@ -432,6 +470,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         shorePoint = null;
         climbRoute = null;
         clearSwimPosture();   // vanilla never clears these for a Mob — see applySwimPosture
+        swimStopTick = mob.tickCount;   // links a quick restart to this attempt's re-entry budget
         phase = Phase.IDLE;
         phaseTicks = 0;
         cooldown = POST_COOLDOWN_TICKS;
@@ -549,6 +588,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
     private void tickSwimToShore() {
         AABB box = target.worldBox();
         applySwimPosture();
+        trackFooting();
         // Cadence, not per-tick: this is a few hundred block lookups on a requiresUpdateEveryTick
         // goal. Rescan on entry, then once a second as the mob drifts and the train slides on.
         if (shorePoint == null || mob.tickCount - shoreScanTick >= SHORE_RESCAN_TICKS) {
@@ -646,8 +686,11 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
     private BlockPos findShorePoint(AABB box) {
         if (!(mob.level() instanceof ServerLevel level)) return null;
         BlockPos feet = mob.blockPosition();
-        int topY = feet.getY() + SHORE_SCAN_UP;
-        int bottomY = feet.getY() - SHORE_SCAN_DOWN;
+        // Anchor on the WATERLINE, not the mob — a shore is at the surface by definition, and the mob
+        // may be many blocks under it. See SHORE_SCAN_UP for what anchoring on the mob broke.
+        int surfaceY = waterSurfaceY();
+        int topY = surfaceY + SHORE_SCAN_UP;
+        int bottomY = surfaceY - SHORE_SCAN_DOWN;
         List<BlockPos> candidates = new java.util.ArrayList<>();
         List<Double> costs = new java.util.ArrayList<>();
         for (int dx = -SHORE_SCAN_RADIUS; dx <= SHORE_SCAN_RADIUS; dx++) {
@@ -659,7 +702,10 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
                 if (!hasDryHeadroom(level, footing)) continue;
                 if (box.intersects(new AABB(footing))) continue;  // never the carriage itself
                 candidates.add(footing);
-                costs.add(shoreCost(box, mob.getX(), mob.getZ(), cx + 0.5, cz + 0.5));
+                // Rise above the waterline is part of the cost: a 1-block step out is easy, a 4-block
+                // cliff face is a slog the mob may not manage at all.
+                double rise = Math.max(0.0, (footing.getY() + 1) - surfaceY);
+                costs.add(shoreCost(box, mob.getX(), mob.getZ(), cx + 0.5, cz + 0.5, rise));
             }
         }
         if (candidates.isEmpty()) return null;
@@ -684,7 +730,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      * the bank sits from the track line. Pure geometry, no world access — kept package-private and
      * static so it can be unit-tested the way the policy classes are.
      */
-    static double shoreCost(AABB box, double mobX, double mobZ, double x, double z) {
+    static double shoreCost(AABB box, double mobX, double mobZ, double x, double z, double rise) {
         double gap = distToTrackLine(box, z);
         // A bank INSIDE the track Z-span is a trap, not a prize. onTracks() is a pure Z-span test, so
         // a mob that climbs out there immediately reads as "standing on the tracks" and APPROACH hands
@@ -693,7 +739,32 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         // scorer's OPTIMUM; ON_TRACK_SHORE_PENALTY makes an off-span bank win whenever one exists,
         // while still leaving an on-span bank reachable (finite cost) if it is genuinely all there is.
         double trap = gap <= 0.0 ? ON_TRACK_SHORE_PENALTY : 0.0;
-        return Math.hypot(x - mobX, z - mobZ) + SHORE_TRACK_BIAS * gap + trap;
+        return Math.hypot(x - mobX, z - mobZ)
+            + SHORE_TRACK_BIAS * gap
+            + SHORE_RISE_BIAS * Math.max(0.0, rise)
+            + trap;
+    }
+
+    /**
+     * Y of the water surface directly above the mob — the first cell with no fluid, scanning up from
+     * its feet. This is the anchor the shore search needs: the mob may be well below the surface
+     * (nothing stops it swimming down while pathing), but a bank it can climb out onto is at the
+     * waterline regardless of how deep the mob currently is.
+     *
+     * <p>Falls back to the mob's own Y if it isn't in fluid at all, and gives up after
+     * {@link #SHORE_SURFACE_SCAN} so a mob under an overhang or in a flooded cave can't spin.</p>
+     */
+    private int waterSurfaceY() {
+        BlockPos feet = mob.blockPosition();
+        if (!(mob.level() instanceof ServerLevel level)) return feet.getY();
+        BlockPos.MutableBlockPos c = new BlockPos.MutableBlockPos();
+        for (int i = 0; i <= SHORE_SURFACE_SCAN; i++) {
+            c.set(feet.getX(), feet.getY() + i, feet.getZ());
+            if (level.getBlockState(c).getFluidState().isEmpty()) {
+                return feet.getY() + i;
+            }
+        }
+        return feet.getY() + SHORE_SURFACE_SCAN;
     }
 
     /**
@@ -722,7 +793,23 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      * has actually climbed out, and it wades the last metre rather than stopping ankle-deep.
      */
     private boolean isAshore() {
-        return mob.onGround() && !mob.isInWater();
+        return groundedTicks >= SHORE_GROUNDED_TICKS;
+    }
+
+    /**
+     * Track how long the mob has had footing, for {@link #isAshore()}. Called every swim tick.
+     *
+     * <p>The test used to be {@code onGround() && !isInWater()}, which left a hole the mob fell into
+     * constantly: wading the shallows at the very edge of a bank, it is on the ground AND in the
+     * water, so it counted as neither afloat nor ashore. The swim phase then ran forever against a
+     * shore point it had effectively already reached — the distance watermark stopped improving, the
+     * stall detector fired, recovery abandoned and restarted, and the whole thing repeated. That is
+     * the in-and-out-of-the-water looping. Footing alone ends the swim; a few ticks of it filters the
+     * flicker as a swimmer scrapes a submerged ledge, and APPROACH is perfectly capable of walking
+     * the last metre out of ankle-deep water.</p>
+     */
+    private void trackFooting() {
+        groundedTicks = mob.onGround() ? groundedTicks + 1 : 0;
     }
 
     // ---- APPROACH ---------------------------------------------------------
