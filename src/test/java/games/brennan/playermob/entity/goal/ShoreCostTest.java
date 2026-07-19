@@ -25,23 +25,34 @@ class ShoreCostTest {
     private static final AABB CARRIAGE = new AABB(0.0, 64.0, -1.5, 10.0, 67.0, 1.5);
 
     @Test
-    void aBankInsideTheTrackSpanIsPenalisedAsATrap() {
-        // THE REGRESSION THIS GUARDS: the span originally scored ZERO, making it the scorer's
-        // optimum. But onTracks() is a pure Z-span test, so a mob that climbs out there reads as
-        // "standing on the tracks", gets handed to tickGetOffTracks, and — where the line crosses
-        // water — is walked straight back into the lake, swims to the same bank, and loops forever.
-        // An off-span bank must win even when it is substantially farther away.
-        double onSpan = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 1.0, 0.0);    // 1 block away, on the line
-        double offSpan = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 20.0, 4.0);  // 20 blocks away, off it
-        assertTrue(offSpan < onSpan,
-            "a distant off-span bank must beat a close on-span one (" + offSpan + " < " + onSpan + ")");
+    void allElseEqualAnOffSpanBankBeatsAnOnSpanOne() {
+        // Climbing out inside the carriage Z-span lands the mob on the track bed, and
+        // tickGetOffTracks then has to sidestep it off before it can do anything — so at equal
+        // distance, prefer the bank just beside the bed.
+        double onSpan = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 6.0, 0.0);
+        double offSpan = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 6.0, 2.0);
+        assertTrue(offSpan < onSpan, "same swim, off-span wins (" + offSpan + " < " + onSpan + ")");
     }
 
     @Test
-    void theOnSpanPenaltyIsFiniteSoATrappedMobStillHasSomewhereToGo() {
-        // A weight, not a ban: if the ONLY dry land is inside the span, it must still be selectable
-        // (finite cost) rather than leaving the mob to drown for want of an alternative.
-        assertTrue(Double.isFinite(TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 1.0, 0.0)));
+    void theOnSpanPenaltyIsANudgeNotAVeto() {
+        // THE REGRESSION THIS GUARDS, and it is the opposite of what the first version guarded
+        // against. The penalty was 64 — larger than the entire scan radius — so ANY off-span
+        // candidate beat every on-span one regardless of distance, and the mob visibly swam past
+        // the obvious nearby shore to reach a far one. A close bank must still win comfortably.
+        double closeOnSpan = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 2.0, 0.0);
+        double farOffSpan = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 11.0, 4.5);
+        assertTrue(closeOnSpan < farOffSpan,
+            "a bank 2 blocks away must beat one 11 blocks away even on-span ("
+                + closeOnSpan + " < " + farOffSpan + ")");
+    }
+
+    @Test
+    void nearestWinsBetweenTwoBanksEquallyPlacedRelativeToTheTrack() {
+        // The headline requirement: closest shore. With the track term equal, distance decides.
+        double near = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 3.0, 3.0);
+        double far = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 9.0, 3.0);
+        assertTrue(near < far, "nearest shore wins when both sit the same distance off the track");
     }
 
     @Test

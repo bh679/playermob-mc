@@ -150,11 +150,12 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
     private static final int SHORE_RESCAN_TICKS = 20;
     /**
      * How hard to pull the shore choice toward the track line, in blocks-of-equivalent-distance.
-     * The mob is chasing a MOVING train, so a bank 8 blocks away beside the rails beats one 6
-     * blocks away out in the wilderness — it lands where APPROACH can immediately start working.
-     * A weight, not a filter: with no track-side shore in range it still takes the nearest dry land.
+     * 1.0 means one block further from the rails costs exactly one block of extra swimming — so the
+     * mob picks the nearest bank that is also near the track, which is what it looks like it should
+     * do. At 2.0 the pull was strong enough to visibly swim PAST closer banks, which reads as the
+     * mob picking a strange spot.
      */
-    private static final double SHORE_TRACK_BIAS = 2.0;
+    private static final double SHORE_TRACK_BIAS = 1.0;
     /** Cells of clear, water-free air a standing spot needs above its footing (the mob is 2 tall). */
     private static final int SHORE_HEADROOM = 2;
     /**
@@ -177,11 +178,17 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      */
     private static final double SWIM_NAV_BOOST = 4.0;
     /**
-     * Flat surcharge for a bank whose Z sits INSIDE the carriage's Z-span. Large enough that any
-     * off-span bank in scan range wins outright, small enough that an on-span bank is still chosen
-     * over nothing at all. See {@link #shoreCost} for why the span is a trap rather than a prize.
+     * Small surcharge for a bank whose Z sits INSIDE the carriage's Z-span — climbing out there puts
+     * the mob on the track bed, and {@code tickGetOffTracks} then has to sidestep it off before it can
+     * do anything. 4.0 is roughly what that detour is worth.
+     *
+     * <p>This was 64, which — being larger than the whole {@link #SHORE_SCAN_RADIUS} — acted as a veto
+     * rather than a nudge: a bank 2 blocks away beside the rails scored 66 against 17 for one 11
+     * blocks away, so the mob swam right past the obvious shore. That over-correction was aimed at an
+     * oscillation whose actual cause (stepping off the bed straight back into water) is now fixed at
+     * source in {@code tickGetOffTracks}, so the surcharge only has to price the sidestep.</p>
      */
-    private static final double ON_TRACK_SHORE_PENALTY = 64.0;
+    private static final double ON_TRACK_SHORE_PENALTY = 4.0;
     /**
      * How many times one recovery may fall back in the water before we give up. The oscillation this
      * bounds (climb out → APPROACH walks back in → swim out again) refreshed the stall timer on every
