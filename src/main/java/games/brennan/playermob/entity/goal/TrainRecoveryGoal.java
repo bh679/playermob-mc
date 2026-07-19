@@ -150,12 +150,17 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
     private static final int SHORE_RESCAN_TICKS = 20;
     /**
      * How hard to pull the shore choice toward the track line, in blocks-of-equivalent-distance.
-     * 1.0 means one block further from the rails costs exactly one block of extra swimming — so the
-     * mob picks the nearest bank that is also near the track, which is what it looks like it should
-     * do. At 2.0 the pull was strong enough to visibly swim PAST closer banks, which reads as the
-     * mob picking a strange spot.
+     * <b>Deliberately small: distance dominates, track proximity only breaks near-ties.</b>
+     *
+     * <p>Getting out of the water is the urgent part; being near the rails is a convenience for the
+     * phase that follows. At 1.0 the two were co-equal, and that loses badly in the exact place this
+     * matters — where the line CROSSES water. There the nearest banks are perpendicular to the rails
+     * (large gap) while the lake runs long in the track direction (gap ~0), so an equal-weight score
+     * paid the mob to swim 15 blocks along the track instead of 5 blocks to the obvious bank beside
+     * it. At 0.25 a bank has to be roughly four times further away before the track term can
+     * outvote it.</p>
      */
-    private static final double SHORE_TRACK_BIAS = 1.0;
+    private static final double SHORE_TRACK_BIAS = 0.25;
     /** Cells of clear, water-free air a standing spot needs above its footing (the mob is 2 tall). */
     private static final int SHORE_HEADROOM = 2;
     /**
@@ -188,7 +193,14 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      * oscillation whose actual cause (stepping off the bed straight back into water) is now fixed at
      * source in {@code tickGetOffTracks}, so the surcharge only has to price the sidestep.</p>
      */
-    private static final double ON_TRACK_SHORE_PENALTY = 4.0;
+    private static final double ON_TRACK_SHORE_PENALTY = 2.0;
+    /**
+     * How many of the best-scoring shore candidates to check for reachability before settling.
+     * A bank the mob cannot actually path to — the far side of a ravine, the top of a cliff face —
+     * is worse than useless: it swims all the way over and then can't get out. Bounded because each
+     * check is a full A*.
+     */
+    private static final int SHORE_REACH_CHECKS = 4;
     /**
      * How many times one recovery may fall back in the water before we give up. The oscillation this
      * bounds (climb out → APPROACH walks back in → swim out again) refreshed the stall timer on every
@@ -636,24 +648,35 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         BlockPos feet = mob.blockPosition();
         int topY = feet.getY() + SHORE_SCAN_UP;
         int bottomY = feet.getY() - SHORE_SCAN_DOWN;
-        BlockPos best = null;
-        double bestCost = Double.MAX_VALUE;
+        List<BlockPos> candidates = new java.util.ArrayList<>();
+        List<Double> costs = new java.util.ArrayList<>();
         for (int dx = -SHORE_SCAN_RADIUS; dx <= SHORE_SCAN_RADIUS; dx++) {
             for (int dz = -SHORE_SCAN_RADIUS; dz <= SHORE_SCAN_RADIUS; dz++) {
                 if (dx * dx + dz * dz > SHORE_SCAN_RADIUS * SHORE_SCAN_RADIUS) continue;
                 int cx = feet.getX() + dx, cz = feet.getZ() + dz;
-                // Cheap rejects BEFORE any block lookup: already dearer than the best candidate.
-                double cost = shoreCost(box, mob.getX(), mob.getZ(), cx + 0.5, cz + 0.5);
-                if (cost >= bestCost) continue;
                 BlockPos footing = dryFootingCell(cx, topY, bottomY, cz);
                 if (footing == null) continue;                    // water column / no footing
                 if (!hasDryHeadroom(level, footing)) continue;
                 if (box.intersects(new AABB(footing))) continue;  // never the carriage itself
-                bestCost = cost;
-                best = footing;
+                candidates.add(footing);
+                costs.add(shoreCost(box, mob.getX(), mob.getZ(), cx + 0.5, cz + 0.5));
             }
         }
-        return best;
+        if (candidates.isEmpty()) return null;
+        // Cheapest first, then take the best one the mob can actually REACH. A bank it can't path to
+        // — across a ravine, up a cliff face, behind the carriage — is worse than useless: it swims
+        // the whole way and then can't climb out, which reads as picking an absurd destination. The
+        // check is bounded (each is a full A*), and if none of the top few are reachable we fall back
+        // to the cheapest and let the stall backstop deal with it.
+        Integer[] order = new Integer[candidates.size()];
+        for (int i = 0; i < order.length; i++) order[i] = i;
+        java.util.Arrays.sort(order, java.util.Comparator.comparingDouble(costs::get));
+        for (int i = 0; i < Math.min(SHORE_REACH_CHECKS, order.length); i++) {
+            BlockPos c = candidates.get(order[i]);
+            Path p = mob.getNavigation().createPath(c, 0);
+            if (p != null && p.canReach()) return c;
+        }
+        return candidates.get(order[0]);
     }
 
     /**

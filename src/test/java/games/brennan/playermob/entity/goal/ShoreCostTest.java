@@ -74,18 +74,29 @@ class ShoreCostTest {
     }
 
     @Test
-    void nearerBankOffTrackLosesToFartherBankBesideTheRails() {
-        // Mob afloat on the line at the origin. Candidate A is nearer (6 blocks) but way out in the
-        // wilderness; candidate B is farther (8 blocks) but just beside the rails. B must win —
-        // that's the whole point of the bias.
-        //
-        // Note B sits just OUTSIDE the carriage Z-span (2.0 vs maxZ 1.5), not on it: a bank inside
-        // the span is the onTracks() trap and is penalised, not rewarded. "Beside the rails" means
-        // alongside them, not between them.
-        double offTrack = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 0.0, 6.0);
-        double besideRails = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 8.0, 2.0);
-        assertTrue(besideRails < offTrack,
-            "a track-side bank at 8 must beat a wilderness bank at 6 (" + besideRails + " < " + offTrack + ")");
+    void aClearlyNearerBankWinsEvenIfItIsFurtherFromTheTrack() {
+        // Distance dominates. This DELIBERATELY inverts what an earlier version of this test
+        // asserted (that a track-side bank at 8 should beat a wilderness bank at 6) — that
+        // co-equal weighting is what made the mob swim past obvious nearby shores, which is the
+        // behaviour being fixed. Getting out of the water is the urgent part; being near the rails
+        // is a convenience for the phase that follows.
+        double nearer = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 0.0, 6.0);   // 6 away, 4.5 off track
+        double besideRails = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 8.0, 2.0); // 8 away, 0.5 off
+        assertTrue(nearer < besideRails,
+            "the nearer bank must win (" + nearer + " < " + besideRails + ")");
+    }
+
+    @Test
+    void theWorstCaseThatPromptedThis_crossingALake() {
+        // The geometry where the old weighting failed hardest: the line CROSSES water, so the
+        // nearest bank is perpendicular to the rails (big gap) while the lake runs long in the
+        // track direction (gap ~0). Equal weighting paid the mob to swim 15 blocks along the track
+        // rather than 5 to the obvious bank beside it.
+        double obviousBank = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 0.0, 5.0);   // 5 away, perpendicular
+        double farAlongTrack = TrainRecoveryGoal.shoreCost(CARRIAGE, 0.0, 0.0, 15.0, 2.5); // 15 away, along the rails
+        assertTrue(obviousBank < farAlongTrack,
+            "the near perpendicular bank must beat the distant one along the rails ("
+                + obviousBank + " < " + farAlongTrack + ")");
     }
 
     @Test
