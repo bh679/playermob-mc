@@ -323,6 +323,13 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      */
     private final FeelingLedger feelings = new FeelingLedger();
 
+    /**
+     * Per-recipient tally of conjured flowers, capping the last-resort gift so an
+     * empty-handed mob can't bury one friend in an endless pile. Server-side only;
+     * persisted to NBT. See {@link #trinketGift(LivingEntity)}.
+     */
+    private final TrinketLedger trinkets = new TrinketLedger();
+
     private final SimpleContainer inventory = new SimpleContainer(INVENTORY_SIZE);
 
     /**
@@ -2394,6 +2401,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
 
     /** Toss {@code gift} arcing toward {@code target} from eye height, like a player's Q-drop. */
     public void tossGift(LivingEntity target, ItemStack gift) {
+        // A rationed-out trinketGift arrives empty — the gesture happens, no item drops.
+        if (gift.isEmpty()) {
+            return;
+        }
         double fromX = getX();
         double fromY = getEyeY() - 0.1;
         double fromZ = getZ();
@@ -2421,7 +2432,25 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         }
     }
 
-    /** A flower — the last-resort gift when the pack is empty and nothing's nearby to fetch. */
+    /**
+     * A flower for {@code recipient} — the last-resort gift when the pack is empty and
+     * nothing's nearby to fetch. Conjured from nothing, so it's rationed: once the
+     * recipient has had {@link PlayerMobConfig#maxFlowerGifts()} of them this returns
+     * {@link ItemStack#EMPTY} and the greet simply ends giftless. Real items the mob
+     * owns or fetches are unaffected.
+     */
+    public ItemStack trinketGift(LivingEntity recipient) {
+        if (!trinkets.canGive(recipient.getUUID(), PlayerMobConfig.maxFlowerGifts())) {
+            return ItemStack.EMPTY;
+        }
+        trinkets.record(recipient.getUUID());
+        return trinketGift();
+    }
+
+    /**
+     * An unrationed flower. Only for gifts a player explicitly ordered
+     * ({@code /playermob order <name> give}) — a direct command always produces one.
+     */
     public ItemStack trinketGift() {
         return new ItemStack(getRandom().nextBoolean() ? Items.POPPY : Items.DANDELION);
     }
@@ -3482,6 +3511,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private void writeCustomTag(CompoundTag tag) {
         traits.save(tag);
         feelings.save(tag);
+        trinkets.save(tag);
         tag.putInt(TAG_SKIN_INDEX, getSkinIndex());
         // Persist the arm model for bundled mobs too (previously URL-only). Additive:
         // a save without this key reads back false ⇒ wide (the old bundled-mob look).
@@ -3545,6 +3575,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // Traits + feelings; missing keys keep defaults. Legacy *Personality keys ignored.
         traits.load(tag);
         feelings.load(tag);
+        trinkets.load(tag);
         pushDispositionToClient();
         // Only mark the skin explicit when a key is really present — a trait-only
         // egg (archetype) carries no Skin* keys and must still roll a skin at spawn.

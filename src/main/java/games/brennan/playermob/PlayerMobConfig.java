@@ -48,6 +48,7 @@ public final class PlayerMobConfig {
     private static final String KEY_END_CRYSTAL_COMBAT = "endCrystalCombat";
     private static final String KEY_EXTINGUISH_WITH_BUCKET = "extinguishWithBucket";
     private static final String KEY_HUNT_FOR_FOOD = "huntForFood";
+    private static final String KEY_MAX_FLOWER_GIFTS = "maxFlowerGifts";
 
     private static final String KEY_EXTRA_PICKUP_ITEMS = "extraPickupItems";
     private static final String KEY_MODDED_RANGED_WEAPONS = "moddedRangedWeapons";
@@ -85,6 +86,8 @@ public final class PlayerMobConfig {
     public static final boolean DEFAULT_EXTINGUISH_WITH_BUCKET = true;
     /** A hungry PlayerMob hunts nearby food animals (cow/pig/chicken/sheep/rabbit); on by default. */
     public static final boolean DEFAULT_HUNT_FOR_FOOD = true;
+    /** Conjured flowers a PlayerMob will hand any one recipient, lifetime. 0 = never, negative = unlimited. */
+    public static final int DEFAULT_MAX_FLOWER_GIFTS = 5;
     /** No extra pickup items by default — the mob wants only its hardcoded gear/ammo/valuable/consumable set. */
     public static final String DEFAULT_EXTRA_PICKUP_ITEMS = "";
     /** No modded ranged weapons recognised by default — only vanilla bows/crossbows are ranged out of the box. */
@@ -195,6 +198,7 @@ public final class PlayerMobConfig {
     private static volatile boolean endCrystalCombat = DEFAULT_END_CRYSTAL_COMBAT;
     private static volatile boolean extinguishWithBucket = DEFAULT_EXTINGUISH_WITH_BUCKET;
     private static volatile boolean huntForFood = DEFAULT_HUNT_FOR_FOOD;
+    private static volatile int maxFlowerGifts = DEFAULT_MAX_FLOWER_GIFTS;
     /** Admin-configured extra items the mob always wants; replaced wholesale on {@link #load}. */
     private static volatile WantedItemList extraPickups = WantedItemList.EMPTY;
     /** Admin-configured modded ranged weapons + their ammo; replaced wholesale on {@link #load}. */
@@ -307,6 +311,17 @@ public final class PlayerMobConfig {
      */
     public static boolean huntForFood() {
         return huntForFood;
+    }
+
+    /**
+     * How many <em>conjured</em> flowers (the empty-handed last-resort greeting gift) a PlayerMob will
+     * hand any one recipient over its lifetime; 5 by default. {@code 0} stops it conjuring them at all,
+     * a negative value means unlimited. Items the mob picked up, looted, or was gifted are never counted,
+     * and an explicitly ordered gift ({@code /playermob order <name> give}) ignores the cap entirely.
+     * See {@code PlayerMobEntity.trinketGift} and {@code TrinketLedger}.
+     */
+    public static int maxFlowerGifts() {
+        return maxFlowerGifts;
     }
 
     /** Distance (blocks) beyond which a PlayerMob prefers a ranged weapon over melee. See {@code equipBestWeaponForTarget}. */
@@ -480,6 +495,14 @@ public final class PlayerMobConfig {
     }
 
     /**
+     * Set the conjured-flower cap at runtime. A session override — not written back to the file,
+     * which stays the startup default.
+     */
+    public static void setMaxFlowerGifts(int limit) {
+        maxFlowerGifts = limit;
+    }
+
+    /**
      * Toggle a skin source at runtime (e.g. from {@code /playermob skin source <bundled|online|local> on|off}).
      * A session override — not written back to the file, which stays the startup default.
      */
@@ -556,6 +579,7 @@ public final class PlayerMobConfig {
             endCrystalCombat = v.endCrystalCombat();
             extinguishWithBucket = v.extinguishWithBucket();
             huntForFood = v.huntForFood();
+            maxFlowerGifts = v.maxFlowerGifts();
             extraPickups = v.extraPickups();
             moddedRanged = v.moddedRanged();
             naturalSpawnScales = v.naturalSpawnScales();
@@ -590,6 +614,7 @@ public final class PlayerMobConfig {
                   boolean requireArrows, boolean seekArrowsWhenEmpty,
                   float rangedEngageDistance, float meleeEngageDistance, boolean tntCombat,
                   boolean endCrystalCombat, boolean extinguishWithBucket, boolean huntForFood,
+                  int maxFlowerGifts,
                   WantedItemList extraPickups,
                   ModdedRangedWeapons moddedRanged,
                   Map<String, Float> naturalSpawnScales,
@@ -612,6 +637,7 @@ public final class PlayerMobConfig {
             parseBool(props.getProperty(KEY_END_CRYSTAL_COMBAT), DEFAULT_END_CRYSTAL_COMBAT),
             parseBool(props.getProperty(KEY_EXTINGUISH_WITH_BUCKET), DEFAULT_EXTINGUISH_WITH_BUCKET),
             parseBool(props.getProperty(KEY_HUNT_FOR_FOOD), DEFAULT_HUNT_FOR_FOOD),
+            parseInt(props.getProperty(KEY_MAX_FLOWER_GIFTS), DEFAULT_MAX_FLOWER_GIFTS),
             WantedItemList.parse(props.getProperty(KEY_EXTRA_PICKUP_ITEMS, DEFAULT_EXTRA_PICKUP_ITEMS)),
             ModdedRangedWeapons.parse(props.getProperty(KEY_MODDED_RANGED_WEAPONS, DEFAULT_MODDED_RANGED_WEAPONS)),
             parseScales(props),
@@ -712,6 +738,17 @@ public final class PlayerMobConfig {
         }
     }
 
+    private static int parseInt(String raw, int fallback) {
+        if (raw == null) {
+            return fallback;
+        }
+        try {
+            return Integer.parseInt(raw.trim());
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
     private static boolean parseBool(String raw, boolean fallback) {
         if (raw == null) {
             return fallback;
@@ -780,6 +817,12 @@ public final class PlayerMobConfig {
             .append("#   attack target, letting its weapon do the kill, then eats the drops. Set false to leave\n")
             .append("#   animals alone entirely. Toggle live with /playermob huntforfood on|off (session\n")
             .append("#   override). Default true.\n")
+            .append("# maxFlowerGifts: how many CONJURED flowers a PlayerMob will hand any one recipient over\n")
+            .append("#   its lifetime. When a mob greets someone it loves but its pack is empty and there's\n")
+            .append("#   nothing nearby to fetch, it conjures a poppy or dandelion; this caps that so an\n")
+            .append("#   empty-handed mob can't bury one player in flowers. Items it picked up, looted, or was\n")
+            .append("#   gifted are NOT counted, and /playermob order <name> give ignores the cap. Set 0 to\n")
+            .append("#   never conjure flowers, or a negative value for unlimited. Default 5.\n")
             .append("# extraPickupItems: extra items the mob ALWAYS picks up (off the floor and out of chests)\n")
             .append("#   and hoards in its backpack, beyond the built-in weapons/armor/ammo/valuables/food it\n")
             .append("#   already grabs. List item ids and/or item tags, separated by commas or spaces. Prefix a\n")
@@ -816,6 +859,7 @@ public final class PlayerMobConfig {
             .append(KEY_END_CRYSTAL_COMBAT).append("=").append(DEFAULT_END_CRYSTAL_COMBAT).append("\n")
             .append(KEY_EXTINGUISH_WITH_BUCKET).append("=").append(DEFAULT_EXTINGUISH_WITH_BUCKET).append("\n")
             .append(KEY_HUNT_FOR_FOOD).append("=").append(DEFAULT_HUNT_FOR_FOOD).append("\n")
+            .append(KEY_MAX_FLOWER_GIFTS).append("=").append(DEFAULT_MAX_FLOWER_GIFTS).append("\n")
             .append(KEY_EXTRA_PICKUP_ITEMS).append("=").append(DEFAULT_EXTRA_PICKUP_ITEMS).append("\n")
             .append(KEY_MODDED_RANGED_WEAPONS).append("=").append(DEFAULT_MODDED_RANGED_WEAPONS).append("\n")
             .append(KEY_SKIN_SOURCE_BUNDLED).append("=").append(DEFAULT_SKIN_SOURCE_BUNDLED).append("\n")

@@ -187,14 +187,14 @@ public final class FriendlyGreetGoal extends Goal implements DescribableGoal {
             return;
         }
         // Nothing to give and nothing nearby — a flower keeps the gesture warm.
-        mob.tossGift(friend, mob.trinketGift());
+        mob.tossGift(friend, mob.trinketGift(friend));
         phase = Phase.DONE;     // cycle complete — stop() decides greet-again vs disengage
     }
 
     /** Walk to the dropped item we chose to fetch, then lob it to the friend. */
     private void tickFetch() {
         if (fetchItem == null || !fetchItem.isAlive() || fetchItem.isRemoved()) {
-            mob.tossGift(friend, mob.trinketGift()); // item vanished → flower fallback
+            mob.tossGift(friend, mob.trinketGift(friend)); // item vanished → flower fallback
             phase = Phase.DONE;
             return;
         }
@@ -206,7 +206,7 @@ public final class FriendlyGreetGoal extends Goal implements DescribableGoal {
             mob.tossGift(friend, gift);
             phase = Phase.DONE;
         } else if (++fetchTicks > FETCH_TIMEOUT_TICKS) {
-            mob.tossGift(friend, mob.trinketGift()); // couldn't reach it → flower fallback
+            mob.tossGift(friend, mob.trinketGift(friend)); // couldn't reach it → flower fallback
             phase = Phase.DONE;
         } else if (mob.getNavigation().isDone()) {
             mob.getNavigation().moveTo(fetchItem, approachSpeed); // re-issue if the path stalled
