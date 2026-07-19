@@ -127,6 +127,19 @@ public final class TrainConfinement {
         return environment.nextGroupTarget(self, dir);
     }
 
+    /** Re-export of {@link TrainEnvironment#UNKNOWN_GAP} for AI-side callers. */
+    public static final double UNKNOWN_GAP = TrainEnvironment.UNKNOWN_GAP;
+
+    /**
+     * The world-X clearance in blocks to the adjacent same-train group in march direction
+     * {@code dir}, or {@link #UNKNOWN_GAP} if it can't be measured (always {@code UNKNOWN_GAP}
+     * without a train mod). Used by {@code GapLeap} to size the hop to the actual gap; see
+     * {@link TrainEnvironment#groupGapWidth}. A one-tick snapshot — query it at launch.
+     */
+    public static double groupGapWidth(Entity self, int dir) {
+        return environment.groupGapWidth(self, dir);
+    }
+
     /**
      * Open a closed door {@code self} is standing against on a train (wooden
      * directly, iron/copper via its control). No-op off a train / without a train

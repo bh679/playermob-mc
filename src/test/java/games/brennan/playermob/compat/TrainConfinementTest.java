@@ -77,15 +77,20 @@ class TrainConfinementTest {
             "ABSENT has no next-carriage waypoint");
         assertNull(TrainConfinement.nextGroupTarget(null, -1),
             "ABSENT has no next-group waypoint");
+        assertEquals(TrainConfinement.UNKNOWN_GAP, TrainConfinement.groupGapWidth(null, -1),
+            "ABSENT can't measure a gap, so GapLeap falls back to the full sprint jump");
     }
 
     @Test
     void noTrainModHasNoCrossGroupTarget() {
         // A train env that reports "on a train" but no geometry still yields no
         // cross-group waypoint — the AdvanceCarriage/CrossGroupGap goals then no-op.
+        // FakeTrain deliberately doesn't override groupGapWidth: the seam is additive,
+        // so every existing environment inherits the safe UNKNOWN_GAP default.
         TrainConfinement.install(new FakeTrain(true, true));
         assertNull(TrainConfinement.nextGroupTarget(null, -1));
         assertNull(TrainConfinement.nextGroupTarget(null, +1));
+        assertEquals(TrainConfinement.UNKNOWN_GAP, TrainConfinement.groupGapWidth(null, -1));
     }
 
     @Test

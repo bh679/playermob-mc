@@ -425,24 +425,22 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         return new Vec3(targetX, self.getY(), centerZ);
     }
 
-    @Override
-    public Vec3 nextGroupTarget(Entity self, int dir) {
-        if (!(self.level() instanceof ServerLevel level)) {
-            return null;
-        }
-        Trains.Carriage current = carriageAt(self);
-        if (current == null) {
-            return null;
-        }
+    /**
+     * The adjacent group of the <em>same</em> train, just beyond {@code current}'s boundary in
+     * {@code dir}: marching down ({@code dir < 0}) the same-train group whose rooms sit entirely
+     * below ours, nearest to the gap; marching up ({@code dir > 0}), the nearest one above.
+     * pIdx is monotonic along world-X across the whole train, so the current group is excluded
+     * automatically by these range tests. {@code null} at the genuine end of the train.
+     *
+     * <p>Shared by {@link #nextGroupTarget} (which aims at a room in it) and
+     * {@link #groupGapWidth} (which measures the clearance to it), so the two can never
+     * disagree about <em>which</em> group is being crossed to.</p>
+     */
+    private static Trains.Carriage adjacentGroup(ServerLevel level, Trains.Carriage current, int dir) {
         UUID trainId = current.provider().getTrainId();
         int myLow = current.provider().getPIdx();
         int myHigh = current.provider().getGroupHighestPIdx();
 
-        // The adjacent group of the *same* train, just beyond our boundary in `dir`:
-        // marching down (dir < 0) we want the same-train group whose rooms sit
-        // entirely below ours, nearest to the gap; marching up (dir > 0), the nearest
-        // one above. pIdx is monotonic along world-X across the whole train, so the
-        // current group is excluded automatically by these range tests.
         Trains.Carriage best = null;
         for (Trains.Carriage c : Trains.allCarriages(level)) {
             if (c == current || !trainId.equals(c.provider().getTrainId())) {
@@ -460,6 +458,47 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
                 }
             }
         }
+        return best;
+    }
+
+    @Override
+    public double groupGapWidth(Entity self, int dir) {
+        if (!(self.level() instanceof ServerLevel level)) {
+            return UNKNOWN_GAP;
+        }
+        Trains.Carriage current = carriageAt(self);
+        if (current == null) {
+            return UNKNOWN_GAP;
+        }
+        Trains.Carriage best = adjacentGroup(level, current, dir);
+        if (best == null) {
+            return UNKNOWN_GAP; // genuine end of the train this way
+        }
+        AABBdc mine = current.ship().worldAABB();
+        AABBdc theirs = best.ship().worldAABB();
+        if (mine == null || theirs == null) {
+            return UNKNOWN_GAP;
+        }
+        // Marching down we sit above them, so the clearance is our min minus their max;
+        // marching up, the reverse. The same minX/maxX subtraction Dungeon Train's own
+        // CarriageGroupGap debug HUD uses, so the two agree on screen.
+        double gap = dir < 0 ? mine.minX() - theirs.maxX()
+                             : theirs.minX() - mine.maxX();
+        // Clamp: overlapping or jittering AABBs must not yield a negative, which would read
+        // as UNKNOWN_GAP and silently restore the full sprint jump.
+        return Math.max(0.0, gap);
+    }
+
+    @Override
+    public Vec3 nextGroupTarget(Entity self, int dir) {
+        if (!(self.level() instanceof ServerLevel level)) {
+            return null;
+        }
+        Trains.Carriage current = carriageAt(self);
+        if (current == null) {
+            return null;
+        }
+        Trains.Carriage best = adjacentGroup(level, current, dir);
         if (best == null) {
             return null; // genuine end of the train this way
         }
