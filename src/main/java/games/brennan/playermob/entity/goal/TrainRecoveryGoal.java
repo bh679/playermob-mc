@@ -39,11 +39,17 @@ import java.util.List;
  * lost. That trade-off was chosen deliberately (issue #35).</p>
  *
  * <p><b>Phase machine</b> (re-resolves the moving carriage box every tick):
- * APPROACH → BRIDGE → GATHER → CRAFT. Registered at goalSelector priority 1 so
- * it preempts combat (@2): falling off is existential. It still yields to
+ * SWIM_TO_SHORE → APPROACH → BRIDGE → GATHER → CRAFT. Registered at goalSelector
+ * priority 1 so it preempts combat (@2): falling off is existential. It still yields to
  * {@link net.minecraft.world.entity.ai.goal.FloatGoal} (@0) so a mob bridging
  * over water swims instead of drowning. All world mutation (place + gather) is
  * gated on {@code mobGriefing}, matching the raid/harvest goals.</p>
+ *
+ * <p>A mob that falls in the drink starts in SWIM_TO_SHORE, which makes for the nearest
+ * dry bank (preferring banks beside the track) and hands off to APPROACH once it has
+ * climbed out — every later phase assumes footing, so none of them work from the water.
+ * A mob with no shore in range is abandoned by the stall backstop like any other
+ * hopeless case.</p>
  *
  * <p>Fires only when the mob actually <em>fell off</em> — it was on a train
  * within {@link PlayerMobEntity#RECOVERY_WINDOW_TICKS} and isn't now — so a
@@ -113,8 +119,36 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
     private static final int TOOL_SWAP_MAX_TICKS = 20;
     /** Rescan delay after the goal stops (success or abandon). */
     private static final int POST_COOLDOWN_TICKS = 40;
+    /**
+     * Half-extent of the dry-land search around a swimming mob. 12 is comfortably wider than the
+     * lakes and rivers the track cuts through, while keeping the scan (a column sweep over this
+     * disc) cheap enough to run off the tick loop at {@link #SHORE_RESCAN_TICKS}.
+     */
+    private static final int SHORE_SCAN_RADIUS = 12;
+    /**
+     * Vertical band of the shore search, relative to the swimming mob's feet: a bank the mob can
+     * climb out onto is at or just above the waterline, never far below it.
+     */
+    private static final int SHORE_SCAN_UP = 4;
+    private static final int SHORE_SCAN_DOWN = 3;
+    /**
+     * Rescan cadence (1s). {@link #requiresUpdateEveryTick()} is true and the shore sweep is
+     * hundreds of block lookups, so it must NOT run per tick — but the train slides on and the mob
+     * drifts, so a one-shot scan at phase entry goes stale. Once a second is imperceptible at swim
+     * speed and keeps the goal off the hot path.
+     */
+    private static final int SHORE_RESCAN_TICKS = 20;
+    /**
+     * How hard to pull the shore choice toward the track line, in blocks-of-equivalent-distance.
+     * The mob is chasing a MOVING train, so a bank 8 blocks away beside the rails beats one 6
+     * blocks away out in the wilderness — it lands where APPROACH can immediately start working.
+     * A weight, not a filter: with no track-side shore in range it still takes the nearest dry land.
+     */
+    private static final double SHORE_TRACK_BIAS = 2.0;
+    /** Cells of clear, water-free air a standing spot needs above its footing (the mob is 2 tall). */
+    private static final int SHORE_HEADROOM = 2;
 
-    private enum Phase { IDLE, APPROACH, BRIDGE, GATHER, CRAFT }
+    private enum Phase { IDLE, SWIM_TO_SHORE, APPROACH, BRIDGE, GATHER, CRAFT }
 
     private final PlayerMobEntity mob;
     private final double moveSpeed;
@@ -135,6 +169,9 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
     private TrainEnvironment.ReboardTarget target;
     private BlockPos gatherTargetPos;
     private BlockPos pillarColumn;     // foot column captured at jump-stack launch
+    private BlockPos shorePoint;       // dry land we're swimming to; null = none found in range
+    private int shoreScanTick = 0;     // mob.tickCount of the last shore scan (rescan cadence)
+    private double lastShoreDist = Double.MAX_VALUE;  // BEST mob→shore dist so far (watermark, not last tick)
     private int gatherBreakTicks = 0;
     private int breakTicksTotal = 0;   // 0 = not yet sized for the current gather target
     private int toolReadyTick = 0;     // tick the post-tool-swap pause ends
@@ -163,6 +200,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
             return "leaving tracks";   // on the rails/bed → top priority is getting off the side
         }
         return switch (phase) {
+            case SWIM_TO_SHORE -> "swimming to shore";
             case APPROACH -> "approaching";
             case BRIDGE -> "bridging";
             case GATHER -> "gathering blocks";
@@ -184,8 +222,14 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         if (mob.ticksSinceOnTrain() > PlayerMobEntity.RECOVERY_WINDOW_TICKS) return false;
         // World mutation gate (placement + gather); matches the raid/harvest goals.
         if (!mobGriefingOn()) return false;
-        // Don't start mid-air / mid-fall; wait until we have footing on something.
-        if (!mob.onGround()) return false;
+        // Don't start mid-air / mid-fall; wait until we have footing on something — or until we're
+        // afloat, which is the OTHER stable state. A swimming mob is never onGround(), so the bare
+        // ground check meant a mob that fell in the drink never started recovering AT ALL: it bobbed
+        // where it landed until the train outran it. Water still satisfies the "not mid-fall" intent
+        // the ground check was there for — FloatGoal (@0) pins it at the surface, it isn't going
+        // anywhere. isInWater() is water-tag-only, so lava never qualifies (and FireBucketGoal @0
+        // preempts us there anyway).
+        if (!mob.onGround() && !mob.isInWater()) return false;
         TrainEnvironment.ReboardTarget t = TrainConfinement.nearestCarriage(mob, SCAN_RADIUS);
         if (t == null) {
             return false;
@@ -235,8 +279,15 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         wasOnTracks = false;
         gatherTargetPos = null;
         pillarColumn = null;
+        shorePoint = null;
+        shoreScanTick = 0;
+        lastShoreDist = Double.MAX_VALUE;
         mob.setRecovering(true);   // off the train, re-boarding is the mob's sole focus (no combat)
-        moveTowardCarriage();
+        if (isAfloat()) {
+            enterSwimToShore();    // fell in the drink — get out of the water before anything else
+        } else {
+            moveTowardCarriage();
+        }
     }
 
     @Override
@@ -248,6 +299,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
             gatherTargetPos = null;
         }
         pillarColumn = null;
+        shorePoint = null;
         phase = Phase.IDLE;
         phaseTicks = 0;
         cooldown = POST_COOLDOWN_TICKS;
@@ -264,6 +316,25 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         if (target == null) return;
         totalTicks++;
         phaseTicks++;
+        // Being afloat trumps every other early-out below. Nothing recovery does works from the
+        // water: it can't board (no jump height treading water, and no footing to launch from),
+        // can't tower, can't gather. Worse, onTracks() is a pure Z-SPAN test — a mob swimming in a
+        // lake the line crosses reads as "on the tracks", so without this gate the handoff below
+        // would drop it into tickGetOffTracks and it would paddle sideways forever instead of
+        // making for the bank.
+        if (isAfloat() && phase != Phase.SWIM_TO_SHORE) {
+            enterSwimToShore();
+        }
+        if (phase == Phase.SWIM_TO_SHORE) {
+            if (!isAshore()) {
+                tickSwimToShore();
+                return;
+            }
+            // Climbed out — hand straight back to the UNCHANGED approach machinery, this same tick,
+            // so the normal board / off-tracks early-outs below get their first look at dry-land
+            // state (a mob that surfaces beside a carriage should get tryBoardNow's look at once).
+            enterApproach();
+        }
         // Top priority once OFF the tracks: if we can already board from here (high enough + an
         // opening in reach), just do it — don't tower or gather when a hop will do. Never board
         // while standing on the rails/bed: the bed is static and the carriage is moving, so a leap
@@ -277,19 +348,166 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         // static track, so if it's on the tracks, get off them first (re-approach an off-track
         // launch spot) before towering/gathering/waiting.
         if (onTracks() && phase != Phase.APPROACH) {
-            phase = Phase.APPROACH;
-            phaseTicks = 0;
-            lastApproachDist = Double.MAX_VALUE;
-            lastApproachY = -1.0e9;
-            approachStuckTicks = 0;
+            enterApproach();
         }
         switch (phase) {
             case APPROACH -> tickApproach();
             case BRIDGE -> tickBridge();
             case GATHER -> tickGather();
             case CRAFT -> tickCraft();
-            default -> { /* IDLE */ }
+            default -> { /* IDLE, SWIM_TO_SHORE (handled above) */ }
         }
+    }
+
+    // ---- SWIM_TO_SHORE ----------------------------------------------------
+
+    /**
+     * Enter SWIM_TO_SHORE: drop whatever the previous phase was doing (a nav path to a launch spot
+     * the mob can't reach from the water, a half-built tower) and reset the swim trackers so the
+     * stall detector starts clean.
+     */
+    private void enterSwimToShore() {
+        phase = Phase.SWIM_TO_SHORE;
+        phaseTicks = 0;
+        shorePoint = null;
+        shoreScanTick = 0;
+        lastShoreDist = Double.MAX_VALUE;
+        mob.getNavigation().stop();
+        markProgress();            // hitting the water is a state change, not a stall
+    }
+
+    /** Enter (or re-enter) APPROACH, resetting the approach progress trackers. */
+    private void enterApproach() {
+        phase = Phase.APPROACH;
+        phaseTicks = 0;
+        lastApproachDist = Double.MAX_VALUE;
+        lastApproachY = -1.0e9;
+        approachStuckTicks = 0;
+        shorePoint = null;
+    }
+
+    /**
+     * Swim for the nearest dry bank, biased toward the track line, then hand off to APPROACH.
+     * Movement only — no placing, no gathering, no boarding: this phase exists purely to convert
+     * "afloat" into "standing on something", which is the precondition every other phase assumes.
+     *
+     * <p><b>Depth is not our problem.</b> Vanilla ground nav with {@code setCanFloat(true)} (set in
+     * {@code PlayerMobEntity}) will happily route a swim path along the seabed; what keeps the mob's
+     * head up is {@link net.minecraft.world.entity.ai.goal.FloatGoal} @0, which is still running
+     * because recovery never claims {@link Flag#JUMP} (see the constructor). That flag rule is
+     * exactly why it matters here — this phase would drown the mob the moment it took JUMP.</p>
+     */
+    private void tickSwimToShore() {
+        AABB box = target.worldBox();
+        // Cadence, not per-tick: this is a few hundred block lookups on a requiresUpdateEveryTick
+        // goal. Rescan on entry, then once a second as the mob drifts and the train slides on.
+        if (shorePoint == null || mob.tickCount - shoreScanTick >= SHORE_RESCAN_TICKS) {
+            shoreScanTick = mob.tickCount;
+            BlockPos found = findShorePoint(box);
+            if (found != null && !found.equals(shorePoint)) {
+                shorePoint = found;
+                lastShoreDist = Double.MAX_VALUE;   // new target → restart the progress watermark
+                markProgress();                     // committing to a fresh target is forward motion
+            }
+        }
+        if (shorePoint == null) {
+            // Nothing dry within SHORE_SCAN_RADIUS (mid-ocean / a wide river crossing). Best-effort:
+            // swim perpendicular toward the track line so successive rescans sweep fresh water.
+            // Deliberately NO markProgress() here — bobbing with no shore in range is exactly the
+            // hopeless case STALL_ABANDON_TICKS exists to end (the class javadoc's "the mob is lost").
+            double towardZ = Mth.clamp(mob.getZ(), box.minZ, box.maxZ);
+            if (phaseTicks % PATH_REISSUE_TICKS == 0 || mob.getNavigation().isDone()) {
+                mob.getNavigation().moveTo(mob.getX(), mob.getY(), towardZ, moveSpeed);
+            }
+            mob.getLookControl().setLookAt(mob.getX(), mob.getY(), towardZ);
+            return;
+        }
+        double tx = shorePoint.getX() + 0.5, ty = shorePoint.getY() + 1.0, tz = shorePoint.getZ() + 0.5;
+        if (phaseTicks % PATH_REISSUE_TICKS == 0 || mob.getNavigation().isDone()) {
+            mob.getNavigation().moveTo(tx, ty, tz, moveSpeed);
+        }
+        mob.getLookControl().setLookAt(tx, ty, tz);
+        // Progress = a new BEST distance to the bank, not "closer than last tick". Swimming is slow
+        // (well under 0.05 blocks/tick horizontally for a land mob), so the tick-over-tick test the
+        // APPROACH phases use would report a stall on every single tick of a perfectly good swim and
+        // STALL_ABANDON_TICKS would kill it 30s in. A monotonic watermark trips as soon as the mob
+        // has genuinely gained 0.05 blocks, however many ticks that took.
+        double dist = Math.hypot(mob.getX() - tx, mob.getZ() - tz);
+        if (dist < lastShoreDist - 0.05) {
+            lastShoreDist = dist;
+            markProgress();
+        }
+    }
+
+    /**
+     * Nearest dry, standable block a swimming mob can climb out onto, or {@code null} if there's
+     * none in range (mid-ocean → the caller lets the stall backstop end it).
+     *
+     * <p>A column sweep, not a cube sweep: for each column in the {@link #SHORE_SCAN_RADIUS} disc we
+     * take the FIRST dry footing scanning down from {@link #SHORE_SCAN_UP} above the mob's feet —
+     * i.e. the shallowest way out of that column — then score it with {@link #shoreCost}.</p>
+     */
+    private BlockPos findShorePoint(AABB box) {
+        if (!(mob.level() instanceof ServerLevel level)) return null;
+        BlockPos feet = mob.blockPosition();
+        int topY = feet.getY() + SHORE_SCAN_UP;
+        int bottomY = feet.getY() - SHORE_SCAN_DOWN;
+        BlockPos best = null;
+        double bestCost = Double.MAX_VALUE;
+        for (int dx = -SHORE_SCAN_RADIUS; dx <= SHORE_SCAN_RADIUS; dx++) {
+            for (int dz = -SHORE_SCAN_RADIUS; dz <= SHORE_SCAN_RADIUS; dz++) {
+                if (dx * dx + dz * dz > SHORE_SCAN_RADIUS * SHORE_SCAN_RADIUS) continue;
+                int cx = feet.getX() + dx, cz = feet.getZ() + dz;
+                // Cheap rejects BEFORE any block lookup: already dearer than the best candidate.
+                double cost = shoreCost(box, mob.getX(), mob.getZ(), cx + 0.5, cz + 0.5);
+                if (cost >= bestCost) continue;
+                BlockPos footing = dryFootingCell(cx, topY, bottomY, cz);
+                if (footing == null) continue;                    // water column / no footing
+                if (!hasDryHeadroom(level, footing)) continue;
+                if (box.intersects(new AABB(footing))) continue;  // never the carriage itself
+                bestCost = cost;
+                best = footing;
+            }
+        }
+        return best;
+    }
+
+    /**
+     * Cost of a shore candidate: how far the mob has to swim, plus a weighted penalty for how far
+     * the bank sits from the track line. Pure geometry, no world access — kept package-private and
+     * static so it can be unit-tested the way the policy classes are.
+     */
+    static double shoreCost(AABB box, double mobX, double mobZ, double x, double z) {
+        return Math.hypot(x - mobX, z - mobZ) + SHORE_TRACK_BIAS * distToTrackLine(box, z);
+    }
+
+    /**
+     * Perpendicular distance from world Z {@code z} to the track line. The train runs along world-X
+     * and the track is exactly as wide in Z as the carriage that rides it (see {@link #onTracks()}),
+     * so the carriage box's Z-span IS the line and the gap to it is a pure Z term.
+     */
+    static double distToTrackLine(AABB box, double z) {
+        return Math.max(Math.max(box.minZ - z, 0.0), z - box.maxZ);
+    }
+
+    /**
+     * Afloat: in water with nothing underfoot — the swimming state. Deliberately NOT just
+     * {@code isInWater()}: a mob wading a shallow shoreline is in water AND on ground, and it should
+     * keep walking (normal APPROACH), not start a shore search from a spot it's already standing on.
+     */
+    private boolean isAfloat() {
+        return mob.isInWater() && !mob.onGround();
+    }
+
+    /**
+     * Ashore: out of the water entirely, with footing. Deliberately stricter than
+     * {@code !isAfloat()} — {@code onGround()} flickers true for a tick as a swimming mob scrapes a
+     * submerged ledge, and a symmetric test would flip the phase (and re-issue nav) every other
+     * tick. Requiring the mob be genuinely DRY means the handoff to APPROACH happens once, when it
+     * has actually climbed out, and it wades the last metre rather than stopping ankle-deep.
+     */
+    private boolean isAshore() {
+        return mob.onGround() && !mob.isInWater();
     }
 
     // ---- APPROACH ---------------------------------------------------------
@@ -545,10 +763,13 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         if (!(mob.level() instanceof ServerLevel level)) return false;
         BlockState s = level.getBlockState(pos);
         if (!s.isCollisionShapeFullBlock(level, pos)) return false;
+        // Submerged terrain is not a step. isCollisionShapeFullBlock is true for a stone block at
+        // the bottom of a lake, and water clears a collision-only headroom test, so without this the
+        // mob mistakes the lakebed for a finished staircase and stalls against it.
+        if (!s.getFluidState().isEmpty()) return false;
         if (BlockSourcePolicy.isProtectedTrackBlock(s)) return false;
         if (target != null && target.worldBox().intersects(new AABB(pos))) return false;
-        return level.getBlockState(pos.above()).getCollisionShape(level, pos.above()).isEmpty()
-            && level.getBlockState(pos.above(2)).getCollisionShape(level, pos.above(2)).isEmpty();
+        return hasDryHeadroom(level, pos);
     }
 
     /**
@@ -784,11 +1005,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
             // launch spot (we may have wandered while gathering, and the train has moved), then
             // tower from there. Not enough yet → stay in GATHER; next tick picks the next block.
             if (BlockSourcePolicy.bridgeBlockCount(mob.getInventory()) >= blocksNeeded()) {
-                phase = Phase.APPROACH;
-                phaseTicks = 0;
-                lastApproachDist = Double.MAX_VALUE;
-                lastApproachY = -1.0e9;
-                approachStuckTicks = 0;
+                enterApproach();
             }
         }
     }
@@ -945,8 +1162,12 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         double tz = faceZ + step;
         for (int i = 1; i <= OFF_TRACK_MAX_STEPS; i++) {
             tz = faceZ + step * i;
-            if (!surfaceIsTrack(centerX, box.minY, tz)) {
-                break;                          // first off-track column out — launch from here
+            // Off the bed AND on dry land. Now that surfaceIsTrack reports false for a water column
+            // (it has no footing, so it isn't the bed), "not track" alone would break on the first
+            // WATER column out and launch the mob from a lake — so require real dry footing too.
+            if (!surfaceIsTrack(centerX, box.minY, tz)
+                    && offBedFootingY(Mth.floor(centerX), box.minY, Mth.floor(tz)) != Double.NEGATIVE_INFINITY) {
+                break;                          // first off-track dry column out — launch from here
             }
         }
         // Scan along the carriage length (at this off-track offset) for higher ground.
@@ -955,7 +1176,10 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         int samples = 10;
         for (int i = 0; i <= samples; i++) {
             double x = box.minX + (box.maxX - box.minX) * (i / (double) samples);
-            double g = groundSurfaceY(x, box.minY, tz);
+            // offBedFootingY, not groundSurfaceY: the latter masks the void sentinel by substituting
+            // the mob's own Y, which would let a water / void column win the "highest ground" vote.
+            double g = offBedFootingY(Mth.floor(x), box.minY, Mth.floor(tz));
+            if (g == Double.NEGATIVE_INFINITY) continue;   // water / void column — never a launch spot
             if (g > bestGroundY + 0.5) {        // meaningfully higher → worth walking to
                 bestGroundY = g;
                 bestX = x;
@@ -971,20 +1195,12 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      */
     private boolean surfaceIsTrack(double x, double deckMinY, double z) {
         if (!(mob.level() instanceof ServerLevel level)) return false;
-        int ix = Mth.floor(x), iz = Mth.floor(z);
         int top = Mth.floor(deckMinY);
-        BlockPos.MutableBlockPos c = new BlockPos.MutableBlockPos();
-        for (int y = top; y >= top - GROUND_SCAN_DEPTH; y--) {
-            c.set(ix, y, iz);
-            BlockState s = level.getBlockState(c);
-            // First block with real footing — full blocks, slabs and stairs all count. Rails / air
-            // / plants have no collision, so they're skipped down to the surface beneath them
-            // (isCollisionShapeFullBlock would wrongly skip a slab/stairs track piece too).
-            if (!s.getCollisionShape(level, c).isEmpty()) {
-                return BlockSourcePolicy.isProtectedTrackBlock(s);
-            }
-        }
-        return false;
+        // First block with real footing — see dryFootingCell. A column that goes under water has no
+        // footing at all, so it isn't the bed either; callers pair this with an offBedFootingY check
+        // when they need "off the bed AND dry".
+        BlockPos cell = dryFootingCell(Mth.floor(x), top, top - GROUND_SCAN_DEPTH, Mth.floor(z));
+        return cell != null && BlockSourcePolicy.isProtectedTrackBlock(level.getBlockState(cell));
     }
 
     /**
@@ -1019,29 +1235,69 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
     }
 
     /**
-     * Standable surface Y (top of the first block with a non-empty collision shape — full block,
-     * slab or stairs; rails/air/plants are skipped) at column {@code (x, z)}, scanning down from the
-     * deck floor, or {@link Double#NEGATIVE_INFINITY} if none within {@link #GROUND_SCAN_DEPTH}
-     * (a void / long drop). The explicit void sentinel lets callers tell "no footing" from a real
-     * surface that happens to be at the mob's Y.
+     * Standable <em>dry</em> surface Y (top of the first block with a non-empty collision shape —
+     * full block, slab or stairs; rails/air/plants are skipped) at column {@code (x, z)}, scanning
+     * down from the deck floor, or {@link Double#NEGATIVE_INFINITY} if none within
+     * {@link #GROUND_SCAN_DEPTH} (a void / long drop) <em>or the column goes under water first</em>.
+     * The explicit void sentinel lets callers tell "no footing" from a real surface that happens to
+     * be at the mob's Y.
      */
     private double offBedFootingY(int x, double deckMinY, int z) {
-        if (!(mob.level() instanceof ServerLevel level)) return Double.NEGATIVE_INFINITY;
         int top = Mth.floor(deckMinY);
+        BlockPos cell = dryFootingCell(x, top, top - GROUND_SCAN_DEPTH, z);
+        return cell == null ? Double.NEGATIVE_INFINITY : cell.getY() + 1.0;
+    }
+
+    /**
+     * The first cell with real footing in column {@code (x, z)}, scanning DOWN from {@code topY} to
+     * {@code bottomY}, or {@code null} if the column has none — or if it goes under a fluid first.
+     * Footing means a non-empty collision shape, so full blocks, slabs and stairs all count while
+     * rails / air / plants are skipped ({@code isCollisionShapeFullBlock} would wrongly reject a
+     * slab or stairs track piece).
+     *
+     * <p><b>The fluid stop is the load-bearing part.</b> Water's collision shape is EMPTY, exactly
+     * like air, so a naive downward scan sails clean through the surface of a lake and reports the
+     * LAKEBED as the column's standable surface. Every caller then believed a submerged spot was dry
+     * ground: {@link #approachPoint} would pick a launch spot at the bottom of the lake and the mob
+     * would wade in and try to tower up underwater. Treating the first fluid cell as the end of the
+     * column means a column that goes under water simply has no footing — callers skip it and pick a
+     * dry one instead. It excludes lava for free, which is the right answer for the same reason, and
+     * it rejects waterlogged slabs/stairs, whose top is still underwater.</p>
+     */
+    private BlockPos dryFootingCell(int x, int topY, int bottomY, int z) {
+        if (!(mob.level() instanceof ServerLevel level)) return null;
         BlockPos.MutableBlockPos c = new BlockPos.MutableBlockPos();
-        for (int y = top; y >= top - GROUND_SCAN_DEPTH; y--) {
+        for (int y = topY; y >= bottomY; y--) {
             c.set(x, y, z);
-            if (!level.getBlockState(c).getCollisionShape(level, c).isEmpty()) {
-                return y + 1.0;                 // stand on top of the first standable block
+            BlockState s = level.getBlockState(c);
+            if (!s.getFluidState().isEmpty()) return null;   // column goes under water/lava — not dry
+            if (!s.getCollisionShape(level, c).isEmpty()) {
+                return c.immutable();           // stand on top of the first standable block
             }
         }
-        return Double.NEGATIVE_INFINITY;
+        return null;
+    }
+
+    /**
+     * True if the mob can actually stand on {@code footing}: {@link #SHORE_HEADROOM} cells above it
+     * are free of collision AND free of fluid. The fluid half is the point — a submerged ledge has
+     * flawless "headroom" measured by collision alone (water collides with nothing), so a
+     * collision-only test cheerfully reports the bottom of a lake as a place to stand.
+     */
+    private boolean hasDryHeadroom(ServerLevel level, BlockPos footing) {
+        for (int i = 1; i <= SHORE_HEADROOM; i++) {
+            BlockPos a = footing.above(i);
+            BlockState s = level.getBlockState(a);
+            if (!s.getCollisionShape(level, a).isEmpty()) return false;
+            if (!s.getFluidState().isEmpty()) return false;
+        }
+        return true;
     }
 
     /** Horizontal distance from the mob to the nearest point of {@code box}. */
     private double horizontalDistToBox(AABB box) {
         double dx = Math.max(Math.max(box.minX - mob.getX(), 0.0), mob.getX() - box.maxX);
-        double dz = Math.max(Math.max(box.minZ - mob.getZ(), 0.0), mob.getZ() - box.maxZ);
+        double dz = distToTrackLine(box, mob.getZ());
         return Math.sqrt(dx * dx + dz * dz);
     }
 
