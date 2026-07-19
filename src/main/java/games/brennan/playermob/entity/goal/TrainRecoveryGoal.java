@@ -135,7 +135,20 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      * lakes and rivers the track cuts through, while keeping the scan (a column sweep over this
      * disc) cheap enough to run off the tick loop at {@link #SHORE_RESCAN_TICKS}.
      */
-    private static final int SHORE_SCAN_RADIUS = 12;
+    /**
+     * Width of each ring in the expanding shore search, and how far out it will go before giving up.
+     *
+     * <p>The search used to be a single 12-block disc, and any lake or river wider
+     * than about 24 blocks — which is most of the water the line crosses — returned nothing at all.
+     * The mob then fell through to the no-shore fallback and just swam <em>a direction</em>, with no
+     * destination, which is exactly what it looked like.</p>
+     *
+     * <p>Scanning ring by ring and stopping at the first one containing land is both the literal
+     * definition of "nearest shore" and CHEAPER than the old disc in the common case: land 5 blocks
+     * away is found in the first ring (~200 columns) instead of always sweeping 452.</p>
+     */
+    private static final int SHORE_RING_STEP = 8;
+    private static final int SHORE_RING_MAX = 48;
     /**
      * Vertical band of the shore search, measured from the <b>water surface</b> — not the mob. A
      * bank you can climb out onto sits at the waterline by definition, so that is the only sensible
@@ -218,7 +231,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      * the mob on the track bed, and {@code tickGetOffTracks} then has to sidestep it off before it can
      * do anything. 4.0 is roughly what that detour is worth.
      *
-     * <p>This was 64, which — being larger than the whole {@link #SHORE_SCAN_RADIUS} — acted as a veto
+     * <p>This was 64, which — being larger than the whole scan radius — acted as a veto
      * rather than a nudge: a bank 2 blocks away beside the rails scored 66 against 17 for one 11
      * blocks away, so the mob swam right past the obvious shore. That over-correction was aimed at an
      * oscillation whose actual cause (stepping off the bed straight back into water) is now fixed at
@@ -612,15 +625,22 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
             }
         }
         if (shorePoint == null) {
-            // Nothing dry within SHORE_SCAN_RADIUS (mid-ocean / a wide river crossing). Best-effort:
-            // swim perpendicular toward the track line so successive rescans sweep fresh water.
-            // Deliberately NO markProgress() here — bobbing with no shore in range is exactly the
-            // hopeless case STALL_ABANDON_TICKS exists to end (the class javadoc's "the mob is lost").
+            // No dry land anywhere out to SHORE_RING_MAX — genuinely mid-ocean now, not merely
+            // "wider than one small disc". Head for the track structure itself: the bed and its
+            // support pillars ARE land, they're the one thing guaranteed to exist in the middle of
+            // the water the line crosses, and they're where the mob wants to end up regardless.
+            //
+            // This used to clamp only Z and keep X fixed, which swam the mob sideways with no
+            // destination at all — the "just a random direction" of the report. Aiming at the
+            // nearest point of the carriage footprint gives it somewhere real to go.
+            double towardX = Mth.clamp(mob.getX(), box.minX, box.maxX);
             double towardZ = Mth.clamp(mob.getZ(), box.minZ, box.maxZ);
             if (phaseTicks % PATH_REISSUE_TICKS == 0 || mob.getNavigation().isDone()) {
-                mob.getNavigation().moveTo(mob.getX(), mob.getY(), towardZ, moveSpeed * SWIM_NAV_BOOST);
+                mob.getNavigation().moveTo(towardX, mob.getY(), towardZ, moveSpeed * SWIM_NAV_BOOST);
             }
-            mob.getLookControl().setLookAt(mob.getX(), mob.getY(), towardZ);
+            mob.getLookControl().setLookAt(towardX, mob.getY(), towardZ);
+            // Still no markProgress(): with nothing dry in 48 blocks this is the hopeless case
+            // STALL_ABANDON_TICKS exists to end (the class javadoc's "the mob is lost").
             return;
         }
         double tx = shorePoint.getX() + 0.5, ty = shorePoint.getY() + 1.0, tz = shorePoint.getZ() + 0.5;
@@ -689,7 +709,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      * Nearest dry, standable block a swimming mob can climb out onto, or {@code null} if there's
      * none in range (mid-ocean → the caller lets the stall backstop end it).
      *
-     * <p>A column sweep, not a cube sweep: for each column in the {@link #SHORE_SCAN_RADIUS} disc we
+     * <p>A column sweep, not a cube sweep: for each column in the search ring we
      * take the FIRST dry footing scanning down from {@link #SHORE_SCAN_UP} above the mob's feet —
      * i.e. the shallowest way out of that column — then score it with {@link #shoreCost}.</p>
      */
@@ -703,19 +723,27 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         int bottomY = surfaceY - SHORE_SCAN_DOWN;
         List<BlockPos> candidates = new java.util.ArrayList<>();
         List<Double> costs = new java.util.ArrayList<>();
-        for (int dx = -SHORE_SCAN_RADIUS; dx <= SHORE_SCAN_RADIUS; dx++) {
-            for (int dz = -SHORE_SCAN_RADIUS; dz <= SHORE_SCAN_RADIUS; dz++) {
-                if (dx * dx + dz * dz > SHORE_SCAN_RADIUS * SHORE_SCAN_RADIUS) continue;
-                int cx = feet.getX() + dx, cz = feet.getZ() + dz;
-                BlockPos footing = dryFootingCell(cx, topY, bottomY, cz);
-                if (footing == null) continue;                    // water column / no footing
-                if (!hasDryHeadroom(level, footing)) continue;
-                if (box.intersects(new AABB(footing))) continue;  // never the carriage itself
-                candidates.add(footing);
-                // Rise above the waterline is part of the cost: a 1-block step out is easy, a 4-block
-                // cliff face is a slog the mob may not manage at all.
-                double rise = Math.max(0.0, (footing.getY() + 1) - surfaceY);
-                costs.add(shoreCost(box, mob.getX(), mob.getZ(), cx + 0.5, cz + 0.5, rise));
+        // Ring by ring, nearest first, stopping as soon as a ring yields anything. "Nearest shore"
+        // falls straight out of the search order rather than having to be recovered from the score,
+        // and a distant bank can no longer outbid a close one however the weights are tuned.
+        for (int outer = SHORE_RING_STEP; outer <= SHORE_RING_MAX && candidates.isEmpty();
+                outer += SHORE_RING_STEP) {
+            int inner = outer - SHORE_RING_STEP;
+            for (int dx = -outer; dx <= outer; dx++) {
+                for (int dz = -outer; dz <= outer; dz++) {
+                    int d2 = dx * dx + dz * dz;
+                    if (d2 > outer * outer || d2 <= inner * inner) continue;   // this ring only
+                    int cx = feet.getX() + dx, cz = feet.getZ() + dz;
+                    BlockPos footing = dryFootingCell(cx, topY, bottomY, cz);
+                    if (footing == null) continue;                    // water column / no footing
+                    if (!hasDryHeadroom(level, footing)) continue;
+                    if (box.intersects(new AABB(footing))) continue;  // never the carriage itself
+                    candidates.add(footing);
+                    // Rise above the waterline is part of the cost: a 1-block step out is easy, a
+                    // 4-block cliff face is a slog the mob may not manage at all.
+                    double rise = Math.max(0.0, (footing.getY() + 1) - surfaceY);
+                    costs.add(shoreCost(box, mob.getX(), mob.getZ(), cx + 0.5, cz + 0.5, rise));
+                }
             }
         }
         if (candidates.isEmpty()) return null;
