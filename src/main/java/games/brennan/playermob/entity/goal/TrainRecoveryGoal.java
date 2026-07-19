@@ -93,11 +93,17 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      */
     private static final int MAX_PLACEMENTS = 32;
     /**
-     * Tower this many blocks ABOVE the deck/track level before boarding. Deck-level
-     * footing leaves a walled carriage's wall in the way; +3 clears typical walls so the
-     * mob can drop in through an opening (flatbed / hole) from above.
+     * Tower until the mob's block Y reaches {@code floor(carriage.minY) + this}, i.e. TWO blocks
+     * above the deck's walking surface, before boarding. Deck-level footing leaves a walled
+     * carriage's wall in the way; two clear blocks let the mob drop in through an opening
+     * (flatbed / hole) from above.
+     *
+     * <p>Calibrated from measurement, not arithmetic: a carriage logs {@code minY = 77.99} while
+     * its boarding foot Y is 79, so the walking surface is 79 and {@code floor(77.99) = 77}. The
+     * previous value of 3 stopped the mob at 80 — only ONE block up — which is why it kept
+     * clipping walls on the way in.</p>
      */
-    private static final int TOWER_ABOVE_DECK = 3;
+    private static final int TOWER_ABOVE_DECK = 4;
     /** Extra bridge blocks to gather beyond the bare climb — a cushion so a tower never runs short. */
     private static final int BLOCK_BUFFER = 5;
     /**
@@ -156,6 +162,37 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      */
     private static final double MAX_PLAUSIBLE_DRIFT = 1.0;
     /**
+     * Ticks in BRIDGE with no placement and no height gained before concluding we are not
+     * actually building and re-planning. The moving carriage can body-check the mob off its own
+     * tower; the captured pillar column then never matches and bridging silently does nothing.
+     */
+    private static final int BRIDGE_STALL_TICKS = 60;
+    /**
+     * Squared horizontal distance from the captured pillar column beyond which that capture is
+     * considered stale (1.5 blocks) — the mob was pushed off and must re-capture, not keep
+     * waiting to land on a column it is no longer above.
+     */
+    private static final double PILLAR_DISPLACE_SQR = 2.25;
+    /**
+     * Tolerance when testing whether a cell is "inside the carriage". The carriage box carries
+     * floating-point slop — its minZ sits at about -2e-7 and its floor 0.014 into the block below
+     * — so a cell laid legitimately BESIDE and BELOW the deck overlapped it by a sliver and every
+     * step-off placement was rejected as inside the train, trapping the mob on the bed. Anything
+     * smaller than this is slop, not a real overlap.
+     */
+    private static final double CARRIAGE_OVERLAP_EPSILON = 0.05;
+    /**
+     * Horizontal distance to the carriage within which the mob is considered "beside the line" and
+     * should pillar straight up in place rather than travelling any further toward it.
+     */
+    private static final double BESIDE_CARRIAGE_DIST = 2.0;
+    /**
+     * How far in from the far edge of its column the mob holds while pillaring. A 0.6-wide hitbox
+     * centred at this inset sits entirely in the half of the block away from the track, clear of
+     * the passing carriage that would otherwise body-check it off its own pillar.
+     */
+    private static final double PILLAR_BACK_INSET = 0.25;
+    /**
      * Lay the step-off as a short STRIP of this many blocks along the direction of travel, all in
      * one go, rather than a single block. A 1-wide target is easy to miss: the train carries the
      * mob ~0.1 blocks/tick while it steps diagonally across, so a small timing error slid it right
@@ -202,7 +239,10 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
     private int recoveryGrantsUsed = 0;            // mercy plank grants spent this recovery (max MAX_RECOVERY_GRANTS)
     private int wedgedOnBedTicks = 0;              // ticks continuously stuck on the bed; resets only on leaving it / stepping off
     private int waitingTicks = 0;                  // consecutive ticks held beside the deck waiting for an opening
-    private double lastMobX = Double.NaN;          // previous tick's x, for measuring carried drift
+    private int bridgeStallTicks = 0;              // ticks in BRIDGE with no placement and no height gained
+    private double lastBridgeY = -1.0e9;           // mob y at the last BRIDGE progress check
+    private int lastBridgePlacements = -1;         // placementsUsed at the last BRIDGE progress check
+    private double lastCarriageX = Double.NaN;      // previous tick's carriage minX, for measuring train speed
     private double driftPerTickX = 0.0;            // smoothed forward drift (blocks/tick) imparted by the moving train
 
     /** Re-resolved every evaluation/tick — the carriage moves. */
@@ -337,7 +377,10 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         recoveryGrantsUsed = 0;
         wedgedOnBedTicks = 0;
         waitingTicks = 0;
-        lastMobX = Double.NaN;
+        bridgeStallTicks = 0;
+        lastBridgeY = -1.0e9;
+        lastBridgePlacements = -1;
+        lastCarriageX = Double.NaN;
         driftPerTickX = 0.0;
         gatherTargetPos = null;
         pillarColumn = null;
@@ -374,6 +417,21 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         totalTicks++;
         phaseTicks++;
         AABB tbox = target.worldBox();
+        // Track the TRAIN's speed down the line, from the carriage box itself rather than the mob:
+        // once the mob is standing on its own static tower its personal delta is zero, but the
+        // carriage is still moving and both block placement and the boarding leap must aim where
+        // it WILL be. Smoothed; a re-resolve to a different carriage shows up as an implausible
+        // jump and resyncs instead of poisoning the average.
+        double curX = tbox.minX;
+        if (!Double.isNaN(lastCarriageX)) {
+            double dx = curX - lastCarriageX;
+            if (Math.abs(dx) <= MAX_PLAUSIBLE_DRIFT) {
+                driftPerTickX = driftPerTickX * 0.8 + dx * 0.2;
+            } else {
+                driftPerTickX = 0.0;   // resync rather than trust a re-anchor/target switch
+            }
+        }
+        lastCarriageX = curX;
         traceTick("tick phase={} onTracks={} isAboard={} pos=({},{},{}) zSpan=[{}..{}] stuck={} wedged={} waiting={} placed={} granted={}",
                 phase, onTracks(), isAboard(tbox),
                 mob.getBlockX(), mob.getBlockY(), mob.getBlockZ(),
@@ -431,11 +489,13 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         // Don't climb back DOWN to the ground launch spot to gather — hold here and let an opening
         // slide into reach; tryBoardNow (top of tick) leaps the moment one does. (≤2.5 keeps us
         // inside boarding reach so a hop can land.)
-        // Genuinely up at deck level and right beside the carriage → hold briefly and let an
-        // opening slide into reach (tryBoardNow leaps the moment one does). Bounded: if none comes
-        // within WAIT_FOR_OPENING_TICKS, stop waiting and tower up instead. The tolerance is tight
-        // on purpose — a mob a full block BELOW the deck must climb, not wait (it never boards).
-        if (mob.getY() >= box.minY - DECK_HEIGHT_TOLERANCE && horizontalDistToBox(box) <= 2.5) {
+        // Beside the carriage AND high enough that a leap is a drop-in → hold and let an opening
+        // slide into reach (tryBoardNow leaps the moment one does). Bounded: if none comes within
+        // WAIT_FOR_OPENING_TICKS, tower higher instead. Gated on readyToBoard, NOT merely on being
+        // at deck level: waiting level with the deck just parks the mob beside a wall it can never
+        // get over, which is how it ended up hopping into the carriage flank forever.
+        boolean adjacent = horizontalDistToBox(box) <= 2.5;
+        if (adjacent && readyToBoard(box)) {
             waitingTicks++;
             traceTick("approach WAIT-FOR-OPENING mobY={} deckMinY={} horizDist={} waiting={}/{}",
                     f(mob.getY()), f(box.minY), f(horizontalDistToBox(box)),
@@ -451,13 +511,13 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
             commitToBuildUp();
             return;
         }
-        waitingTicks = 0;   // not beside the deck → the wait clock only counts consecutive ticks
-        // Already hard up against the carriage but BELOW deck level — typically standing on the
-        // step block we just bridged out onto, over a drop. There is no better ground to walk to
-        // (approachPoint would send us off toward the canyon floor), so BUILD UP from here until
-        // we can drop onto the deck. tryBoardNow (top of tick) takes any opening that slides past.
-        if (horizontalDistToBox(box) <= 2.5 && mob.getY() < box.minY - DECK_HEIGHT_TOLERANCE) {
-            traceTick("approach adjacent-but-low → BUILD UP (mobY={} deckMinY={} horizDist={} blocks={})",
+        waitingTicks = 0;   // not holding station → the wait clock only counts consecutive ticks
+        // Hard up against the carriage but not yet high enough to drop in — either still below the
+        // deck (standing on the step block we bridged out onto) or level with it but short of the
+        // planned tower height. Either way there is no better ground to walk to (approachPoint
+        // would send us off toward the canyon floor), so BUILD UP from here.
+        if (adjacent) {
+            traceTick("approach adjacent-not-high-enough → BUILD UP (mobY={} deckMinY={} horizDist={} blocks={})",
                     f(mob.getY()), f(box.minY), f(horizontalDistToBox(box)),
                     BlockSourcePolicy.bridgeBlockCount(mob.getInventory()));
             commitToBuildUp();
@@ -517,6 +577,35 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      * carriage. In that state it needs an OPENING, not more blocks — anything that sends it off to
      * gather from here is wasted time it does not have while the train keeps moving.
      */
+    /**
+     * True if {@code pos} genuinely lies within the carriage, ignoring the sub-centimetre slop in
+     * the carriage box's bounds (see {@link #CARRIAGE_OVERLAP_EPSILON}). Used to keep the mob from
+     * building into the train without rejecting the legitimate cell just beside/below the deck.
+     */
+    private boolean overlapsCarriage(BlockPos pos) {
+        return target != null
+            && target.worldBox().deflate(CARRIAGE_OVERLAP_EPSILON).intersects(new AABB(pos));
+    }
+
+    /**
+     * True only when the mob is high enough that a leap is a DROP-IN rather than a sideways shove
+     * at the carriage's flank. Keyed on height, not phase: a mob standing at deck level finds a
+     * "reachable" column one step inside the footprint every single tick, leaps at it, bounces off
+     * the wall and lands back where it started — a loop that never boards and, because the attempt
+     * short-circuits the tick, never lets it tower any higher either.
+     *
+     * <p>So: board once the planned tower height is reached ({@link #TOWER_ABOVE_DECK}, two blocks
+     * over the deck), or — if we are out of material and cannot climb further — from whatever
+     * height we did reach, provided it is at least deck level.</p>
+     */
+    private boolean readyToBoard(AABB box) {
+        if (mob.blockPosition().getY() >= Mth.floor(box.minY) + TOWER_ABOVE_DECK) {
+            return true;
+        }
+        return BlockSourcePolicy.bridgeBlockCount(mob.getInventory()) <= 0
+            && mob.getY() >= box.minY - DECK_HEIGHT_TOLERANCE;
+    }
+
     private boolean atBoardingHeight(AABB box) {
         return mob.getY() >= box.minY - DECK_HEIGHT_TOLERANCE && horizontalDistToBox(box) <= 2.5;
     }
@@ -564,21 +653,6 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      */
     private void tickGetOffTracks(AABB box) {
         wedgedOnBedTicks++;   // reliable "stuck on the bed" clock — reset only on leaving it (tickApproach) or stepping off
-        // Measure how fast the train is carrying the mob down the line (it rides the bed, so its own
-        // x delta IS the drift). Smoothed so a single jittery tick doesn't skew the placement lead.
-        double curX = mob.getX();
-        if (!Double.isNaN(lastMobX)) {
-            double dx = curX - lastMobX;
-            // Ignore implausible jumps: a carriage re-anchor / sub-level coordinate switch can move
-            // the mob many blocks in one tick, which would poison the average and fling the step
-            // block far down the line (observed drift=3.41/tick against a ~0.1 train).
-            if (Math.abs(dx) <= MAX_PLAUSIBLE_DRIFT) {
-                driftPerTickX = driftPerTickX * 0.8 + dx * 0.2;
-            } else {
-                driftPerTickX = 0.0;   // resync rather than trust a teleport
-            }
-        }
-        lastMobX = curX;
         int mx = mob.blockPosition().getX();
         int mz = mob.blockPosition().getZ();
         int footY = mob.blockPosition().getY();
@@ -721,6 +795,24 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
 
     private void tickBridge() {
         AABB box = target.worldBox();
+        // Displacement guard. The moving carriage can body-check the mob off its own tower; the
+        // captured pillar column then never matches and bridging does nothing at all, silently,
+        // until the 30s backstop. If we're neither gaining height nor placing, re-plan.
+        if (mob.getY() > lastBridgeY + 0.05 || placementsUsed != lastBridgePlacements) {
+            bridgeStallTicks = 0;
+            lastBridgeY = mob.getY();
+            lastBridgePlacements = placementsUsed;
+        } else if (++bridgeStallTicks > BRIDGE_STALL_TICKS) {
+            trace("bridge STALLED {} ticks (pushed off tower?) → re-approach", bridgeStallTicks);
+            bridgeStallTicks = 0;
+            pillarColumn = null;
+            phase = Phase.APPROACH;
+            phaseTicks = 0;
+            lastApproachDist = Double.MAX_VALUE;
+            lastApproachY = -1.0e9;
+            approachStuckTicks = 0;
+            return;
+        }
         clearClimbObstruction(box);   // punch through any leaves/plants blocking the way up
         // No top-level navigation here: stairs steer onto each placed step, and jump-stack
         // pillars straight up with nav OFF (otherwise the mob walks off its own 1-wide tower).
@@ -755,11 +847,34 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         // sand/gravel would just fall).
         BlockState block = ((BlockItem) mob.getInventory().getItem(slot).getItem())
             .getBlock().defaultBlockState();
-        if (BlockSourcePolicy.isGravityBlock(block)) {
+        // Already standing beside the line (we bridged out one block): STOP MOVING and stack
+        // straight up under ourselves — jump, place into the vacated foot space, repeat. Building
+        // a staircase from here would walk the mob back and forth beside a moving train instead of
+        // gaining height. Stairs remain for the approach from open ground further out.
+        if (atBuildUpColumn(box) || BlockSourcePolicy.isGravityBlock(block)) {
             tickJumpStack(slot, box);
         } else {
             tickStairs(slot, box);
         }
+    }
+
+    /**
+     * True once the mob is on its step block immediately beside the carriage — the point where it
+     * should stop travelling and pillar straight up in place.
+     */
+    /**
+     * Z to hold while pillaring: inset from the far edge of the mob's CURRENT column, on the side
+     * away from the carriage. Same block, back of it — so the pillar keeps rising in one place
+     * while the mob's hitbox sits clear of the passing train instead of being shoved off.
+     */
+    private double pillarHoldZ(AABB box) {
+        int bz = mob.blockPosition().getZ();
+        boolean farSide = mob.getZ() > (box.minZ + box.maxZ) * 0.5;
+        return farSide ? bz + 1.0 - PILLAR_BACK_INSET : bz + PILLAR_BACK_INSET;
+    }
+
+    private boolean atBuildUpColumn(AABB box) {
+        return horizontalDistToBox(box) <= BESIDE_CARRIAGE_DIST;
     }
 
     /**
@@ -805,7 +920,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         BlockState s = level.getBlockState(pos);
         if (!s.isCollisionShapeFullBlock(level, pos)) return false;
         if (BlockSourcePolicy.isProtectedTrackBlock(s)) return false;
-        if (target != null && target.worldBox().intersects(new AABB(pos))) return false;
+        if (overlapsCarriage(pos)) return false;
         return level.getBlockState(pos.above()).getCollisionShape(level, pos.above()).isEmpty()
             && level.getBlockState(pos.above(2)).getCollisionShape(level, pos.above(2)).isEmpty();
     }
@@ -819,15 +934,38 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      */
     private void tickJumpStack(int slot, AABB box) {
         if (mob.blockPosition().getY() >= Mth.floor(box.minY) + TOWER_ABOVE_DECK) {
-            waitForOpening(box);                       // towered 3 above; tryBoardNow leaps when an opening is in reach
+            // Tower is tall enough: hold station and take the first clear opening.
+            traceTick("jumpStack TOWER TOP mobBlockY={} deckMinY={} threshold={} blocks={} → wait for opening",
+                    mob.blockPosition().getY(), f(box.minY),
+                    Mth.floor(box.minY) + TOWER_ABOVE_DECK,
+                    BlockSourcePolicy.bridgeBlockCount(mob.getInventory()));
+            waitForOpening(box);                       // tryBoardNow leaps when an opening is in reach
             return;
         }
         // Pillar straight up: nav OFF so no horizontal path-following walks the mob off its
-        // own 1-wide tower, and zero horizontal drift EVERY tick so it rises and lands back
+        // own 1-wide tower, and no drift along the line EVERY tick so it rises and lands back
         // on the same column (no leftover approach momentum carries it off).
+        //
+        // Hold station at the BACK of that column rather than its centre. Standing centred keeps
+        // the mob inside the passing carriage's swept volume, and the train body-checks it clean
+        // off its own pillar part-way up. Easing toward the far edge keeps the same XZ column
+        // (the pillar is still built here) while putting the hitbox out of the train's path.
         mob.getNavigation().stop();
         Vec3 dm = mob.getDeltaMovement();
-        mob.setDeltaMovement(0.0, dm.y, 0.0);
+        double holdZ = pillarHoldZ(box);
+        double vz = Mth.clamp((holdZ - mob.getZ()) * 0.3, -0.08, 0.08);
+        mob.setDeltaMovement(0.0, dm.y, vz);
+        // Drop a captured column we've been shoved away from: while airborne the apex test below
+        // can never match a column we're no longer above, and the onGround re-capture never runs,
+        // so jump-stacking would deadlock doing nothing until the stall backstop.
+        if (pillarColumn != null) {
+            double px = mob.getX() - (pillarColumn.getX() + 0.5);
+            double pz = mob.getZ() - (pillarColumn.getZ() + 0.5);
+            if (px * px + pz * pz > PILLAR_DISPLACE_SQR) {
+                trace("jumpStack pillar {} stale (displaced) → recapture", pillarColumn);
+                pillarColumn = null;
+            }
+        }
         if (mob.onGround()) {
             pillarColumn = mob.blockPosition();        // the space we're about to vacate
             mob.getJumpControl().jump();
@@ -854,16 +992,25 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      * collecting blocks. Returns false when it isn't yet high enough / no opening is in reach.
      */
     private boolean tryBoardNow(AABB box) {
+        if (!readyToBoard(box)) {
+            return false;
+        }
         Vec3 spot = TrainConfinement.boardingSpot(mob, box);
         if (spot == null) {
             return false;
         }
-        // Leap toward the opening. Vanilla nav can't path onto the moving carriage, so steer
-        // the body straight at the spot with the MoveControl (works off the nav graph) and hop.
+        // Aim at the spot EXACTLY as validated. Do not lead it: boardingSpot checked that a
+        // specific carriage column has a floor and clear headroom at its position right now, and
+        // that check is only meaningful for that position. Offsetting the aim by a predicted
+        // travel distance points the mob at a column nothing has verified — which lands it in a
+        // carriage gap or off an open edge and it falls straight through. The spot is re-resolved
+        // every tick, so the target tracks the moving carriage without any prediction.
         mob.getNavigation().stop();
         mob.getLookControl().setLookAt(spot.x, spot.y, spot.z);
         mob.getMoveControl().setWantedPosition(spot.x, spot.y, spot.z, moveSpeed);
         if (mob.onGround()) mob.getJumpControl().jump();
+        trace("BOARD leap spot=({},{},{}) mobY={} drift={}/tick phase={}",
+                f(spot.x), f(spot.y), f(spot.z), f(mob.getY()), f(driftPerTickX), phase);
         markProgress();
         return true;
     }
@@ -963,7 +1110,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         if (!existing.canBeReplaced()) { trace("place REJECT not-replaceable @{} existing={}", pos, existing.getBlock()); return false; }
         if (BlockSourcePolicy.isProtectedTrackBlock(existing)) { trace("place REJECT protected-track @{} existing={}", pos, existing.getBlock()); return false; }
         AABB cell = new AABB(pos);
-        if (target != null && target.worldBox().intersects(cell)) { trace("place REJECT intersects-carriage @{} carriage={}", pos, target.worldBox()); return false; }   // never the carriage box
+        if (overlapsCarriage(pos)) { trace("place REJECT intersects-carriage @{} carriage={}", pos, target.worldBox()); return false; }   // never the carriage box
         if (!level.getEntities(mob, cell).isEmpty()) { trace("place REJECT cell-occupied @{}", pos); return false; }                 // don't suffocate anything
 
         BlockState state = blockItem.getBlock().defaultBlockState();

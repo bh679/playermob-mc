@@ -268,6 +268,15 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
                 if (footY > mobFootY + 1) {
                     continue;                               // landing is higher than the mob can hop up to
                 }
+                // Require floor a block either side ALONG THE TRAVEL AXIS too. The carriage slides
+                // roughly a block while the mob is in the air, so a spot validated at the lip of a
+                // gap (carriage seam, open flatbed edge) is NOT where the mob actually comes down
+                // — it drops straight through. Insisting on a three-wide solid strip absorbs that
+                // timing error, at the cost of refusing to aim at one-block ledges.
+                if (dropInFootY(ship, level, wx - 1.0, wz, deckY, mobFootY) == null
+                        || dropInFootY(ship, level, wx + 1.0, wz, deckY, mobFootY) == null) {
+                    continue;
+                }
                 if (!corridorClear(ship, level, mx, mz, wx, wz, mobFootY)) {
                     continue;                               // a too-tall wall blocks the leap
                 }
