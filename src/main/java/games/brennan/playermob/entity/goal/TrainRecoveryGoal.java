@@ -158,6 +158,25 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
     /** Cells of clear, water-free air a standing spot needs above its footing (the mob is 2 tall). */
     private static final int SHORE_HEADROOM = 2;
     /**
+     * Navigation speed multiplier while swimming. <b>This is the other half of "swims too slowly",
+     * and it is the bigger half</b> — sprinting alone only doubled 0.03 to 0.06 blocks/tick when a
+     * player does 0.20.
+     *
+     * <p>In water {@code LivingEntity.travel} accelerates by a FLAT {@code 0.02 * inputVector} — the
+     * movement-speed attribute is bypassed entirely (it only re-enters via WATER_MOVEMENT_EFFICIENCY,
+     * which is 0 here). What differs is the input magnitude: a player holds full stick, so its
+     * {@code zza} is <b>1.0</b>, while {@code Mob.setSpeed} sets {@code zza} to
+     * {@code speedModifier x MOVEMENT_SPEED} = <b>0.30</b>. Same drag, same accel constant, but the
+     * mob feeds a third of the input — hence roughly a third of the speed.
+     *
+     * <p>4.0 x 0.30 = 1.2, and {@code Entity.getInputVector} normalises anything over length 1, so
+     * this clamps to exactly the player's 1.0 rather than overshooting. It is applied ONLY to the
+     * swim navigation calls: on land the same multiplier would be a real 4x sprint, since the ground
+     * branch of {@code travel} does scale by the speed attribute. {@link #enterApproach()} stops
+     * navigation on the way out so the boosted modifier can't outlive the water.</p>
+     */
+    private static final double SWIM_NAV_BOOST = 4.0;
+    /**
      * Flat surcharge for a bank whose Z sits INSIDE the carriage's Z-span. Large enough that any
      * off-span bank in scan range wins outright, small enough that an on-span bank is still chosen
      * over nothing at all. See {@link #shoreCost} for why the span is a trap rather than a prize.
@@ -483,6 +502,10 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
     /** Enter (or re-enter) APPROACH, resetting the approach progress trackers. */
     private void enterApproach() {
         clearSwimPosture();        // out of the water — stop sprinting / swimming-posed on land
+        // Drop the swim path too: MoveControl keeps the last speedModifier until the next moveTo, and
+        // SWIM_NAV_BOOST is only harmless underwater — on land the ground branch of travel() DOES
+        // scale by it, so a leftover boosted path would sprint the mob across the bank at 4x.
+        mob.getNavigation().stop();
         phase = Phase.APPROACH;
         phaseTicks = 0;
         lastApproachDist = Double.MAX_VALUE;
@@ -526,14 +549,14 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
             // hopeless case STALL_ABANDON_TICKS exists to end (the class javadoc's "the mob is lost").
             double towardZ = Mth.clamp(mob.getZ(), box.minZ, box.maxZ);
             if (phaseTicks % PATH_REISSUE_TICKS == 0 || mob.getNavigation().isDone()) {
-                mob.getNavigation().moveTo(mob.getX(), mob.getY(), towardZ, moveSpeed);
+                mob.getNavigation().moveTo(mob.getX(), mob.getY(), towardZ, moveSpeed * SWIM_NAV_BOOST);
             }
             mob.getLookControl().setLookAt(mob.getX(), mob.getY(), towardZ);
             return;
         }
         double tx = shorePoint.getX() + 0.5, ty = shorePoint.getY() + 1.0, tz = shorePoint.getZ() + 0.5;
         if (phaseTicks % PATH_REISSUE_TICKS == 0 || mob.getNavigation().isDone()) {
-            mob.getNavigation().moveTo(tx, ty, tz, moveSpeed);
+            mob.getNavigation().moveTo(tx, ty, tz, moveSpeed * SWIM_NAV_BOOST);
         }
         mob.getLookControl().setLookAt(tx, ty, tz);
         // Progress = a new BEST distance to the bank, not "closer than last tick". Swimming is slow

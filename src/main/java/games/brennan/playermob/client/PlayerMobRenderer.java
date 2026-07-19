@@ -634,4 +634,49 @@ public final class PlayerMobRenderer
         }
         return arr;
     }
+
+    /**
+     * Lay the body flat while swimming.
+     *
+     * <p><b>Why this has to exist at all:</b> the swim-to-horizontal rotation lives ONLY in vanilla's
+     * {@code PlayerRenderer.setupRotations}. {@code LivingEntityRenderer.setupRotations} — which every
+     * mob renderer including this one inherits — handles death spin, spin-attack and sleeping, and has
+     * no swim branch whatsoever. So a mob given {@code Pose.SWIMMING} gets the limb animation (that
+     * part {@code HumanoidModel} drives off {@code getSwimAmount}) while staying bolt upright: it
+     * "does the swimming animation, but vertical". This replicates the vanilla player branch.</p>
+     *
+     * <p>Called AFTER {@code super.setupRotations}, matching the order vanilla uses.</p>
+     */
+    private void applySwimRotation(PlayerMobEntity entity, PoseStack poseStack, float partialTick) {
+        float amount = entity.getSwimAmount(partialTick);
+        if (amount <= 0.0F) return;
+        // In water the lean follows the look pitch, so a mob angling down dives head-first; out of
+        // water (crawling) it's a flat -90.
+        float pitch = entity.getViewXRot(partialTick);
+        float target = entity.isInWater() ? -90.0F - pitch : -90.0F;
+        poseStack.mulPose(com.mojang.math.Axis.XP.rotationDegrees(
+            net.minecraft.util.Mth.lerp(amount, 0.0F, target)));
+        if (entity.isVisuallySwimming()) {
+            poseStack.translate(0.0F, -1.0F, 0.3F);   // re-centre the now-horizontal body on its cell
+        }
+    }
+
+    //? if >=26 {
+    /*// 26.x renders avatars through the render-state pipeline, where this hook has a different
+    // shape; the swim lean is not wired up on that branch yet.
+    *///?} elif >=1.21.1 {
+    @Override
+    protected void setupRotations(PlayerMobEntity entity, PoseStack poseStack, float bob,
+                                  float yBodyRot, float partialTick, float scale) {
+        super.setupRotations(entity, poseStack, bob, yBodyRot, partialTick, scale);
+        applySwimRotation(entity, poseStack, partialTick);
+    }
+    //?} else {
+    /*@Override
+    protected void setupRotations(PlayerMobEntity entity, PoseStack poseStack, float bob,
+                                  float yBodyRot, float partialTick) {
+        super.setupRotations(entity, poseStack, bob, yBodyRot, partialTick);
+        applySwimRotation(entity, poseStack, partialTick);
+    }
+    *///?}
 }
