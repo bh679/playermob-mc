@@ -702,6 +702,23 @@
       "released": true,
       "released_in": "v0.82.0",
       "released_at": "2026-07-17T16:46:33Z"
+    },
+    {
+      "id": "gap-proportionate-carriage-hop",
+      "version": "0.83.0",
+      "type": "fix",
+      "title": "PlayerMobs step over carriage gaps instead of leaping them",
+      "summary": "PlayerMobs crossing between train carriage groups now take a hop sized to the actual gap. Dungeon Train tightened the seams between carriages, but PlayerMobs kept using the same big sprint-leap they needed for the old wider gaps \u2014 so they'd sail across a hand's-width seam. They now step over it.",
+      "highlights": [
+        "Cross-carriage hops are sized to the real gap \u2014 about half the height and half the distance at Dungeon Train's current spacing",
+        "Wider gaps still get the full sprint jump, so nothing changes where the longer leap is actually needed",
+        "Fixed a mob briefly getting stuck in its crossing state after landing on a very narrow gap"
+      ],
+      "pr": 175,
+      "date": "2026-07-19",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
