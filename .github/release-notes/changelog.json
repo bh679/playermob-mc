@@ -754,6 +754,22 @@
       "released": false,
       "released_in": null,
       "released_at": null
+    },
+    {
+      "id": "shulker-box-contents",
+      "version": "0.85.0",
+      "type": "fix",
+      "title": "PlayerMobs no longer empty shulker boxes they pick up",
+      "summary": "A PlayerMob (or an Echo) that picked up your shulker box would wipe everything inside it \u2014 when you killed the mob to get the box back, it came back empty. The mob was treating the box as a plain building block and re-placing it as an empty one. Now it keeps shulker boxes intact: it will still carry one and drop it when it dies, but never places it or uses it as building material, so the contents always survive.",
+      "highlights": [
+        "Shulker boxes picked up by a PlayerMob keep their contents",
+        "A mob still carries a shulker box and returns it intact when killed",
+        "PlayerMobs never place shulker boxes as bridge, recovery, or combat-cover blocks"
+      ],
+      "date": "2026-07-25",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
