@@ -98,6 +98,30 @@ class ItemPickupPolicyTest {
     }
 
     @Test
+    void shulkerBoxesAreNeverBuildingBlocks() {
+        // Shulker boxes carry their inventory in item components; classifying one as a
+        // fungible building block would let the mob place it as an empty box, deleting
+        // the contents. It must be excluded so it is only ever carried, never placed.
+        // The instanceof ShulkerBoxBlock check covers every colour; the uncoloured box is
+        // the one Items constant whose name is stable across all target MC versions.
+        assertTrue(ItemPickupPolicy.isShulkerBox(new ItemStack(Items.SHULKER_BOX)), "shulker box");
+        assertFalse(ItemPickupPolicy.isShulkerBox(new ItemStack(Items.COBBLESTONE)), "cobblestone is not a shulker");
+        assertFalse(ItemPickupPolicy.isShulkerBox(new ItemStack(Items.DIAMOND)), "diamond is not a shulker");
+
+        assertFalse(ItemPickupPolicy.isBuildingBlock(new ItemStack(Items.SHULKER_BOX)),
+            "shulker box is excluded from building blocks");
+    }
+
+    @Test
+    void shulkerBoxesAreExcludedFromBlockCountingAndBridging() {
+        SimpleContainer backpack = new SimpleContainer(8);
+        backpack.setItem(0, new ItemStack(Items.COBBLESTONE, 16));
+        backpack.setItem(1, new ItemStack(Items.SHULKER_BOX, 1)); // carried, but not counted as filler
+        assertEquals(16, ItemPickupPolicy.countBuildingBlocks(backpack),
+            "the shulker box does not count toward the building-block total");
+    }
+
+    @Test
     void identifiesConsumables() {
         assertTrue(ItemPickupPolicy.isConsumable(new ItemStack(Items.BREAD)), "bread is food");
         assertTrue(ItemPickupPolicy.isConsumable(new ItemStack(Items.GOLDEN_APPLE)), "golden apple is food");
