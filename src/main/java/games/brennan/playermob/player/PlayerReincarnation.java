@@ -4,6 +4,7 @@ import com.mojang.authlib.minecraft.MinecraftProfileTexture;
 import com.mojang.logging.LogUtils;
 import games.brennan.playermob.PlayerMobRegistry;
 import games.brennan.playermob.compat.PlayerMobSpawnHooks;
+import games.brennan.playermob.compat.FreePlayQuery;
 import games.brennan.playermob.compat.ReincarnationCaptureGate;
 import games.brennan.playermob.compat.ReincarnationQuery;
 import games.brennan.playermob.compat.ReincarnationRecord;
@@ -106,6 +107,11 @@ public final class PlayerReincarnation {
             // spawns echoes of itself. Default (no consumer) captures every death.
             if (ReincarnationCaptureGate.shouldCapture(player)) {
                 CompoundTag snapshot = buildSnapshot(level, player, record);
+                // Stamp the life's Free Play provenance into the snapshot so it rides through the
+                // relay verbatim (remote echoes) and gates spawning: a Free Play life reincarnates
+                // only for Free Play players, a legit life only for legit players (see
+                // maybeReincarnateOnSpawn / ReincarnationSources.liveCandidates).
+                snapshot.putBoolean(FreePlayQuery.SNAPSHOT_TAG, FreePlayQuery.isFreePlay(player));
                 // Record the carriage they died in so Dungeon-Train echoes can match depth.
                 int carriage = TrainConfinement.carriageIndex(player);
                 // Snapshot the PlayerMobs that loved this player so an echo of them can later return
@@ -171,6 +177,13 @@ public final class PlayerReincarnation {
             Player nearest = level.getNearestPlayer(mob, -1.0);
             UUID owner = nearest == null ? null : nearest.getUUID();
             ReincarnationQuery query = ReincarnationQuery.byCarriage(spawnCarriage, owner);
+            // Provenance match: unless a consumer disables it (dev builds), a life reincarnates only
+            // for a player whose Free Play state matches the life's — Free Play echoes stay in Free
+            // Play, legit in legit. Only applied when the nearby player is a real ServerPlayer; with
+            // no consumer installed isFreePlay() is always false, so this narrows to legit-only.
+            if (FreePlayQuery.enforceMatch() && nearest instanceof ServerPlayer sp) {
+                query = query.withMatchFreePlay(FreePlayQuery.isFreePlay(sp));
+            }
             // Two separate slices — [0,SELF) a local life, [SELF,SELF+REMOTE) a remote one — so a
             // remote pool never eats into the local self-reincarnation chance; the rest stays fresh.
             float roll = world.getRandom().nextFloat();

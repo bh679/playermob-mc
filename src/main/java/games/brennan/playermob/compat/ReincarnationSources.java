@@ -135,12 +135,20 @@ public final class ReincarnationSources {
                                                             UUID excludePlayer) {
         try {
             List<ReincarnationRecord> candidates = source.candidates(server, query);
+            Boolean wantFreePlay = query.matchFreePlay();
             List<ReincarnationRecord> live = new ArrayList<>(candidates.size());
             for (ReincarnationRecord r : candidates) {
                 if (seen.contains(r.id())) {
                     continue;
                 }
                 if (excludePlayer != null && excludePlayer.equals(r.playerId())) {
+                    continue;
+                }
+                // Provenance match: keep a life only if its Free Play flag equals the requested one.
+                // Filtered here (before the weighted pick + mark-met) so a mismatched life is never
+                // consumed. wantFreePlay == null means no filter (dev bypass / no consumer).
+                if (wantFreePlay != null
+                        && NbtCompat.getBooleanOr(r.snapshot(), FreePlayQuery.SNAPSHOT_TAG, false) != wantFreePlay) {
                     continue;
                 }
                 live.add(r);
