@@ -4,6 +4,7 @@ import com.mojang.authlib.minecraft.MinecraftProfileTexture;
 import com.mojang.logging.LogUtils;
 import games.brennan.playermob.PlayerMobRegistry;
 import games.brennan.playermob.compat.PlayerMobSpawnHooks;
+import games.brennan.playermob.compat.ReincarnationCaptureGate;
 import games.brennan.playermob.compat.ReincarnationQuery;
 import games.brennan.playermob.compat.ReincarnationRecord;
 import games.brennan.playermob.compat.ReincarnationSources;
@@ -100,19 +101,25 @@ public final class PlayerReincarnation {
             //?}
             PlayerLifeStore store = PlayerLifeStore.get(level);
             PlayerLifeRecord record = store.current(player.getUUID());
-            CompoundTag snapshot = buildSnapshot(level, player, record);
-            // The completed snapshot is appended to the GLOBAL death log (cross-world); only
-            // the in-progress tally was world-scoped, so reset it on the world store.
+            // A consuming mod may veto capturing this death into the reincarnation pool — e.g.
+            // Dungeon Train excludes "Free Play" (sandbox) deaths so a consequence-free run never
+            // spawns echoes of itself. Default (no consumer) captures every death.
+            if (ReincarnationCaptureGate.shouldCapture(player)) {
+                CompoundTag snapshot = buildSnapshot(level, player, record);
+                // Record the carriage they died in so Dungeon-Train echoes can match depth.
+                int carriage = TrainConfinement.carriageIndex(player);
+                // Snapshot the PlayerMobs that loved this player so an echo of them can later return
+                // alongside a friend-echo of one of those loved ones (with its last-seen gear).
+                List<CompoundTag> friends = captureFriendSnapshots(level, player);
+                // The completed snapshot is appended to the GLOBAL death log (cross-world).
+                GlobalLifeStore global = GlobalLifeStore.get(level.getServer());
+                global.append(player.getUUID(), profileName(player), carriage, snapshot, friends);
+            }
+            // A new life begins on respawn whether or not the death was captured. The in-progress
+            // tally is world-scoped, so reset it (a skipped life must not taint a later snapshot);
+            // and clear which past lives this player has met, so the whole reincarnation pool is
+            // available to meet again.
             store.resetCurrent(player.getUUID());
-            // Record the carriage they died in so Dungeon-Train echoes can match depth.
-            int carriage = TrainConfinement.carriageIndex(player);
-            // Snapshot the PlayerMobs that loved this player so an echo of them can later return
-            // alongside a friend-echo of one of those loved ones (with its last-seen gear).
-            List<CompoundTag> friends = captureFriendSnapshots(level, player);
-            GlobalLifeStore global = GlobalLifeStore.get(level.getServer());
-            global.append(player.getUUID(), profileName(player), carriage, snapshot, friends);
-            // A new life begins on respawn — clear which past lives this player has already met,
-            // so every life across the whole reincarnation pool is available to meet again.
             ReincarnationSources.resetSession(player.getUUID());
         } catch (RuntimeException e) {
             LOGGER.error("[playermob] failed to snapshot reincarnation for {}", profileName(player), e);
