@@ -76,6 +76,11 @@ public final class EndCrystalCombatPolicy {
         if (!(stack.getItem() instanceof BlockItem blockItem)) {
             return false;
         }
+        // A shulker box is a full cube, but placing it as cover would drop an empty
+        // box and destroy its stored inventory — never use one as blast cover.
+        if (ItemPickupPolicy.isShulkerBox(stack)) {
+            return false;
+        }
         return blockItem.getBlock().defaultBlockState()
             .isCollisionShapeFullBlock(EmptyBlockGetter.INSTANCE, BlockPos.ZERO);
     }

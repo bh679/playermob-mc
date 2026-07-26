@@ -13,6 +13,7 @@ import net.minecraft.world.item.CrossbowItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.ShulkerBoxBlock;
 
 import java.util.Set;
 
@@ -214,9 +215,29 @@ public final class ItemPickupPolicy {
         return stack.getItem() instanceof ArrowItem;
     }
 
-    /** Any placeable block (anything backed by a {@link BlockItem}). */
+    /**
+     * Any placeable block (anything backed by a {@link BlockItem}) <em>except</em>
+     * a shulker box. Shulker boxes are deliberately excluded: they carry their
+     * inventory in the item's components, and every place-from-item site builds
+     * the block from {@code defaultBlockState()} — an empty box — which would
+     * destroy the contents. Excluding them here keeps the mob from ever counting,
+     * selecting, or placing a shulker as fungible building filler (bridging,
+     * train recovery, etc.); {@link #isShulkerBox} routes them to a carry-only
+     * pickup instead.
+     */
     public static boolean isBuildingBlock(ItemStack stack) {
-        return stack.getItem() instanceof BlockItem;
+        return stack.getItem() instanceof BlockItem && !isShulkerBox(stack);
+    }
+
+    /**
+     * True if {@code stack} is a shulker box (uncoloured or any of the 16 dyed
+     * variants — all backed by {@link ShulkerBoxBlock}). Such a box stores its
+     * inventory in item components, so the mob must never place it as a block
+     * (which would drop an empty box); it may only carry and return it intact.
+     */
+    public static boolean isShulkerBox(ItemStack stack) {
+        return stack.getItem() instanceof BlockItem blockItem
+            && blockItem.getBlock() instanceof ShulkerBoxBlock;
     }
 
     /** Food (carries a FOOD component) or a potion of any flavour. */

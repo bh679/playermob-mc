@@ -737,6 +737,39 @@
       "released": true,
       "released_in": "v0.83.0",
       "released_at": "2026-07-19T12:20:34Z"
+    },
+    {
+      "id": "playermob-swims-to-shore",
+      "version": "0.85.0",
+      "type": "fix",
+      "title": "PlayerMobs swim to shore and climb back to the train",
+      "summary": "A PlayerMob knocked off the train into water used to bob where it landed until the train left it behind \u2014 it could not even start trying to recover while afloat. It now swims properly, makes for the nearest reachable bank, and works its way back toward the line. Where the track runs on pillars it will walk up an existing spiral staircase rather than building its own.",
+      "highlights": [
+        "Mobs that fall in the water now swim out instead of treading water until the train is gone",
+        "They swim at a player's pace and with the player swimming stroke, rather than paddling upright at walking speed",
+        "They head for the nearest bank they can actually climb out onto, preferring low ground near the track over a distant or sheer shoreline",
+        "Where a staircase or ladder already runs up to the track, they use it instead of pillaring up beside it"
+      ],
+      "date": "2026-07-19",
+      "released": true,
+      "released_in": "v0.85.0",
+      "released_at": "2026-07-25T16:02:01Z"
+    },
+    {
+      "id": "shulker-box-contents",
+      "version": "0.85.0",
+      "type": "fix",
+      "title": "PlayerMobs no longer empty shulker boxes they pick up",
+      "summary": "A PlayerMob (or an Echo) that picked up your shulker box would wipe everything inside it \u2014 when you killed the mob to get the box back, it came back empty. The mob was treating the box as a plain building block and re-placing it as an empty one. Now it keeps shulker boxes intact: it will still carry one and drop it when it dies, but never places it or uses it as building material, so the contents always survive.",
+      "highlights": [
+        "Shulker boxes picked up by a PlayerMob keep their contents",
+        "A mob still carries a shulker box and returns it intact when killed",
+        "PlayerMobs never place shulker boxes as bridge, recovery, or combat-cover blocks"
+      ],
+      "date": "2026-07-25",
+      "released": true,
+      "released_in": "v0.85.0",
+      "released_at": "2026-07-25T16:02:01Z"
     }
   ]
 }

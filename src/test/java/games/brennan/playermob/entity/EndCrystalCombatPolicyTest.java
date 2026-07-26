@@ -52,6 +52,14 @@ class EndCrystalCombatPolicyTest {
     }
 
     @Test
+    void rejectsShulkerBoxesAsCover() {
+        // A shulker box is a full cube, so it would otherwise qualify as cover — but placing
+        // it as blast cover drops an empty box and destroys its contents, so it is excluded.
+        assertFalse(EndCrystalCombatPolicy.isCoverBlock(new ItemStack(Items.SHULKER_BOX)),
+            "shulker box is not usable as cover (would drop an empty box)");
+    }
+
+    @Test
     void countsSolidCoverAcrossSlots() {
         SimpleContainer pack = new SimpleContainer(6);
         pack.setItem(0, new ItemStack(Items.COBBLESTONE, 3));

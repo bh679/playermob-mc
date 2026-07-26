@@ -2880,6 +2880,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             || wantsAsAmmo(stack)
             || ItemPickupPolicy.isValuable(stack)
             || ItemPickupPolicy.isConsumable(stack)
+            || ItemPickupPolicy.isShulkerBox(stack)
             || isExtraWanted(stack)
             || (ItemPickupPolicy.isBuildingBlock(stack)
                 && ItemPickupPolicy.wantsBuildingBlock(this.inventory, stack));
@@ -2948,8 +2949,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (wantsAsAmmo(stack)
                 || ItemPickupPolicy.isValuable(stack)
                 || ItemPickupPolicy.isConsumable(stack)
+                || ItemPickupPolicy.isShulkerBox(stack)
                 || isExtraWanted(stack)) {
             // InventoryCarrier.pickUpItem handles its own want-check, take, and discard.
+            // Shulker boxes route here (not the building-block path) so their stored
+            // inventory is carried and returned intact — they are never placed.
             //? if >=26 {
             /*// 26.x added a leading ServerLevel argument; pickup only runs server-side.
             if (level() instanceof ServerLevel server) {

@@ -144,32 +144,58 @@ class BlockSourcePolicyTest {
     // ---- Staircase math --------------------------------------------------
 
     @Test
-    void nextBridgePosStepsTowardCarriageWhenBelow() {
-        // Carriage box to the +X of the mob; floor (minY) at 65, mob feet at 63.
-        AABB carriage = new AABB(10, 65, 0, 19, 70, 9);
-        BlockPos foot = new BlockPos(5, 63, 4);
-        // Below the lip → place one block east (toward the carriage) at foot level.
-        assertEquals(new BlockPos(6, 63, 4), BlockSourcePolicy.nextBridgePos(foot, carriage));
+    void nextBridgePosStepsAcrossTheNearZFaceWhenBelow() {
+        // Realistic geometry: the mob is BESIDE the line, outside the carriage's Z-span. (It is never
+        // within the span when this runs — tick() forces APPROACH/tickGetOffTracks the moment
+        // onTracks() is true, precisely because you cannot board a moving carriage from the static
+        // bed.) Carriage floor (minY) at 65, mob feet at 63, mob 2 blocks off the −Z face.
+        AABB carriage = new AABB(10, 65, 10, 19, 70, 19);
+        BlockPos foot = new BlockPos(5, 63, 8);
+        // Below the lip → place one block SOUTH (+Z, across the near face) at foot level.
+        // Emphatically NOT east: the carriage is far to the +X here, and stepping along the rails
+        // builds a staircase that never approaches the deck. See horizontalDirToward's javadoc.
+        assertEquals(new BlockPos(5, 63, 9), BlockSourcePolicy.nextBridgePos(foot, carriage));
     }
 
     @Test
     void nextBridgePosNullOnceLevelWithCarriageBase() {
-        AABB carriage = new AABB(10, 65, 0, 19, 70, 9);
+        AABB carriage = new AABB(10, 65, 10, 19, 70, 19);
         // Feet already at the carriage base layer → jump the last step, no placement.
-        assertNull(BlockSourcePolicy.nextBridgePos(new BlockPos(5, 65, 4), carriage));
-        assertNull(BlockSourcePolicy.nextBridgePos(new BlockPos(5, 67, 4), carriage));
+        assertNull(BlockSourcePolicy.nextBridgePos(new BlockPos(5, 65, 8), carriage));
+        assertNull(BlockSourcePolicy.nextBridgePos(new BlockPos(5, 67, 8), carriage));
     }
 
     @Test
-    void horizontalDirTowardPicksDominantAxis() {
-        BlockPos foot = new BlockPos(5, 63, 4);
-        assertEquals(Direction.EAST,
-            BlockSourcePolicy.horizontalDirToward(foot, new AABB(10, 65, 0, 19, 70, 9)));
-        assertEquals(Direction.WEST,
-            BlockSourcePolicy.horizontalDirToward(foot, new AABB(-19, 65, 0, -10, 70, 9)));
+    void horizontalDirTowardCrossesTheNearZFace() {
+        // Standing outside the −Z face → step +Z (SOUTH) onto it; outside +Z → step −Z (NORTH).
         assertEquals(Direction.SOUTH,
             BlockSourcePolicy.horizontalDirToward(new BlockPos(4, 63, 5), new AABB(0, 65, 10, 9, 70, 19)));
         assertEquals(Direction.NORTH,
             BlockSourcePolicy.horizontalDirToward(new BlockPos(4, 63, 5), new AABB(0, 65, -19, 9, 70, -10)));
+    }
+
+    @Test
+    void horizontalDirTowardNeverStepsAlongTheTrack() {
+        // THE REGRESSION THIS GUARDS: the old implementation picked the dominant axis toward the box
+        // centre. Carriages are long in X and the line runs along X, so a mob off to one side got
+        // EAST/WEST — parallel to the rails — and bridged a staircase alongside the track that never
+        // approached the deck. Both cases below are strongly X-dominant and must still resolve in Z.
+        assertEquals(Direction.SOUTH,
+            BlockSourcePolicy.horizontalDirToward(new BlockPos(5, 63, 4), new AABB(10, 65, 10, 19, 70, 19)),
+            "far off in −X and −Z must still cross the near Z face, not run along the rails");
+        assertEquals(Direction.NORTH,
+            BlockSourcePolicy.horizontalDirToward(new BlockPos(80, 63, 40), new AABB(0, 65, 0, 40, 70, 9)),
+            "far off in +X and +Z must still cross the near Z face");
+    }
+
+    @Test
+    void horizontalDirTowardInsideTheSpanPicksTheNearerFace() {
+        // On the bed (Z within the carriage span) there is no "toward" — return the nearer face so
+        // the caller gets a stable answer instead of an arbitrary one that flips as the train slides.
+        AABB carriage = new AABB(0, 65, 0, 9, 70, 10);
+        assertEquals(Direction.NORTH,
+            BlockSourcePolicy.horizontalDirToward(new BlockPos(4, 63, 1), carriage), "nearer the −Z face");
+        assertEquals(Direction.SOUTH,
+            BlockSourcePolicy.horizontalDirToward(new BlockPos(4, 63, 8), carriage), "nearer the +Z face");
     }
 }

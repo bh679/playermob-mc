@@ -224,13 +224,25 @@ public final class BlockSourcePolicy {
         return foot.relative(horizontalDirToward(foot, carriageBox));
     }
 
-    /** The dominant horizontal {@link Direction} from {@code foot} toward {@code box}'s centre. */
+    /**
+     * The horizontal {@link Direction} a mob beside the track should step to get <em>onto</em>
+     * {@code box} — i.e. across the carriage's near Z face.
+     *
+     * <p><b>Always a Z step, never X.</b> This used to pick the dominant axis toward the box centre,
+     * which is wrong for a train: carriages are long in X and the line runs along X, so for any mob
+     * not near the carriage's X-centre — the common case — {@code |dx| > |dz|} and it returned
+     * EAST/WEST, <em>parallel to the rails</em>. Bridging then built a staircase running alongside
+     * the track that never got closer to the deck, and because the train slides in +X the chosen
+     * direction flipped sign as it passed, so the mob twitched between two cells and appeared to
+     * stall on its own stairs. The way aboard is across the near face, which is purely a Z move —
+     * the same reasoning {@code approachPoint} and {@code offBedColumn} already use.</p>
+     */
     public static Direction horizontalDirToward(BlockPos foot, AABB box) {
-        double dx = (box.minX + box.maxX) / 2.0 - (foot.getX() + 0.5);
-        double dz = (box.minZ + box.maxZ) / 2.0 - (foot.getZ() + 0.5);
-        if (Math.abs(dx) >= Math.abs(dz)) {
-            return dx >= 0 ? Direction.EAST : Direction.WEST;
-        }
-        return dz >= 0 ? Direction.SOUTH : Direction.NORTH;
+        double z = foot.getZ() + 0.5;
+        if (z < box.minZ) return Direction.SOUTH;      // outside the −Z face → step +Z toward it
+        if (z > box.maxZ) return Direction.NORTH;      // outside the +Z face → step −Z toward it
+        // Already within the carriage's Z-span (on the bed): head for the nearer face so the caller
+        // still gets a sensible, stable direction rather than an arbitrary one.
+        return z - box.minZ <= box.maxZ - z ? Direction.NORTH : Direction.SOUTH;
     }
 }
