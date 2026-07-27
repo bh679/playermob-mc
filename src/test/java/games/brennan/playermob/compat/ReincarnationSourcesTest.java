@@ -32,6 +32,17 @@ class ReincarnationSourcesTest {
         return new ReincarnationRecord(source, key, player, key, carriage, "", new CompoundTag(), List.of());
     }
 
+    /** A life whose snapshot carries the Free Play provenance flag ({@link FreePlayQuery#SNAPSHOT_TAG}). */
+    private static ReincarnationRecord recFP(String source, String key, int carriage, boolean freePlay) {
+        CompoundTag snap = new CompoundTag();
+        snap.putBoolean(FreePlayQuery.SNAPSHOT_TAG, freePlay);
+        return new ReincarnationRecord(source, key, new UUID(0L, 0L), key, carriage, "", snap, List.of());
+    }
+
+    private static boolean pickedFreePlay(ReincarnationRecord r) {
+        return NbtCompat.getBooleanOr(r.snapshot(), FreePlayQuery.SNAPSHOT_TAG, false);
+    }
+
     /** A remote source (the default kind) that returns a fixed candidate list (ignoring server/query). */
     private static ReincarnationSource source(ReincarnationRecord... records) {
         List<ReincarnationRecord> list = List.of(records);
@@ -200,5 +211,55 @@ class ReincarnationSourcesTest {
         assertEquals(4, ReincarnationSources.recentFrom(List.of(a, b), NO_SERVER, 10).size());
         assertEquals(3, ReincarnationSources.recentFrom(List.of(a, b), NO_SERVER, 3).size(), "capped to the limit");
         assertTrue(ReincarnationSources.recentFrom(List.of(a, b), NO_SERVER, 0).isEmpty());
+    }
+
+    // ---- Free Play provenance match (query.matchFreePlay) ----
+
+    @Test
+    void matchFreePlayTrueKeepsOnlyFreePlayLives() {
+        // Mixed pool; a Free Play player (matchFreePlay=TRUE) must only ever embody a Free Play life.
+        ReincarnationSource s = source(
+            recFP("dp", "legit1", 0, false), recFP("dp", "legit2", 0, false),
+            recFP("dp", "fp1", 0, true), recFP("dp", "fp2", 0, true));
+        ReincarnationQuery q = ReincarnationQuery.any(null).withMatchFreePlay(true);
+        for (int seed = 0; seed < 50; seed++) {
+            ReincarnationRecord pick = ReincarnationSources.pickFrom(
+                List.of(s), NO_SERVER, q, Set.of(), null, RandomSource.create(seed));
+            assertTrue(pickedFreePlay(pick), "a Free Play player must never embody a legit life");
+        }
+    }
+
+    @Test
+    void matchFreePlayFalseKeepsOnlyLegitLives() {
+        ReincarnationSource s = source(
+            recFP("dp", "legit1", 0, false), recFP("dp", "legit2", 0, false),
+            recFP("dp", "fp1", 0, true), recFP("dp", "fp2", 0, true));
+        ReincarnationQuery q = ReincarnationQuery.any(null).withMatchFreePlay(false);
+        for (int seed = 0; seed < 50; seed++) {
+            ReincarnationRecord pick = ReincarnationSources.pickFrom(
+                List.of(s), NO_SERVER, q, Set.of(), null, RandomSource.create(seed));
+            assertTrue(!pickedFreePlay(pick), "a legit player must never embody a Free Play life");
+        }
+    }
+
+    @Test
+    void matchFreePlayReturnsNullWhenNoLifeMatches() {
+        // A Free Play player, but every stored life is legit -> nothing eligible -> stay a fresh mob.
+        ReincarnationSource s = source(recFP("dp", "legit1", 0, false), recFP("dp", "legit2", 0, false));
+        ReincarnationQuery q = ReincarnationQuery.any(null).withMatchFreePlay(true);
+        assertNull(ReincarnationSources.pickFrom(List.of(s), NO_SERVER, q, Set.of(), null, RandomSource.create(1)));
+    }
+
+    @Test
+    void nullMatchFreePlayDoesNotFilter() {
+        // No provenance requested (dev-build bypass / no consumer): neither kind is filtered out — a
+        // legit-only pool and a Free-Play-only pool each still yield their (only) life.
+        ReincarnationQuery q = ReincarnationQuery.any(null); // matchFreePlay == null
+        ReincarnationRecord fromFp = ReincarnationSources.pickFrom(
+            List.of(source(recFP("dp", "fp", 0, true))), NO_SERVER, q, Set.of(), null, RandomSource.create(1));
+        ReincarnationRecord fromLegit = ReincarnationSources.pickFrom(
+            List.of(source(recFP("dp", "legit", 0, false))), NO_SERVER, q, Set.of(), null, RandomSource.create(1));
+        assertTrue(fromFp != null && pickedFreePlay(fromFp), "a Free Play life is not filtered when no provenance is requested");
+        assertTrue(fromLegit != null && !pickedFreePlay(fromLegit), "a legit life is not filtered when no provenance is requested");
     }
 }
