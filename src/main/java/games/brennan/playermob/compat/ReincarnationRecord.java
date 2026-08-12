@@ -34,15 +34,32 @@ import java.util.UUID;
  * @param carriage        Dungeon-Train room index the death happened in, or
  *                        {@link TrainConfinement#NO_CARRIAGE} if it didn't happen on a train
  * @param skinUrl         captured Mojang skin texture URL, or {@code ""} if none was captured
+ * @param difficulty      the vanilla difficulty this life was lived on (its serialized name), or
+ *                        {@code ""} when unknown — see {@link ReincarnationDifficulty}
  * @param snapshot        the opaque PlayerMob entity NBT to embody this life
  * @param friendSnapshots snapshots of the PlayerMobs that loved this player at death (may be empty)
  */
 public record ReincarnationRecord(String sourceId, String key, UUID playerId, String name,
-                                  int carriage, String skinUrl, CompoundTag snapshot,
+                                  int carriage, String skinUrl, String difficulty, CompoundTag snapshot,
                                   List<CompoundTag> friendSnapshots) {
+
+    /**
+     * A record whose difficulty is unknown — it answers to {@link ReincarnationDifficulty#LEGACY}. Kept
+     * so a source written before the difficulty partition still compiles and behaves as it did.
+     */
+    public ReincarnationRecord(String sourceId, String key, UUID playerId, String name,
+                               int carriage, String skinUrl, CompoundTag snapshot,
+                               List<CompoundTag> friendSnapshots) {
+        this(sourceId, key, playerId, name, carriage, skinUrl, "", snapshot, friendSnapshots);
+    }
 
     /** Pool-wide stable identity ({@code sourceId:key}) — keys the "already met this life" de-dup. */
     public String id() {
         return sourceId + ":" + key;
+    }
+
+    /** This life's effective partition — an unknown difficulty is {@link ReincarnationDifficulty#LEGACY}. */
+    public String partition() {
+        return ReincarnationDifficulty.partitionOf(difficulty);
     }
 }

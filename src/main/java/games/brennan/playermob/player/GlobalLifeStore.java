@@ -62,22 +62,48 @@ public final class GlobalLifeStore {
     private static final String TAG_CARRIAGE = "Carriage";
     private static final String TAG_SNAPSHOT = "Snapshot";
     private static final String TAG_FRIENDS = "Friends";
+    private static final String TAG_DIFFICULTY = "Difficulty";
 
     /** NBT key, inside a friend snapshot, holding the label its friend-echo is titled with ("Echo of &lt;label&gt;"). */
     public static final String FRIEND_LABEL_KEY = "FriendLabel";
 
     /**
-     * One recorded death: the player's own reincarnation snapshot, where/when it happened, and
-     * snapshots of the PlayerMobs that loved them at death ({@code friendSnapshots}) — replayed as
-     * "friend-echoes" beside an echo of this life. Empty when no loved one was nearby, and for every
-     * pre-friend-pair record.
+     * The partition every record written before the difficulty partition existed belongs to — see
+     * {@link #partitionOf}. Deliberately not "no partition": an unreachable history is worse than one
+     * attributed to the difficulty essentially all of it was actually played on.
      */
-    public record DeathRecord(long id, UUID uuid, String name, int carriage,
+    public static final String LEGACY_DIFFICULTY = "normal";
+
+    /**
+     * One recorded death: the player's own reincarnation snapshot, where/when it happened, the
+     * difficulty it happened on, and snapshots of the PlayerMobs that loved them at death
+     * ({@code friendSnapshots}) — replayed as "friend-echoes" beside an echo of this life. Friends are
+     * empty when no loved one was nearby, and for every pre-friend-pair record.
+     *
+     * <p>{@code difficulty} is the vanilla difficulty's serialized name at the moment of death
+     * ({@code peaceful}/{@code easy}/{@code normal}/{@code hard}), or {@code ""} for a record written
+     * before it was captured. A consumer that isolates its echoes by difficulty (Dungeon Train does)
+     * only draws lives from the matching partition; read it through {@link #partitionOf} so the
+     * untagged history keeps a home.</p>
+     */
+    public record DeathRecord(long id, UUID uuid, String name, int carriage, String difficulty,
                               CompoundTag snapshot, List<CompoundTag> friendSnapshots) {
         /** A death with no logged friends — keeps the legacy/test call-sites that predate friend capture. */
         public DeathRecord(long id, UUID uuid, String name, int carriage, CompoundTag snapshot) {
-            this(id, uuid, name, carriage, snapshot, List.of());
+            this(id, uuid, name, carriage, "", snapshot, List.of());
         }
+
+        /** A death with friends but no captured difficulty — the call-sites that predate the partition. */
+        public DeathRecord(long id, UUID uuid, String name, int carriage, CompoundTag snapshot,
+                           List<CompoundTag> friendSnapshots) {
+            this(id, uuid, name, carriage, "", snapshot, friendSnapshots);
+        }
+    }
+
+    /** A record's effective partition: an untagged (or null) difficulty is {@link #LEGACY_DIFFICULTY}. */
+    public static String partitionOf(DeathRecord r) {
+        String d = r.difficulty();
+        return d == null || d.isEmpty() ? LEGACY_DIFFICULTY : d;
     }
 
     private static MinecraftServer cachedServer;
@@ -164,9 +190,23 @@ public final class GlobalLifeStore {
      * Append a death to the log and persist, together with snapshots of the PlayerMobs that loved
      * this player at death ({@code friends}) for later friend-echo replay. All tags are
      * defensively copied so the caller can't mutate the stored record.
+     *
+     * <p>Records the death as untagged — it lands in the {@link #LEGACY_DIFFICULTY} partition. Prefer
+     * {@link #append(UUID, String, int, String, CompoundTag, List)} so the life is filed under the
+     * difficulty it was actually lived on.</p>
      */
     public void append(UUID id, String name, int carriage, CompoundTag snapshot, List<CompoundTag> friends) {
-        history.add(new DeathRecord(nextId++, id, name, carriage, snapshot.copy(), copyAll(friends)));
+        append(id, name, carriage, "", snapshot, friends);
+    }
+
+    /**
+     * Append a death recorded on {@code difficulty} (a vanilla difficulty's serialized name; {@code ""}
+     * for unknown). All tags are defensively copied so the caller can't mutate the stored record.
+     */
+    public void append(UUID id, String name, int carriage, String difficulty, CompoundTag snapshot,
+                       List<CompoundTag> friends) {
+        history.add(new DeathRecord(nextId++, id, name, carriage, difficulty == null ? "" : difficulty,
+            snapshot.copy(), copyAll(friends)));
         save();
     }
 
@@ -190,10 +230,19 @@ public final class GlobalLifeStore {
      * registry's job; this is just the eligible set.
      */
     public List<DeathRecord> recordsInBand(int carriage) {
+        return recordsInBand(carriage, null);
+    }
+
+    /**
+     * As {@link #recordsInBand(int)}, restricted to the {@code difficulty} partition — the deaths this
+     * difficulty's echoes may be drawn from. {@code null} (or {@code ""}) means "every partition", the
+     * behaviour before difficulty isolation existed.
+     */
+    public List<DeathRecord> recordsInBand(int carriage, String difficulty) {
         if (carriage == NO_CARRIAGE) {
             return List.of();
         }
-        return eligible(history, carriage, CARRIAGE_RADIUS);
+        return eligible(history, carriage, CARRIAGE_RADIUS, difficulty);
     }
 
     /** Every death belonging to {@code id}, oldest→newest (a fresh list; records are shared). */
@@ -229,6 +278,17 @@ public final class GlobalLifeStore {
      * filter — the recency/proximity-weighted pick over the result lives in the registry.
      */
     static List<DeathRecord> eligible(List<DeathRecord> historyOldestFirst, int spawnCarriage, int radius) {
+        return eligible(historyOldestFirst, spawnCarriage, radius, null);
+    }
+
+    /**
+     * As {@link #eligible(List, int, int)}, also restricted to the {@code difficulty} partition
+     * (compared through {@link #partitionOf}, so untagged records answer to
+     * {@link #LEGACY_DIFFICULTY}). A null/blank {@code difficulty} filters nothing.
+     */
+    static List<DeathRecord> eligible(List<DeathRecord> historyOldestFirst, int spawnCarriage, int radius,
+                                      String difficulty) {
+        boolean byPartition = difficulty != null && !difficulty.isEmpty();
         List<DeathRecord> out = new ArrayList<>();
         for (DeathRecord r : historyOldestFirst) {
             if (r.carriage() == NO_CARRIAGE) {
@@ -236,6 +296,9 @@ public final class GlobalLifeStore {
             }
             if (Math.abs((long) r.carriage() - spawnCarriage) > radius) {
                 continue;
+            }
+            if (byPartition && !partitionOf(r).equals(difficulty)) {
+                continue; // a life from another difficulty's isolated profile
             }
             out.add(r);
         }
@@ -254,6 +317,11 @@ public final class GlobalLifeStore {
                 entry.putString(TAG_NAME, r.name());
             }
             entry.putInt(TAG_CARRIAGE, r.carriage());
+            // Omitted when unknown, so a record written by a pre-partition build and one written now
+            // with no difficulty available round-trip to the same bytes.
+            if (r.difficulty() != null && !r.difficulty().isEmpty()) {
+                entry.putString(TAG_DIFFICULTY, r.difficulty());
+            }
             entry.put(TAG_SNAPSHOT, r.snapshot().copy());
             if (!r.friendSnapshots().isEmpty()) {
                 ListTag friends = new ListTag();
@@ -285,7 +353,8 @@ public final class GlobalLifeStore {
             maxId = Math.max(maxId, id);
             int carriage = NbtCompat.getIntOr(entry, TAG_CARRIAGE, NO_CARRIAGE);
             String name = NbtCompat.getStringOr(entry, TAG_NAME, null);
-            out.add(new DeathRecord(id, NbtCompat.getUUID(entry, TAG_UUID), name, carriage,
+            String difficulty = NbtCompat.getStringOr(entry, TAG_DIFFICULTY, "");
+            out.add(new DeathRecord(id, NbtCompat.getUUID(entry, TAG_UUID), name, carriage, difficulty,
                 NbtCompat.getCompoundOrEmpty(entry, TAG_SNAPSHOT), readFriendList(entry)));
         }
         // Back-compat: the pre-death-log global format stored one snapshot per player under "Lives".

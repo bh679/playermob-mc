@@ -123,6 +123,72 @@ class GlobalLifeStoreTest {
         assertEquals(List.of(1L, 2L, 4L), band.stream().map(DeathRecord::id).toList());
     }
 
+    // ---- difficulty partition (each vanilla difficulty keeps its own echoes) ----
+
+    @Test
+    void partitionOfTreatsAnUntaggedLifeAsTheLegacyDifficulty() {
+        assertEquals("normal", GlobalLifeStore.LEGACY_DIFFICULTY);
+        assertEquals("normal", GlobalLifeStore.partitionOf(rec(1, 1, 0, "old")));       // no difficulty
+        assertEquals("normal", GlobalLifeStore.partitionOf(
+            new DeathRecord(2, uuid(2), "P2", 0, "", snap("blank"), List.of())));
+        assertEquals("hard", GlobalLifeStore.partitionOf(
+            new DeathRecord(3, uuid(3), "P3", 0, "hard", snap("h"), List.of())));
+    }
+
+    @Test
+    void writeReadRoundTripPreservesTheDifficulty() {
+        DeathRecord onHard = new DeathRecord(1, uuid(1), "P1", 0, "hard", snap("h"), List.of());
+        DeathRecord untagged = rec(2, 2, 5, "old"); // the shape a pre-partition lives.dat holds
+
+        CompoundTag tag = new CompoundTag();
+        GlobalLifeStore.write(tag, List.of(onHard, untagged), 3L);
+        List<DeathRecord> back = new ArrayList<>();
+        GlobalLifeStore.read(tag, back);
+
+        assertEquals("hard", back.get(0).difficulty());
+        assertEquals("", back.get(1).difficulty(), "an unknown difficulty round-trips as unknown");
+        // Unknown is written as an ABSENT key, so the record is byte-identical to a pre-partition one.
+        assertTrue(NbtCompat.getListOfType(tag, "Deaths", 10).size() == 2);
+        assertEquals("", NbtCompat.getStringOr(NbtCompat.compoundAt(
+            NbtCompat.getListOfType(tag, "Deaths", 10), 1), "Difficulty", ""));
+    }
+
+    @Test
+    void eligibleRestrictsToOnePartition() {
+        List<DeathRecord> history = List.of(
+            rec(1, 1, 0, "untagged"),                                                    // -> normal
+            new DeathRecord(2, uuid(2), "P2", 0, "normal", snap("normal"), List.of()),
+            new DeathRecord(3, uuid(3), "P3", 0, "hard", snap("hard"), List.of()),
+            new DeathRecord(4, uuid(4), "P4", 0, "peaceful", snap("peaceful"), List.of()));
+
+        assertEquals(List.of(1L, 2L),
+            GlobalLifeStore.eligible(history, 0, 30, "normal").stream().map(DeathRecord::id).toList(),
+            "the untagged history is reachable on Normal");
+        assertEquals(List.of(3L),
+            GlobalLifeStore.eligible(history, 0, 30, "hard").stream().map(DeathRecord::id).toList());
+        assertEquals(List.of(),
+            GlobalLifeStore.eligible(history, 0, 30, "easy").stream().map(DeathRecord::id).toList());
+        assertEquals(List.of(1L, 2L, 3L, 4L),
+            GlobalLifeStore.eligible(history, 0, 30, null).stream().map(DeathRecord::id).toList(),
+            "no partition requested -> no partition filter");
+    }
+
+    @Test
+    void recordsInBandRestrictsToOnePartition() {
+        GlobalLifeStore store = new GlobalLifeStore();
+        store.append(uuid(1), "A", 0, "hard", snap("onHard"), List.of());
+        store.append(uuid(2), "B", 0, "peaceful", snap("onPeaceful"), List.of());
+        store.append(uuid(3), "C", 0, snap("untagged")); // legacy append -> normal
+
+        assertEquals(List.of("onHard"), markers(store.recordsInBand(0, "hard")));
+        assertEquals(List.of("untagged"), markers(store.recordsInBand(0, "normal")));
+        assertEquals(List.of("onHard", "onPeaceful", "untagged"), markers(store.recordsInBand(0)));
+    }
+
+    private static List<String> markers(List<DeathRecord> records) {
+        return records.stream().map(r -> NbtCompat.getStringOr(r.snapshot(), "Marker", "")).toList();
+    }
+
     // ---- query accessors consumed by the reincarnation source registry ----
 
     @Test

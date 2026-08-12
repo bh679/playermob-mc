@@ -30,6 +30,7 @@ public final class PlayerMobConfig {
     private static final String FILE = "playermob.properties";
 
     private static final String KEY_ECHO_FRIEND_CHANCE = "echoFriendChance";
+    private static final String KEY_REINCARNATION_DIFFICULTY_ISOLATION = "reincarnationDifficultyIsolation";
     private static final String KEY_DEBUG_SPAWN_LOG = "debugSpawnLog";
     private static final String KEY_TRAIN_DIG_THROUGH = "trainDigThrough";
     private static final String KEY_TRAIN_FOLLOW_LOVED_PLAYER = "trainFollowLovedPlayer";
@@ -59,6 +60,11 @@ public final class PlayerMobConfig {
 
     /** Default chance a Dungeon-Train echo with logged friends also brings back a friend-echo. */
     public static final float DEFAULT_ECHO_FRIEND_CHANCE = 0.40F;
+    /**
+     * Echoes are partitioned by the vanilla difficulty their life was lived on; on by default. Off
+     * pools every difficulty together — the behaviour before the partition existed.
+     */
+    public static final boolean DEFAULT_REINCARNATION_DIFFICULTY_ISOLATION = true;
     /** Debug spawn logging ships off — when on it broadcasts a chat line on every DT auto-spawn. */
     public static final boolean DEFAULT_DEBUG_SPAWN_LOG = false;
     /** PlayerMobs dig through fill (ice/dirt/mud/moss/logs) blocking a Dungeon-Train carriage; on by default. */
@@ -182,6 +188,7 @@ public final class PlayerMobConfig {
     }
 
     private static volatile float echoFriendChance = DEFAULT_ECHO_FRIEND_CHANCE;
+    private static volatile boolean reincarnationDifficultyIsolation = DEFAULT_REINCARNATION_DIFFICULTY_ISOLATION;
     private static volatile boolean debugSpawnLog = DEFAULT_DEBUG_SPAWN_LOG;
     private static volatile boolean trainDigThrough = DEFAULT_TRAIN_DIG_THROUGH;
     private static volatile boolean trainFollowLovedPlayer = DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER;
@@ -214,6 +221,15 @@ public final class PlayerMobConfig {
     }
 
     /** When true, every DT auto-spawn logs + broadcasts a colour-coded chat message (see {@code DtSpawnDebug}). */
+    /**
+     * When true (default), a past life is only ever reincarnated on the vanilla difficulty it was lived
+     * on — see {@code ReincarnationDifficulty}. Lives logged before the partition existed count as
+     * {@code normal}. Off pools every difficulty together, as builds before this did.
+     */
+    public static boolean reincarnationDifficultyIsolation() {
+        return reincarnationDifficultyIsolation;
+    }
+
     public static boolean debugSpawnLog() {
         return debugSpawnLog;
     }
@@ -543,6 +559,7 @@ public final class PlayerMobConfig {
             Properties props = parseProperties(Files.readAllLines(file));
             Values v = parse(props);
             echoFriendChance = v.echoFriendChance();
+            reincarnationDifficultyIsolation = v.reincarnationDifficultyIsolation();
             debugSpawnLog = v.debugSpawnLog();
             trainDigThrough = v.trainDigThrough();
             trainFollowLovedPlayer = v.trainFollowLovedPlayer();
@@ -584,7 +601,8 @@ public final class PlayerMobConfig {
     }
 
     /** Parsed, validated values — split out (pure, no I/O) so the parsing rules are unit-tested. */
-    record Values(float echoFriendChance, boolean debugSpawnLog, boolean trainDigThrough,
+    record Values(float echoFriendChance, boolean reincarnationDifficultyIsolation,
+                  boolean debugSpawnLog, boolean trainDigThrough,
                   boolean trainFollowLovedPlayer, boolean naturalSpawnEnabled,
                   AutoNameMode autoNameMode,
                   boolean requireArrows, boolean seekArrowsWhenEmpty,
@@ -600,6 +618,8 @@ public final class PlayerMobConfig {
         float[] engage = parseEngageDistances(props);
         return new Values(
             clamp01(parseFloat(props.getProperty(KEY_ECHO_FRIEND_CHANCE), DEFAULT_ECHO_FRIEND_CHANCE)),
+            parseBool(props.getProperty(KEY_REINCARNATION_DIFFICULTY_ISOLATION),
+                DEFAULT_REINCARNATION_DIFFICULTY_ISOLATION),
             parseBool(props.getProperty(KEY_DEBUG_SPAWN_LOG), DEFAULT_DEBUG_SPAWN_LOG),
             parseBool(props.getProperty(KEY_TRAIN_DIG_THROUGH), DEFAULT_TRAIN_DIG_THROUGH),
             parseBool(props.getProperty(KEY_TRAIN_FOLLOW_LOVED_PLAYER), DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER),
@@ -804,7 +824,13 @@ public final class PlayerMobConfig {
             .append("#   a bundled default; 1.0 = always custom when a custom skin is available (a mob with no\n")
             .append("#   custom skin available keeps its bundled look regardless). Toggle live with\n")
             .append("#   /playermob skin chance <0.0-1.0> (session override). Default 0.4.\n")
+            .append("# reincarnationDifficultyIsolation: when true (default), a past life is only ever\n")
+            .append("#   reincarnated on the vanilla difficulty it was lived on — echoes of a Hard run stay in\n")
+            .append("#   Hard, Peaceful in Peaceful. Lives logged before this existed count as normal. Set false\n")
+            .append("#   to pool every difficulty together, as older builds did.\n")
             .append(KEY_ECHO_FRIEND_CHANCE).append("=").append(DEFAULT_ECHO_FRIEND_CHANCE).append("\n")
+            .append(KEY_REINCARNATION_DIFFICULTY_ISOLATION).append("=")
+            .append(DEFAULT_REINCARNATION_DIFFICULTY_ISOLATION).append("\n")
             .append(KEY_DEBUG_SPAWN_LOG).append("=").append(DEFAULT_DEBUG_SPAWN_LOG).append("\n")
             .append(KEY_TRAIN_DIG_THROUGH).append("=").append(DEFAULT_TRAIN_DIG_THROUGH).append("\n")
             .append(KEY_TRAIN_FOLLOW_LOVED_PLAYER).append("=").append(DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER).append("\n")

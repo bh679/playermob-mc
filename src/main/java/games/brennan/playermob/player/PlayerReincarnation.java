@@ -6,6 +6,7 @@ import games.brennan.playermob.PlayerMobRegistry;
 import games.brennan.playermob.compat.PlayerMobSpawnHooks;
 import games.brennan.playermob.compat.FreePlayQuery;
 import games.brennan.playermob.compat.ReincarnationCaptureGate;
+import games.brennan.playermob.compat.ReincarnationDifficulty;
 import games.brennan.playermob.compat.ReincarnationQuery;
 import games.brennan.playermob.compat.ReincarnationRecord;
 import games.brennan.playermob.compat.ReincarnationSources;
@@ -119,7 +120,10 @@ public final class PlayerReincarnation {
                 List<CompoundTag> friends = captureFriendSnapshots(level, player);
                 // The completed snapshot is appended to the GLOBAL death log (cross-world).
                 GlobalLifeStore global = GlobalLifeStore.get(level.getServer());
-                global.append(player.getUUID(), profileName(player), carriage, snapshot, friends);
+                // File the life under the difficulty it was lived on, so it is only ever offered back
+                // there (see ReincarnationDifficulty).
+                global.append(player.getUUID(), profileName(player), carriage,
+                    ReincarnationDifficulty.keyFor(level), snapshot, friends);
             }
             // A new life begins on respawn whether or not the death was captured. The in-progress
             // tally is world-scoped, so reset it (a skipped life must not taint a later snapshot);
@@ -177,6 +181,9 @@ public final class PlayerReincarnation {
             Player nearest = level.getNearestPlayer(mob, -1.0);
             UUID owner = nearest == null ? null : nearest.getUUID();
             ReincarnationQuery query = ReincarnationQuery.byCarriage(spawnCarriage, owner);
+            // Difficulty partition: draw only from lives lived on THIS difficulty (config, default on),
+            // so each difficulty's echoes stay inside its own isolated profile.
+            query = query.withDifficulty(ReincarnationDifficulty.filterFor(level));
             // Provenance match: unless a consumer disables it (dev builds), a life reincarnates only
             // for a player whose Free Play state matches the life's — Free Play echoes stay in Free
             // Play, legit in legit. Only applied when the nearby player is a real ServerPlayer; with

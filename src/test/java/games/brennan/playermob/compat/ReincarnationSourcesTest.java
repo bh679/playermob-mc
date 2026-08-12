@@ -262,4 +262,71 @@ class ReincarnationSourcesTest {
         assertTrue(fromFp != null && pickedFreePlay(fromFp), "a Free Play life is not filtered when no provenance is requested");
         assertTrue(fromLegit != null && !pickedFreePlay(fromLegit), "a legit life is not filtered when no provenance is requested");
     }
+
+    // ---- difficulty partition (query.difficulty) ----
+
+    /** A life lived on {@code difficulty} ({@code ""} = a record written before the partition existed). */
+    private static ReincarnationRecord recDiff(String source, String key, String difficulty) {
+        return new ReincarnationRecord(source, key, new UUID(0L, 0L), key, 0, "", difficulty,
+            new CompoundTag(), List.of());
+    }
+
+    @Test
+    void difficultyPartitionKeepsOnlyLivesFromThatDifficulty() {
+        ReincarnationSource s = source(
+            recDiff("dp", "hard1", "hard"), recDiff("dp", "hard2", "hard"),
+            recDiff("dp", "peaceful", "peaceful"), recDiff("dp", "easy", "easy"));
+        ReincarnationQuery q = ReincarnationQuery.any(null).withDifficulty("hard");
+        for (int seed = 0; seed < 50; seed++) {
+            ReincarnationRecord pick = ReincarnationSources.pickFrom(
+                List.of(s), NO_SERVER, q, Set.of(), null, RandomSource.create(seed));
+            assertEquals("hard", pick.partition(), "a Hard run must never meet another difficulty's echo");
+        }
+    }
+
+    @Test
+    void anUntaggedLifeIsOfferedOnNormalOnly() {
+        // The whole pre-partition history: no difficulty recorded, so it belongs to Normal.
+        ReincarnationSource s = source(recDiff("pm", "legacy", ""));
+        assertEquals("pm:legacy", ReincarnationSources.pickFrom(
+            List.of(s), NO_SERVER, ReincarnationQuery.any(null).withDifficulty("normal"),
+            Set.of(), null, RandomSource.create(1)).id());
+        assertNull(ReincarnationSources.pickFrom(
+            List.of(s), NO_SERVER, ReincarnationQuery.any(null).withDifficulty("hard"),
+            Set.of(), null, RandomSource.create(1)));
+    }
+
+    @Test
+    void aRemotePoolThatIgnoredTheFilterIsStillPartitionedLocally() {
+        // An older relay drops the difficulty parameter and returns the whole band. The local filter is
+        // the backstop that keeps another difficulty's echoes out regardless.
+        ReincarnationSource stale = source(recDiff("dp", "peaceful", "peaceful"), recDiff("dp", "hard", "hard"));
+        ReincarnationRecord pick = ReincarnationSources.pickFrom(
+            List.of(stale), NO_SERVER, ReincarnationQuery.any(null).withDifficulty("hard"),
+            Set.of(), null, RandomSource.create(3));
+        assertEquals("dp:hard", pick.id());
+    }
+
+    @Test
+    void noDifficultyRequestedDoesNotFilter() {
+        // Isolation off (or no difficulty readable): every partition is eligible, as before. Asserted
+        // one pool at a time — with both in one pool the recency weighting would almost always return
+        // the newer life, which says nothing about filtering.
+        ReincarnationQuery q = ReincarnationQuery.any(null).withDifficulty(null);
+        assertEquals("dp:hard", ReincarnationSources.pickFrom(
+            List.of(source(recDiff("dp", "hard", "hard"))), NO_SERVER, q, Set.of(), null,
+            RandomSource.create(1)).id());
+        assertEquals("dp:peaceful", ReincarnationSources.pickFrom(
+            List.of(source(recDiff("dp", "peaceful", "peaceful"))), NO_SERVER, q, Set.of(), null,
+            RandomSource.create(1)).id());
+    }
+
+    @Test
+    void withDifficultyTreatsBlankAsNoFilterAndKeepsTheFreePlayMatch() {
+        ReincarnationQuery q = ReincarnationQuery.any(null).withMatchFreePlay(true).withDifficulty("");
+        assertNull(q.difficulty(), "a blank partition is no partition");
+        assertEquals(Boolean.TRUE, q.matchFreePlay(), "the provenance match survives a partition change");
+        assertEquals("hard", q.withDifficulty("hard").difficulty());
+        assertEquals(Boolean.TRUE, q.withDifficulty("hard").withMatchFreePlay(true).matchFreePlay());
+    }
 }

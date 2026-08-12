@@ -20,9 +20,22 @@ import java.util.UUID;
  * enforcement / dev bypass), {@code TRUE}/{@code FALSE} = keep only lives whose stored Free Play
  * flag equals it. Selection reads it in {@code ReincarnationSources.liveCandidates}.</p>
  *
+ * <p>{@link #difficulty()} carries the requested partition: {@code null} = don't filter, else keep only
+ * lives lived on that vanilla difficulty (untagged lives answering to
+ * {@link ReincarnationDifficulty#LEGACY}). Selection reads it in
+ * {@code ReincarnationSources.liveCandidates}; a source that can pre-filter — the local death log, or a
+ * remote pool that can push the filter server-side — should also honour it so the per-band candidate cap
+ * isn't spent on lives from another difficulty.</p>
+ *
  * <p>A pure value object (uuids only) so selection is unit-testable without a world.</p>
  */
-public record ReincarnationQuery(Mode mode, int carriage, UUID player, UUID owner, Boolean matchFreePlay) {
+public record ReincarnationQuery(Mode mode, int carriage, UUID player, UUID owner, Boolean matchFreePlay,
+                                 String difficulty) {
+
+    /** A query with no difficulty partition — the shape before difficulty isolation existed. */
+    public ReincarnationQuery(Mode mode, int carriage, UUID player, UUID owner, Boolean matchFreePlay) {
+        this(mode, carriage, player, owner, matchFreePlay, null);
+    }
 
     /** Which lives qualify for the request. */
     public enum Mode { CARRIAGE, PLAYER, ANY }
@@ -48,6 +61,15 @@ public record ReincarnationQuery(Mode mode, int carriage, UUID player, UUID owne
      * players and legit with legit.
      */
     public ReincarnationQuery withMatchFreePlay(Boolean matchFreePlay) {
-        return new ReincarnationQuery(mode, carriage, player, owner, matchFreePlay);
+        return new ReincarnationQuery(mode, carriage, player, owner, matchFreePlay, difficulty);
+    }
+
+    /**
+     * A copy of this query restricted to the {@code difficulty} partition ({@code null}/{@code ""} = no
+     * partition filter). Used at spawn to keep each difficulty's echoes inside its own profile.
+     */
+    public ReincarnationQuery withDifficulty(String difficulty) {
+        String d = difficulty == null || difficulty.isEmpty() ? null : difficulty;
+        return new ReincarnationQuery(mode, carriage, player, owner, matchFreePlay, d);
     }
 }

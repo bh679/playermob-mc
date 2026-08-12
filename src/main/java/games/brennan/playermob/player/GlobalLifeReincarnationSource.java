@@ -41,7 +41,10 @@ public final class GlobalLifeReincarnationSource implements ReincarnationSource 
     public List<ReincarnationRecord> candidates(MinecraftServer server, ReincarnationQuery query) {
         GlobalLifeStore store = GlobalLifeStore.get(server);
         List<GlobalLifeStore.DeathRecord> records = switch (query.mode()) {
-            case CARRIAGE -> store.recordsInBand(query.carriage());
+            // Partition pushed into the band filter, not left to the caller: the band is trimmed to the
+            // newest few candidates, so filtering afterwards would let another difficulty's lives eat the
+            // whole allowance and leave nothing to reincarnate.
+            case CARRIAGE -> store.recordsInBand(query.carriage(), query.difficulty());
             case PLAYER -> query.player() == null ? List.of() : store.recordsForPlayer(query.player());
             case ANY -> store.allRecords();
         };
@@ -73,6 +76,7 @@ public final class GlobalLifeReincarnationSource implements ReincarnationSource 
             r.name() == null ? "" : r.name(),
             r.carriage(),
             skinUrl,
+            r.difficulty(),
             snapshot,
             copyAll(r.friendSnapshots()));
     }

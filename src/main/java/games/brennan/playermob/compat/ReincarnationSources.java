@@ -136,6 +136,7 @@ public final class ReincarnationSources {
         try {
             List<ReincarnationRecord> candidates = source.candidates(server, query);
             Boolean wantFreePlay = query.matchFreePlay();
+            String wantDifficulty = query.difficulty();
             List<ReincarnationRecord> live = new ArrayList<>(candidates.size());
             for (ReincarnationRecord r : candidates) {
                 if (seen.contains(r.id())) {
@@ -149,6 +150,13 @@ public final class ReincarnationSources {
                 // consumed. wantFreePlay == null means no filter (dev bypass / no consumer).
                 if (wantFreePlay != null
                         && NbtCompat.getBooleanOr(r.snapshot(), FreePlayQuery.SNAPSHOT_TAG, false) != wantFreePlay) {
+                    continue;
+                }
+                // Difficulty partition: a life belongs to the difficulty it was lived on. Enforced here
+                // for EVERY source, including remote ones that already filtered their side — a pool that
+                // can't (or an older relay that ignores the parameter) must not leak another
+                // difficulty's echoes in. null = no partition filter.
+                if (wantDifficulty != null && !r.partition().equals(wantDifficulty)) {
                     continue;
                 }
                 live.add(r);
