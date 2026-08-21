@@ -142,6 +142,38 @@ class FeelingRecordTest {
         assertEquals(2, moved.lastCarriageIndex());
     }
 
+    // ---- provocation ----
+
+    @Test
+    void withProvokedLatchesOnceAndLeavesTheOriginalUntouched() {
+        FeelingRecord neutral = FeelingRecord.NEUTRAL;
+        assertFalse(neutral.provoked());
+        FeelingRecord picked = neutral.withProvoked();
+        assertTrue(picked.provoked());
+        assertFalse(neutral.provoked(), "the original record is untouched");
+        assertSame(picked, picked.withProvoked(), "already provoked → same instance");
+    }
+
+    @Test
+    void provocationSurvivesEveryOtherTransition() {
+        FeelingRecord r = FeelingRecord.NEUTRAL.withProvoked()
+            .afterAttack(-2.0f)
+            .afterCrouch()
+            .afterDefend()
+            .afterCarriageAdvance(1)
+            .withWitnessTick(42)
+            .adjusted(0.5f)
+            .withFeeling(6.0f);
+        assertTrue(r.provoked());
+    }
+
+    @Test
+    void aProvokedRecordIsNotDefault() {
+        // Otherwise the compact save path would drop the flag on an untouched relationship.
+        assertTrue(FeelingRecord.NEUTRAL.isDefault());
+        assertFalse(FeelingRecord.NEUTRAL.withProvoked().isDefault());
+    }
+
     // ---- clamp / magnitude ----
 
     @Test

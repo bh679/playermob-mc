@@ -233,6 +233,56 @@ class FeelingLedgerTest {
         assertFalse(ledger.has(weakest), "the weakest bare entry is pruned first");
     }
 
+    // ---- provocation ----
+
+    @Test
+    void markProvokedLatchesPerIndividual() {
+        FeelingLedger ledger = new FeelingLedger();
+        UUID hunted = UUID.randomUUID();
+        UUID bystander = UUID.randomUUID();
+        assertFalse(ledger.isProvoked(hunted), "unknown individual is not provoked");
+        ledger.markProvoked(hunted);
+        assertTrue(ledger.isProvoked(hunted));
+        assertFalse(ledger.isProvoked(bystander), "provocation does not spill to others");
+        ledger.markProvoked(hunted);   // idempotent
+        assertTrue(ledger.isProvoked(hunted));
+    }
+
+    @Test
+    void provocationSurvivesSaveLoad() {
+        FeelingLedger src = new FeelingLedger();
+        UUID hunted = UUID.randomUUID();
+        UUID gifted = UUID.randomUUID();
+        src.markProvoked(hunted);
+        src.adjust(gifted, 1.0f);
+        CompoundTag tag = new CompoundTag();
+        src.save(tag);
+
+        FeelingLedger back = new FeelingLedger();
+        back.load(tag);
+        assertTrue(back.isProvoked(hunted), "a mob that picked the fight still picked it after a reload");
+        assertFalse(back.isProvoked(gifted));
+        assertEquals(6.0f, back.feelingToward(gifted), EPS);
+    }
+
+    @Test
+    void entryWithoutTheProvokedKeyLoadsUnprovoked() {
+        // A save written before the flag existed: the player struck first, as that build assumed.
+        UUID id = UUID.randomUUID();
+        CompoundTag entry = new CompoundTag();
+        NbtCompat.putUUID(entry, "UUID", id);
+        entry.putFloat("Feeling", 4.0f);
+        ListTag list = new ListTag();
+        list.add(entry);
+        CompoundTag tag = new CompoundTag();
+        tag.put(FeelingLedger.TAG_FEELINGS, list);
+
+        FeelingLedger back = new FeelingLedger();
+        back.load(tag);
+        assertFalse(back.isProvoked(id));
+        assertEquals(4.0f, back.feelingToward(id), EPS);
+    }
+
     // ---- lossy float sync channel (unchanged) ----
 
     @Test

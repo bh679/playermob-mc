@@ -770,6 +770,22 @@
       "released": true,
       "released_in": "v0.85.0",
       "released_at": "2026-07-25T16:02:01Z"
+    },
+    {
+      "id": "echo-self-defence-weighting",
+      "version": "0.88.0",
+      "type": "feat",
+      "title": "Fighting back no longer marks you as a killer",
+      "summary": "When you die, the echo you leave behind is shaped by how you treated the people you met \u2014 but until now it couldn't tell murder from survival. Kills where something came for you first now count for a tenth as much, so a life spent defending yourself reincarnates near neutral instead of as a monster.",
+      "highlights": [
+        "Damage and kills against a mob that targeted or struck you first are weighed at 10% toward both Fight/Flight and Friendliness.",
+        "Your own first strike still counts in full \u2014 the discount only applies once the other side has picked the fight.",
+        "Hate-seeded death-note echoes hunt you, so cutting one down barely stains the life you leave behind."
+      ],
+      "date": "2026-08-21",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
