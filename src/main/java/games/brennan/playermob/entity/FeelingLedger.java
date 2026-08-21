@@ -40,6 +40,7 @@ public final class FeelingLedger {
     static final String TAG_CROUCH_CAP = "CrouchCap";
     static final String TAG_DEFEND_COUNT = "DefendCount";
     static final String TAG_LAST_CARRIAGE = "LastCarriage";
+    static final String TAG_PROVOKED = "Provoked";
     // NB: lastWitnessTick is deliberately NOT persisted — it's session-scoped (see FeelingRecord).
 
     public static final float DEFAULT = FeelingRecord.DEFAULT;
@@ -110,6 +111,23 @@ public final class FeelingLedger {
      */
     public void recordAttack(UUID id, float delta) {
         put(id, recordFor(id).afterAttack(delta));
+    }
+
+    /**
+     * Latch "this mob picked the fight with {@code id}" — called once it acquires them as a
+     * combat target. Idempotent, and never cleared (see {@link FeelingRecord#withProvoked}).
+     */
+    public void markProvoked(UUID id) {
+        FeelingRecord before = recordFor(id);
+        FeelingRecord after = before.withProvoked();
+        if (after != before) {
+            put(id, after);
+        }
+    }
+
+    /** True once this mob has taken combat intent toward {@code id}; false for anyone unknown. */
+    public boolean isProvoked(UUID id) {
+        return recordFor(id).provoked();
     }
 
     /** Set the feeling toward {@code id} to an absolute value (clamped), keeping other state. */
@@ -255,6 +273,9 @@ public final class FeelingLedger {
             if (r.lastCarriageIndex() != FeelingRecord.NO_CARRIAGE) {
                 entry.putInt(TAG_LAST_CARRIAGE, r.lastCarriageIndex());
             }
+            if (r.provoked()) {
+                entry.putBoolean(TAG_PROVOKED, true);
+            }
             // lastWitnessTick is session-scoped (combat ticks reset on reload) — not persisted.
             list.add(entry);
         }
@@ -282,9 +303,13 @@ public final class FeelingLedger {
                 float crouchCap = NbtCompat.getFloatOr(entry, TAG_CROUCH_CAP, FeelingRecord.CROUCH_CAP_BASE);
                 int defendCount = NbtCompat.getIntOr(entry, TAG_DEFEND_COUNT, 0);
                 int lastCarriage = NbtCompat.getIntOr(entry, TAG_LAST_CARRIAGE, FeelingRecord.NO_CARRIAGE);
+                // Provocation IS persisted (unlike lastWitnessTick): a mob that hunted a player
+                // before a reload still started that fight afterwards. Missing key ⇒ false, so
+                // saves from before this flag existed read as "the player struck first".
+                boolean provoked = NbtCompat.getBooleanOr(entry, TAG_PROVOKED, false);
                 // lastWitnessTick resets to 0 on load — session-scoped debounce, not persisted.
                 feelings.put(NbtCompat.getUUID(entry, TAG_UUID), new FeelingRecord(
-                    feeling, crouchUsed, crouchCap, defendCount, lastCarriage, 0));
+                    feeling, crouchUsed, crouchCap, defendCount, lastCarriage, 0, provoked));
             }
         }
         prune();

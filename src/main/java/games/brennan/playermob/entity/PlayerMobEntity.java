@@ -953,6 +953,12 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
                 && (recovering || isIgnoredPlayer(target) || !TrainConfinement.allowsTarget(this, target))) {
             setTarget(null);   // recovering back onto a train preempts all combat
         }
+        // Whoever this mob is hunting, it picked that fight — latch it against the player so the
+        // blows they land back are scored as self-defence (PlayerLifeRecord.DEFENSIVE_SCALE).
+        // Read after the validity block above, so a target this tick rejected never counts.
+        if (getTarget() instanceof Player hunted) {
+            feelings.markProvoked(hunted.getUUID());
+        }
         tickAttackOrder();   // enforce a commanded attack's stop limit (duration / hearts / hit-back)
         tickOrderTimeout();  // abandon a movement order that outlived its timeout (default 2 min)
         latchTrainExploreDirection();
@@ -3706,9 +3712,12 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
                     // More aggressive mobs care less about being hit (DispositionResolver.attackScale).
                     feelings.recordAttack(attacker.getUUID(),
                         -amount * DMG_TO_FEELING * DispositionResolver.attackScale(fightFlight()));
-                    // Credit the real player's lifetime aggression by the damage dealt.
+                    // Credit the real player's lifetime aggression by the damage dealt — at a
+                    // tenth weight if this mob had already come for them. Read the flag BEFORE
+                    // the retaliation below can set it, so a first strike is never self-defence.
                     if (attacker instanceof ServerPlayer sp) {
-                        PlayerLifeStore.record(sp, PlayerLifeRecord.Signal.ATTACK, amount);
+                        PlayerLifeStore.record(sp, PlayerLifeRecord.Signal.ATTACK, amount,
+                            feelings.isProvoked(sp.getUUID()));
                     }
                     pushDispositionToClient();
                 }
@@ -3780,9 +3789,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     @Override
     public void die(DamageSource source) {
         closeOpenedContainer();
-        // Credit the real player who killed this mob with their lifetime aggression.
+        // Credit the real player who killed this mob with their lifetime aggression — discounted
+        // when this mob was the aggressor (it hunted them, they finished it).
         if (getKillCredit() instanceof ServerPlayer sp) {
-            PlayerLifeStore.record(sp, PlayerLifeRecord.Signal.KILL, 1);
+            PlayerLifeStore.record(sp, PlayerLifeRecord.Signal.KILL, 1,
+                feelings.isProvoked(sp.getUUID()));
         }
         // Capture the death message BEFORE super.die(): super calls
         // CombatTracker.recheckStatus(), which clears the combat entries, so

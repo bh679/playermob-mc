@@ -44,28 +44,45 @@ public final class PlayerLifeRecord {
     /** Friendliness points gained per unit of kindness. */
     static final double KINDNESS_TO_FRIENDLY = 1.0;
 
+    /**
+     * Weight applied to damage and kills dealt in <em>self-defence</em> — against a mob that
+     * had already taken combat intent toward the player (see {@code FeelingRecord.provoked}).
+     * Fighting back still says something about you, but at a tenth of the weight of a fight
+     * you started: a player who only ever defends themselves reincarnates near neutral.
+     */
+    static final double DEFENSIVE_SCALE = 0.1;
+
     // ---- NBT keys ---------------------------------------------------------
     static final String TAG_DAMAGE = "DamageDealt";
     static final String TAG_KILLS = "Kills";
     static final String TAG_KINDNESS = "Kindness";
     static final String TAG_HARMS = "Harms";
     static final String TAG_ATTACKS = "Attacks";
+    static final String TAG_DEFENSIVE_DAMAGE = "DefensiveDamage";
+    static final String TAG_DEFENSIVE_KILLS = "DefensiveKills";
 
     /** A fresh life — no conduct recorded yet. */
-    public static final PlayerLifeRecord EMPTY = new PlayerLifeRecord(0.0F, 0, 0.0F, 0, 0);
+    public static final PlayerLifeRecord EMPTY = new PlayerLifeRecord(0.0F, 0, 0.0F, 0, 0, 0.0F, 0);
 
     private final float damageDealt;
     private final int kills;
     private final float kindness;
     private final int harms;
     private final int attacks;
+    /** Subset of {@link #damageDealt} dealt to mobs that had already picked the fight. */
+    private final float defensiveDamage;
+    /** Subset of {@link #kills} taken in self-defence. */
+    private final int defensiveKills;
 
-    PlayerLifeRecord(float damageDealt, int kills, float kindness, int harms, int attacks) {
+    PlayerLifeRecord(float damageDealt, int kills, float kindness, int harms, int attacks,
+                     float defensiveDamage, int defensiveKills) {
         this.damageDealt = damageDealt;
         this.kills = kills;
         this.kindness = kindness;
         this.harms = harms;
         this.attacks = attacks;
+        this.defensiveDamage = defensiveDamage;
+        this.defensiveKills = defensiveKills;
     }
 
     public float damageDealt() { return damageDealt; }
@@ -73,6 +90,10 @@ public final class PlayerLifeRecord {
     public float kindness() { return kindness; }
     public int harms() { return harms; }
     public int attacks() { return attacks; }
+    /** Of {@link #damageDealt}, how much landed on a mob that struck or stalked first. */
+    public float defensiveDamage() { return defensiveDamage; }
+    /** Of {@link #kills}, how many were self-defence. */
+    public int defensiveKills() { return defensiveKills; }
 
     /** True for a life with no recorded conduct (used to skip empty saves). */
     public boolean isEmpty() {
@@ -82,26 +103,43 @@ public final class PlayerLifeRecord {
     /** The kind of player→mob action being credited; routes a magnitude to the right tally. */
     public enum Signal { ATTACK, KILL, CROUCH, GIFT, TRAVEL, DEFEND, HARM }
 
+    /** As {@link #credit(Signal, float, boolean)}, treating the action as unprovoked. */
+    public PlayerLifeRecord credit(Signal signal, float magnitude) {
+        return credit(signal, magnitude, false);
+    }
+
     /**
      * Return a fresh record with {@code signal} applied. {@code magnitude} is the
      * damage amount for {@link Signal#ATTACK} and the gift value for
      * {@link Signal#GIFT}; it is ignored for the fixed-weight signals.
+     *
+     * <p>{@code defensive} marks an {@link Signal#ATTACK}/{@link Signal#KILL} against a mob
+     * that had already taken combat intent toward the player. The blow is tallied in full
+     * <em>and</em> into the defensive subset, so {@link #toTraits()} can weigh it at
+     * {@link #DEFENSIVE_SCALE}. It is ignored for every other signal — there is no such thing
+     * as a defensive gift.</p>
      */
-    public PlayerLifeRecord credit(Signal signal, float magnitude) {
+    public PlayerLifeRecord credit(Signal signal, float magnitude, boolean defensive) {
         return switch (signal) {
-            case ATTACK -> new PlayerLifeRecord(damageDealt + Math.max(0.0F, magnitude),
-                                                kills, kindness, harms, attacks + 1);
-            case KILL   -> new PlayerLifeRecord(damageDealt, kills + 1, kindness, harms, attacks);
+            case ATTACK -> {
+                float dealt = Math.max(0.0F, magnitude);
+                yield new PlayerLifeRecord(damageDealt + dealt, kills, kindness, harms, attacks + 1,
+                    defensive ? defensiveDamage + dealt : defensiveDamage, defensiveKills);
+            }
+            case KILL   -> new PlayerLifeRecord(damageDealt, kills + 1, kindness, harms, attacks,
+                               defensiveDamage, defensive ? defensiveKills + 1 : defensiveKills);
             case CROUCH -> withKindness(CROUCH_KINDNESS);
             case TRAVEL -> withKindness(TRAVEL_KINDNESS);
             case DEFEND -> withKindness(DEFEND_KINDNESS);
             case GIFT   -> withKindness(Math.max(0.0F, magnitude));
-            case HARM   -> new PlayerLifeRecord(damageDealt, kills, kindness, harms + 1, attacks);
+            case HARM   -> new PlayerLifeRecord(damageDealt, kills, kindness, harms + 1, attacks,
+                               defensiveDamage, defensiveKills);
         };
     }
 
     private PlayerLifeRecord withKindness(float delta) {
-        return new PlayerLifeRecord(damageDealt, kills, kindness + delta, harms, attacks);
+        return new PlayerLifeRecord(damageDealt, kills, kindness + delta, harms, attacks,
+            defensiveDamage, defensiveKills);
     }
 
     /**
@@ -114,12 +152,21 @@ public final class PlayerLifeRecord {
      *       (damage, kills, harming loved ones). A cruel life reincarnates unfriendly;
      *       a kind one, welcoming.</li>
      * </ul>
+     * Both combat terms weigh self-defence — blows against a mob that picked the fight —
+     * at {@link #DEFENSIVE_SCALE}: killing what came for you is neither aggression nor
+     * cruelty in the way hunting something down is. {@code harms} is never discounted;
+     * there is no self-defence in hurting someone's loved one.
      * Both are rounded and clamped to {@code [0, 10]} and marked explicit so the
      * mob's spawn roll leaves them untouched.
      */
     public DispositionTraits toTraits() {
-        double aggression = damageDealt + kills * KILL_AGGRESSION;
-        double cruelty = damageDealt * DAMAGE_CRUELTY + kills * KILL_CRUELTY + harms * HARM_CRUELTY;
+        // Defensive tallies are subsets of the totals: full-weight the rest, tenth-weight those.
+        double weightedDamage = (damageDealt - defensiveDamage) + defensiveDamage * DEFENSIVE_SCALE;
+        double weightedKills = (kills - defensiveKills) + defensiveKills * DEFENSIVE_SCALE;
+
+        double aggression = weightedDamage + weightedKills * KILL_AGGRESSION;
+        double cruelty = weightedDamage * DAMAGE_CRUELTY + weightedKills * KILL_CRUELTY
+            + harms * HARM_CRUELTY;
 
         int fightFlight = clampTrait(DispositionTraits.DEFAULT + aggression * AGGRESSION_TO_FIGHT);
         int friendliness = clampTrait(DispositionTraits.DEFAULT + kindness * KINDNESS_TO_FRIENDLY - cruelty);
@@ -142,6 +189,8 @@ public final class PlayerLifeRecord {
         tag.putFloat(TAG_KINDNESS, kindness);
         tag.putInt(TAG_HARMS, harms);
         tag.putInt(TAG_ATTACKS, attacks);
+        tag.putFloat(TAG_DEFENSIVE_DAMAGE, defensiveDamage);
+        tag.putInt(TAG_DEFENSIVE_KILLS, defensiveKills);
     }
 
     /** Read a record back; missing keys default to zero (forward/backward compatible). */
@@ -151,6 +200,10 @@ public final class PlayerLifeRecord {
             NbtCompat.getIntOr(tag, TAG_KILLS, 0),
             NbtCompat.getFloatOr(tag, TAG_KINDNESS, 0f),
             NbtCompat.getIntOr(tag, TAG_HARMS, 0),
-            NbtCompat.getIntOr(tag, TAG_ATTACKS, 0));
+            NbtCompat.getIntOr(tag, TAG_ATTACKS, 0),
+            // Missing on saves from before the self-defence split ⇒ 0 ⇒ every past blow
+            // scores as offensive, exactly as that build scored it.
+            NbtCompat.getFloatOr(tag, TAG_DEFENSIVE_DAMAGE, 0f),
+            NbtCompat.getIntOr(tag, TAG_DEFENSIVE_KILLS, 0));
     }
 }

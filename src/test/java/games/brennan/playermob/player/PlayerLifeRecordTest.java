@@ -115,6 +115,83 @@ class PlayerLifeRecordTest {
         assertEquals(3, t.friendliness());
     }
 
+    // ---- self-defence discount ----
+
+    @Test
+    void defensiveKillScoresATenthOfTheSameUnprovokedKill() {
+        // Same 20-damage kill, but the mob picked the fight: aggression 25 → 2.5, cruelty 4 → 0.4.
+        DispositionTraits t = PlayerLifeRecord.EMPTY
+            .credit(Signal.ATTACK, 20.0F, true)
+            .credit(Signal.KILL, 0, true)
+            .toTraits();
+        // ff = round(5 + 2.5*0.1) = round(5.25) = 5 ; fr = round(5 - 0.4) = round(4.6) = 5
+        assertEquals(DispositionTraits.DEFAULT, t.fightFlight());
+        assertEquals(DispositionTraits.DEFAULT, t.friendliness());
+    }
+
+    @Test
+    void defensiveTalliesAreSubsetsOfTheTotals() {
+        PlayerLifeRecord r = PlayerLifeRecord.EMPTY
+            .credit(Signal.ATTACK, 6.0F, true)
+            .credit(Signal.ATTACK, 4.0F, false)
+            .credit(Signal.KILL, 0, true)
+            .credit(Signal.KILL, 0, false);
+        assertEquals(10.0F, r.damageDealt(), EPS);   // both blows counted in the total
+        assertEquals(6.0F, r.defensiveDamage(), EPS);
+        assertEquals(2, r.kills());
+        assertEquals(1, r.defensiveKills());
+        assertEquals(2, r.attacks());
+    }
+
+    @Test
+    void aLifeOfPureSelfDefenceStaysNearNeutral() {
+        // Five mobs hunted this player down; they killed all five. weighted damage 10,
+        // weighted kills 0.5 → aggression 12.5, cruelty 2.0.
+        PlayerLifeRecord r = PlayerLifeRecord.EMPTY;
+        for (int i = 0; i < 5; i++) {
+            r = r.credit(Signal.ATTACK, 20.0F, true).credit(Signal.KILL, 0, true);
+        }
+        DispositionTraits t = r.toTraits();
+        assertEquals(6, t.fightFlight());   // round(5 + 1.25) — vs MAX for the same unprovoked spree
+        assertEquals(3, t.friendliness());  // round(5 - 2.0) — vs MIN unprovoked
+    }
+
+    @Test
+    void mixedLifeWeighsEachBloodOnItsOwnTerms() {
+        // One kill started, one survived. Offensive 20 damage + 1 kill = 25 aggression;
+        // defensive adds 20*0.1 + 5*0.1 = 2.5 → 27.5. Cruelty 4 + 0.4 = 4.4.
+        DispositionTraits t = PlayerLifeRecord.EMPTY
+            .credit(Signal.ATTACK, 20.0F, false).credit(Signal.KILL, 0, false)
+            .credit(Signal.ATTACK, 20.0F, true).credit(Signal.KILL, 0, true)
+            .toTraits();
+        assertEquals(8, t.fightFlight());   // round(5 + 2.75)
+        assertEquals(1, t.friendliness());  // round(5 - 4.4)
+    }
+
+    @Test
+    void defensiveFlagIsIgnoredForNonCombatSignals() {
+        PlayerLifeRecord r = PlayerLifeRecord.EMPTY
+            .credit(Signal.GIFT, 2.0F, true)
+            .credit(Signal.HARM, 0, true);
+        assertEquals(2.0F, r.kindness(), EPS);
+        assertEquals(1, r.harms());
+        assertEquals(0.0F, r.defensiveDamage(), EPS);
+        assertEquals(0, r.defensiveKills());
+    }
+
+    @Test
+    void unprovokedScoringIsUnchangedByTheSplit() {
+        // Regression guard: with nothing marked defensive, traits match the pre-split formula.
+        PlayerLifeRecord r = PlayerLifeRecord.EMPTY
+            .credit(Signal.ATTACK, 13.0F)
+            .credit(Signal.KILL, 0)
+            .credit(Signal.HARM, 0);
+        double aggression = 13.0 + 1 * 5.0;
+        double cruelty = 13.0 * 0.1 + 1 * 2.0 + 1 * 1.0;
+        assertEquals((int) Math.round(5 + aggression * 0.1), r.toTraits().fightFlight());
+        assertEquals((int) Math.round(5 + 0 - cruelty), r.toTraits().friendliness());
+    }
+
     // ---- persistence ----
 
     @Test
@@ -132,6 +209,38 @@ class PlayerLifeRecordTest {
         assertEquals(r.kindness(), back.kindness(), EPS);
         assertEquals(r.harms(), back.harms());
         assertEquals(r.attacks(), back.attacks());
+        assertEquals(r.defensiveDamage(), back.defensiveDamage(), EPS);
+        assertEquals(r.defensiveKills(), back.defensiveKills());
+    }
+
+    @Test
+    void nbtRoundTripCarriesTheDefensiveSplit() {
+        PlayerLifeRecord r = PlayerLifeRecord.EMPTY
+            .credit(Signal.ATTACK, 8.0F, true)
+            .credit(Signal.KILL, 0, true)
+            .credit(Signal.ATTACK, 2.0F, false);
+        CompoundTag tag = new CompoundTag();
+        r.save(tag);
+        PlayerLifeRecord back = PlayerLifeRecord.load(tag);
+        assertEquals(8.0F, back.defensiveDamage(), EPS);
+        assertEquals(1, back.defensiveKills());
+        assertEquals(10.0F, back.damageDealt(), EPS);
+        assertEquals(r.toTraits().fightFlight(), back.toTraits().fightFlight());
+        assertEquals(r.toTraits().friendliness(), back.toTraits().friendliness());
+    }
+
+    @Test
+    void legacyTagWithoutTheDefensiveKeysLoadsAsFullyOffensive() {
+        // A save written before the split: only the old keys are present.
+        CompoundTag tag = new CompoundTag();
+        tag.putFloat("DamageDealt", 20.0F);
+        tag.putInt("Kills", 1);
+        tag.putInt("Attacks", 3);
+        PlayerLifeRecord back = PlayerLifeRecord.load(tag);
+        assertEquals(0.0F, back.defensiveDamage(), EPS);
+        assertEquals(0, back.defensiveKills());
+        assertEquals(8, back.toTraits().fightFlight());   // scores exactly as that build scored it
+        assertEquals(1, back.toTraits().friendliness());
     }
 
     @Test

@@ -23,6 +23,10 @@ package games.brennan.playermob.entity;
  *   <li>{@code lastCarriageIndex} — the Dungeon-Train carriage this pairing last co-rode
  *       ({@link #NO_CARRIAGE} until first seen on a train; the index is <em>signed</em>, so a
  *       plain {@code 0} would collide with the real central carriage).</li>
+ *   <li>{@code provoked} — this mob has taken combat intent toward the individual (acquired them
+ *       as a target, or struck them). Latches true for the rest of the mob's life and persists:
+ *       once it has picked the fight, the individual's answering blows are self-defence, and the
+ *       player-side {@code PlayerLifeRecord} discounts them when distilling reincarnation traits.</li>
  *   <li>{@code lastWitnessTick} — game tick of the last witnessed combat event (defend / harm)
  *       credited for this individual; debounces repeat-crediting of one event. <b>Session-scoped:
  *       not persisted</b> — vanilla combat timestamps reset on reload, so a stale saved value would
@@ -30,7 +34,8 @@ package games.brennan.playermob.entity;
  * </ul>
  */
 public record FeelingRecord(float feeling, float crouchBudgetUsed, float crouchCap,
-                            int defendCount, int lastCarriageIndex, int lastWitnessTick) {
+                            int defendCount, int lastCarriageIndex, int lastWitnessTick,
+                            boolean provoked) {
 
     public static final float DEFAULT = 5.0F;
     public static final float MIN = 0.0F;
@@ -66,18 +71,31 @@ public record FeelingRecord(float feeling, float crouchBudgetUsed, float crouchC
 
     /** A fresh, neutral individual — the default returned for anyone not in the ledger. */
     public static final FeelingRecord NEUTRAL =
-        new FeelingRecord(DEFAULT, 0.0F, CROUCH_CAP_BASE, 0, NO_CARRIAGE, 0);
+        new FeelingRecord(DEFAULT, 0.0F, CROUCH_CAP_BASE, 0, NO_CARRIAGE, 0, false);
 
     /** Copy with an absolute feeling (clamped); all other state preserved. */
     public FeelingRecord withFeeling(float value) {
         return new FeelingRecord(clamp(value), crouchBudgetUsed, crouchCap,
-            defendCount, lastCarriageIndex, lastWitnessTick);
+            defendCount, lastCarriageIndex, lastWitnessTick, provoked);
     }
 
     /** Copy with the witnessed-event tick updated (debounce bookkeeping). */
     public FeelingRecord withWitnessTick(int tick) {
         return new FeelingRecord(feeling, crouchBudgetUsed, crouchCap,
-            defendCount, lastCarriageIndex, tick);
+            defendCount, lastCarriageIndex, tick, provoked);
+    }
+
+    /**
+     * Copy marked as "this mob started it" toward the individual — see the {@code provoked}
+     * field note. One-way: the flag never clears, so a mob can't launder its instigation by
+     * losing interest, and {@code this} is returned unchanged once it is already set.
+     */
+    public FeelingRecord withProvoked() {
+        if (provoked) {
+            return this;
+        }
+        return new FeelingRecord(feeling, crouchBudgetUsed, crouchCap,
+            defendCount, lastCarriageIndex, lastWitnessTick, true);
     }
 
     /**
@@ -101,7 +119,7 @@ public record FeelingRecord(float feeling, float crouchBudgetUsed, float crouchC
             newCap = Math.min(crouchCap + CROUCH_REEARN, CROUCH_CAP_MAX);
         }
         return new FeelingRecord(clamp(feeling + delta), crouchBudgetUsed, newCap,
-            defendCount, lastCarriageIndex, lastWitnessTick);
+            defendCount, lastCarriageIndex, lastWitnessTick, provoked);
     }
 
     /** One debounced crouch at neutral strength — see {@link #afterCrouch(float)}. */
@@ -121,7 +139,7 @@ public record FeelingRecord(float feeling, float crouchBudgetUsed, float crouchC
         }
         float step = CROUCH_STEP * scale;
         return new FeelingRecord(clamp(feeling + step), crouchBudgetUsed + step,
-            crouchCap, defendCount, lastCarriageIndex, lastWitnessTick);
+            crouchCap, defendCount, lastCarriageIndex, lastWitnessTick, provoked);
     }
 
     /** One credited defence at neutral strength — see {@link #afterDefend(float)}. */
@@ -140,7 +158,7 @@ public record FeelingRecord(float feeling, float crouchBudgetUsed, float crouchC
             return this;
         }
         return new FeelingRecord(clamp(feeling + DEFEND_STEP * scale), crouchBudgetUsed, crouchCap,
-            defendCount + 1, lastCarriageIndex, lastWitnessTick);
+            defendCount + 1, lastCarriageIndex, lastWitnessTick, provoked);
     }
 
     /**
@@ -152,13 +170,13 @@ public record FeelingRecord(float feeling, float crouchBudgetUsed, float crouchC
     public FeelingRecord afterCarriageAdvance(int newIndex) {
         if (lastCarriageIndex == NO_CARRIAGE) {
             return new FeelingRecord(feeling, crouchBudgetUsed, crouchCap,
-                defendCount, newIndex, lastWitnessTick);
+                defendCount, newIndex, lastWitnessTick, provoked);
         }
         if (newIndex == lastCarriageIndex) {
             return this;
         }
         return new FeelingRecord(clamp(feeling + TRAVEL_STEP), crouchBudgetUsed, crouchCap,
-            defendCount, newIndex, lastWitnessTick);
+            defendCount, newIndex, lastWitnessTick, provoked);
     }
 
     /**
@@ -194,7 +212,8 @@ public record FeelingRecord(float feeling, float crouchBudgetUsed, float crouchC
             && crouchCap == CROUCH_CAP_BASE
             && defendCount == 0
             && lastCarriageIndex == NO_CARRIAGE
-            && lastWitnessTick == 0;
+            && lastWitnessTick == 0
+            && !provoked;
     }
 
     static float clamp(float value) {

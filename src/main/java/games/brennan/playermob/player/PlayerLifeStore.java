@@ -108,16 +108,30 @@ public final class PlayerLifeStore extends SavedData {
      * player's server level.
      */
     public static void record(ServerPlayer player, PlayerLifeRecord.Signal signal, float magnitude) {
+        record(player, signal, magnitude, false);
+    }
+
+    /**
+     * As {@link #record(ServerPlayer, PlayerLifeRecord.Signal, float)}, but marking the action
+     * as self-defence — the mob had already picked the fight, so the trait distillation weighs
+     * it at {@link PlayerLifeRecord#DEFENSIVE_SCALE}.
+     */
+    public static void record(ServerPlayer player, PlayerLifeRecord.Signal signal, float magnitude,
+                              boolean defensive) {
         //? if >=26 {
         /*// 26.x renamed ServerPlayer.serverLevel() → level() (still returns ServerLevel).
-        get(player.level()).credit(player.getUUID(), signal, magnitude);
+        get(player.level()).credit(player.getUUID(), signal, magnitude, defensive);
         *///?} else {
-        get(player.serverLevel()).credit(player.getUUID(), signal, magnitude);
+        get(player.serverLevel()).credit(player.getUUID(), signal, magnitude, defensive);
         //?}
     }
 
     public void credit(UUID id, PlayerLifeRecord.Signal signal, float magnitude) {
-        current.put(id, current(id).credit(signal, magnitude));
+        credit(id, signal, magnitude, false);
+    }
+
+    public void credit(UUID id, PlayerLifeRecord.Signal signal, float magnitude, boolean defensive) {
+        current.put(id, current(id).credit(signal, magnitude, defensive));
         setDirty();
     }
 
