@@ -783,9 +783,9 @@
         "Hate-seeded death-note echoes hunt you, so cutting one down barely stains the life you leave behind."
       ],
       "date": "2026-08-21",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.89.0",
+      "released_at": "2026-08-22T07:59:38Z"
     },
     {
       "id": "echo-restraint-flight",
@@ -801,9 +801,9 @@
       ],
       "pr": 190,
       "date": "2026-08-22",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.89.0",
+      "released_at": "2026-08-22T07:59:38Z"
     }
   ]
 }
