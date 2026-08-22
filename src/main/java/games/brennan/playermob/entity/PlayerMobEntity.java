@@ -949,8 +949,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         super.customServerAiStep();
     //?}
         LivingEntity target = getTarget();
+        // The mob dropping a target for its OWN reasons (climbing back onto a train, or a
+        // creative/spectator player it ignores) is not the player getting away — flag it so the
+        // escape check below skips this tick. A TrainConfinement drop is NOT such a reason: on
+        // Dungeon Train, putting carriages between you and an echo is exactly how you run away.
+        boolean droppedByHousekeeping = false;
         if (target != null
                 && (recovering || isIgnoredPlayer(target) || !TrainConfinement.allowsTarget(this, target))) {
+            droppedByHousekeeping = recovering || isIgnoredPlayer(target);
             setTarget(null);   // recovering back onto a train preempts all combat
         }
         // Whoever this mob is hunting, it picked that fight — latch it against the player so the
@@ -958,6 +964,15 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // Read after the validity block above, so a target this tick rejected never counts.
         if (getTarget() instanceof Player hunted) {
             feelings.markProvoked(hunted.getUUID());
+            lastPlayerTarget = hunted;
+        } else if (lastPlayerTarget != null) {
+            // Falling edge of the same read: it was hunting them and now it isn't. If they are
+            // still standing and never hit it back, they got away — bank Flight, once per pairing.
+            Player fled = lastPlayerTarget;
+            lastPlayerTarget = null;
+            if (!droppedByHousekeeping) {
+                creditEscape(fled);
+            }
         }
         tickAttackOrder();   // enforce a commanded attack's stop limit (duration / hearts / hit-back)
         tickOrderTimeout();  // abandon a movement order that outlived its timeout (default 2 min)
@@ -1884,6 +1899,15 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      */
     private LivingEntity lastAttacker;
     private int lastAttackerTick = -10000;
+
+    /**
+     * The player this mob held as its combat target on the previous AI step — the edge detector
+     * behind the escape credit in {@code customServerAiStep}. Session memory: not saved, not
+     * synced. Losing it across a reload only costs an escape that was mid-flight at the moment
+     * of saving; the per-pair {@code escaped} latch it feeds <em>is</em> persisted, so a getaway
+     * already paid out never pays twice.
+     */
+    private Player lastPlayerTarget;
 
     /** The last categorisable attacker (survives the flee-driven {@code lastHurtByMob} reset), or null. */
     public LivingEntity getLastAttacker() {
@@ -3678,6 +3702,57 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * a flighty mob drops the retaliation target so {@link FleeFromCategoryGoal}
      * takes over. Creative/spectator attackers are ignored entirely.
      */
+    /**
+     * Bank Flight for a real player this mob just landed a blow on: they were hit and, so far,
+     * have not hit back. Mirrored by {@link #forfeitRestraint} — one blow in return hands every
+     * banked point straight back, so the credit only survives a fight they never joined.
+     *
+     * <p>Called from {@link WitnessedAttacks#onHurt} once per hit that actually dealt damage.
+     * {@code amount} is the incoming, pre-mitigation damage — the same basis the attacker-side
+     * {@code Signal.ATTACK} credit in {@link #hurt} uses, so damage dealt and damage endured are
+     * measured the same way and cancel cleanly.</p>
+     */
+    public void onStruckPlayer(ServerPlayer player, float amount) {
+        if (amount <= 0.0F || isIgnoredPlayer(player)) {
+            return;   // creative/spectator are outside the social model entirely
+        }
+        if (feelings.accrueTimidity(player.getUUID(), amount) > 0.0F) {
+            PlayerLifeStore.record(player, PlayerLifeRecord.Signal.FLEE, amount);
+        }
+    }
+
+    /**
+     * Credit {@code fled} for breaking away clean from this mob — it was hunting them, it isn't
+     * any more, and they are still alive to tell it. Skipped if they ever hit back (that was a
+     * fight, not a getaway) and capped at one payout per pairing, so an echo that re-acquires and
+     * loses them all afternoon is worth one escape.
+     */
+    private void creditEscape(Player fled) {
+        if (!isAlive() || !fled.isAlive() || fled.isDeadOrDying()) {
+            return;   // dying while it hunts you is the opposite of escaping it
+        }
+        if (!(fled instanceof ServerPlayer sp) || isIgnoredPlayer(fled)) {
+            return;
+        }
+        if (feelings.isAnswered(sp.getUUID()) || !feelings.markEscaped(sp.getUUID())) {
+            return;
+        }
+        feelings.accrueTimidity(sp.getUUID(), FeelingRecord.ESCAPE_TIMIDITY);
+        PlayerLifeStore.record(sp, PlayerLifeRecord.Signal.FLEE, FeelingRecord.ESCAPE_TIMIDITY);
+    }
+
+    /**
+     * They hit back (or landed the kill) — hand back every point of Flight this mob had banked
+     * for them. Idempotent: the ledger returns the forfeited total once and 0 forever after, so
+     * the cancellation can never over-refund and drive the life tally negative.
+     */
+    private void forfeitRestraint(ServerPlayer sp) {
+        float forfeited = feelings.markAnswered(sp.getUUID());
+        if (forfeited > 0.0F) {
+            PlayerLifeStore.record(sp, PlayerLifeRecord.Signal.FLEE, -forfeited);
+        }
+    }
+
     //? if >=26 {
     /*@Override
     public boolean hurtServer(ServerLevel level, DamageSource source, float amount) {
@@ -3718,6 +3793,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
                     if (attacker instanceof ServerPlayer sp) {
                         PlayerLifeStore.record(sp, PlayerLifeRecord.Signal.ATTACK, amount,
                             feelings.isProvoked(sp.getUUID()));
+                        // ...and take back the Flight this mob's own blows had banked for them.
+                        // After the ATTACK credit, so the provoked read above is untouched.
+                        forfeitRestraint(sp);
                     }
                     pushDispositionToClient();
                 }
@@ -3794,6 +3872,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (getKillCredit() instanceof ServerPlayer sp) {
             PlayerLifeStore.record(sp, PlayerLifeRecord.Signal.KILL, 1,
                 feelings.isProvoked(sp.getUUID()));
+            // Killing it is answering it — covers the kill that lands without a hurt() of ours
+            // first (a shove into lava, a crushing block).
+            forfeitRestraint(sp);
         }
         // Capture the death message BEFORE super.die(): super calls
         // CombatTracker.recheckStatus(), which clears the combat entries, so

@@ -27,6 +27,16 @@ package games.brennan.playermob.entity;
  *       as a target, or struck them). Latches true for the rest of the mob's life and persists:
  *       once it has picked the fight, the individual's answering blows are self-defence, and the
  *       player-side {@code PlayerLifeRecord} discounts them when distilling reincarnation traits.</li>
+ *   <li>{@code unansweredTimidity} — Flight points this mob has banked for the individual and
+ *       they have not yet answered: damage it has landed on them, plus {@code ESCAPE_TIMIDITY}
+ *       once they break away clean. Held per-pair so a single blow back can forfeit exactly what
+ *       <em>this</em> mob earned them, and no more. Persisted.</li>
+ *   <li>{@code answered} — they hit back (or landed the kill). Latches true for the rest of the
+ *       mob's life and zeroes {@code unansweredTimidity}: a fight once joined is a fight, so the
+ *       mob's later blows never bank Flight again. Persisted.</li>
+ *   <li>{@code escaped} — they have already been credited for getting away from this mob once.
+ *       Latches so an echo that re-acquires and loses them all afternoon still pays out once.
+ *       Persisted.</li>
  *   <li>{@code lastWitnessTick} — game tick of the last witnessed combat event (defend / harm)
  *       credited for this individual; debounces repeat-crediting of one event. <b>Session-scoped:
  *       not persisted</b> — vanilla combat timestamps reset on reload, so a stale saved value would
@@ -35,7 +45,8 @@ package games.brennan.playermob.entity;
  */
 public record FeelingRecord(float feeling, float crouchBudgetUsed, float crouchCap,
                             int defendCount, int lastCarriageIndex, int lastWitnessTick,
-                            boolean provoked) {
+                            boolean provoked, float unansweredTimidity, boolean answered,
+                            boolean escaped) {
 
     public static final float DEFAULT = 5.0F;
     public static final float MIN = 0.0F;
@@ -60,6 +71,13 @@ public record FeelingRecord(float feeling, float crouchBudgetUsed, float crouchC
     /** Feeling gained per Dungeon-Train carriage travelled together. */
     public static final float TRAVEL_STEP = 0.2F;
 
+    /**
+     * Flight points banked for breaking away clean from a mob that was hunting you — worth about
+     * one solid beating endured (see {@code PlayerLifeRecord.TIMIDITY_TO_FLIGHT}). Credited at
+     * most once per pairing, on the {@link #escaped} latch.
+     */
+    public static final float ESCAPE_TIMIDITY = 10.0F;
+
     /** Smallest / largest feeling a gift can add. */
     public static final float GIFT_MIN = 0.5F;
     public static final float GIFT_MAX = 3.0F;
@@ -71,18 +89,20 @@ public record FeelingRecord(float feeling, float crouchBudgetUsed, float crouchC
 
     /** A fresh, neutral individual — the default returned for anyone not in the ledger. */
     public static final FeelingRecord NEUTRAL =
-        new FeelingRecord(DEFAULT, 0.0F, CROUCH_CAP_BASE, 0, NO_CARRIAGE, 0, false);
+        new FeelingRecord(DEFAULT, 0.0F, CROUCH_CAP_BASE, 0, NO_CARRIAGE, 0, false, 0.0F, false, false);
 
     /** Copy with an absolute feeling (clamped); all other state preserved. */
     public FeelingRecord withFeeling(float value) {
         return new FeelingRecord(clamp(value), crouchBudgetUsed, crouchCap,
-            defendCount, lastCarriageIndex, lastWitnessTick, provoked);
+            defendCount, lastCarriageIndex, lastWitnessTick, provoked,
+            unansweredTimidity, answered, escaped);
     }
 
     /** Copy with the witnessed-event tick updated (debounce bookkeeping). */
     public FeelingRecord withWitnessTick(int tick) {
         return new FeelingRecord(feeling, crouchBudgetUsed, crouchCap,
-            defendCount, lastCarriageIndex, tick, provoked);
+            defendCount, lastCarriageIndex, tick, provoked,
+            unansweredTimidity, answered, escaped);
     }
 
     /**
@@ -95,7 +115,45 @@ public record FeelingRecord(float feeling, float crouchBudgetUsed, float crouchC
             return this;
         }
         return new FeelingRecord(feeling, crouchBudgetUsed, crouchCap,
-            defendCount, lastCarriageIndex, lastWitnessTick, true);
+            defendCount, lastCarriageIndex, lastWitnessTick, true,
+            unansweredTimidity, answered, escaped);
+    }
+
+    /**
+     * Copy with {@code points} of Flight banked toward the individual — damage this mob landed
+     * on them, or {@link #ESCAPE_TIMIDITY} for a clean getaway. A no-op once they have
+     * {@link #answered}: a fight once joined never banks Flight again.
+     */
+    public FeelingRecord withTimidity(float points) {
+        if (answered || points <= 0.0F) {
+            return this;
+        }
+        return new FeelingRecord(feeling, crouchBudgetUsed, crouchCap,
+            defendCount, lastCarriageIndex, lastWitnessTick, provoked,
+            unansweredTimidity + points, false, escaped);
+    }
+
+    /**
+     * Copy marked "they hit back" — one-way, and it forfeits the banked
+     * {@link #unansweredTimidity} outright. The caller reads the old total first so it can hand
+     * the same amount back to the player-side {@code PlayerLifeRecord}.
+     */
+    public FeelingRecord withAnswered() {
+        if (answered) {
+            return this;
+        }
+        return new FeelingRecord(feeling, crouchBudgetUsed, crouchCap,
+            defendCount, lastCarriageIndex, lastWitnessTick, provoked, 0.0F, true, escaped);
+    }
+
+    /** Copy marked "they already got away from me once" — one-way, so the escape pays out once. */
+    public FeelingRecord withEscaped() {
+        if (escaped) {
+            return this;
+        }
+        return new FeelingRecord(feeling, crouchBudgetUsed, crouchCap,
+            defendCount, lastCarriageIndex, lastWitnessTick, provoked,
+            unansweredTimidity, answered, true);
     }
 
     /**
@@ -119,7 +177,8 @@ public record FeelingRecord(float feeling, float crouchBudgetUsed, float crouchC
             newCap = Math.min(crouchCap + CROUCH_REEARN, CROUCH_CAP_MAX);
         }
         return new FeelingRecord(clamp(feeling + delta), crouchBudgetUsed, newCap,
-            defendCount, lastCarriageIndex, lastWitnessTick, provoked);
+            defendCount, lastCarriageIndex, lastWitnessTick, provoked,
+            unansweredTimidity, answered, escaped);
     }
 
     /** One debounced crouch at neutral strength — see {@link #afterCrouch(float)}. */
@@ -139,7 +198,8 @@ public record FeelingRecord(float feeling, float crouchBudgetUsed, float crouchC
         }
         float step = CROUCH_STEP * scale;
         return new FeelingRecord(clamp(feeling + step), crouchBudgetUsed + step,
-            crouchCap, defendCount, lastCarriageIndex, lastWitnessTick, provoked);
+            crouchCap, defendCount, lastCarriageIndex, lastWitnessTick, provoked,
+            unansweredTimidity, answered, escaped);
     }
 
     /** One credited defence at neutral strength — see {@link #afterDefend(float)}. */
@@ -158,7 +218,8 @@ public record FeelingRecord(float feeling, float crouchBudgetUsed, float crouchC
             return this;
         }
         return new FeelingRecord(clamp(feeling + DEFEND_STEP * scale), crouchBudgetUsed, crouchCap,
-            defendCount + 1, lastCarriageIndex, lastWitnessTick, provoked);
+            defendCount + 1, lastCarriageIndex, lastWitnessTick, provoked,
+            unansweredTimidity, answered, escaped);
     }
 
     /**
@@ -170,13 +231,15 @@ public record FeelingRecord(float feeling, float crouchBudgetUsed, float crouchC
     public FeelingRecord afterCarriageAdvance(int newIndex) {
         if (lastCarriageIndex == NO_CARRIAGE) {
             return new FeelingRecord(feeling, crouchBudgetUsed, crouchCap,
-                defendCount, newIndex, lastWitnessTick, provoked);
+                defendCount, newIndex, lastWitnessTick, provoked,
+                unansweredTimidity, answered, escaped);
         }
         if (newIndex == lastCarriageIndex) {
             return this;
         }
         return new FeelingRecord(clamp(feeling + TRAVEL_STEP), crouchBudgetUsed, crouchCap,
-            defendCount, newIndex, lastWitnessTick, provoked);
+            defendCount, newIndex, lastWitnessTick, provoked,
+            unansweredTimidity, answered, escaped);
     }
 
     /**
@@ -202,7 +265,8 @@ public record FeelingRecord(float feeling, float crouchBudgetUsed, float crouchC
         return Math.abs(feeling - DEFAULT)
             + crouchBudgetUsed
             + 2.0 * defendCount
-            + Math.max(0.0, crouchCap - CROUCH_CAP_BASE);
+            + Math.max(0.0, crouchCap - CROUCH_CAP_BASE)
+            + unansweredTimidity;
     }
 
     /** True when every field is at its default — written to NBT as just {@code {UUID, Feeling}}. */
@@ -213,7 +277,10 @@ public record FeelingRecord(float feeling, float crouchBudgetUsed, float crouchC
             && defendCount == 0
             && lastCarriageIndex == NO_CARRIAGE
             && lastWitnessTick == 0
-            && !provoked;
+            && !provoked
+            && unansweredTimidity == 0.0F
+            && !answered
+            && !escaped;
     }
 
     static float clamp(float value) {

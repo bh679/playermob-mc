@@ -308,4 +308,60 @@ class FeelingLedgerTest {
         assertEquals(1, mixed.size());
         assertEquals(2.5f, mixed.get(id), EPS);
     }
+
+    // ---- restraint bookkeeping ----
+
+    @Test
+    void accrueTimidityAccumulatesPerIndividual() {
+        FeelingLedger ledger = new FeelingLedger();
+        UUID beaten = UUID.randomUUID();
+        UUID bystander = UUID.randomUUID();
+        assertEquals(4.0f, ledger.accrueTimidity(beaten, 4.0f), EPS);
+        assertEquals(10.0f, ledger.accrueTimidity(beaten, 6.0f), EPS);
+        assertEquals(0.0f, ledger.recordFor(bystander).unansweredTimidity(), EPS,
+            "a beating does not spill to others");
+    }
+
+    @Test
+    void markAnsweredReturnsTheForfeitedTotalExactlyOnce() {
+        FeelingLedger ledger = new FeelingLedger();
+        UUID player = UUID.randomUUID();
+        ledger.accrueTimidity(player, 7.0f);
+        assertEquals(7.0f, ledger.markAnswered(player), EPS);
+        assertTrue(ledger.isAnswered(player));
+        assertEquals(0.0f, ledger.markAnswered(player), EPS, "no double refund");
+        assertEquals(0.0f, ledger.accrueTimidity(player, 5.0f), EPS,
+            "nothing banks once they have hit back");
+    }
+
+    @Test
+    void markEscapedPaysOutOnlyTheFirstGetaway() {
+        FeelingLedger ledger = new FeelingLedger();
+        UUID player = UUID.randomUUID();
+        assertTrue(ledger.markEscaped(player));
+        assertFalse(ledger.markEscaped(player));
+    }
+
+    @Test
+    void restraintStateSurvivesASaveAndLoad() {
+        FeelingLedger src = new FeelingLedger();
+        UUID beaten = UUID.randomUUID();
+        UUID fought = UUID.randomUUID();
+        src.accrueTimidity(beaten, 12.0f);
+        src.markEscaped(beaten);
+        src.accrueTimidity(fought, 5.0f);
+        src.markAnswered(fought);
+
+        CompoundTag tag = new CompoundTag();
+        src.save(tag);
+        FeelingLedger back = new FeelingLedger();
+        back.load(tag);
+
+        assertEquals(12.0f, back.recordFor(beaten).unansweredTimidity(), EPS,
+            "a beating taken still counts after a reload");
+        assertTrue(back.recordFor(beaten).escaped());
+        assertFalse(back.isAnswered(beaten));
+        assertTrue(back.isAnswered(fought), "a blow struck back still counts after a reload");
+        assertEquals(0.0f, back.recordFor(fought).unansweredTimidity(), EPS);
+    }
 }
