@@ -786,6 +786,24 @@
       "released": false,
       "released_in": null,
       "released_at": null
+    },
+    {
+      "id": "echo-restraint-flight",
+      "version": "0.89.0",
+      "type": "feat",
+      "title": "Not fighting an echo back makes your own echo flighty",
+      "summary": "Your echo used to be shaped only by the violence you did. Now it is also shaped by the violence you refused. An echo that comes for you and doesn't get a fight out of you leaves its mark: take its blows without hitting back, or slip away from it alive, and the echo born from your death leans toward Flight. Hit it back even once \u2014 or kill it \u2014 and the whole credit is handed straight back. A fight once joined is a fight.",
+      "highlights": [
+        "Damage you take from an echo you never strike back counts toward Flight, point for point against damage you deal.",
+        "Getting away clean from an echo that was hunting you counts too, once per echo.",
+        "One blow in return, or the kill, cancels everything that echo had earned you.",
+        "A life that never raised a hand used to reincarnate as a fighter; now it comes back timid."
+      ],
+      "pr": 190,
+      "date": "2026-08-22",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
