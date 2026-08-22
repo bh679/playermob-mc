@@ -45,7 +45,7 @@ public abstract class LivingHurtWitnessMixin {
     private void playermob$witnessAttack(net.minecraft.server.level.ServerLevel level, DamageSource source, float amount,
                                          CallbackInfoReturnable<Boolean> cir) {
         if (cir.getReturnValueZ()) {
-            WitnessedAttacks.onHurt((LivingEntity) (Object) this, source);
+            WitnessedAttacks.onHurt((LivingEntity) (Object) this, source, amount);
         }
     }
     *///?} else {
@@ -53,7 +53,7 @@ public abstract class LivingHurtWitnessMixin {
     private void playermob$witnessAttack(DamageSource source, float amount,
                                          CallbackInfoReturnable<Boolean> cir) {
         if (cir.getReturnValueZ()) {
-            WitnessedAttacks.onHurt((LivingEntity) (Object) this, source);
+            WitnessedAttacks.onHurt((LivingEntity) (Object) this, source, amount);
         }
     }
     //?}

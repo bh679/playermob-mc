@@ -174,6 +174,72 @@ class FeelingRecordTest {
         assertFalse(FeelingRecord.NEUTRAL.withProvoked().isDefault());
     }
 
+    // ---- restraint: timidity / answered / escaped ----
+
+    @Test
+    void timidityAccumulatesAndLeavesTheOriginalUntouched() {
+        FeelingRecord once = FeelingRecord.NEUTRAL.withTimidity(4.0f);
+        assertEquals(4.0f, once.unansweredTimidity(), EPS);
+        assertEquals(0.0f, FeelingRecord.NEUTRAL.unansweredTimidity(), EPS);
+        assertEquals(7.0f, once.withTimidity(3.0f).unansweredTimidity(), EPS);
+    }
+
+    @Test
+    void nonPositiveTimidityIsANoOp() {
+        assertSame(FeelingRecord.NEUTRAL, FeelingRecord.NEUTRAL.withTimidity(0.0f));
+        assertSame(FeelingRecord.NEUTRAL, FeelingRecord.NEUTRAL.withTimidity(-3.0f));
+    }
+
+    @Test
+    void answeringForfeitsTheBankedTimidity() {
+        FeelingRecord answered = FeelingRecord.NEUTRAL.withTimidity(9.0f).withAnswered();
+        assertTrue(answered.answered());
+        assertEquals(0.0f, answered.unansweredTimidity(), EPS);
+        assertSame(answered, answered.withAnswered(), "already answered → same instance");
+    }
+
+    @Test
+    void aFightOnceJoinedNeverBanksAgain() {
+        FeelingRecord answered = FeelingRecord.NEUTRAL.withAnswered();
+        assertSame(answered, answered.withTimidity(20.0f));
+    }
+
+    @Test
+    void escapedLatchesOnce() {
+        FeelingRecord got = FeelingRecord.NEUTRAL.withEscaped();
+        assertTrue(got.escaped());
+        assertFalse(FeelingRecord.NEUTRAL.escaped(), "the original record is untouched");
+        assertSame(got, got.withEscaped());
+    }
+
+    @Test
+    void restraintStateSurvivesTheOtherTransitions() {
+        FeelingRecord r = FeelingRecord.NEUTRAL.withTimidity(6.0f).withEscaped()
+            .afterCrouch()
+            .afterDefend()
+            .afterCarriageAdvance(2)
+            .withWitnessTick(40)
+            .withFeeling(8.0f);
+        assertEquals(6.0f, r.unansweredTimidity(), EPS);
+        assertTrue(r.escaped());
+        assertFalse(r.answered());
+    }
+
+    @Test
+    void anyRestraintStateMakesARecordNonDefault() {
+        assertTrue(FeelingRecord.NEUTRAL.isDefault());
+        assertFalse(FeelingRecord.NEUTRAL.withTimidity(1.0f).isDefault());
+        assertFalse(FeelingRecord.NEUTRAL.withAnswered().isDefault());
+        assertFalse(FeelingRecord.NEUTRAL.withEscaped().isDefault());
+    }
+
+    @Test
+    void bankedTimidityIsWorthKeeping() {
+        // Feeling-neutral, but a beating endured is real history — don't prune it first.
+        FeelingRecord beaten = FeelingRecord.NEUTRAL.withTimidity(8.0f);
+        assertTrue(beaten.magnitude() >= 8.0);
+    }
+
     // ---- clamp / magnitude ----
 
     @Test

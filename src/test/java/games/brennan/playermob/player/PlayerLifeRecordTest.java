@@ -1,6 +1,7 @@
 package games.brennan.playermob.player;
 
 import games.brennan.playermob.entity.DispositionTraits;
+import games.brennan.playermob.entity.FeelingRecord;
 import games.brennan.playermob.player.PlayerLifeRecord.Signal;
 import net.minecraft.nbt.CompoundTag;
 import org.junit.jupiter.api.Test;
@@ -193,6 +194,94 @@ class PlayerLifeRecordTest {
     }
 
     // ---- persistence ----
+
+    // ---- timidity: restraint pushes toward Flight ----
+
+    @Test
+    void enduredDamageLowersFightFlightAndLeavesFriendlinessAlone() {
+        DispositionTraits traits = PlayerLifeRecord.EMPTY.credit(Signal.FLEE, 10.0F).toTraits();
+        assertEquals(DispositionTraits.DEFAULT - 1, traits.fightFlight());
+        assertEquals(DispositionTraits.DEFAULT, traits.friendliness());
+    }
+
+    @Test
+    void oneCleanEscapeIsWorthOneSolidBeatingEndured() {
+        DispositionTraits escaped =
+            PlayerLifeRecord.EMPTY.credit(Signal.FLEE, FeelingRecord.ESCAPE_TIMIDITY).toTraits();
+        DispositionTraits endured = PlayerLifeRecord.EMPTY.credit(Signal.FLEE, 10.0F).toTraits();
+        assertEquals(endured.fightFlight(), escaped.fightFlight());
+    }
+
+    @Test
+    void aLifeOfPureFleeingClampsToFullFlight() {
+        PlayerLifeRecord timid = PlayerLifeRecord.EMPTY;
+        for (int i = 0; i < 10; i++) {
+            timid = timid.credit(Signal.FLEE, FeelingRecord.ESCAPE_TIMIDITY);
+        }
+        DispositionTraits traits = timid.toTraits();
+        assertEquals(DispositionTraits.MIN, traits.fightFlight());
+        // Fleeing says nothing about warmth — only Fight/Flight moves.
+        assertEquals(DispositionTraits.DEFAULT, traits.friendliness());
+    }
+
+    @Test
+    void damageDealtAndDamageEnduredCancelPointForPoint() {
+        DispositionTraits traits = PlayerLifeRecord.EMPTY
+            .credit(Signal.ATTACK, 10.0F)
+            .credit(Signal.FLEE, 10.0F)
+            .toTraits();
+        assertEquals(DispositionTraits.DEFAULT, traits.fightFlight());
+    }
+
+    @Test
+    void aNegativeFleeHandsBackWhatWasBanked() {
+        PlayerLifeRecord banked = PlayerLifeRecord.EMPTY.credit(Signal.FLEE, 12.0F);
+        assertEquals(12.0F, banked.timidity(), EPS);
+        PlayerLifeRecord forfeited = banked.credit(Signal.FLEE, -12.0F);
+        assertEquals(0.0F, forfeited.timidity(), EPS);
+        assertEquals(DispositionTraits.DEFAULT, forfeited.toTraits().fightFlight());
+    }
+
+    @Test
+    void anOverLargeForfeitFloorsAtZeroRatherThanTurningAggressive() {
+        PlayerLifeRecord forfeited = PlayerLifeRecord.EMPTY
+            .credit(Signal.FLEE, 5.0F)
+            .credit(Signal.FLEE, -50.0F);
+        assertEquals(0.0F, forfeited.timidity(), EPS);
+        assertEquals(DispositionTraits.DEFAULT, forfeited.toTraits().fightFlight());
+    }
+
+    @Test
+    void timidityCountsTowardNonEmptiness() {
+        assertFalse(PlayerLifeRecord.EMPTY.credit(Signal.FLEE, 3.0F).isEmpty());
+    }
+
+    @Test
+    void fleeLeavesEveryOtherTallyUntouched() {
+        PlayerLifeRecord fled = PlayerLifeRecord.EMPTY.credit(Signal.FLEE, 7.0F);
+        assertEquals(0.0F, fled.damageDealt(), EPS);
+        assertEquals(0, fled.kills());
+        assertEquals(0, fled.attacks());
+        assertEquals(0.0F, fled.kindness(), EPS);
+        assertEquals(0, fled.harms());
+    }
+
+    @Test
+    void nbtRoundTripCarriesTimidity() {
+        CompoundTag tag = new CompoundTag();
+        PlayerLifeRecord.EMPTY.credit(Signal.FLEE, 14.0F).save(tag);
+        assertEquals(14.0F, PlayerLifeRecord.load(tag).timidity(), EPS);
+    }
+
+    @Test
+    void legacyTagWithoutTheTimidityKeyLoadsAsUnflinching() {
+        CompoundTag tag = new CompoundTag();
+        PlayerLifeRecord.EMPTY.credit(Signal.ATTACK, 20.0F).save(tag);
+        tag.remove(PlayerLifeRecord.TAG_TIMIDITY);
+        PlayerLifeRecord loaded = PlayerLifeRecord.load(tag);
+        assertEquals(0.0F, loaded.timidity(), EPS);
+        assertEquals(DispositionTraits.DEFAULT + 2, loaded.toTraits().fightFlight());
+    }
 
     @Test
     void nbtRoundTrip() {

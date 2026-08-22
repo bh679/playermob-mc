@@ -41,6 +41,9 @@ public final class FeelingLedger {
     static final String TAG_DEFEND_COUNT = "DefendCount";
     static final String TAG_LAST_CARRIAGE = "LastCarriage";
     static final String TAG_PROVOKED = "Provoked";
+    static final String TAG_TIMIDITY = "Timidity";
+    static final String TAG_ANSWERED = "Answered";
+    static final String TAG_ESCAPED = "Escaped";
     // NB: lastWitnessTick is deliberately NOT persisted — it's session-scoped (see FeelingRecord).
 
     public static final float DEFAULT = FeelingRecord.DEFAULT;
@@ -128,6 +131,46 @@ public final class FeelingLedger {
     /** True once this mob has taken combat intent toward {@code id}; false for anyone unknown. */
     public boolean isProvoked(UUID id) {
         return recordFor(id).provoked();
+    }
+
+    /**
+     * Bank {@code points} of Flight toward {@code id} — damage this mob just landed on them, or
+     * {@link FeelingRecord#ESCAPE_TIMIDITY} for a getaway. Returns the running total, or 0 once
+     * they have answered (at which point nothing more is banked).
+     */
+    public float accrueTimidity(UUID id, float points) {
+        FeelingRecord after = recordFor(id).withTimidity(points);
+        put(id, after);
+        return after.answered() ? 0.0F : after.unansweredTimidity();
+    }
+
+    /**
+     * Latch "{@code id} hit back" and return the Flight total they forfeit by doing so — the
+     * caller hands exactly that much back to the player-side {@code PlayerLifeRecord}. Returns 0
+     * on every call after the first, so the cancellation can never double-count.
+     */
+    public float markAnswered(UUID id) {
+        FeelingRecord before = recordFor(id);
+        if (before.answered()) {
+            return 0.0F;
+        }
+        put(id, before.withAnswered());
+        return before.unansweredTimidity();
+    }
+
+    /** True once {@code id} has hit this mob back (or killed it). */
+    public boolean isAnswered(UUID id) {
+        return recordFor(id).answered();
+    }
+
+    /** Latch "{@code id} got away from me". Returns true only on the first clean getaway. */
+    public boolean markEscaped(UUID id) {
+        FeelingRecord before = recordFor(id);
+        if (before.escaped()) {
+            return false;
+        }
+        put(id, before.withEscaped());
+        return true;
     }
 
     /** Set the feeling toward {@code id} to an absolute value (clamped), keeping other state. */
@@ -276,6 +319,15 @@ public final class FeelingLedger {
             if (r.provoked()) {
                 entry.putBoolean(TAG_PROVOKED, true);
             }
+            if (r.unansweredTimidity() != 0.0F) {
+                entry.putFloat(TAG_TIMIDITY, r.unansweredTimidity());
+            }
+            if (r.answered()) {
+                entry.putBoolean(TAG_ANSWERED, true);
+            }
+            if (r.escaped()) {
+                entry.putBoolean(TAG_ESCAPED, true);
+            }
             // lastWitnessTick is session-scoped (combat ticks reset on reload) — not persisted.
             list.add(entry);
         }
@@ -307,9 +359,16 @@ public final class FeelingLedger {
                 // before a reload still started that fight afterwards. Missing key ⇒ false, so
                 // saves from before this flag existed read as "the player struck first".
                 boolean provoked = NbtCompat.getBooleanOr(entry, TAG_PROVOKED, false);
+                // The restraint trio is persisted for the same reason: a beating you took, a
+                // getaway you made, or a blow you struck back all outlive a reload. Missing keys
+                // ⇒ 0/false, so pre-restraint saves read as "nothing banked, nothing answered".
+                float timidity = Math.max(0.0F, NbtCompat.getFloatOr(entry, TAG_TIMIDITY, 0.0F));
+                boolean answered = NbtCompat.getBooleanOr(entry, TAG_ANSWERED, false);
+                boolean escaped = NbtCompat.getBooleanOr(entry, TAG_ESCAPED, false);
                 // lastWitnessTick resets to 0 on load — session-scoped debounce, not persisted.
                 feelings.put(NbtCompat.getUUID(entry, TAG_UUID), new FeelingRecord(
-                    feeling, crouchUsed, crouchCap, defendCount, lastCarriage, 0, provoked));
+                    feeling, crouchUsed, crouchCap, defendCount, lastCarriage, 0, provoked,
+                    answered ? 0.0F : timidity, answered, escaped));
             }
         }
         prune();
