@@ -650,6 +650,16 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private final DoorStuckMonitor offTrainDoorStuck = new DoorStuckMonitor();
 
     /**
+     * Per-mob rate limit on door operations — at most one every 2 s, escalating on a Fibonacci
+     * ladder to 34 s while the mob keeps reaching for a door without moving a whole block, and
+     * resetting the moment it does. Consulted (and armed) by every door path through
+     * {@link #armDoorOperation(boolean)}, so it covers the goal, the stuck-recovery, and the
+     * on-train reflex alike. Transient AI state (never saved), like the fields around it.
+     * See {@link DoorChangeCooldown}.
+     */
+    private final DoorChangeCooldown doorChangeCooldown = new DoorChangeCooldown();
+
+    /**
      * Ticks left during which this mob opens no doors, so a door the stuck-recovery just closed
      * isn't reopened before the mob can cross the perpendicular path the open swing was blocking.
      * Set by {@link #holdDoorsClosed()} (on or off a train), decremented each server tick, and read
@@ -983,6 +993,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (doorCloseHoldTicks > 0) {
             doorCloseHoldTicks--;
         }
+        // Tick down the door-operation rate limit. Unconditional — on a train the Dungeon-Train
+        // reflex arms it just as the off-train paths do, so it must run in both branches below.
+        doorChangeCooldown.tick();
         // Advance any in-progress deliberate door operation (face the door, then open/close it).
         // After super.customServerAiStep() ticked the goals, so this look wins — like the iron gaze.
         tickDoorOperation();
@@ -1056,6 +1069,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (blocking != null) {
             BlockPos pos = blocking.pos();
             Vec3 eye = getEyePosition();
+            // Rate-limited like every other door path. A mob wedged at a doorway is exactly the
+            // case the backoff escalates, so a recovery can end up deferred as far as 34 s — which
+            // is the intended shape: DoorStuckMonitor keeps re-firing, and a close that hasn't
+            // freed the mob after several tries won't on the next one either.
             beginDoorOperation(
                 pos.getX() + 0.5 - eye.x, pos.getY() + 0.5 - eye.y, pos.getZ() + 0.5 - eye.z,
                 () -> DoorObstruction.setOpen(this, serverLevel, pos, false));
@@ -2560,6 +2577,15 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     }
 
     /**
+     * Whether this mob's door rate limit is currently holding off a new (non-exempt) door
+     * operation. Read by {@link PlayerMobDoorGoal#canUse()} so the goal declines to latch a door it
+     * couldn't operate anyway. See {@link DoorChangeCooldown}.
+     */
+    public boolean isDoorChangeOnCooldown() {
+        return this.doorChangeCooldown.isOnCooldown();
+    }
+
+    /**
      * Begin a deliberate door operation: for {@link #DOOR_OP_TICKS} the mob faces the door — via the
      * eye-relative offset, re-applied each tick so it tracks a moving carriage — and, through
      * {@link DoorOperationGoal} claiming MOVE+LOOK at priority 1, stops fighting/walking; partway in
@@ -2574,7 +2600,39 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * @param action the deferred open/close (e.g. {@link DoorObstruction#setOpen})
      */
     public void beginDoorOperation(double dx, double dy, double dz, Runnable action) {
-        if (!armDoorOperation()) {
+        beginDoorOperation(dx, dy, dz, action, false, getX(), getZ());
+    }
+
+    /**
+     * {@link #beginDoorOperation(double, double, double, Runnable)} with control over the door rate
+     * limit. Only {@link PlayerMobDoorGoal}'s close-behind passes {@code true}: the open it pairs
+     * with already spent this mob's slot, and refusing the close here would quietly turn every
+     * door-closing mob into a door-leaving one. Every other caller must go through the four-argument
+     * form so it counts against the limit.
+     *
+     * @param exemptFromCooldown whether to bypass (but still re-arm) the rate limit
+     */
+    public void beginDoorOperation(double dx, double dy, double dz, Runnable action,
+                                   boolean exemptFromCooldown) {
+        beginDoorOperation(dx, dy, dz, action, exemptFromCooldown, getX(), getZ());
+    }
+
+    /**
+     * {@link #beginDoorOperation(double, double, double, Runnable, boolean)} with the mob's position
+     * in the frame the doors live in, for the rate limit's "has it actually got anywhere?" test.
+     *
+     * <p>The other forms pass world coordinates, which is right off a train. On a moving Dungeon
+     * Train carriage the mob's world position changes every tick from being carried along, so a mob
+     * flapping a carriage door on the spot would read as covering a block every time and never back
+     * off — the on-train reflex must pass the carriage's sub-level coordinates instead, the same
+     * ones it already feeds {@link DoorObstruction#travelAxis}.</p>
+     *
+     * @param frameX the mob's X in the door frame
+     * @param frameZ the mob's Z in the door frame
+     */
+    public void beginDoorOperation(double dx, double dy, double dz, Runnable action,
+                                   boolean exemptFromCooldown, double frameX, double frameZ) {
+        if (!armDoorOperation(exemptFromCooldown, frameX, frameZ)) {
             return;
         }
         this.doorOpFacing = true;
@@ -2590,16 +2648,39 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * and punches the button via its own gaze). This just makes that operation pause combat too.
      */
     public void interruptForDoorOperation() {
-        if (!armDoorOperation()) {
+        interruptForDoorOperation(getX(), getZ());
+    }
+
+    /**
+     * {@link #interruptForDoorOperation()} with the mob's position in the door frame — the on-train
+     * iron-door control must pass carriage sub-level coordinates, for the reason spelled out on
+     * {@link #beginDoorOperation(double, double, double, Runnable, boolean, double, double)}.
+     */
+    public void interruptForDoorOperation(double frameX, double frameZ) {
+        // Non-exempt: the iron-door control is a real door change and counts against the limit.
+        if (!armDoorOperation(false, frameX, frameZ)) {
             return;
         }
         this.doorOpFacing = false;
         this.doorOpAction = null;
     }
 
-    /** Start a fresh door-operation window unless one is already running (or the mob is recovering). */
-    private boolean armDoorOperation() {
+    /**
+     * Start a fresh door-operation window unless one is already running, the mob is recovering, or
+     * the door rate limit is still holding it off ({@link DoorChangeCooldown}). The already-running
+     * and recovering guards are checked first, so a call rejected for those reasons never arms — or
+     * climbs the backoff ladder of — the rate limit.
+     *
+     * @param exemptFromCooldown whether this is the paired close-behind of an operation already
+     *                           paid for; see {@link DoorChangeCooldown#tryChange}
+     * @param frameX             the mob's X in the frame the doors live in
+     * @param frameZ             the mob's Z in the same frame
+     */
+    private boolean armDoorOperation(boolean exemptFromCooldown, double frameX, double frameZ) {
         if (isOperatingDoor() || this.recovering) {
+            return false;
+        }
+        if (!this.doorChangeCooldown.tryChange(frameX, frameZ, exemptFromCooldown)) {
             return false;
         }
         this.doorOpTicks = DOOR_OP_TICKS;

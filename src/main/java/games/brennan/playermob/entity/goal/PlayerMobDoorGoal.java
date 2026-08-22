@@ -31,6 +31,11 @@ import net.minecraft.world.phys.Vec3;
  * so it runs concurrently with the movement goal driving the walk and never
  * preempts combat, raiding, or strolling.</p>
  *
+ * <p>Rate-limited per mob: the goal declines to start while
+ * {@link PlayerMobEntity#isDoorChangeOnCooldown()}, and its open sets the next wait (2 s,
+ * escalating to 34 s while the mob isn't getting anywhere). The close-behind is the one
+ * exemption — see {@code DoorChangeCooldown}.</p>
+ *
  * <p>Wooden doors only — iron doors aren't hand-openable and stay path-blocked,
  * and {@code DoorInteractGoal.setOpen} no-ops on anything that isn't a
  * {@link net.minecraft.world.level.block.DoorBlock}.</p>
@@ -67,16 +72,24 @@ public final class PlayerMobDoorGoal extends DoorInteractGoal implements Describ
      * can't immediately reopen the very door the recovery just shut to clear a blocked perpendicular
      * path (an open door's panel swings across the perpendicular edge of its cell). See
      * {@link PlayerMobEntity#isHoldingDoorsClosed()}.
+     *
+     * <p>Also suppressed while the mob's door rate limit is running
+     * ({@link PlayerMobEntity#isDoorChangeOnCooldown()}). Declining here rather than letting the run
+     * start and no-op matters: a run that started on cooldown would open nothing, then close
+     * "behind" itself on {@link #stop()} — shutting a door this mob never opened.</p>
      */
     @Override
     public boolean canUse() {
-        return !this.playerMob.isHoldingDoorsClosed() && super.canUse();
+        return !this.playerMob.isHoldingDoorsClosed()
+            && !this.playerMob.isDoorChangeOnCooldown()
+            && super.canUse();
     }
 
     @Override
     public void start() {
         this.forgetTime = CLOSE_DELAY_TICKS;
-        operateDeliberately(true);
+        // Non-exempt: the open is what spends this mob's door slot and sets the next wait.
+        operateDeliberately(true, false);
     }
 
     @Override
@@ -104,7 +117,10 @@ public final class PlayerMobDoorGoal extends DoorInteractGoal implements Describ
     @Override
     public void stop() {
         if (this.playerMob.closesDoors()) {
-            operateDeliberately(false);
+            // Exempt: the close-behind is the second half of the operation the open already paid
+            // for. Without the exemption the rate limit would swallow it and every closer would
+            // behave as a non-closer.
+            operateDeliberately(false, true);
         }
     }
 
@@ -114,8 +130,12 @@ public final class PlayerMobDoorGoal extends DoorInteractGoal implements Describ
      * instantly. Acts on the captured {@code doorPos} (the door this goal latched), so a later goal
      * re-detection can't redirect the deferred action to a different door. No-op if the base goal
      * hasn't resolved a door.
+     *
+     * @param exempt whether this operation bypasses the mob's door rate limit — true only for the
+     *               close-behind; see {@link PlayerMobEntity#beginDoorOperation(double, double,
+     *               double, Runnable, boolean)}
      */
-    private void operateDeliberately(boolean open) {
+    private void operateDeliberately(boolean open, boolean exempt) {
         if (!this.hasDoor) {
             return;
         }
@@ -123,6 +143,7 @@ public final class PlayerMobDoorGoal extends DoorInteractGoal implements Describ
         Vec3 eye = this.playerMob.getEyePosition();
         this.playerMob.beginDoorOperation(
             pos.getX() + 0.5 - eye.x, pos.getY() + 0.5 - eye.y, pos.getZ() + 0.5 - eye.z,
-            () -> DoorObstruction.setOpen(this.playerMob, this.playerMob.level(), pos, open));
+            () -> DoorObstruction.setOpen(this.playerMob, this.playerMob.level(), pos, open),
+            exempt);
     }
 }

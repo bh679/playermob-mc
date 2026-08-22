@@ -639,11 +639,15 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
                 // silently. The eye→door offset is taken in the carriage's sub-level frame, which equals
                 // the world-frame offset (rotation is locked to identity), so it's the right look target.
                 Vector3d subEye = c.ship().worldToShip(new Vector3d(self.getX(), self.getEyeY(), self.getZ()));
+                // Sub-level coordinates for the per-mob door rate limit's progress test too: in world
+                // space the carriage's carry-along drift would read as the mob covering ground every
+                // tick, so a mob flapping a carriage door on the spot would never back off.
                 playerMob.beginDoorOperation(
                     doorPos.getX() + 0.5 - subEye.x,
                     doorPos.getY() + 0.5 - subEye.y,
                     doorPos.getZ() + 0.5 - subEye.z,
-                    () -> DoorObstruction.setOpen(self, level, doorPos, desiredOpen));
+                    () -> DoorObstruction.setOpen(self, level, doorPos, desiredOpen),
+                    false, sub.x, sub.z);
                 DOOR_COOLDOWN.put(self, new long[]{posLong, DOOR_TOGGLE_COOLDOWN});
             }
             return;
@@ -658,7 +662,8 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         DoorObstruction.Obstruction iron =
             DoorObstruction.nearestObstructing(level, subPos, DOOR_REACH, travelAxis, DoorObstruction.CLOSED_IRON_DOOR);
         if (iron != null && operateControlNear(playerMob, level, c, iron.pos())) {
-            playerMob.interruptForDoorOperation(); // pause combat/movement for the control press too
+            // Pause combat/movement for the control press too; sub-level frame, as above.
+            playerMob.interruptForDoorOperation(sub.x, sub.z);
         }
     }
 
