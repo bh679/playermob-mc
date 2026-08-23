@@ -16,6 +16,7 @@ import games.brennan.playermob.entity.AutoNameMode;
 import games.brennan.playermob.entity.DispositionTraits;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.entity.PlayerMobSummon;
+import games.brennan.playermob.entity.ScavengeMode;
 import games.brennan.playermob.entity.StayAnchor;
 import games.brennan.playermob.entity.StayNearPolicy;
 import games.brennan.playermob.entity.goal.AttackOrder;
@@ -214,6 +215,15 @@ public final class ReincarnateCommand {
                     .then(Commands.literal("natural").executes(ctx -> setAutoName(ctx, AutoNameMode.NATURAL)))
                     .then(Commands.literal("egg").executes(ctx -> setAutoName(ctx, AutoNameMode.EGG)))
                     .then(Commands.literal("all").executes(ctx -> setAutoName(ctx, AutoNameMode.ALL))))
+                .then(scavengeTree("searchcontainers",
+                    PlayerMobConfig::searchContainers, PlayerMobConfig::setSearchContainers,
+                    "chest raiding", "raid chests, barrels and shulker boxes"))
+                .then(scavengeTree("searcharmorstands",
+                    PlayerMobConfig::searchArmorStands, PlayerMobConfig::setSearchArmorStands,
+                    "armor-stand raiding", "strip gear off armor stands"))
+                .then(scavengeTree("collectflooritems",
+                    PlayerMobConfig::collectFloorItems, PlayerMobConfig::setCollectFloorItems,
+                    "floor-item collecting", "pick wanted items up off the floor"))
                 .then(skinTree()));
     }
 
@@ -1109,6 +1119,59 @@ public final class ReincarnateCommand {
         ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob animal-hunting "
             + (enabled ? "enabled" : "disabled") + " for this session."), false);
         return 1;
+    }
+
+    // ---- /playermob searchcontainers|searcharmorstands|collectflooritems ------------------------
+
+    /**
+     * Build one {@code /playermob <name> [enabled|disabled|onlynaturallyspawning]} subtree — bare form
+     * reports the current mode, each literal sets it for this session (never written back to the config
+     * file). One tree per scavenging behaviour; {@code label} names it in feedback ("chest raiding") and
+     * {@code action} completes the sentence "…mobs {action}".
+     */
+    private static LiteralArgumentBuilder<CommandSourceStack> scavengeTree(
+            String name,
+            java.util.function.Supplier<ScavengeMode> getter,
+            java.util.function.Consumer<ScavengeMode> setter,
+            String label,
+            String action) {
+        LiteralArgumentBuilder<CommandSourceStack> tree = Commands.literal(name)
+            .executes(ctx -> queryScavenge(ctx, getter.get(), label, action));
+        for (ScavengeMode mode : ScavengeMode.values()) {
+            tree = tree.then(Commands.literal(mode.token())
+                .executes(ctx -> setScavenge(ctx, setter, mode, label, action)));
+        }
+        return tree;
+    }
+
+    /** Report a scavenging behaviour's current mode. */
+    private static int queryScavenge(CommandContext<CommandSourceStack> ctx, ScavengeMode mode,
+                                     String label, String action) {
+        ctx.getSource().sendSuccess(() -> Component.literal(
+            "PlayerMob " + label + " is " + scavengeDescription(mode, action) + "."), false);
+        return 1;
+    }
+
+    /** Set a scavenging behaviour's mode for this session. */
+    private static int setScavenge(CommandContext<CommandSourceStack> ctx,
+                                   java.util.function.Consumer<ScavengeMode> setter,
+                                   ScavengeMode mode, String label, String action) {
+        setter.accept(mode);
+        ctx.getSource().sendSuccess(() -> Component.literal(
+            "PlayerMob " + label + " set to " + scavengeDescription(mode, action)
+                + " for this session."), false);
+        return 1;
+    }
+
+    /** Human-readable description of a scavenging mode for command feedback. */
+    private static String scavengeDescription(ScavengeMode mode, String action) {
+        return switch (mode) {
+            case ENABLED -> "ENABLED — every PlayerMob may " + action;
+            case DISABLED -> "DISABLED — no PlayerMob will " + action;
+            case ONLY_NATURALLY_SPAWNING ->
+                "ONLYNATURALLYSPAWNING — only naturally spawned PlayerMobs " + action
+                    + " (egg / summon / dispenser mobs won't)";
+        };
     }
 
     /** {@code /playermob autoname} — report which spawns are auto-named from their skin source. */

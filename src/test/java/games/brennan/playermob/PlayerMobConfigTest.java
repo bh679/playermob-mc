@@ -3,6 +3,7 @@ package games.brennan.playermob;
 import org.junit.jupiter.api.Test;
 
 import games.brennan.playermob.entity.AutoNameMode;
+import games.brennan.playermob.entity.ScavengeMode;
 
 import java.util.List;
 import java.util.Map;
@@ -34,6 +35,30 @@ class PlayerMobConfigTest {
         assertEquals(PlayerMobConfig.DEFAULT_DEBUG_SPAWN_LOG, v.debugSpawnLog());
         assertEquals(PlayerMobConfig.DEFAULT_TRAIN_DIG_THROUGH, v.trainDigThrough());
         assertEquals(PlayerMobConfig.DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER, v.trainFollowLovedPlayer());
+    }
+
+    @Test
+    void scavengeModesDefaultToEnabled() {
+        var v = PlayerMobConfig.parse(new Properties());
+        assertEquals(ScavengeMode.ENABLED, v.searchContainers());
+        assertEquals(ScavengeMode.ENABLED, v.searchArmorStands());
+        assertEquals(ScavengeMode.ENABLED, v.collectFloorItems());
+    }
+
+    @Test
+    void scavengeModesParseIndependently() {
+        var v = PlayerMobConfig.parse(props(
+            "searchContainers", "onlynaturallyspawning",
+            "searchArmorStands", "disabled"));
+        assertEquals(ScavengeMode.ONLY_NATURALLY_SPAWNING, v.searchContainers());
+        assertEquals(ScavengeMode.DISABLED, v.searchArmorStands());
+        assertEquals(ScavengeMode.ENABLED, v.collectFloorItems());
+    }
+
+    @Test
+    void unparseableScavengeModeFallsBackToDefault() {
+        var v = PlayerMobConfig.parse(props("collectFloorItems", "sometimes"));
+        assertEquals(PlayerMobConfig.DEFAULT_COLLECT_FLOOR_ITEMS, v.collectFloorItems());
     }
 
     @Test

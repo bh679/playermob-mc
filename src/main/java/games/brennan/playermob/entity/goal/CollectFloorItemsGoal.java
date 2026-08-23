@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.compat.GameRuleCompat;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.PlayerMobEntity;
@@ -73,6 +74,7 @@ public final class CollectFloorItemsGoal extends Goal implements DescribableGoal
         }
         if (mob.getTarget() != null) return false; // combat preempts
         if (!GameRuleCompat.mobGriefing(mob.level())) return false;
+        if (!mob.allowsScavenging(PlayerMobConfig.collectFloorItems())) return false; // floor-item collecting gated by config
 
         ItemEntity found = findClosestWantedItem();
         if (found == null) {

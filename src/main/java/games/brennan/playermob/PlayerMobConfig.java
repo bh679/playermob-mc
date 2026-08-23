@@ -3,6 +3,7 @@ package games.brennan.playermob;
 import com.mojang.logging.LogUtils;
 import games.brennan.playermob.entity.AutoNameMode;
 import games.brennan.playermob.entity.ModdedRangedWeapons;
+import games.brennan.playermob.entity.ScavengeMode;
 import games.brennan.playermob.entity.WantedItemList;
 import org.slf4j.Logger;
 
@@ -50,6 +51,10 @@ public final class PlayerMobConfig {
     private static final String KEY_EXTINGUISH_WITH_BUCKET = "extinguishWithBucket";
     private static final String KEY_HUNT_FOR_FOOD = "huntForFood";
 
+    private static final String KEY_SEARCH_CONTAINERS = "searchContainers";
+    private static final String KEY_SEARCH_ARMOR_STANDS = "searchArmorStands";
+    private static final String KEY_COLLECT_FLOOR_ITEMS = "collectFloorItems";
+
     private static final String KEY_EXTRA_PICKUP_ITEMS = "extraPickupItems";
     private static final String KEY_MODDED_RANGED_WEAPONS = "moddedRangedWeapons";
 
@@ -91,6 +96,12 @@ public final class PlayerMobConfig {
     public static final boolean DEFAULT_EXTINGUISH_WITH_BUCKET = true;
     /** A hungry PlayerMob hunts nearby food animals (cow/pig/chicken/sheep/rabbit); on by default. */
     public static final boolean DEFAULT_HUNT_FOR_FOOD = true;
+    /** Chest / barrel / shulker-box raiding is on for every PlayerMob by default. */
+    public static final ScavengeMode DEFAULT_SEARCH_CONTAINERS = ScavengeMode.ENABLED;
+    /** Armor-stand stripping is on for every PlayerMob by default. */
+    public static final ScavengeMode DEFAULT_SEARCH_ARMOR_STANDS = ScavengeMode.ENABLED;
+    /** Floor-item collecting is on for every PlayerMob by default. */
+    public static final ScavengeMode DEFAULT_COLLECT_FLOOR_ITEMS = ScavengeMode.ENABLED;
     /** No extra pickup items by default — the mob wants only its hardcoded gear/ammo/valuable/consumable set. */
     public static final String DEFAULT_EXTRA_PICKUP_ITEMS = "";
     /** No modded ranged weapons recognised by default — only vanilla bows/crossbows are ranged out of the box. */
@@ -202,6 +213,9 @@ public final class PlayerMobConfig {
     private static volatile boolean endCrystalCombat = DEFAULT_END_CRYSTAL_COMBAT;
     private static volatile boolean extinguishWithBucket = DEFAULT_EXTINGUISH_WITH_BUCKET;
     private static volatile boolean huntForFood = DEFAULT_HUNT_FOR_FOOD;
+    private static volatile ScavengeMode searchContainers = DEFAULT_SEARCH_CONTAINERS;
+    private static volatile ScavengeMode searchArmorStands = DEFAULT_SEARCH_ARMOR_STANDS;
+    private static volatile ScavengeMode collectFloorItems = DEFAULT_COLLECT_FLOOR_ITEMS;
     /** Admin-configured extra items the mob always wants; replaced wholesale on {@link #load}. */
     private static volatile WantedItemList extraPickups = WantedItemList.EMPTY;
     /** Admin-configured modded ranged weapons + their ammo; replaced wholesale on {@link #load}. */
@@ -323,6 +337,37 @@ public final class PlayerMobConfig {
      */
     public static boolean huntForFood() {
         return huntForFood;
+    }
+
+    /**
+     * Whether a PlayerMob raids nearby chests, barrels and shulker boxes for better gear
+     * ({@link ScavengeMode#ENABLED} by default). {@link ScavengeMode#ONLY_NATURALLY_SPAWNING} limits it to
+     * mobs that arrived on their own, so egg / {@code /summon} / dispenser mobs leave your storage alone.
+     * Toggle live with {@code /playermob searchcontainers <enabled|disabled|onlynaturallyspawning>}.
+     * See {@code RaidContainersGoal}.
+     */
+    public static ScavengeMode searchContainers() {
+        return searchContainers;
+    }
+
+    /**
+     * Whether a PlayerMob strips gear off nearby armor stands ({@link ScavengeMode#ENABLED} by default).
+     * Same three modes as {@link #searchContainers()}. Toggle live with
+     * {@code /playermob searcharmorstands <enabled|disabled|onlynaturallyspawning>}.
+     * See {@code RaidArmorStandsGoal}.
+     */
+    public static ScavengeMode searchArmorStands() {
+        return searchArmorStands;
+    }
+
+    /**
+     * Whether a PlayerMob picks wanted items up off the floor ({@link ScavengeMode#ENABLED} by default).
+     * Same three modes as {@link #searchContainers()}. Toggle live with
+     * {@code /playermob collectflooritems <enabled|disabled|onlynaturallyspawning>}.
+     * See {@code CollectFloorItemsGoal}.
+     */
+    public static ScavengeMode collectFloorItems() {
+        return collectFloorItems;
     }
 
     /** Distance (blocks) beyond which a PlayerMob prefers a ranged weapon over melee. See {@code equipBestWeaponForTarget}. */
@@ -496,6 +541,25 @@ public final class PlayerMobConfig {
     }
 
     /**
+     * Set the chest-raiding mode at runtime (e.g. from
+     * {@code /playermob searchcontainers <enabled|disabled|onlynaturallyspawning>}). A session override —
+     * not written back to the file, which stays the startup default.
+     */
+    public static void setSearchContainers(ScavengeMode mode) {
+        searchContainers = mode == null ? DEFAULT_SEARCH_CONTAINERS : mode;
+    }
+
+    /** @see #setSearchContainers(ScavengeMode) */
+    public static void setSearchArmorStands(ScavengeMode mode) {
+        searchArmorStands = mode == null ? DEFAULT_SEARCH_ARMOR_STANDS : mode;
+    }
+
+    /** @see #setSearchContainers(ScavengeMode) */
+    public static void setCollectFloorItems(ScavengeMode mode) {
+        collectFloorItems = mode == null ? DEFAULT_COLLECT_FLOOR_ITEMS : mode;
+    }
+
+    /**
      * Toggle a skin source at runtime (e.g. from {@code /playermob skin source <bundled|online|local> on|off}).
      * A session override — not written back to the file, which stays the startup default.
      */
@@ -573,6 +637,9 @@ public final class PlayerMobConfig {
             endCrystalCombat = v.endCrystalCombat();
             extinguishWithBucket = v.extinguishWithBucket();
             huntForFood = v.huntForFood();
+            searchContainers = v.searchContainers();
+            searchArmorStands = v.searchArmorStands();
+            collectFloorItems = v.collectFloorItems();
             extraPickups = v.extraPickups();
             moddedRanged = v.moddedRanged();
             naturalSpawnScales = v.naturalSpawnScales();
@@ -595,6 +662,11 @@ public final class PlayerMobConfig {
                 KEY_END_CRYSTAL_COMBAT, endCrystalCombat,
                 KEY_EXTINGUISH_WITH_BUCKET, extinguishWithBucket,
                 KEY_HUNT_FOR_FOOD, huntForFood);
+            LOGGER.info("[{}] scavenging config: {}={}, {}={}, {}={}",
+                PlayerMob.MOD_ID,
+                KEY_SEARCH_CONTAINERS, searchContainers.token(),
+                KEY_SEARCH_ARMOR_STANDS, searchArmorStands.token(),
+                KEY_COLLECT_FLOOR_ITEMS, collectFloorItems.token());
         } catch (IOException | RuntimeException e) {
             LOGGER.warn("[{}] failed to load {}; using defaults", PlayerMob.MOD_ID, FILE, e);
         }
@@ -608,6 +680,8 @@ public final class PlayerMobConfig {
                   boolean requireArrows, boolean seekArrowsWhenEmpty,
                   float rangedEngageDistance, float meleeEngageDistance, boolean tntCombat,
                   boolean endCrystalCombat, boolean extinguishWithBucket, boolean huntForFood,
+                  ScavengeMode searchContainers, ScavengeMode searchArmorStands,
+                  ScavengeMode collectFloorItems,
                   WantedItemList extraPickups,
                   ModdedRangedWeapons moddedRanged,
                   Map<String, Float> naturalSpawnScales,
@@ -632,6 +706,9 @@ public final class PlayerMobConfig {
             parseBool(props.getProperty(KEY_END_CRYSTAL_COMBAT), DEFAULT_END_CRYSTAL_COMBAT),
             parseBool(props.getProperty(KEY_EXTINGUISH_WITH_BUCKET), DEFAULT_EXTINGUISH_WITH_BUCKET),
             parseBool(props.getProperty(KEY_HUNT_FOR_FOOD), DEFAULT_HUNT_FOR_FOOD),
+            ScavengeMode.fromString(props.getProperty(KEY_SEARCH_CONTAINERS), DEFAULT_SEARCH_CONTAINERS),
+            ScavengeMode.fromString(props.getProperty(KEY_SEARCH_ARMOR_STANDS), DEFAULT_SEARCH_ARMOR_STANDS),
+            ScavengeMode.fromString(props.getProperty(KEY_COLLECT_FLOOR_ITEMS), DEFAULT_COLLECT_FLOOR_ITEMS),
             WantedItemList.parse(props.getProperty(KEY_EXTRA_PICKUP_ITEMS, DEFAULT_EXTRA_PICKUP_ITEMS)),
             ModdedRangedWeapons.parse(props.getProperty(KEY_MODDED_RANGED_WEAPONS, DEFAULT_MODDED_RANGED_WEAPONS)),
             parseScales(props),
@@ -800,6 +877,18 @@ public final class PlayerMobConfig {
             .append("#   attack target, letting its weapon do the kill, then eats the drops. Set false to leave\n")
             .append("#   animals alone entirely. Toggle live with /playermob huntforfood on|off (session\n")
             .append("#   override). Default true.\n")
+            .append("# searchContainers / searchArmorStands / collectFloorItems: whether PlayerMobs scavenge —\n")
+            .append("#   searchContainers covers walking to nearby chests, barrels and shulker boxes, opening them\n")
+            .append("#   and swapping in better gear; searchArmorStands covers stripping gear off armor stands;\n")
+            .append("#   collectFloorItems covers picking wanted items up off the ground. Each is one of:\n")
+            .append("#     enabled                — every PlayerMob does it (default)\n")
+            .append("#     disabled               — none do\n")
+            .append("#     onlynaturallyspawning  — only mobs that arrived on their own (wild / chunk-generation /\n")
+            .append("#                              mob-spawner spawns and Dungeon-Train events); mobs you placed\n")
+            .append("#                              with a spawn egg, /summon or a dispenser leave your stuff alone\n")
+            .append("#   PlayerMobs already in your world from before this setting existed count as naturally\n")
+            .append("#   spawned. All three still require the mobGriefing gamerule. Toggle live with\n")
+            .append("#   /playermob searchcontainers|searcharmorstands|collectflooritems <mode> (session override).\n")
             .append("# extraPickupItems: extra items the mob ALWAYS picks up (off the floor and out of chests)\n")
             .append("#   and hoards in its backpack, beyond the built-in weapons/armor/ammo/valuables/food it\n")
             .append("#   already grabs. List item ids and/or item tags, separated by commas or spaces. Prefix a\n")
@@ -842,6 +931,9 @@ public final class PlayerMobConfig {
             .append(KEY_END_CRYSTAL_COMBAT).append("=").append(DEFAULT_END_CRYSTAL_COMBAT).append("\n")
             .append(KEY_EXTINGUISH_WITH_BUCKET).append("=").append(DEFAULT_EXTINGUISH_WITH_BUCKET).append("\n")
             .append(KEY_HUNT_FOR_FOOD).append("=").append(DEFAULT_HUNT_FOR_FOOD).append("\n")
+            .append(KEY_SEARCH_CONTAINERS).append("=").append(DEFAULT_SEARCH_CONTAINERS.token()).append("\n")
+            .append(KEY_SEARCH_ARMOR_STANDS).append("=").append(DEFAULT_SEARCH_ARMOR_STANDS.token()).append("\n")
+            .append(KEY_COLLECT_FLOOR_ITEMS).append("=").append(DEFAULT_COLLECT_FLOOR_ITEMS.token()).append("\n")
             .append(KEY_EXTRA_PICKUP_ITEMS).append("=").append(DEFAULT_EXTRA_PICKUP_ITEMS).append("\n")
             .append(KEY_MODDED_RANGED_WEAPONS).append("=").append(DEFAULT_MODDED_RANGED_WEAPONS).append("\n")
             .append(KEY_SKIN_SOURCE_BUNDLED).append("=").append(DEFAULT_SKIN_SOURCE_BUNDLED).append("\n")

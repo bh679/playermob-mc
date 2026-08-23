@@ -298,6 +298,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private static final String TAG_SKIN_SLIM = "SkinSlim";
     private static final String TAG_SKIN_PLAYER_NAME = "SkinPlayerName";
     private static final String TAG_CLOSES_DOORS = "ClosesDoors";
+    private static final String TAG_NATURAL_ORIGIN = "NaturalOrigin";
     private static final String TAG_TRAIN_EXPLORE_DIR = "TrainExploreDir";
     private static final String TAG_ORDER_TIMEOUT = "OrderTimeout";
     private static final String TAG_ORDER_INTERRUPTIBLE = "OrderInterruptible";
@@ -367,6 +368,25 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * persistence rather than a synched DataTracker entry.</p>
      */
     private boolean closesDoors;
+
+    /**
+     * Whether this mob arrived in the world on its own (wild / chunk-generation / mob-spawner spawn, or a
+     * Dungeon-Train event) rather than being placed by a player with a spawn egg, {@code /summon} or a
+     * dispenser. Set in {@link #finalizeSpawn} from the spawn reason and persisted; a mob saved before
+     * this existed loads as {@code true}, so the scavenging gates keep their old behaviour for it.
+     *
+     * <p>Read by the scavenging goals through {@link #allowsScavenging(ScavengeMode)} — see
+     * {@link ScavengeMode#ONLY_NATURALLY_SPAWNING}.</p>
+     */
+    private boolean naturalOrigin = true;
+
+    /**
+     * True once {@link #finalizeSpawn} has classified this spawn — transient, never persisted. A spawn
+     * egg's {@code entity_data} is merged <em>after</em> {@code finalizeSpawn} (see the note there), so
+     * {@link #readCustomTag} must not reset {@link #naturalOrigin} to its "legacy save" default when that
+     * merge carries no {@code NaturalOrigin} key; an explicit key still wins.
+     */
+    private boolean naturalOriginResolved = false;
 
     /**
      * Whether this mob's skin came from loaded NBT (a reincarnation egg's snapshot,
@@ -1502,6 +1522,8 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (isEventSpawn(reason)) {
             DtSpawnDebug.report(world.getLevel(), this, echo != null, companion);
         }
+        this.naturalOrigin = ScavengeMode.isNaturalOrigin(reason.name());
+        this.naturalOriginResolved = true;
         maybeAutoName(reason.name());
         //? if >=1.21.1 {
         return super.finalizeSpawn(world, difficulty, reason, data);
@@ -2542,6 +2564,24 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     }
 
     /**
+     * Whether this mob arrived on its own rather than being placed by a player — see
+     * {@link #naturalOrigin}.
+     */
+    public boolean isNaturallySpawned() {
+        return this.naturalOrigin;
+    }
+
+    /**
+     * Whether a scavenging behaviour configured with {@code mode} is allowed for this mob:
+     * always under {@link ScavengeMode#ENABLED}, never under {@link ScavengeMode#DISABLED}, and only
+     * for a naturally-spawned mob under {@link ScavengeMode#ONLY_NATURALLY_SPAWNING}. Called from
+     * {@code canUse()} in the chest / armor-stand / floor-item goals.
+     */
+    public boolean allowsScavenging(ScavengeMode mode) {
+        return mode.allows(this.naturalOrigin);
+    }
+
+    /**
      * Arm the door-close hold: for {@link #DOOR_CLOSE_HOLD_TICKS} this mob opens no doors, so a
      * door the stuck-recovery just closed (to clear an open swing blocking its path) isn't reopened
      * before it can cross. Called by the stuck-recovery on and off a train.
@@ -3521,6 +3561,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // a save without this key reads back false ⇒ wide (the old bundled-mob look).
         tag.putBoolean(TAG_SKIN_SLIM, isSkinSlim());
         tag.putBoolean(TAG_CLOSES_DOORS, this.closesDoors);
+        tag.putBoolean(TAG_NATURAL_ORIGIN, this.naturalOrigin);
         // Per-mob order defaults (timeout / interruptibility) applied when a /playermob order command
         // omits the flags. Additive — a save without these keys reads back the 2-min / interruptible
         // defaults. The live pending order itself is transient and never persisted.
@@ -3592,6 +3633,15 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         }
         // Missing key (pre-door-feature saves) ⇒ false ⇒ leave-open. Additive.
         this.closesDoors = NbtCompat.getBooleanOr(tag, TAG_CLOSES_DOORS, false);
+        // An explicit key always wins. Absent: keep what finalizeSpawn decided if it already ran (a spawn
+        // egg's entity_data merge lands after it), else default to naturally spawned — which is what mobs
+        // saved before the scavenging gates existed should count as.
+        if (NbtCompat.containsOfType(tag, TAG_NATURAL_ORIGIN, NbtCompat.ANY_NUMERIC)) {
+            this.naturalOrigin = NbtCompat.getBooleanOr(tag, TAG_NATURAL_ORIGIN, true);
+            this.naturalOriginResolved = true;
+        } else if (!this.naturalOriginResolved) {
+            this.naturalOrigin = true;
+        }
         // Missing keys ⇒ the 2-min / interruptible order defaults (pre-durable-orders saves). Additive.
         this.orderTimeoutDefaultTicks = NbtCompat.getIntOr(tag, TAG_ORDER_TIMEOUT, Order.DEFAULT_TIMEOUT_TICKS);
         this.orderInterruptibleDefault = NbtCompat.getBooleanOr(tag, TAG_ORDER_INTERRUPTIBLE, true);

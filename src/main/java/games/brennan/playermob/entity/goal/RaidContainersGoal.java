@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.compat.GameRuleCompat;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.PlayerMobEntity;
@@ -118,6 +119,7 @@ public final class RaidContainersGoal extends Goal implements DescribableGoal {
         }
         if (mob.getTarget() != null) return false; // combat preempts
         if (!GameRuleCompat.mobGriefing(mob.level())) return false;
+        if (!mob.allowsScavenging(PlayerMobConfig.searchContainers())) return false; // chest raiding gated by config
 
         BlockPos found = findClosestContainer();
         if (found == null) {
