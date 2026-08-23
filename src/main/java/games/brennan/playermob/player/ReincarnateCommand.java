@@ -76,6 +76,11 @@ import java.util.Collection;
  *       persists in the mob's NBT (also authorable via {@code /summon …{PlayerMobData:{StayNear:{…}}}}).</li>
  *   <li>{@code /playermob debug spawnlog [on|off]} — toggle (or report) the colour-coded
  *       Dungeon-Train auto-spawn chat log for this session.</li>
+ *   <li>{@code /playermob exactnames [on|off]} — toggle (or report) exact-name command matching for
+ *       this session: when {@code on}, a subcommand whose {@code <name>} matches no loaded PlayerMob is
+ *       cancelled instead of falling back to the nearest one. A session override of the config flag.</li>
+ *   <li>{@code /playermob orderfailures [on|off]} — toggle (or report) the chat text explaining why a
+ *       {@code /playermob order} could not run. {@code off} still cancels the order, just silently.</li>
  *   <li>{@code /playermob unlimitedammo [on|off]} — toggle (or report) global unlimited ammo for
  *       this session: {@code on} = ranged weapons never run out; {@code off} = they consume inventory
  *       ammo (the {@code requireArrows} default). A session override of the config flag.</li>
@@ -162,6 +167,14 @@ public final class ReincarnateCommand {
                         .executes(ReincarnateCommand::querySpawnLog)
                         .then(Commands.literal("on").executes(ctx -> setSpawnLog(ctx, true)))
                         .then(Commands.literal("off").executes(ctx -> setSpawnLog(ctx, false)))))
+                .then(Commands.literal("exactnames")
+                    .executes(ReincarnateCommand::queryExactNames)
+                    .then(Commands.literal("on").executes(ctx -> setExactNames(ctx, true)))
+                    .then(Commands.literal("off").executes(ctx -> setExactNames(ctx, false))))
+                .then(Commands.literal("orderfailures")
+                    .executes(ReincarnateCommand::queryOrderFailures)
+                    .then(Commands.literal("on").executes(ctx -> setOrderFailures(ctx, true)))
+                    .then(Commands.literal("off").executes(ctx -> setOrderFailures(ctx, false))))
                 .then(Commands.literal("unlimitedammo")
                     .executes(ReincarnateCommand::queryUnlimitedAmmo)
                     .then(Commands.literal("on").executes(ctx -> setUnlimitedAmmo(ctx, true)))
@@ -346,7 +359,8 @@ public final class ReincarnateCommand {
 
     /**
      * Builds the {@code order} subtree: {@code /playermob order <name> <action> <target...>}.
-     * {@code <name>} selects a PlayerMob by custom name (nearest one as a fallback); a
+     * {@code <name>} selects a PlayerMob by custom name (nearest one as a fallback, unless
+     * {@code /playermob exactnames on} — then an unmatched name cancels the order); a
      * {@code <target>} resolves to an online player or a named PlayerMob; positions accept
      * {@code ~ ~ ~}. {@code place} conjures the given block from air.
      */
@@ -632,8 +646,8 @@ public final class ReincarnateCommand {
             if (spawn) {
                 mob.spawnWeapon(weapon.copy());
             } else if (!mob.equipWeapon(weapon.getItem())) {
-                source.sendFailure(Component.literal(who + " doesn't have "
-                    + weapon.getHoverName().getString() + " — add 'spawn' to give it one."));
+                orderFailure(source, who + " doesn't have "
+                    + weapon.getHoverName().getString() + " — add 'spawn' to give it one.");
                 return 0;
             }
         }
@@ -658,14 +672,26 @@ public final class ReincarnateCommand {
     }
 
     /**
+     * Report why an order was cancelled — suppressed entirely when {@code orderFailureMessages} is off,
+     * so the order still fails (the caller's {@code return 0} is unchanged) but says nothing in chat.
+     */
+    private static void orderFailure(CommandSourceStack source, String text) {
+        if (PlayerMobConfig.orderFailureMessages()) {
+            source.sendFailure(Component.literal(text));
+        }
+    }
+
+    /**
      * Resolve the {@code <name>} arg to a PlayerMob: an exact (case-insensitive) custom-name match
      * among loaded PlayerMobs, else the nearest PlayerMob to the command source. Sends a failure and
-     * returns {@code null} only when the dimension holds no PlayerMob at all.
+     * returns {@code null} when the dimension holds no PlayerMob at all — and, when
+     * {@link PlayerMobConfig#exactNames()} is on, whenever no name matches (the nearest-mob fallback
+     * is skipped so a stale or misspelled name cancels the command instead of hitting the wrong mob).
      */
     private static PlayerMobEntity resolveMob(CommandSourceStack source, String name) {
         List<PlayerMobEntity> mobs = source.getLevel().getEntitiesOfClass(PlayerMobEntity.class, EVERYWHERE);
         if (mobs.isEmpty()) {
-            source.sendFailure(Component.literal("No PlayerMob is loaded in this dimension."));
+            orderFailure(source, "No PlayerMob is loaded in this dimension.");
             return null;
         }
         for (PlayerMobEntity m : mobs) {
@@ -673,6 +699,10 @@ public final class ReincarnateCommand {
             if (cn != null && cn.getString().equalsIgnoreCase(name)) {
                 return m;
             }
+        }
+        if (PlayerMobConfig.exactNames()) {
+            orderFailure(source, "No PlayerMob named '" + name + "' is loaded (exact names is on).");
+            return null;
         }
         Vec3 origin = source.getPosition();
         PlayerMobEntity nearest = null;
@@ -706,8 +736,8 @@ public final class ReincarnateCommand {
         if (nearestOfType != null) {
             return nearestOfType;
         }
-        source.sendFailure(Component.literal(
-            "No player, named PlayerMob, or nearby mob of type '" + name + "' found."));
+        orderFailure(source,
+            "No player, named PlayerMob, or nearby mob of type '" + name + "' found.");
         return null;
     }
 
@@ -810,8 +840,8 @@ public final class ReincarnateCommand {
             return true;
         }
         if (!mob.equipWeapon(item.getItem())) {
-            source.sendFailure(Component.literal(label(mob) + " doesn't have "
-                + item.getHoverName().getString() + " — add 'spawn' to give it one."));
+            orderFailure(source, label(mob) + " doesn't have "
+                + item.getHoverName().getString() + " — add 'spawn' to give it one.");
             return false;
         }
         return true;
@@ -1040,6 +1070,44 @@ public final class ReincarnateCommand {
         PlayerMobConfig.setRequireArrows(!unlimited);
         ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob unlimited ammo "
             + (unlimited ? "enabled" : "disabled") + " for this session."), false);
+        return 1;
+    }
+
+    /** {@code /playermob exactnames} — report whether a non-matching {@code <name>} cancels the command. */
+    private static int queryExactNames(CommandContext<CommandSourceStack> ctx) {
+        boolean on = PlayerMobConfig.exactNames();
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob exact names is "
+            + (on ? "ON — a <name> that matches no loaded PlayerMob cancels the command"
+                  : "OFF — a <name> that matches nothing falls back to the nearest PlayerMob") + "."), false);
+        return 1;
+    }
+
+    /** {@code /playermob exactnames on|off} — flip exact-name command matching for this session. */
+    private static int setExactNames(CommandContext<CommandSourceStack> ctx, boolean exact) {
+        PlayerMobConfig.setExactNames(exact);
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob exact names "
+            + (exact ? "enabled — an unmatched <name> now cancels the command"
+                     : "disabled — an unmatched <name> falls back to the nearest PlayerMob")
+            + " for this session."), false);
+        return 1;
+    }
+
+    /** {@code /playermob orderfailures} — report whether cancelled orders explain themselves in chat. */
+    private static int queryOrderFailures(CommandContext<CommandSourceStack> ctx) {
+        boolean on = PlayerMobConfig.orderFailureMessages();
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob order failure messages are "
+            + (on ? "ON — a cancelled order says why in chat"
+                  : "OFF — a cancelled order is silent") + "."), false);
+        return 1;
+    }
+
+    /** {@code /playermob orderfailures on|off} — flip order-failure chat messages for this session. */
+    private static int setOrderFailures(CommandContext<CommandSourceStack> ctx, boolean show) {
+        PlayerMobConfig.setOrderFailureMessages(show);
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob order failure messages "
+            + (show ? "enabled — a cancelled order now says why in chat"
+                    : "disabled — a cancelled order is now silent")
+            + " for this session."), false);
         return 1;
     }
 

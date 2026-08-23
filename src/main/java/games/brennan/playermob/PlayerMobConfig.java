@@ -49,6 +49,8 @@ public final class PlayerMobConfig {
     private static final String KEY_END_CRYSTAL_COMBAT = "endCrystalCombat";
     private static final String KEY_EXTINGUISH_WITH_BUCKET = "extinguishWithBucket";
     private static final String KEY_HUNT_FOR_FOOD = "huntForFood";
+    private static final String KEY_EXACT_NAMES = "exactNames";
+    private static final String KEY_ORDER_FAILURE_MESSAGES = "orderFailureMessages";
 
     private static final String KEY_EXTRA_PICKUP_ITEMS = "extraPickupItems";
     private static final String KEY_MODDED_RANGED_WEAPONS = "moddedRangedWeapons";
@@ -75,6 +77,15 @@ public final class PlayerMobConfig {
     public static final boolean DEFAULT_NATURAL_SPAWN_ENABLED = false;
     /** Auto-naming ships OFF — opt in (per spawn category) to label PlayerMobs with their skin source. */
     public static final AutoNameMode DEFAULT_AUTO_NAME_MODE = AutoNameMode.OFF;
+    /**
+     * Command {@code <name>} lookups fall back to the nearest PlayerMob when no name matches; off by default.
+     * On, a non-matching name cancels the command instead.
+     */
+    public static final boolean DEFAULT_EXACT_NAMES = false;
+    /**
+     * A {@code /playermob order} that cannot run says why in chat; on by default. Off cancels it silently.
+     */
+    public static final boolean DEFAULT_ORDER_FAILURE_MESSAGES = true;
     /** Ranged weapons need real arrows in the mob's inventory; on by default. Off restores vanilla infinite ammo. */
     public static final boolean DEFAULT_REQUIRE_ARROWS = true;
     /** Out of arrows mid-fight, a PlayerMob fetches a nearby dropped arrow (enemy not too close); on by default. */
@@ -202,6 +213,8 @@ public final class PlayerMobConfig {
     private static volatile boolean endCrystalCombat = DEFAULT_END_CRYSTAL_COMBAT;
     private static volatile boolean extinguishWithBucket = DEFAULT_EXTINGUISH_WITH_BUCKET;
     private static volatile boolean huntForFood = DEFAULT_HUNT_FOR_FOOD;
+    private static volatile boolean exactNames = DEFAULT_EXACT_NAMES;
+    private static volatile boolean orderFailureMessages = DEFAULT_ORDER_FAILURE_MESSAGES;
     /** Admin-configured extra items the mob always wants; replaced wholesale on {@link #load}. */
     private static volatile WantedItemList extraPickups = WantedItemList.EMPTY;
     /** Admin-configured modded ranged weapons + their ammo; replaced wholesale on {@link #load}. */
@@ -266,6 +279,26 @@ public final class PlayerMobConfig {
      */
     public static AutoNameMode autoNameMode() {
         return autoNameMode;
+    }
+
+    /**
+     * When true, a {@code /playermob} subcommand whose {@code <name>} argument matches no loaded
+     * PlayerMob is cancelled outright instead of falling back to the nearest one. Off by default
+     * (the nearest-mob fallback stands) — turn it on when commands are issued by automation and a
+     * stale or misspelled name must never command the wrong mob. See {@code ReincarnateCommand#resolveMob}.
+     */
+    public static boolean exactNames() {
+        return exactNames;
+    }
+
+    /**
+     * When true (default), a {@code /playermob order} that cannot run reports why in chat — no mob by that
+     * name, no such target, the mob lacks the weapon. When false the order is still cancelled, just
+     * silently: worth turning off when orders come from automation and the failures are chat noise nobody
+     * can act on. Success messages are unaffected. See {@code ReincarnateCommand#orderFailure}.
+     */
+    public static boolean orderFailureMessages() {
+        return orderFailureMessages;
     }
 
     /**
@@ -455,6 +488,25 @@ public final class PlayerMobConfig {
     }
 
     /**
+     * Flip exact-name command matching at runtime (e.g. from {@code /playermob exactnames on|off}).
+     * {@code true} = a {@code <name>} that matches nothing cancels the command; {@code false} (default)
+     * = fall back to the nearest PlayerMob. A session override — not written back to the file, which
+     * stays the startup default.
+     */
+    public static void setExactNames(boolean enabled) {
+        exactNames = enabled;
+    }
+
+    /**
+     * Flip order-failure chat messages at runtime (e.g. from {@code /playermob orderfailures on|off}).
+     * {@code true} (default) = say why an order was cancelled; {@code false} = cancel silently. A session
+     * override — not written back to the file, which stays the startup default.
+     */
+    public static void setOrderFailureMessages(boolean enabled) {
+        orderFailureMessages = enabled;
+    }
+
+    /**
      * Flip the require-arrows / unlimited-ammo gate at runtime (e.g. from {@code /playermob unlimitedammo on|off}).
      * {@code true} = consume inventory ammo (default); {@code false} = global unlimited ammo. A session override —
      * not written back to the file, which stays the startup default.
@@ -573,6 +625,8 @@ public final class PlayerMobConfig {
             endCrystalCombat = v.endCrystalCombat();
             extinguishWithBucket = v.extinguishWithBucket();
             huntForFood = v.huntForFood();
+            exactNames = v.exactNames();
+            orderFailureMessages = v.orderFailureMessages();
             extraPickups = v.extraPickups();
             moddedRanged = v.moddedRanged();
             naturalSpawnScales = v.naturalSpawnScales();
@@ -608,6 +662,7 @@ public final class PlayerMobConfig {
                   boolean requireArrows, boolean seekArrowsWhenEmpty,
                   float rangedEngageDistance, float meleeEngageDistance, boolean tntCombat,
                   boolean endCrystalCombat, boolean extinguishWithBucket, boolean huntForFood,
+                  boolean exactNames, boolean orderFailureMessages,
                   WantedItemList extraPickups,
                   ModdedRangedWeapons moddedRanged,
                   Map<String, Float> naturalSpawnScales,
@@ -632,6 +687,8 @@ public final class PlayerMobConfig {
             parseBool(props.getProperty(KEY_END_CRYSTAL_COMBAT), DEFAULT_END_CRYSTAL_COMBAT),
             parseBool(props.getProperty(KEY_EXTINGUISH_WITH_BUCKET), DEFAULT_EXTINGUISH_WITH_BUCKET),
             parseBool(props.getProperty(KEY_HUNT_FOR_FOOD), DEFAULT_HUNT_FOR_FOOD),
+            parseBool(props.getProperty(KEY_EXACT_NAMES), DEFAULT_EXACT_NAMES),
+            parseBool(props.getProperty(KEY_ORDER_FAILURE_MESSAGES), DEFAULT_ORDER_FAILURE_MESSAGES),
             WantedItemList.parse(props.getProperty(KEY_EXTRA_PICKUP_ITEMS, DEFAULT_EXTRA_PICKUP_ITEMS)),
             ModdedRangedWeapons.parse(props.getProperty(KEY_MODDED_RANGED_WEAPONS, DEFAULT_MODDED_RANGED_WEAPONS)),
             parseScales(props),
@@ -800,6 +857,16 @@ public final class PlayerMobConfig {
             .append("#   attack target, letting its weapon do the kill, then eats the drops. Set false to leave\n")
             .append("#   animals alone entirely. Toggle live with /playermob huntforfood on|off (session\n")
             .append("#   override). Default true.\n")
+            .append("# exactNames: when true, a /playermob subcommand whose <name> argument matches no\n")
+            .append("#   loaded PlayerMob is cancelled with an error, instead of falling back to the nearest\n")
+            .append("#   PlayerMob. Turn it on when orders are issued by automation (chat bots, command\n")
+            .append("#   blocks) and a stale or misspelled name must never command the wrong mob. Toggle live\n")
+            .append("#   with /playermob exactnames on|off (session override). Default false.\n")
+            .append("# orderFailureMessages: when true, a /playermob order that cannot run says why in chat\n")
+            .append("#   (no mob by that name, no such target, the mob lacks the weapon). Set false to cancel\n")
+            .append("#   such orders silently — useful when orders come from automation and the failures are\n")
+            .append("#   chat noise nobody can act on. Success messages are unaffected. Toggle live with\n")
+            .append("#   /playermob orderfailures on|off (session override). Default true.\n")
             .append("# extraPickupItems: extra items the mob ALWAYS picks up (off the floor and out of chests)\n")
             .append("#   and hoards in its backpack, beyond the built-in weapons/armor/ammo/valuables/food it\n")
             .append("#   already grabs. List item ids and/or item tags, separated by commas or spaces. Prefix a\n")
@@ -842,6 +909,9 @@ public final class PlayerMobConfig {
             .append(KEY_END_CRYSTAL_COMBAT).append("=").append(DEFAULT_END_CRYSTAL_COMBAT).append("\n")
             .append(KEY_EXTINGUISH_WITH_BUCKET).append("=").append(DEFAULT_EXTINGUISH_WITH_BUCKET).append("\n")
             .append(KEY_HUNT_FOR_FOOD).append("=").append(DEFAULT_HUNT_FOR_FOOD).append("\n")
+            .append(KEY_EXACT_NAMES).append("=").append(DEFAULT_EXACT_NAMES).append("\n")
+            .append(KEY_ORDER_FAILURE_MESSAGES).append("=")
+            .append(DEFAULT_ORDER_FAILURE_MESSAGES).append("\n")
             .append(KEY_EXTRA_PICKUP_ITEMS).append("=").append(DEFAULT_EXTRA_PICKUP_ITEMS).append("\n")
             .append(KEY_MODDED_RANGED_WEAPONS).append("=").append(DEFAULT_MODDED_RANGED_WEAPONS).append("\n")
             .append(KEY_SKIN_SOURCE_BUNDLED).append("=").append(DEFAULT_SKIN_SOURCE_BUNDLED).append("\n")
