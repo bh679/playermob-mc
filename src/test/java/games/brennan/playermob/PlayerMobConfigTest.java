@@ -366,6 +366,25 @@ class PlayerMobConfigTest {
     }
 
     @Test
+    void orderFailureMessagesDefaultOnAndToggleAtRuntime() {
+        assertTrue(PlayerMobConfig.DEFAULT_ORDER_FAILURE_MESSAGES, "order failure messages are on by default");
+        assertTrue(PlayerMobConfig.parse(new Properties()).orderFailureMessages(), "missing key → default true");
+        assertFalse(PlayerMobConfig.parse(props("orderFailureMessages", "false")).orderFailureMessages());
+        assertTrue(PlayerMobConfig.parse(props("orderFailureMessages", "true")).orderFailureMessages());
+        assertTrue(PlayerMobConfig.parse(props("orderFailureMessages", "quiet")).orderFailureMessages(),
+            "unparseable value → default true");
+        try {
+            PlayerMobConfig.setOrderFailureMessages(false);
+            assertFalse(PlayerMobConfig.orderFailureMessages());
+            PlayerMobConfig.setOrderFailureMessages(true);
+            assertTrue(PlayerMobConfig.orderFailureMessages());
+        } finally {
+            // don't leak into other tests
+            PlayerMobConfig.setOrderFailureMessages(PlayerMobConfig.DEFAULT_ORDER_FAILURE_MESSAGES);
+        }
+    }
+
+    @Test
     void customSkinChanceDefaultsAndParsesAndClamps() {
         assertEquals(0.40F, PlayerMobConfig.DEFAULT_CUSTOM_SKIN_CHANCE, 1e-6);
         assertEquals(0.40F, PlayerMobConfig.parse(new Properties()).customSkinChance(), 1e-6,
