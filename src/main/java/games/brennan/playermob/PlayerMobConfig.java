@@ -50,6 +50,8 @@ public final class PlayerMobConfig {
     private static final String KEY_END_CRYSTAL_COMBAT = "endCrystalCombat";
     private static final String KEY_EXTINGUISH_WITH_BUCKET = "extinguishWithBucket";
     private static final String KEY_HUNT_FOR_FOOD = "huntForFood";
+    private static final String KEY_EXACT_NAMES = "exactNames";
+    private static final String KEY_ORDER_FAILURE_MESSAGES = "orderFailureMessages";
 
     private static final String KEY_SEARCH_CONTAINERS = "searchContainers";
     private static final String KEY_SEARCH_ARMOR_STANDS = "searchArmorStands";
@@ -80,6 +82,15 @@ public final class PlayerMobConfig {
     public static final boolean DEFAULT_NATURAL_SPAWN_ENABLED = false;
     /** Auto-naming ships OFF — opt in (per spawn category) to label PlayerMobs with their skin source. */
     public static final AutoNameMode DEFAULT_AUTO_NAME_MODE = AutoNameMode.OFF;
+    /**
+     * Command {@code <name>} lookups fall back to the nearest PlayerMob when no name matches; off by default.
+     * On, a non-matching name cancels the command instead.
+     */
+    public static final boolean DEFAULT_EXACT_NAMES = false;
+    /**
+     * A {@code /playermob order} that cannot run says why in chat; on by default. Off cancels it silently.
+     */
+    public static final boolean DEFAULT_ORDER_FAILURE_MESSAGES = true;
     /** Ranged weapons need real arrows in the mob's inventory; on by default. Off restores vanilla infinite ammo. */
     public static final boolean DEFAULT_REQUIRE_ARROWS = true;
     /** Out of arrows mid-fight, a PlayerMob fetches a nearby dropped arrow (enemy not too close); on by default. */
@@ -213,6 +224,8 @@ public final class PlayerMobConfig {
     private static volatile boolean endCrystalCombat = DEFAULT_END_CRYSTAL_COMBAT;
     private static volatile boolean extinguishWithBucket = DEFAULT_EXTINGUISH_WITH_BUCKET;
     private static volatile boolean huntForFood = DEFAULT_HUNT_FOR_FOOD;
+    private static volatile boolean exactNames = DEFAULT_EXACT_NAMES;
+    private static volatile boolean orderFailureMessages = DEFAULT_ORDER_FAILURE_MESSAGES;
     private static volatile ScavengeMode searchContainers = DEFAULT_SEARCH_CONTAINERS;
     private static volatile ScavengeMode searchArmorStands = DEFAULT_SEARCH_ARMOR_STANDS;
     private static volatile ScavengeMode collectFloorItems = DEFAULT_COLLECT_FLOOR_ITEMS;
@@ -280,6 +293,26 @@ public final class PlayerMobConfig {
      */
     public static AutoNameMode autoNameMode() {
         return autoNameMode;
+    }
+
+    /**
+     * When true, a {@code /playermob} subcommand whose {@code <name>} argument matches no loaded
+     * PlayerMob is cancelled outright instead of falling back to the nearest one. Off by default
+     * (the nearest-mob fallback stands) — turn it on when commands are issued by automation and a
+     * stale or misspelled name must never command the wrong mob. See {@code ReincarnateCommand#resolveMob}.
+     */
+    public static boolean exactNames() {
+        return exactNames;
+    }
+
+    /**
+     * When true (default), a {@code /playermob order} that cannot run reports why in chat — no mob by that
+     * name, no such target, the mob lacks the weapon. When false the order is still cancelled, just
+     * silently: worth turning off when orders come from automation and the failures are chat noise nobody
+     * can act on. Success messages are unaffected. See {@code ReincarnateCommand#orderFailure}.
+     */
+    public static boolean orderFailureMessages() {
+        return orderFailureMessages;
     }
 
     /**
@@ -500,6 +533,25 @@ public final class PlayerMobConfig {
     }
 
     /**
+     * Flip exact-name command matching at runtime (e.g. from {@code /playermob exactnames on|off}).
+     * {@code true} = a {@code <name>} that matches nothing cancels the command; {@code false} (default)
+     * = fall back to the nearest PlayerMob. A session override — not written back to the file, which
+     * stays the startup default.
+     */
+    public static void setExactNames(boolean enabled) {
+        exactNames = enabled;
+    }
+
+    /**
+     * Flip order-failure chat messages at runtime (e.g. from {@code /playermob orderfailures on|off}).
+     * {@code true} (default) = say why an order was cancelled; {@code false} = cancel silently. A session
+     * override — not written back to the file, which stays the startup default.
+     */
+    public static void setOrderFailureMessages(boolean enabled) {
+        orderFailureMessages = enabled;
+    }
+
+    /**
      * Flip the require-arrows / unlimited-ammo gate at runtime (e.g. from {@code /playermob unlimitedammo on|off}).
      * {@code true} = consume inventory ammo (default); {@code false} = global unlimited ammo. A session override —
      * not written back to the file, which stays the startup default.
@@ -637,6 +689,8 @@ public final class PlayerMobConfig {
             endCrystalCombat = v.endCrystalCombat();
             extinguishWithBucket = v.extinguishWithBucket();
             huntForFood = v.huntForFood();
+            exactNames = v.exactNames();
+            orderFailureMessages = v.orderFailureMessages();
             searchContainers = v.searchContainers();
             searchArmorStands = v.searchArmorStands();
             collectFloorItems = v.collectFloorItems();
@@ -680,6 +734,7 @@ public final class PlayerMobConfig {
                   boolean requireArrows, boolean seekArrowsWhenEmpty,
                   float rangedEngageDistance, float meleeEngageDistance, boolean tntCombat,
                   boolean endCrystalCombat, boolean extinguishWithBucket, boolean huntForFood,
+                  boolean exactNames, boolean orderFailureMessages,
                   ScavengeMode searchContainers, ScavengeMode searchArmorStands,
                   ScavengeMode collectFloorItems,
                   WantedItemList extraPickups,
@@ -706,6 +761,8 @@ public final class PlayerMobConfig {
             parseBool(props.getProperty(KEY_END_CRYSTAL_COMBAT), DEFAULT_END_CRYSTAL_COMBAT),
             parseBool(props.getProperty(KEY_EXTINGUISH_WITH_BUCKET), DEFAULT_EXTINGUISH_WITH_BUCKET),
             parseBool(props.getProperty(KEY_HUNT_FOR_FOOD), DEFAULT_HUNT_FOR_FOOD),
+            parseBool(props.getProperty(KEY_EXACT_NAMES), DEFAULT_EXACT_NAMES),
+            parseBool(props.getProperty(KEY_ORDER_FAILURE_MESSAGES), DEFAULT_ORDER_FAILURE_MESSAGES),
             ScavengeMode.fromString(props.getProperty(KEY_SEARCH_CONTAINERS), DEFAULT_SEARCH_CONTAINERS),
             ScavengeMode.fromString(props.getProperty(KEY_SEARCH_ARMOR_STANDS), DEFAULT_SEARCH_ARMOR_STANDS),
             ScavengeMode.fromString(props.getProperty(KEY_COLLECT_FLOOR_ITEMS), DEFAULT_COLLECT_FLOOR_ITEMS),
@@ -877,6 +934,16 @@ public final class PlayerMobConfig {
             .append("#   attack target, letting its weapon do the kill, then eats the drops. Set false to leave\n")
             .append("#   animals alone entirely. Toggle live with /playermob huntforfood on|off (session\n")
             .append("#   override). Default true.\n")
+            .append("# exactNames: when true, a /playermob subcommand whose <name> argument matches no\n")
+            .append("#   loaded PlayerMob is cancelled with an error, instead of falling back to the nearest\n")
+            .append("#   PlayerMob. Turn it on when orders are issued by automation (chat bots, command\n")
+            .append("#   blocks) and a stale or misspelled name must never command the wrong mob. Toggle live\n")
+            .append("#   with /playermob exactnames on|off (session override). Default false.\n")
+            .append("# orderFailureMessages: when true, a /playermob order that cannot run says why in chat\n")
+            .append("#   (no mob by that name, no such target, the mob lacks the weapon). Set false to cancel\n")
+            .append("#   such orders silently — useful when orders come from automation and the failures are\n")
+            .append("#   chat noise nobody can act on. Success messages are unaffected. Toggle live with\n")
+            .append("#   /playermob orderfailures on|off (session override). Default true.\n")
             .append("# searchContainers / searchArmorStands / collectFloorItems: whether PlayerMobs scavenge —\n")
             .append("#   searchContainers covers walking to nearby chests, barrels and shulker boxes, opening them\n")
             .append("#   and swapping in better gear; searchArmorStands covers stripping gear off armor stands;\n")
@@ -931,6 +998,9 @@ public final class PlayerMobConfig {
             .append(KEY_END_CRYSTAL_COMBAT).append("=").append(DEFAULT_END_CRYSTAL_COMBAT).append("\n")
             .append(KEY_EXTINGUISH_WITH_BUCKET).append("=").append(DEFAULT_EXTINGUISH_WITH_BUCKET).append("\n")
             .append(KEY_HUNT_FOR_FOOD).append("=").append(DEFAULT_HUNT_FOR_FOOD).append("\n")
+            .append(KEY_EXACT_NAMES).append("=").append(DEFAULT_EXACT_NAMES).append("\n")
+            .append(KEY_ORDER_FAILURE_MESSAGES).append("=")
+            .append(DEFAULT_ORDER_FAILURE_MESSAGES).append("\n")
             .append(KEY_SEARCH_CONTAINERS).append("=").append(DEFAULT_SEARCH_CONTAINERS.token()).append("\n")
             .append(KEY_SEARCH_ARMOR_STANDS).append("=").append(DEFAULT_SEARCH_ARMOR_STANDS.token()).append("\n")
             .append(KEY_COLLECT_FLOOR_ITEMS).append("=").append(DEFAULT_COLLECT_FLOOR_ITEMS.token()).append("\n")
