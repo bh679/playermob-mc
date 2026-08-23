@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.compat.GameRuleCompat;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.PlayerMobEntity;
@@ -82,6 +83,7 @@ public final class RaidArmorStandsGoal extends Goal implements DescribableGoal {
         }
         if (mob.getTarget() != null) return false;
         if (!GameRuleCompat.mobGriefing(mob.level())) return false;
+        if (!mob.allowsScavenging(PlayerMobConfig.searchArmorStands())) return false; // armor-stand raiding gated by config
 
         ArmorStand found = findClosestArmorStand();
         if (found == null) {
