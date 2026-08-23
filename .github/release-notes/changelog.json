@@ -804,6 +804,23 @@
       "released": true,
       "released_in": "v0.89.0",
       "released_at": "2026-08-22T07:59:38Z"
+    },
+    {
+      "id": "exact-name-order-matching",
+      "version": "0.90.0",
+      "type": "feat",
+      "title": "Order the PlayerMob you named \u2014 or nobody",
+      "summary": "Commands that take a PlayerMob name have always fallen back to the nearest mob when nothing matched, which means an order aimed at a name that no longer exists lands on a bystander. Two new options put you in control: exact-name matching, and quiet failures for orders driven by automation.",
+      "highlights": [
+        "/playermob exactnames on \u2014 a <name> that matches no loaded PlayerMob cancels the command instead of falling back to the nearest one. Off by default, so nothing changes until you turn it on.",
+        "/playermob orderfailures off \u2014 a /playermob order that cannot run is cancelled silently instead of explaining itself in red chat. Handy when orders come from a chat bot or command block and the errors are just noise. On by default.",
+        "Both are also config keys (exactNames, orderFailureMessages) in config/playermob.properties, and the command form is a session override."
+      ],
+      "pr": 191,
+      "date": "2026-08-23",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
