@@ -76,6 +76,9 @@ import java.util.Collection;
  *       persists in the mob's NBT (also authorable via {@code /summon …{PlayerMobData:{StayNear:{…}}}}).</li>
  *   <li>{@code /playermob debug spawnlog [on|off]} — toggle (or report) the colour-coded
  *       Dungeon-Train auto-spawn chat log for this session.</li>
+ *   <li>{@code /playermob exactnames [on|off]} — toggle (or report) exact-name command matching for
+ *       this session: when {@code on}, a subcommand whose {@code <name>} matches no loaded PlayerMob is
+ *       cancelled instead of falling back to the nearest one. A session override of the config flag.</li>
  *   <li>{@code /playermob unlimitedammo [on|off]} — toggle (or report) global unlimited ammo for
  *       this session: {@code on} = ranged weapons never run out; {@code off} = they consume inventory
  *       ammo (the {@code requireArrows} default). A session override of the config flag.</li>
@@ -162,6 +165,10 @@ public final class ReincarnateCommand {
                         .executes(ReincarnateCommand::querySpawnLog)
                         .then(Commands.literal("on").executes(ctx -> setSpawnLog(ctx, true)))
                         .then(Commands.literal("off").executes(ctx -> setSpawnLog(ctx, false)))))
+                .then(Commands.literal("exactnames")
+                    .executes(ReincarnateCommand::queryExactNames)
+                    .then(Commands.literal("on").executes(ctx -> setExactNames(ctx, true)))
+                    .then(Commands.literal("off").executes(ctx -> setExactNames(ctx, false))))
                 .then(Commands.literal("unlimitedammo")
                     .executes(ReincarnateCommand::queryUnlimitedAmmo)
                     .then(Commands.literal("on").executes(ctx -> setUnlimitedAmmo(ctx, true)))
@@ -346,7 +353,8 @@ public final class ReincarnateCommand {
 
     /**
      * Builds the {@code order} subtree: {@code /playermob order <name> <action> <target...>}.
-     * {@code <name>} selects a PlayerMob by custom name (nearest one as a fallback); a
+     * {@code <name>} selects a PlayerMob by custom name (nearest one as a fallback, unless
+     * {@code /playermob exactnames on} — then an unmatched name cancels the order); a
      * {@code <target>} resolves to an online player or a named PlayerMob; positions accept
      * {@code ~ ~ ~}. {@code place} conjures the given block from air.
      */
@@ -660,7 +668,9 @@ public final class ReincarnateCommand {
     /**
      * Resolve the {@code <name>} arg to a PlayerMob: an exact (case-insensitive) custom-name match
      * among loaded PlayerMobs, else the nearest PlayerMob to the command source. Sends a failure and
-     * returns {@code null} only when the dimension holds no PlayerMob at all.
+     * returns {@code null} when the dimension holds no PlayerMob at all — and, when
+     * {@link PlayerMobConfig#exactNames()} is on, whenever no name matches (the nearest-mob fallback
+     * is skipped so a stale or misspelled name cancels the command instead of hitting the wrong mob).
      */
     private static PlayerMobEntity resolveMob(CommandSourceStack source, String name) {
         List<PlayerMobEntity> mobs = source.getLevel().getEntitiesOfClass(PlayerMobEntity.class, EVERYWHERE);
@@ -673,6 +683,11 @@ public final class ReincarnateCommand {
             if (cn != null && cn.getString().equalsIgnoreCase(name)) {
                 return m;
             }
+        }
+        if (PlayerMobConfig.exactNames()) {
+            source.sendFailure(Component.literal(
+                "No PlayerMob named '" + name + "' is loaded (exact names is on)."));
+            return null;
         }
         Vec3 origin = source.getPosition();
         PlayerMobEntity nearest = null;
@@ -1040,6 +1055,25 @@ public final class ReincarnateCommand {
         PlayerMobConfig.setRequireArrows(!unlimited);
         ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob unlimited ammo "
             + (unlimited ? "enabled" : "disabled") + " for this session."), false);
+        return 1;
+    }
+
+    /** {@code /playermob exactnames} — report whether a non-matching {@code <name>} cancels the command. */
+    private static int queryExactNames(CommandContext<CommandSourceStack> ctx) {
+        boolean on = PlayerMobConfig.exactNames();
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob exact names is "
+            + (on ? "ON — a <name> that matches no loaded PlayerMob cancels the command"
+                  : "OFF — a <name> that matches nothing falls back to the nearest PlayerMob") + "."), false);
+        return 1;
+    }
+
+    /** {@code /playermob exactnames on|off} — flip exact-name command matching for this session. */
+    private static int setExactNames(CommandContext<CommandSourceStack> ctx, boolean exact) {
+        PlayerMobConfig.setExactNames(exact);
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob exact names "
+            + (exact ? "enabled — an unmatched <name> now cancels the command"
+                     : "disabled — an unmatched <name> falls back to the nearest PlayerMob")
+            + " for this session."), false);
         return 1;
     }
 

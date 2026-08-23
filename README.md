@@ -41,6 +41,11 @@ Order a named PlayerMob (or the nearest one) to act with
 and place, against a player, another PlayerMob, a mob type, or coordinates. Full grammar and
 examples: **[Order command](https://github.com/bh679/playermob-mc/wiki/Order-Command)**.
 
+By default a `<name>` that matches no loaded PlayerMob falls back to the nearest one. Run
+`/playermob exactnames on` (or set `exactNames=true` in `config/playermob.properties`) to cancel the
+command with an error instead — worth turning on when orders come from automation (chat bots,
+command blocks), so a stale or misspelled name never commands the wrong mob.
+
 ## Build
 
 ```bash

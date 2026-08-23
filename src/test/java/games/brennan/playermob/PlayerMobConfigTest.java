@@ -348,6 +348,24 @@ class PlayerMobConfigTest {
     }
 
     @Test
+    void exactNamesDefaultsOffAndTogglesAtRuntime() {
+        assertFalse(PlayerMobConfig.DEFAULT_EXACT_NAMES, "exact names is off by default");
+        assertFalse(PlayerMobConfig.parse(new Properties()).exactNames(), "missing key → default false");
+        assertTrue(PlayerMobConfig.parse(props("exactNames", "true")).exactNames());
+        assertFalse(PlayerMobConfig.parse(props("exactNames", "false")).exactNames());
+        assertFalse(PlayerMobConfig.parse(props("exactNames", "yes please")).exactNames(),
+            "unparseable value → default false");
+        try {
+            PlayerMobConfig.setExactNames(true);
+            assertTrue(PlayerMobConfig.exactNames());
+            PlayerMobConfig.setExactNames(false);
+            assertFalse(PlayerMobConfig.exactNames());
+        } finally {
+            PlayerMobConfig.setExactNames(PlayerMobConfig.DEFAULT_EXACT_NAMES); // don't leak into other tests
+        }
+    }
+
+    @Test
     void customSkinChanceDefaultsAndParsesAndClamps() {
         assertEquals(0.40F, PlayerMobConfig.DEFAULT_CUSTOM_SKIN_CHANCE, 1e-6);
         assertEquals(0.40F, PlayerMobConfig.parse(new Properties()).customSkinChance(), 1e-6,
