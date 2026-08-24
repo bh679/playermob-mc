@@ -9,6 +9,7 @@
     "PlayerDeathMixin",
     "TamableAnimalTameMixin",
     "AbstractHorseTameMixin",
+    "SitWhenOrderedToGoalMixin",
     "RaiderTargetsPlayerMobMixin",
     "LivingHurtWitnessMixin",
     "WorldGenRegionMixin"
