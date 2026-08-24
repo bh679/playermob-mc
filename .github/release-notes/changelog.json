@@ -818,9 +818,9 @@
       ],
       "pr": 191,
       "date": "2026-08-23",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.92.0",
+      "released_at": "2026-08-24T14:23:48Z"
     },
     {
       "id": "scavenging-config-gates",
@@ -836,9 +836,9 @@
       ],
       "pr": 192,
       "date": "2026-08-23",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.92.0",
+      "released_at": "2026-08-24T14:23:48Z"
     },
     {
       "id": "echo-pets-return",
@@ -853,9 +853,9 @@
         "Taming raises the friendliness the echo of that life is born with."
       ],
       "date": "2026-08-24",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.92.0",
+      "released_at": "2026-08-24T14:23:48Z"
     }
   ]
 }
