@@ -56,8 +56,35 @@ class PlayerLifeRecordTest {
             .credit(Signal.CROUCH, 0)   // +0.5
             .credit(Signal.TRAVEL, 0)   // +0.2
             .credit(Signal.DEFEND, 0)   // +1.0
-            .credit(Signal.GIFT, 2.5F); // +2.5 (uses magnitude)
-        assertEquals(0.5F + 0.2F + 1.0F + 2.5F, r.kindness(), EPS);
+            .credit(Signal.GIFT, 2.5F)  // +2.5 (uses magnitude)
+            .credit(Signal.TAME, 0);    // +2.0
+        assertEquals(0.5F + 0.2F + 1.0F + 2.5F + 2.0F, r.kindness(), EPS);
+    }
+
+    @Test
+    void tamingRaisesFriendlinessTwoPointsEach() {
+        DispositionTraits one = PlayerLifeRecord.EMPTY
+            .credit(Signal.TAME, 0)
+            .toTraits();
+        assertEquals(DispositionTraits.DEFAULT + 2, one.friendliness());
+        assertEquals(DispositionTraits.DEFAULT, one.fightFlight()); // taming is not combat
+
+        // Two tames reach the friendliness a defend-heavy life needs four gestures for.
+        DispositionTraits two = PlayerLifeRecord.EMPTY
+            .credit(Signal.TAME, 0)
+            .credit(Signal.TAME, 0)
+            .toTraits();
+        assertEquals(DispositionTraits.DEFAULT + 4, two.friendliness());
+    }
+
+    @Test
+    void tamingOffsetsTheCrueltyOfAKill() {
+        // One kill costs 2.0 cruelty; one tame gives 2.0 kindness — they cancel exactly.
+        DispositionTraits t = PlayerLifeRecord.EMPTY
+            .credit(Signal.KILL, 0)
+            .credit(Signal.TAME, 0)
+            .toTraits();
+        assertEquals(DispositionTraits.DEFAULT, t.friendliness());
     }
 
     // ---- trait derivation ----

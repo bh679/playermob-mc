@@ -839,6 +839,23 @@
       "released": false,
       "released_in": null,
       "released_at": null
+    },
+    {
+      "id": "echo-pets-return",
+      "version": "0.92.0",
+      "type": "feat",
+      "title": "Your pets come back with you",
+      "summary": "The animals you tamed are remembered when you die, and up to three of them return alongside your echo \u2014 loyal to it, exactly as they were to you. They follow it down the train, teleport to it when they fall behind, and turn on anyone who attacks it. Mounts stay behind unless you gave them a name; a horse you never named was transport, not a companion. Taming also counts as kindness, so a life spent befriending animals comes back friendlier than one that did not.",
+      "highlights": [
+        "Up to three tamed animals return with an echo of the life that tamed them.",
+        "Returned pets follow, teleport and defend their echo like a living owner's pets \u2014 a PlayerMob is now a real owner as far as the game is concerned.",
+        "Unnamed mounts are left behind; a named one comes back.",
+        "Taming raises the friendliness the echo of that life is born with."
+      ],
+      "date": "2026-08-24",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }

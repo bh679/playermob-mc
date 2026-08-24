@@ -62,6 +62,7 @@ public final class GlobalLifeStore {
     private static final String TAG_CARRIAGE = "Carriage";
     private static final String TAG_SNAPSHOT = "Snapshot";
     private static final String TAG_FRIENDS = "Friends";
+    private static final String TAG_PETS = "Pets";
     private static final String TAG_DIFFICULTY = "Difficulty";
 
     /** NBT key, inside a friend snapshot, holding the label its friend-echo is titled with ("Echo of &lt;label&gt;"). */
@@ -87,16 +88,23 @@ public final class GlobalLifeStore {
      * untagged history keeps a home.</p>
      */
     public record DeathRecord(long id, UUID uuid, String name, int carriage, String difficulty,
-                              CompoundTag snapshot, List<CompoundTag> friendSnapshots) {
+                              CompoundTag snapshot, List<CompoundTag> friendSnapshots,
+                              List<CompoundTag> petSnapshots) {
         /** A death with no logged friends — keeps the legacy/test call-sites that predate friend capture. */
         public DeathRecord(long id, UUID uuid, String name, int carriage, CompoundTag snapshot) {
-            this(id, uuid, name, carriage, "", snapshot, List.of());
+            this(id, uuid, name, carriage, "", snapshot, List.of(), List.of());
         }
 
         /** A death with friends but no captured difficulty — the call-sites that predate the partition. */
         public DeathRecord(long id, UUID uuid, String name, int carriage, CompoundTag snapshot,
                            List<CompoundTag> friendSnapshots) {
-            this(id, uuid, name, carriage, "", snapshot, friendSnapshots);
+            this(id, uuid, name, carriage, "", snapshot, friendSnapshots, List.of());
+        }
+
+        /** A death logged before pets were captured — every record written by a pre-pet build. */
+        public DeathRecord(long id, UUID uuid, String name, int carriage, String difficulty,
+                           CompoundTag snapshot, List<CompoundTag> friendSnapshots) {
+            this(id, uuid, name, carriage, difficulty, snapshot, friendSnapshots, List.of());
         }
     }
 
@@ -205,8 +213,17 @@ public final class GlobalLifeStore {
      */
     public void append(UUID id, String name, int carriage, String difficulty, CompoundTag snapshot,
                        List<CompoundTag> friends) {
+        append(id, name, carriage, difficulty, snapshot, friends, List.of());
+    }
+
+    /**
+     * As {@link #append(UUID, String, int, String, CompoundTag, List)}, also logging snapshots of the
+     * animals this life had tamed ({@code pets}) — replayed beside an echo of this life, tamed to it.
+     */
+    public void append(UUID id, String name, int carriage, String difficulty, CompoundTag snapshot,
+                       List<CompoundTag> friends, List<CompoundTag> pets) {
         history.add(new DeathRecord(nextId++, id, name, carriage, difficulty == null ? "" : difficulty,
-            snapshot.copy(), copyAll(friends)));
+            snapshot.copy(), copyAll(friends), copyAll(pets)));
         save();
     }
 
@@ -323,13 +340,8 @@ public final class GlobalLifeStore {
                 entry.putString(TAG_DIFFICULTY, r.difficulty());
             }
             entry.put(TAG_SNAPSHOT, r.snapshot().copy());
-            if (!r.friendSnapshots().isEmpty()) {
-                ListTag friends = new ListTag();
-                for (CompoundTag f : r.friendSnapshots()) {
-                    friends.add(f.copy());
-                }
-                entry.put(TAG_FRIENDS, friends);
-            }
+            writeTagList(entry, TAG_FRIENDS, r.friendSnapshots());
+            writeTagList(entry, TAG_PETS, r.petSnapshots());
             deaths.add(entry);
         }
         tag.put(TAG_DEATHS, deaths);
@@ -355,7 +367,8 @@ public final class GlobalLifeStore {
             String name = NbtCompat.getStringOr(entry, TAG_NAME, null);
             String difficulty = NbtCompat.getStringOr(entry, TAG_DIFFICULTY, "");
             out.add(new DeathRecord(id, NbtCompat.getUUID(entry, TAG_UUID), name, carriage, difficulty,
-                NbtCompat.getCompoundOrEmpty(entry, TAG_SNAPSHOT), readFriendList(entry)));
+                NbtCompat.getCompoundOrEmpty(entry, TAG_SNAPSHOT),
+                readTagList(entry, TAG_FRIENDS), readTagList(entry, TAG_PETS)));
         }
         // Back-compat: the pre-death-log global format stored one snapshot per player under "Lives".
         if (out.isEmpty() && NbtCompat.containsOfType(tag, TAG_LEGACY_LIVES, Tag.TAG_LIST)) {
@@ -377,11 +390,27 @@ public final class GlobalLifeStore {
     }
 
     /** Friend snapshots stored under {@code entry}, or empty — a missing key (every older record) reads as none. */
-    private static List<CompoundTag> readFriendList(CompoundTag entry) {
-        if (!NbtCompat.containsOfType(entry, TAG_FRIENDS, Tag.TAG_LIST)) {
+    /**
+     * Write {@code tags} under {@code key}, omitting the key entirely when empty — so a record with no
+     * friends (or no pets) round-trips to the same bytes a pre-friend / pre-pet build would write.
+     */
+    private static void writeTagList(CompoundTag entry, String key, List<CompoundTag> tags) {
+        if (tags.isEmpty()) {
+            return;
+        }
+        ListTag out = new ListTag();
+        for (CompoundTag t : tags) {
+            out.add(t.copy());
+        }
+        entry.put(key, out);
+    }
+
+    /** Read a compound list written by {@link #writeTagList}; a missing key reads as empty. */
+    private static List<CompoundTag> readTagList(CompoundTag entry, String key) {
+        if (!NbtCompat.containsOfType(entry, key, Tag.TAG_LIST)) {
             return List.of();
         }
-        ListTag list = NbtCompat.getListOfType(entry, TAG_FRIENDS, Tag.TAG_COMPOUND);
+        ListTag list = NbtCompat.getListOfType(entry, key, Tag.TAG_COMPOUND);
         List<CompoundTag> out = new ArrayList<>(list.size());
         for (int i = 0; i < list.size(); i++) {
             out.add(NbtCompat.compoundAt(list, i));

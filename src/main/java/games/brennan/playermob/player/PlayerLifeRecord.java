@@ -28,6 +28,11 @@ public final class PlayerLifeRecord {
     static final float TRAVEL_KINDNESS = 0.2F;
     /** Kindness added for stepping in to defend a mob from a hostile. */
     static final float DEFEND_KINDNESS = 1.0F;
+    /**
+     * Kindness added for taming an animal. The heaviest single gesture in the list: every other
+     * kindness is a moment, while taming is a standing commitment to keep something alive.
+     */
+    static final float TAME_KINDNESS = 2.0F;
 
     // ---- Trait derivation (toTraits) --------------------------------------
     /** Aggression a single kill contributes, on top of the killing blow's damage. */
@@ -116,7 +121,7 @@ public final class PlayerLifeRecord {
     }
 
     /** The kind of player→mob action being credited; routes a magnitude to the right tally. */
-    public enum Signal { ATTACK, KILL, CROUCH, GIFT, TRAVEL, DEFEND, HARM, FLEE }
+    public enum Signal { ATTACK, KILL, CROUCH, GIFT, TRAVEL, DEFEND, HARM, FLEE, TAME }
 
     /** As {@link #credit(Signal, float, boolean)}, treating the action as unprovoked. */
     public PlayerLifeRecord credit(Signal signal, float magnitude) {
@@ -148,6 +153,7 @@ public final class PlayerLifeRecord {
             case CROUCH -> withKindness(CROUCH_KINDNESS);
             case TRAVEL -> withKindness(TRAVEL_KINDNESS);
             case DEFEND -> withKindness(DEFEND_KINDNESS);
+            case TAME   -> withKindness(TAME_KINDNESS);
             case GIFT   -> withKindness(Math.max(0.0F, magnitude));
             case HARM   -> new PlayerLifeRecord(damageDealt, kills, kindness, harms + 1, attacks,
                                defensiveDamage, defensiveKills, timidity);

@@ -38,10 +38,23 @@ import java.util.UUID;
  *                        {@code ""} when unknown — see {@link ReincarnationDifficulty}
  * @param snapshot        the opaque PlayerMob entity NBT to embody this life
  * @param friendSnapshots snapshots of the PlayerMobs that loved this player at death (may be empty)
+ * @param petSnapshots    snapshots of the animals this life had tamed, replayed beside the echo and
+ *                        tamed to it (may be empty)
  */
 public record ReincarnationRecord(String sourceId, String key, UUID playerId, String name,
                                   int carriage, String skinUrl, String difficulty, CompoundTag snapshot,
-                                  List<CompoundTag> friendSnapshots) {
+                                  List<CompoundTag> friendSnapshots, List<CompoundTag> petSnapshots) {
+
+    /**
+     * A record from a source that logs no pets — every source written before pets were captured.
+     * Kept so those sources compile unchanged; their echoes simply return alone.
+     */
+    public ReincarnationRecord(String sourceId, String key, UUID playerId, String name,
+                               int carriage, String skinUrl, String difficulty, CompoundTag snapshot,
+                               List<CompoundTag> friendSnapshots) {
+        this(sourceId, key, playerId, name, carriage, skinUrl, difficulty, snapshot, friendSnapshots,
+            List.of());
+    }
 
     /**
      * A record whose difficulty is unknown — it answers to {@link ReincarnationDifficulty#LEGACY}. Kept
@@ -50,7 +63,7 @@ public record ReincarnationRecord(String sourceId, String key, UUID playerId, St
     public ReincarnationRecord(String sourceId, String key, UUID playerId, String name,
                                int carriage, String skinUrl, CompoundTag snapshot,
                                List<CompoundTag> friendSnapshots) {
-        this(sourceId, key, playerId, name, carriage, skinUrl, "", snapshot, friendSnapshots);
+        this(sourceId, key, playerId, name, carriage, skinUrl, "", snapshot, friendSnapshots, List.of());
     }
 
     /** Pool-wide stable identity ({@code sourceId:key}) — keys the "already met this life" de-dup. */
