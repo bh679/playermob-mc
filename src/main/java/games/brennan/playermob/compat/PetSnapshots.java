@@ -30,6 +30,12 @@ public final class PetSnapshots {
     private static final String TAG_OWNER = "Owner";
 
     /**
+     * {@link net.minecraft.world.entity.TamableAnimal}'s sit-order key, identical on every
+     * supported version. Cleared on replay — see {@link #retame}.
+     */
+    private static final String TAG_SITTING = "Sitting";
+
+    /**
      * Keys dropped from a captured snapshot. The identity and placement of the <em>original</em>
      * animal must not ride along: the original is usually still alive when the snapshot is taken,
      * so keeping its UUID would spawn a duplicate the level refuses to hold, and keeping its
@@ -79,10 +85,19 @@ public final class PetSnapshots {
         return tag;
     }
 
-    /** Return a copy of {@code snapshot} tamed to {@code owner} instead of whoever owned it in life. */
+    /**
+     * Return a copy of {@code snapshot} tamed to {@code owner} instead of whoever owned it in life,
+     * and standing.
+     *
+     * <p>The sit order is deliberately dropped. A player who told their wolf to sit and then died
+     * would otherwise have it return frozen at the echo's feet, reading as scenery rather than as
+     * something that came back with him — and nobody is left who could tell it to get up, since the
+     * order can only be given by an owner the world can resolve.</p>
+     */
     public static CompoundTag retame(CompoundTag snapshot, UUID owner) {
         CompoundTag tag = snapshot.copy();
         NbtCompat.putUUID(tag, TAG_OWNER, owner);
+        tag.putBoolean(TAG_SITTING, false);
         return tag;
     }
 
