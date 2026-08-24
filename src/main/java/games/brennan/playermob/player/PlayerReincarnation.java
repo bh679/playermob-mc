@@ -11,6 +11,7 @@ import games.brennan.playermob.compat.ReincarnationQuery;
 import games.brennan.playermob.compat.ReincarnationRecord;
 import games.brennan.playermob.compat.ReincarnationSources;
 import games.brennan.playermob.compat.ItemDataCompat;
+import games.brennan.playermob.compat.PetSnapshots;
 import games.brennan.playermob.compat.RegistryCompat;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.DispositionResolver;
@@ -21,6 +22,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -29,6 +31,7 @@ import org.slf4j.Logger;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
@@ -75,6 +78,20 @@ public final class PlayerReincarnation {
     /** Most loved-one snapshots kept per death — bounds {@code lives.dat} growth (most-loved first). */
     private static final int FRIEND_SNAPSHOT_CAP = 4;
 
+    /**
+     * Radius, in blocks, scanned around a dying player for the animals they had tamed (see
+     * {@link #capturePetSnapshots}). The same reach as {@link #FRIEND_SCAN_RADIUS}: a pet left a
+     * carriage back is still yours.
+     */
+    private static final double PET_SCAN_RADIUS = FRIEND_SCAN_RADIUS;
+
+    /**
+     * Most pet snapshots kept per death. A tamed animal's NBT is not small — a horse carries its
+     * inventory and attributes — so the log keeps only the three the life is most likely to be
+     * remembered by.
+     */
+    private static final int PET_SNAPSHOT_CAP = 3;
+
     private PlayerReincarnation() {}
 
     /**
@@ -118,12 +135,14 @@ public final class PlayerReincarnation {
                 // Snapshot the PlayerMobs that loved this player so an echo of them can later return
                 // alongside a friend-echo of one of those loved ones (with its last-seen gear).
                 List<CompoundTag> friends = captureFriendSnapshots(level, player);
+                // …and the animals they had tamed, so an echo of this life comes back with its pets.
+                List<CompoundTag> pets = capturePetSnapshots(level, player);
                 // The completed snapshot is appended to the GLOBAL death log (cross-world).
                 GlobalLifeStore global = GlobalLifeStore.get(level.getServer());
                 // File the life under the difficulty it was lived on, so it is only ever offered back
                 // there (see ReincarnationDifficulty).
                 global.append(player.getUUID(), profileName(player), carriage,
-                    ReincarnationDifficulty.keyFor(level), snapshot, friends);
+                    ReincarnationDifficulty.keyFor(level), snapshot, friends, pets);
             }
             // A new life begins on respawn whether or not the death was captured. The in-progress
             // tally is world-scoped, so reset it (a skipped life must not taint a later snapshot);
@@ -387,6 +406,73 @@ public final class PlayerReincarnation {
         List<CompoundTag> out = new ArrayList<>();
         for (int idx : topIndices(scores, FRIEND_SNAPSHOT_CAP)) {
             out.add(snapshotFriend(lovers.get(idx)));
+        }
+        return out;
+    }
+
+    // ---- pet capture (tamed animals replayed beside an echo) --------------
+
+    /**
+     * Snapshot the animals {@code player} had tamed at death — those within {@link #PET_SCAN_RADIUS}
+     * whose owner is this player — keeping at most {@link #PET_SNAPSHOT_CAP}, named pets first and
+     * then nearest.
+     *
+     * <p><b>Unnamed mounts are skipped.</b> A horse you rode and never named is transport, not a
+     * companion, and bringing every stabled mount back with an echo would crowd the train; naming
+     * one is the player saying otherwise, so a named horse returns like any other pet.</p>
+     *
+     * <p>Only loaded animals are visible — a pet penned up elsewhere simply isn't logged this
+     * death, exactly as with loved ones.</p>
+     */
+    private static List<CompoundTag> capturePetSnapshots(ServerLevel level, ServerPlayer player) {
+        List<Mob> pets = new ArrayList<>();
+        for (Mob mob : level.getEntitiesOfClass(
+                Mob.class, player.getBoundingBox().inflate(PET_SCAN_RADIUS))) {
+            if (player.getUUID().equals(PetSnapshots.ownerUuid(mob))
+                    && returnsWithEcho(PetSnapshots.isMount(mob), mob.hasCustomName())) {
+                pets.add(mob);
+            }
+        }
+        if (pets.isEmpty()) {
+            return List.of();
+        }
+        boolean[] named = new boolean[pets.size()];
+        double[] distanceSqr = new double[pets.size()];
+        for (int i = 0; i < pets.size(); i++) {
+            named[i] = pets.get(i).hasCustomName();
+            distanceSqr[i] = pets.get(i).distanceToSqr(player);
+        }
+        List<CompoundTag> out = new ArrayList<>();
+        for (int idx : petOrder(named, distanceSqr, PET_SNAPSHOT_CAP)) {
+            out.add(PetSnapshots.capture(pets.get(idx)));
+        }
+        return out;
+    }
+
+    /**
+     * Whether an animal owned by the dying player is one an echo brings back: everything except an
+     * unnamed mount. Pure, so the rule is unit-tested directly.
+     */
+    static boolean returnsWithEcho(boolean mount, boolean named) {
+        return named || !mount;
+    }
+
+    /**
+     * Indices of the (up to) {@code cap} pets an echo returns with: named ones first — a name is the
+     * player saying this one mattered — then nearest, ties keeping ascending index order. Pure (no
+     * world) so the selection is unit-tested directly, like {@link #topIndices}.
+     */
+    static int[] petOrder(boolean[] named, double[] distanceSqr, int cap) {
+        Integer[] order = new Integer[named.length];
+        for (int i = 0; i < order.length; i++) {
+            order[i] = i;
+        }
+        Arrays.sort(order, Comparator.comparing((Integer i) -> !named[i])
+            .thenComparingDouble(i -> distanceSqr[i])); // named first, then nearest; stable on ties
+        int k = Math.min(cap, named.length);
+        int[] out = new int[k];
+        for (int i = 0; i < k; i++) {
+            out[i] = order[i];
         }
         return out;
     }

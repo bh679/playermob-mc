@@ -78,7 +78,8 @@ public final class GlobalLifeReincarnationSource implements ReincarnationSource 
             skinUrl,
             r.difficulty(),
             snapshot,
-            copyAll(r.friendSnapshots()));
+            copyAll(r.friendSnapshots()),
+            copyAll(r.petSnapshots()));
     }
 
     private static List<CompoundTag> copyAll(List<CompoundTag> tags) {

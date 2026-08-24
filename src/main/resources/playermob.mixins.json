@@ -7,6 +7,8 @@
     "MobTargetSelectorAccessor",
     "NaturalSpawnCompanionMixin",
     "PlayerDeathMixin",
+    "TamableAnimalTameMixin",
+    "AbstractHorseTameMixin",
     "RaiderTargetsPlayerMobMixin",
     "LivingHurtWitnessMixin",
     "WorldGenRegionMixin"

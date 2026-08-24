@@ -48,6 +48,7 @@ import games.brennan.playermob.compat.GameRuleCompat;
 import games.brennan.playermob.compat.ItemDataCompat;
 import games.brennan.playermob.compat.ItemKindCompat;
 import games.brennan.playermob.compat.NbtCompat;
+import games.brennan.playermob.compat.PetSnapshots;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.particles.ItemParticleOption;
@@ -77,6 +78,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.ChestBlockEntity;
 import net.minecraft.world.level.block.entity.ShulkerBoxBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
@@ -1519,6 +1521,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         rollSpawnDefaults(world.getRandom(), echo != null, !isSpawnEggSpawn(reason));
         this.eggAwaitingSkinRoll = isSpawnEggSpawn(reason);
         boolean companion = maybeSpawnFriendPair(world, reason, echo);
+        spawnPetEchoes(world, echo);
         if (isEventSpawn(reason)) {
             DtSpawnDebug.report(world.getLevel(), this, echo != null, companion);
         }
@@ -1768,10 +1771,45 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     }
 
     /**
+     * Bring back the pets of the life this echo embodies — the animals it had tamed when it died,
+     * captured by {@code PlayerReincarnation.capturePetSnapshots} — each re-tamed to this mob, so
+     * they read as the echo's own rather than as strays.
+     *
+     * <p>The "up to three" cap lives at capture: a record never holds more than that, so every
+     * logged pet returns. Like the friend-echo path these are added with {@code addFreshEntity} and
+     * never see {@code finalizeSpawn}. Non-echo spawns and echoes from a source that logs no pets
+     * (a remote life off the relay) simply have nothing to replay.</p>
+     *
+     * <p>They are pets, not bodyguards: on 1.21.x a tamed animal resolves its owner only through
+     * the player list, so an animal owned by a PlayerMob will not follow or defend it. What the
+     * re-tame buys is that they are unmistakably <em>his</em> — tamed, non-hostile, and never
+     * re-tameable by whoever walks up next.</p>
+     *
+     * @return how many pets actually returned
+     */
+    private int spawnPetEchoes(ServerLevelAccessor world, ReincarnationRecord echo) {
+        if (echo == null || echo.petSnapshots().isEmpty()) {
+            return 0;
+        }
+        ServerLevel level = world.getLevel();
+        int spawned = 0;
+        for (CompoundTag snapshot : echo.petSnapshots()) {
+            Entity pet = PetSnapshots.spawn(PetSnapshots.retame(snapshot, getUUID()), level);
+            if (pet == null) {
+                continue; // a type that no longer exists — that pet just doesn't come back
+            }
+            placeCompanion(pet);
+            level.addFreshEntity(pet);
+            spawned++;
+        }
+        return spawned;
+    }
+
+    /**
      * Place {@code friend} on this mob's already-valid tile; entity collision separates them next
      * tick. Avoids clipping the companion into a carriage wall by guessing an offset.
      */
-    private void placeCompanion(PlayerMobEntity friend) {
+    private void placeCompanion(Entity friend) {
         //? if >=26 {
         /*friend.snapTo(getX(), getY(), getZ(), getYRot(), 0.0F);
         *///?} else {
