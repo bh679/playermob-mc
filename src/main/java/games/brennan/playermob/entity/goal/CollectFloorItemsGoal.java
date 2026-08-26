@@ -78,7 +78,7 @@ public final class CollectFloorItemsGoal extends Goal implements DescribableGoal
 
         ItemEntity found = findClosestWantedItem();
         if (found == null) {
-            scanCooldown = EMPTY_SCAN_COOLDOWN;
+            scanCooldown = mob.reactTicks(EMPTY_SCAN_COOLDOWN);
             return false;
         }
         target = found;
@@ -109,7 +109,7 @@ public final class CollectFloorItemsGoal extends Goal implements DescribableGoal
         target = null;
         phase = Phase.IDLE;
         phaseTicks = 0;
-        scanCooldown = POST_VISIT_COOLDOWN;
+        scanCooldown = mob.reactTicks(POST_VISIT_COOLDOWN);
     }
 
     @Override

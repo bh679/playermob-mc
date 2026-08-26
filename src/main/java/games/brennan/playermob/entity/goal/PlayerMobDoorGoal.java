@@ -75,7 +75,7 @@ public final class PlayerMobDoorGoal extends DoorInteractGoal implements Describ
 
     @Override
     public void start() {
-        this.forgetTime = CLOSE_DELAY_TICKS;
+        this.forgetTime = playerMob.reactTicks(CLOSE_DELAY_TICKS);
         operateDeliberately(true);
     }
 

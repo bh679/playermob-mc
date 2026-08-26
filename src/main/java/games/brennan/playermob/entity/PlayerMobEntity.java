@@ -1091,7 +1091,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // stalls against a panel — measured the same way as the stuck signal below.
         Direction.Axis travelAxis = DoorObstruction.travelAxis(this, getX(), getZ());
         boolean tryingToMove = !getNavigation().isDone();
-        if (!offTrainDoorStuck.tick(getX(), getZ(), tryingToMove) || travelAxis == null) {
+        if (!offTrainDoorStuck.tick(getX(), getZ(), tryingToMove,
+                reactTicks(DoorStuckMonitor.STUCK_TICKS),
+                reactTicks(DoorStuckMonitor.COOLDOWN_TICKS))
+                || travelAxis == null) {
             return;
         }
         DoorObstruction.Obstruction blocking = DoorObstruction.nearestObstructing(
@@ -1118,7 +1121,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * {@link #pushDispositionToClient} so the open menu updates live.
      */
     private void tickFeelingEvents() {
-        if ((this.tickCount + getId()) % SOCIAL_SCAN_INTERVAL != 0) {
+        if ((this.tickCount + getId()) % reactTicks(SOCIAL_SCAN_INTERVAL) != 0) {
             return;
         }
         boolean changed = false;
@@ -2798,7 +2801,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (isOperatingDoor() || this.recovering) {
             return false;
         }
-        this.doorOpTicks = DOOR_OP_TICKS;
+        this.doorOpTicks = reactTicks(DOOR_OP_TICKS);
         return true;
     }
 
@@ -2820,7 +2823,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (this.doorOpFacing) {
             getLookControl().setLookAt(getX() + this.doorOpDx, getEyeY() + this.doorOpDy, getZ() + this.doorOpDz);
         }
-        if (this.doorOpTicks == DOOR_OP_REACH_TICKS) {
+        if (this.doorOpTicks == reactTicks(DOOR_OP_REACH_TICKS)) {
             if (this.doorOpFacing) {
                 swing(InteractionHand.MAIN_HAND);
             }

@@ -76,7 +76,7 @@ public final class CrossGroupGapGoal extends Goal implements DescribableGoal {
             return false;
         }
         if (!TrainConfinement.isConfined(mob)) {
-            scanCooldown = EMPTY_SCAN_COOLDOWN;
+            scanCooldown = mob.reactTicks(EMPTY_SCAN_COOLDOWN);
             return false;
         }
         if (mob.getTarget() != null) {
@@ -84,12 +84,12 @@ public final class CrossGroupGapGoal extends Goal implements DescribableGoal {
         }
         int dir = mob.effectiveTrainMarchDir();
         if (dir == 0) {
-            scanCooldown = EMPTY_SCAN_COOLDOWN; // not latched yet, or a loved player shares our carriage (idle with them)
+            scanCooldown = mob.reactTicks(EMPTY_SCAN_COOLDOWN); // not latched yet, or a loved player shares our carriage (idle with them)
             return false;
         }
         if (TrainConfinement.nextCarriageTarget(mob, dir) != null) {
             // Still rooms to explore within this group — that's AdvanceCarriageGoal's job.
-            scanCooldown = EMPTY_SCAN_COOLDOWN;
+            scanCooldown = mob.reactTicks(EMPTY_SCAN_COOLDOWN);
             return false;
         }
         Vec3 next = TrainConfinement.nextGroupTarget(mob, dir);
@@ -135,7 +135,7 @@ public final class CrossGroupGapGoal extends Goal implements DescribableGoal {
         phaseTicks = 0;
         settleTicks = 0;
         repathCooldown = 0;
-        scanCooldown = POST_VISIT_COOLDOWN;
+        scanCooldown = mob.reactTicks(POST_VISIT_COOLDOWN);
     }
 
     @Override
@@ -179,7 +179,7 @@ public final class CrossGroupGapGoal extends Goal implements DescribableGoal {
         }
         settleTicks = 0;
         if (--repathCooldown <= 0) {
-            repathCooldown = REPATH_INTERVAL;
+            repathCooldown = mob.reactTicks(REPATH_INTERVAL);
             issueMove();
         }
     }

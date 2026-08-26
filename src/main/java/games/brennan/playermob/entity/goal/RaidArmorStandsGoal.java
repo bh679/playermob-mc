@@ -87,7 +87,7 @@ public final class RaidArmorStandsGoal extends Goal implements DescribableGoal {
 
         ArmorStand found = findClosestArmorStand();
         if (found == null) {
-            scanCooldown = EMPTY_SCAN_COOLDOWN;
+            scanCooldown = mob.reactTicks(EMPTY_SCAN_COOLDOWN);
             return false;
         }
         target = found;
@@ -123,7 +123,7 @@ public final class RaidArmorStandsGoal extends Goal implements DescribableGoal {
         phaseTicks = 0;
         slotCursor = 0;
         nextSwapAt = -1;
-        scanCooldown = POST_VISIT_COOLDOWN;
+        scanCooldown = mob.reactTicks(POST_VISIT_COOLDOWN);
     }
 
     @Override
@@ -151,7 +151,7 @@ public final class RaidArmorStandsGoal extends Goal implements DescribableGoal {
                 }
             }
             case APPROACHING -> {
-                if (phaseTicks >= APPROACH_PAUSE_TICKS) {
+                if (phaseTicks >= mob.reactTicks(APPROACH_PAUSE_TICKS)) {
                     phase = Phase.LOOTING;
                     phaseTicks = 0;
                     slotCursor = 0;
@@ -174,8 +174,7 @@ public final class RaidArmorStandsGoal extends Goal implements DescribableGoal {
                 stop();
                 return;
             }
-            int delay = MIN_SWAP_DELAY_TICKS
-                + mob.getRandom().nextInt(MAX_SWAP_DELAY_TICKS - MIN_SWAP_DELAY_TICKS + 1);
+            int delay = mob.reactRoll(MIN_SWAP_DELAY_TICKS, MAX_SWAP_DELAY_TICKS);
             nextSwapAt = mob.tickCount + delay;
             return;
         }

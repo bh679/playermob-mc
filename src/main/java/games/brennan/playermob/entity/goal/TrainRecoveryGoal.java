@@ -423,6 +423,21 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
     private static final int TRACE_INTERVAL_TICKS = 10;
 
     private final PlayerMobEntity mob;
+
+    /**
+     * How often this mob re-issues a path while recovering, scaled by reaction speed. Read
+     * through an accessor rather than inlined: the same cadence gates several phases (and one
+     * debug trace), and a debug line disagreeing with the gate it reports on is worse than no
+     * trace at all.
+     */
+    private int pathReissueTicks() {
+        return mob.reactTicks(PATH_REISSUE_TICKS);
+    }
+
+    /** How often this mob lays the next bridge/step block, scaled by reaction speed. */
+    private int placeIntervalTicks() {
+        return mob.reactTicks(PLACE_INTERVAL_TICKS);
+    }
     private final double moveSpeed;
 
     private Phase phase = Phase.IDLE;
@@ -819,7 +834,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
             // nearest point of the carriage footprint gives it somewhere real to go.
             double towardX = Mth.clamp(mob.getX(), box.minX, box.maxX);
             double towardZ = Mth.clamp(mob.getZ(), box.minZ, box.maxZ);
-            if (phaseTicks % PATH_REISSUE_TICKS == 0 || mob.getNavigation().isDone()) {
+            if (phaseTicks % pathReissueTicks() == 0 || mob.getNavigation().isDone()) {
                 mob.getNavigation().moveTo(towardX, mob.getY(), towardZ, moveSpeed * SWIM_NAV_BOOST);
             }
             mob.getLookControl().setLookAt(towardX, mob.getY(), towardZ);
@@ -828,7 +843,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
             return;
         }
         double tx = shorePoint.getX() + 0.5, ty = shorePoint.getY() + 1.0, tz = shorePoint.getZ() + 0.5;
-        if (phaseTicks % PATH_REISSUE_TICKS == 0 || mob.getNavigation().isDone()) {
+        if (phaseTicks % pathReissueTicks() == 0 || mob.getNavigation().isDone()) {
             mob.getNavigation().moveTo(tx, ty, tz, moveSpeed * SWIM_NAV_BOOST);
         }
         mob.getLookControl().setLookAt(tx, ty, tz);
@@ -1107,7 +1122,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
             commitFromApproach();
             return;
         }
-        if (phaseTicks % PATH_REISSUE_TICKS == 0 || mob.getNavigation().isDone()) {
+        if (phaseTicks % pathReissueTicks() == 0 || mob.getNavigation().isDone()) {
             mob.getNavigation().moveTo(spot.x, spot.y, spot.z, moveSpeed);
             mob.getLookControl().setLookAt(spot.x, spot.y, spot.z);
         }
@@ -1299,7 +1314,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         // pointed navigation at the canyon floor ~20 blocks below — an unreachable target, so the
         // mob never walked onto the block it had just placed and re-placed forever.
         double targetY = noSafeExit ? footY : groundSurfaceY(mx, box.minY, offZ);
-        if (phaseTicks % PATH_REISSUE_TICKS == 0 || mob.getNavigation().isDone()) {
+        if (phaseTicks % pathReissueTicks() == 0 || mob.getNavigation().isDone()) {
             mob.getNavigation().moveTo(mx + 0.5, targetY, offZ + 0.5, moveSpeed);
             mob.getLookControl().setLookAt(mx + 0.5, targetY, offZ + 0.5);
         }
@@ -1351,7 +1366,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         int bridgeBlocks = BlockSourcePolicy.bridgeBlockCount(mob.getInventory());
         traceTick("offBedStep foot=({},{},{}) stepZ={} placeZ={} slot={} bridgeBlocks={} placementsUsed={} phaseTicks%{}={}",
                 foot.getX(), foot.getY(), foot.getZ(), stepZ, placeZ, slot, bridgeBlocks,
-                placementsUsed, PLACE_INTERVAL_TICKS, phaseTicks % PLACE_INTERVAL_TICKS);
+                placementsUsed, placeIntervalTicks(), phaseTicks % placeIntervalTicks());
         if (slot < 0) {
             // Nothing placeable. If the mob has been wedged here ~10s with a genuinely empty
             // backpack (no blocks AND no logs to craft), hand it planks once so it can bridge the
@@ -1365,7 +1380,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
             }
             return;
         }
-        if (phaseTicks % PLACE_INTERVAL_TICKS != 0) {
+        if (phaseTicks % placeIntervalTicks() != 0) {
             return;                              // pacing placement
         }
         // One below the mob's feet (so the top is level with the bed for a flat step), and led
@@ -1488,7 +1503,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
     /** Nav-driven ascent: vanilla pathfinding climbs treads unaided, so just aim it at the top. */
     private void tickTreads() {
         BlockPos top = climbRoute.top();
-        if (phaseTicks % PATH_REISSUE_TICKS == 0 || mob.getNavigation().isDone()) {
+        if (phaseTicks % pathReissueTicks() == 0 || mob.getNavigation().isDone()) {
             mob.getNavigation().moveTo(top.getX() + 0.5, top.getY(), top.getZ() + 0.5, moveSpeed);
         }
         mob.getLookControl().setLookAt(top.getX() + 0.5, top.getY(), top.getZ() + 0.5);
@@ -1520,7 +1535,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
             mob.getMoveControl().setWantedPosition(cx, mob.getY() + 1.0, cz, moveSpeed);
             return;
         }
-        if (phaseTicks % PATH_REISSUE_TICKS == 0 || mob.getNavigation().isDone()) {
+        if (phaseTicks % pathReissueTicks() == 0 || mob.getNavigation().isDone()) {
             mob.getNavigation().moveTo(cx, base.getY(), cz, moveSpeed);   // ordinary walk to the foot
         }
     }
@@ -1747,7 +1762,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         // toward the ground approach point. Gated to the same cadence every other phase uses:
         // re-pathing every tick to a cell one block away, whose direction flips as the train slides,
         // reads in-game as the mob standing still twitching.
-        if (phaseTicks % PATH_REISSUE_TICKS == 0 || mob.getNavigation().isDone()) {
+        if (phaseTicks % pathReissueTicks() == 0 || mob.getNavigation().isDone()) {
             mob.getNavigation().moveTo(place.getX() + 0.5, place.getY() + 1.0, place.getZ() + 0.5, moveSpeed);
         }
         // Height watermark. This phase was the ONLY one without a stuck detector: the standable-step
@@ -1779,7 +1794,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
             tickJumpStack(slot, box);
             return;
         }
-        if (phaseTicks % PLACE_INTERVAL_TICKS != 0) return;   // let it climb the previous step
+        if (phaseTicks % placeIntervalTicks() != 0) return;   // let it climb the previous step
         lookAt(place);
         if (tryPlaceBridgeBlock(place, slot)) {
             placementsUsed++;
@@ -2088,8 +2103,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         if (breakTicksTotal == 0) {
             // First tick in reach: pick the right tool and size the break.
             if (mob.equipBetterToolFor(state)) {
-                toolReadyTick = mob.tickCount + TOOL_SWAP_MIN_TICKS
-                    + mob.getRandom().nextInt(TOOL_SWAP_MAX_TICKS - TOOL_SWAP_MIN_TICKS + 1);
+                toolReadyTick = mob.tickCount + mob.reactRoll(TOOL_SWAP_MIN_TICKS, TOOL_SWAP_MAX_TICKS);
             }
             breakTicksTotal = breakTicksFor(state);
             gatherBreakTicks = 0;

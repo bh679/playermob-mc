@@ -285,8 +285,13 @@ public final class FireBucketGoal extends Goal implements DescribableGoal {
             SoundEvents.BUCKET_FILL, SoundSource.NEUTRAL, 1.0F, 1.0F);
     }
 
+    /**
+     * A delay somewhere in {@code [min, max]}, skewed low for a quick-reacting mob and high for
+     * a slow one. Every pause in this goal's bucket routine runs through here, so this one call
+     * is where reaction speed reaches all of them.
+     */
     private int randomTicks(int minInclusive, int maxInclusive) {
-        return mob.getRandom().nextInt(maxInclusive - minInclusive + 1) + minInclusive;
+        return mob.reactRoll(minInclusive, maxInclusive);
     }
 
     /**
