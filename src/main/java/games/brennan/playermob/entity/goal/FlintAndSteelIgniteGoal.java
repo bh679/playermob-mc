@@ -11,9 +11,11 @@ import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.ai.goal.Goal;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
@@ -49,11 +51,16 @@ import java.util.EnumSet;
  * surface fire can't sit on) the attempt simply fails and the mob puts the tool away, exactly as a
  * player's would — there is deliberately no force-place fallback.</p>
  *
- * <p>Runs at the priority-2 combat tier registered <em>before</em> {@link WeaponAwareAttackGoal}, so it
- * owns MOVE+LOOK for the whole ritual and the attack goal can't land a bare-fisted (or flint-and-steel)
- * hit mid-swap. No JUMP flag, so the priority-0 {@code FloatGoal} keeps the mob afloat — see the
- * goal-JUMP gotcha in {@link TntCombatGoal}. Gated on {@link PlayerMobConfig#flintAndSteelCombat()},
- * on the {@code mobGriefing} gamerule (it places a real fire block), and on {@link TrainConfinement}.</p>
+ * <p>Runs at priority 1 — <em>above</em> {@link WeaponAwareAttackGoal}, alongside
+ * {@link DoorOperationGoal}, and for the same reason. Both of this goal's triggers fire in the middle of
+ * a fight the attack goal is already running, and a same-priority goal can never interrupt one that's
+ * already running (vanilla's GoalSelector only lets a strictly higher-priority goal preempt) — at the
+ * priority-2 combat tier this would simply never get the MOVE/LOOK slot. From priority 1 it takes that
+ * slot for the length of the ritual, so the attack goal can't land a bare-fisted (or flint-and-steel) hit
+ * mid-swap, and hands it straight back when it's done. No JUMP flag, so the priority-0 {@code FloatGoal}
+ * keeps the mob afloat — see the goal-JUMP gotcha in {@link TntCombatGoal}. Gated on
+ * {@link PlayerMobConfig#flintAndSteelCombat()}, on the {@code mobGriefing} gamerule (it places a real
+ * fire block), and on {@link TrainConfinement}.</p>
  */
 public final class FlintAndSteelIgniteGoal extends Goal implements DescribableGoal {
 
@@ -307,6 +314,16 @@ public final class FlintAndSteelIgniteGoal extends Goal implements DescribableGo
             mob.equipBestWeaponForTarget(target);
         } else {
             mob.equipBestMeleeInHand();
+        }
+        // Both of those are no-ops for a mob that owns no weapon at all — it would be left punching with
+        // the flint and steel. Stow it by hand so the tool always goes back in the pack.
+        if (FlintAndSteelPolicy.isFlintAndSteel(mob.getMainHandItem())) {
+            ItemStack tool = mob.getMainHandItem();
+            mob.setItemSlot(EquipmentSlot.MAINHAND, ItemStack.EMPTY);
+            ItemStack leftover = mob.getInventory().addItem(tool);
+            if (!leftover.isEmpty()) {
+                mob.dropAtLocation(leftover);
+            }
         }
     }
 

@@ -821,6 +821,19 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // mines fill blocking the march. No flags (like PlayerMobDoorGoal) so it never evicts the
         // advance goal — the mob keeps stepping into the gap as the wall clears. No-op off a train.
         this.goalSelector.addGoal(1, new DigThroughGoal(this));
+        // Carrying flint and steel? Use it like a player: light the ground under a food animal for the
+        // killing blow (the animal dies burning, so the meat drops COOKED — then the mob stamps that fire
+        // back out), and occasionally torch the ground under any other target that isn't already alight.
+        // Priority 1, ABOVE the attack goal, and for the same reason DoorOperationGoal sits there: both
+        // triggers fire *mid-fight*, and a same-priority goal can never interrupt one that's already
+        // running (vanilla GoalSelector only lets a STRICTLY higher-priority goal preempt) — at priority 2
+        // the already-running WeaponAwareAttackGoal would hold MOVE/LOOK and this would never get to run.
+        // From here it briefly takes the slot for the whole draw → light → stow ritual (so the attack goal
+        // can't land a flint-and-steel hit mid-swap) and hands it straight back. Its canUse() is narrow —
+        // config on, mobGriefing on, flint and steel on hand, a trigger reached, under the 5-per-10s rate
+        // cap — so the normal fight goals own combat the rest of the time. Gated on mobGriefing (it places
+        // a real fire block). See FlintAndSteelIgniteGoal.
+        this.goalSelector.addGoal(1, new FlintAndSteelIgniteGoal(this, /* speed */ 1.0));
         // Carrying TNT + a way to light it? Bomb the enemy instead of trading bow/melee blows — registered
         // BEFORE the seek/attack goals at the same priority so its canUse() (config on, mobGriefing on, TNT +
         // an igniter on hand) wins the MOVE slot while armed. When it runs out of TNT/igniters its canUse()
@@ -838,15 +851,6 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // canUse() goes false and the attack goal re-draws ranged. Ammo is weapon-aware (arrows for bows,
         // arrows or fireworks for crossbows). No-op when seekArrowsWhenEmpty/requireArrows is off (mob melees).
         this.goalSelector.addGoal(2, new SeekAmmoGoal(this, /* speed */ 1.0, /* scanRadius */ 10.0));
-        // Carrying flint and steel? Use it like a player: light the ground under a food animal for the
-        // killing blow (the animal dies burning, so the meat drops COOKED — then the mob stamps that fire
-        // back out), and occasionally torch the ground under any other target that isn't already alight.
-        // Registered BEFORE the attack goal at the same priority so it owns MOVE+LOOK for the whole
-        // draw → light → stow ritual and the attack goal can't land a flint-and-steel hit mid-swap; its
-        // canUse() is narrow (config on, mobGriefing on, flint and steel on hand, a trigger reached, under
-        // the 5-per-10s rate cap) so the normal fight goals run the rest of the time. Gated on mobGriefing
-        // (it places a real fire block). See FlintAndSteelIgniteGoal.
-        this.goalSelector.addGoal(2, new FlintAndSteelIgniteGoal(this, /* speed */ 1.0));
         this.goalSelector.addGoal(2, new WeaponAwareAttackGoal(this, 1.0, 8.0f));
         // Follow the one it loves (a player or another PlayerMob): priority 2 so it
         // deprioritises every own-task (raid 3, harvest 6, train-advance 7, stroll 8) to tag
