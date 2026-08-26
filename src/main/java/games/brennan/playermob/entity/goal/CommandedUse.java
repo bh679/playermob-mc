@@ -36,6 +36,29 @@ public final class CommandedUse {
 
     /** Drive the level's fake player to right-click the mob's held item on {@code targetEntity} or at {@code pos}. */
     public static void perform(PlayerMobEntity mob, ItemStack fallbackItem, LivingEntity targetEntity, BlockPos pos) {
+        perform(mob, fallbackItem, targetEntity, pos, null);
+    }
+
+    /**
+     * Right-click the mob's held item on a <em>specific</em> {@code face} of the block at {@code pos} —
+     * the same pipeline as {@link #perform}, with the clicked face chosen by the caller instead of
+     * derived from the mob's eye position.
+     *
+     * <p>Placement-sensitive items need that exactness. Flint and steel puts its fire on the face you
+     * clicked, so a mob standing a couple of blocks off would otherwise catch a <em>side</em> face and
+     * light the ground beside its target rather than the block the target is standing in — the same
+     * reasoning as {@code FireBucketGoal} choosing its water spot deliberately rather than by raytrace.</p>
+     */
+    public static void performOnFace(PlayerMobEntity mob, BlockPos pos, Direction face) {
+        perform(mob, ItemStack.EMPTY, null, pos, face);
+    }
+
+    /**
+     * Shared implementation. A non-null {@code face} overrides the derived click face; it only applies
+     * to the {@code pos} (block) path — an entity interaction has no block face.
+     */
+    private static void perform(PlayerMobEntity mob, ItemStack fallbackItem, LivingEntity targetEntity,
+                                BlockPos pos, Direction face) {
         if (!(mob.level() instanceof ServerLevel level)) {
             return;
         }
@@ -69,7 +92,8 @@ public final class CommandedUse {
             // Stand just above the block looking down so an air-use item's own raytrace lands on it.
             actor.setPos(center.x, pos.getY() + 1.2, center.z);
             face(actor, center);
-            BlockHitResult hit = new BlockHitResult(center, faceToward(mob.getEyePosition(), center), pos, false);
+            Direction clicked = face != null ? face : faceToward(mob.getEyePosition(), center);
+            BlockHitResult hit = new BlockHitResult(center, clicked, pos, false);
             // Through the gamemode so the loaders' block-use events fire (modded blocks/items).
             var result = actor.gameMode.useItemOn(actor, level, actor.getItemInHand(InteractionHand.MAIN_HAND),
                 InteractionHand.MAIN_HAND, hit);
