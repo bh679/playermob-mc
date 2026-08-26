@@ -69,12 +69,41 @@ public final class ReactionSpeed {
     }
 
     /**
+     * Scale a quantity that should grow with reaction speed rather than shrink — the mirror of
+     * {@link #ticks}. Used for anticipation horizons: a fast mob spots an incoming arrow
+     * <em>further</em> out, so its lookahead is longer, not shorter. Same 2×/1×/0.5× spread,
+     * pointing the other way.
+     */
+    public static int ticksInverse(int reactionSpeed, int baseTicks) {
+        if (baseTicks <= 0) {
+            return baseTicks;
+        }
+        long scaled = Math.round(baseTicks * skew(reactionSpeed));
+        return (int) Math.max(1L, scaled);
+    }
+
+    /**
+     * The blind window in front of a mob's reflex: a threat arriving sooner than this is simply
+     * not reacted to. Ramps <b>linearly</b> from {@code 2 * atNeutral} at reaction 0 down to
+     * <b>zero</b> at reaction 10, unlike everything else here.
+     *
+     * <p>The linear ramp is the point. A geometric curve halves toward zero without ever
+     * arriving, and a reflex window that never closes means even a perfect reactor keeps a
+     * blind spot — the one thing a reaction-10 mob should not have. This is the only quantity
+     * in the trait that is allowed to reach zero.</p>
+     */
+    public static int reflexWindowTicks(int reactionSpeed, int atNeutral) {
+        int rs = DispositionTraits.clamp(reactionSpeed);
+        return (int) Math.round(2.0 * atNeutral * (DispositionTraits.MAX - rs) / DispositionTraits.MAX);
+    }
+
+    /**
      * Distribution exponent for {@link #roll}: {@code EXTREME^((reactionSpeed - PIVOT) / PIVOT)}
      * — 0.5 at reaction 0 (skews the roll toward the slow end of the window), 1.0 at 5
      * (uniform), 2.0 at 10 (skews toward the fast end). The reciprocal of {@link #scale},
      * so the two curves stay symmetric.
      */
-    static double skew(int reactionSpeed) {
+    public static double skew(int reactionSpeed) {
         return Math.pow(EXTREME, (double) (DispositionTraits.clamp(reactionSpeed) - PIVOT) / PIVOT);
     }
 

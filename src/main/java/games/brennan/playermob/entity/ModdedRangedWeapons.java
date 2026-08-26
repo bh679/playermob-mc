@@ -165,7 +165,12 @@ public final class ModdedRangedWeapons {
         }
     }
 
-    private static int clampHold(int ticks) {
+    /**
+     * Clamp a load/aim hold to the sane bounds the config parser enforces. Public so the goal
+     * can re-clamp after scaling the hold by reaction speed — a fast mob must not shorten a
+     * mod's reload below the length its animation and sounds need.
+     */
+    public static int clampHold(int ticks) {
         if (ticks < MIN_HOLD_TICKS) return MIN_HOLD_TICKS;
         if (ticks > MAX_HOLD_TICKS) return MAX_HOLD_TICKS;
         return ticks;

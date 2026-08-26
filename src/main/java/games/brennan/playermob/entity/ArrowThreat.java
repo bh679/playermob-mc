@@ -52,6 +52,27 @@ public final class ArrowThreat {
                                      double arrowX, double arrowY, double arrowZ,
                                      double velX, double velY, double velZ,
                                      double hitRadius, double maxLeadTicks) {
+        return isIncoming(mobX, mobY, mobZ, arrowX, arrowY, arrowZ, velX, velY, velZ,
+            hitRadius, 0.0, maxLeadTicks);
+    }
+
+    /**
+     * As {@link #isIncoming(double, double, double, double, double, double, double, double,
+     * double, double, double)}, but with a <b>minimum</b> lead as well as a maximum: an arrow
+     * whose closest approach is nearer than {@code minLeadTicks} is reported as no threat,
+     * because the mob could not physically react in time.
+     *
+     * <p>That lower bound is what gives reaction speed teeth here. The upper bound alone means
+     * every mob blocks everything it sees; a floor means a slow mob eats the point-blank shot
+     * it "saw" coming, while a fast one ({@code minLeadTicks == 0}) blocks it.</p>
+     *
+     * @param minLeadTicks ignore threats landing sooner than this many ticks from now;
+     *                     {@code 0} disables the floor
+     */
+    public static boolean isIncoming(double mobX, double mobY, double mobZ,
+                                     double arrowX, double arrowY, double arrowZ,
+                                     double velX, double velY, double velZ,
+                                     double hitRadius, double minLeadTicks, double maxLeadTicks) {
         double speedSqr = velX * velX + velY * velY + velZ * velZ;
         if (speedSqr < MIN_SPEED_SQR) {
             return false; // landed / stalled arrow — no threat
@@ -74,6 +95,9 @@ public final class ArrowThreat {
         double ticksToClosest = approach / speedSqr;
         if (ticksToClosest > maxLeadTicks) {
             return false; // too far in the future to start blocking yet
+        }
+        if (ticksToClosest < minLeadTicks) {
+            return false; // inside the reflex blind window — no time to get the shield up
         }
 
         // Closest-approach point along the straight-line projection, and how far

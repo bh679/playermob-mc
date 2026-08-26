@@ -625,6 +625,19 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private int lovedMarchDir;
     private boolean hasLovedMarchOverride;
     /** Re-scan cadence (ticks) for the loved-player march redirect; the march goals read the cache every tick. */
+    /**
+     * How long a neutral-reaction mob takes to round on whoever just hit it. Scaled by reaction
+     * speed ({@link ReactionSpeed#ticks}), so a twitchy mob spins immediately while a sluggish
+     * one wears a blow or two first — the difference between a mob that feels alert and one that
+     * feels slow, without changing whether it retaliates at all.
+     */
+    private static final int RETALIATE_REACTION_TICKS = 10;
+
+    /** Who this mob is about to round on, once {@link #retaliateAtTick} arrives; null when idle. */
+    private LivingEntity pendingRetaliationTarget;
+    /** Server tick at which {@link #pendingRetaliationTarget} becomes the hurt-by target. */
+    private int retaliateAtTick;
+
     private static final int LOVED_MARCH_REFRESH_TICKS = 10;
 
     /**
@@ -975,6 +988,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     protected void customServerAiStep() {
         super.customServerAiStep();
     //?}
+        // A blow landed a few ticks ago may now be due a response — see armRetaliation.
+        releasePendingRetaliation();
+
         LivingEntity target = getTarget();
         // The mob dropping a target for its OWN reasons (climbing back onto a train, or a
         // creative/spectator player it ignores) is not the player getting away — flag it so the
@@ -1905,6 +1921,22 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         return ReactionSpeed.roll(traits.reactionSpeed(), min, max, getRandom());
     }
 
+    /**
+     * Scale an anticipation horizon — a quantity that should grow, not shrink, with reaction
+     * speed. See {@link ReactionSpeed#ticksInverse}.
+     */
+    public int reactTicksInverse(int baseTicks) {
+        return ReactionSpeed.ticksInverse(traits.reactionSpeed(), baseTicks);
+    }
+
+    /**
+     * This mob's reflex blind window: a threat landing sooner than this is not reacted to at
+     * all. Zero at reaction 10. See {@link ReactionSpeed#reflexWindowTicks}.
+     */
+    public int reactReflexWindow(int atNeutral) {
+        return ReactionSpeed.reflexWindowTicks(traits.reactionSpeed(), atNeutral);
+    }
+
     /** The mob's current feeling (0–10, default 5) toward a specific entity. */
     public float feelingToward(LivingEntity entity) {
         return feelings.feelingToward(entity.getUUID());
@@ -2147,6 +2179,55 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             }
         }
         return best;
+    }
+
+    // ---- Delayed retaliation (reaction speed) -----------------------------
+
+    /**
+     * Hold back the hurt-by target for this mob's reaction time. {@code super.hurt} has already
+     * set {@code lastHurtByMob}, which vanilla's {@code HurtByTargetGoal} would act on next
+     * tick; clearing it and re-setting it from {@link #releasePendingRetaliation} is what makes
+     * the pause visible in play.
+     *
+     * <p>Only ever arms — never re-arms. A mob under sustained fire would otherwise have its
+     * timer reset by every incoming blow and never swing back at all, which reads as broken
+     * rather than slow. A reaction-10 mob has no delay and retaliates in the same tick, exactly
+     * as before this trait existed.</p>
+     */
+    private void armRetaliation(LivingEntity attacker) {
+        int delay = reactTicks(RETALIATE_REACTION_TICKS);
+        if (delay <= 0) {
+            return;   // instant reflex: leave the vanilla lastHurtByMob exactly as it was
+        }
+        if (pendingRetaliationTarget != null) {
+            return;   // already winding up — don't let the next hit restart the clock
+        }
+        pendingRetaliationTarget = attacker;
+        retaliateAtTick = tickCount + delay;
+        setLastHurtByMob(null);
+    }
+
+    /**
+     * Hand a wound-up retaliation to the vanilla hurt-by targeting once the mob's reaction time
+     * has elapsed. Drops the pending target instead if it died or left the world in the
+     * meantime, or if the mob has since found something else to fight.
+     */
+    private void releasePendingRetaliation() {
+        if (pendingRetaliationTarget == null) {
+            return;
+        }
+        if (!pendingRetaliationTarget.isAlive() || pendingRetaliationTarget.isRemoved()) {
+            pendingRetaliationTarget = null;
+            return;
+        }
+        if (tickCount < retaliateAtTick) {
+            return;
+        }
+        LivingEntity attacker = pendingRetaliationTarget;
+        pendingRetaliationTarget = null;
+        if (getTarget() == null) {
+            setLastHurtByMob(attacker);
+        }
     }
 
     // ---- Client-synced disposition (for the menu UI) ----------------------
@@ -3936,6 +4017,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
                 if (response == DispositionResolver.HurtResponse.FLEE) {
                     setTarget(null);
                     setLastHurtByMob(null);
+                    pendingRetaliationTarget = null;   // fleeing outranks a queued swing back
+                } else {
+                    armRetaliation(attacker);
                 }
             }
         }

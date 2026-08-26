@@ -88,6 +88,43 @@ class ReactionSpeedTest {
         assertEquals(-1, ReactionSpeed.ticks(10, -1));
     }
 
+    // ---- ticksInverse / reflexWindowTicks ---------------------------------
+
+    @Test
+    void ticksInverseGrowsWithReactionSpeed() {
+        // An anticipation horizon should get LONGER for a quick mob, not shorter.
+        assertEquals(10, ReactionSpeed.ticksInverse(0, 20));
+        assertEquals(20, ReactionSpeed.ticksInverse(5, 20));
+        assertEquals(40, ReactionSpeed.ticksInverse(10, 20));
+    }
+
+    @Test
+    void ticksInverseMirrorsTicks() {
+        for (int rs = 0; rs <= 10; rs++) {
+            assertEquals(ReactionSpeed.ticks(10 - rs, 40), ReactionSpeed.ticksInverse(rs, 40),
+                "reaction " + rs + " inverse should mirror reaction " + (10 - rs));
+        }
+    }
+
+    @Test
+    void reflexWindowClosesCompletelyAtMaximumReaction() {
+        // The one quantity allowed to reach zero: a perfect reactor has no blind spot.
+        assertEquals(0, ReactionSpeed.reflexWindowTicks(10, 4));
+        assertEquals(4, ReactionSpeed.reflexWindowTicks(5, 4));
+        assertEquals(8, ReactionSpeed.reflexWindowTicks(0, 4));
+    }
+
+    @Test
+    void reflexWindowShrinksMonotonicallyAndStaysNonNegative() {
+        int previous = Integer.MAX_VALUE;
+        for (int rs = 0; rs <= 10; rs++) {
+            int window = ReactionSpeed.reflexWindowTicks(rs, 4);
+            assertTrue(window >= 0, "reflex window must never go negative");
+            assertTrue(window <= previous, "window should not grow at reaction " + rs);
+            previous = window;
+        }
+    }
+
     // ---- roll -------------------------------------------------------------
 
     @Test

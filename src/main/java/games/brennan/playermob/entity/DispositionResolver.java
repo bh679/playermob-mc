@@ -235,12 +235,23 @@ public final class DispositionResolver {
 
     /**
      * Extra cooldown (in ticks) added <b>on top of the weapon's own firing cadence</b>
-     * between ranged shots, as a function of fightFlight. Piecewise-linear through three
+     * between ranged shots, as a function of fightFlight, then stretched or compressed by
+     * reaction speed ({@link ReactionSpeed#ticks}) — a twitchy mob re-fires sooner within
+     * whatever its nerve allows. Piecewise-linear through three
      * anchors: {@link #RANGED_DELAY_HIGH 0} ticks at ff 10 (fire as fast as the weapon
      * allows), {@link #RANGED_DELAY_MID 40} (2s) at ff 5, {@link #RANGED_DELAY_LOW 200}
      * (10s) at ff 0. The curve steepens below the pivot (8 ticks/point above, 32 below)
      * on purpose: a low-fightFlight mob usually flees rather than fights, so its slow
      * firerate seldom comes into play. Clamped to {@code [0, 10]}.
+     */
+    public static int rangedAttackExtraDelayTicks(int fightFlight, int reactionSpeed) {
+        return ReactionSpeed.ticks(reactionSpeed, rangedAttackExtraDelayTicks(fightFlight));
+    }
+
+    /**
+     * The fightFlight-only cadence, at the neutral reaction speed. Retained as the pure
+     * two-anchor curve the tests pin; live goal code calls the
+     * {@link #rangedAttackExtraDelayTicks(int, int) reaction-aware overload}.
      */
     public static int rangedAttackExtraDelayTicks(int fightFlight) {
         int ff = clampTrait(fightFlight);
