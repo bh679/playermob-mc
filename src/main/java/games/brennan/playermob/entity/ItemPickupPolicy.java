@@ -253,6 +253,11 @@ public final class ItemPickupPolicy {
         return VALUABLES.contains(stack.getItem());
     }
 
+    /** Flint and steel — hoarded so it can be used to light TNT via {@code TntCombatGoal}. */
+    public static boolean isIgniterTool(ItemStack stack) {
+        return stack.is(Items.FLINT_AND_STEEL);
+    }
+
     /**
      * Sum of every building-block stack's count across {@code container}.
      * Used to enforce {@link #BUILDING_BLOCK_CAP}.
