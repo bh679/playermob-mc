@@ -141,6 +141,14 @@ class ItemPickupPolicyTest {
     }
 
     @Test
+    void identifiesIgniterTool() {
+        assertTrue(ItemPickupPolicy.isIgniterTool(new ItemStack(Items.FLINT_AND_STEEL)), "flint and steel");
+        assertFalse(ItemPickupPolicy.isIgniterTool(new ItemStack(Items.DIAMOND_SWORD)), "sword is not an igniter");
+        assertFalse(ItemPickupPolicy.isIgniterTool(new ItemStack(Items.FIRE_CHARGE)),
+            "fire charge is a TNT igniter but not the pickup-wanted igniter tool");
+    }
+
+    @Test
     void countsBuildingBlocksIgnoringNonBlocks() {
         SimpleContainer backpack = new SimpleContainer(8);
         backpack.setItem(0, new ItemStack(Items.COBBLESTONE, 32));
