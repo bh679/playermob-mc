@@ -14,6 +14,7 @@ import games.brennan.playermob.entity.goal.CrossGroupGapGoal;
 import games.brennan.playermob.entity.goal.DefendLovedOneGoal;
 import games.brennan.playermob.entity.goal.DigThroughGoal;
 import games.brennan.playermob.entity.goal.DoorOperationGoal;
+import games.brennan.playermob.entity.goal.DouseFireInPathGoal;
 import games.brennan.playermob.entity.goal.EatFoodGoal;
 import games.brennan.playermob.entity.goal.FireBucketGoal;
 import games.brennan.playermob.entity.goal.FleeFromCategoryGoal;
@@ -821,6 +822,13 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // mines fill blocking the march. No flags (like PlayerMobDoorGoal) so it never evicts the
         // advance goal — the mob keeps stepping into the gap as the wall clears. No-op off a train.
         this.goalSelector.addGoal(1, new DigThroughGoal(this));
+        // Fire in the way? Stop short, hesitate, and put it out rather than walking into it. Priority 1
+        // for the same reason as the flint-and-steel goal below: the trigger fires mid-walk while a
+        // lower-priority movement goal already holds MOVE/LOOK, and only a strictly higher-priority goal
+        // can preempt a running one. Deliberately fallible (~1 fire in 4 is missed), and it never fires
+        // while the mob is already alight — that's the priority-0 FireBucketGoal's job. See
+        // DouseFireInPathGoal.
+        this.goalSelector.addGoal(1, new DouseFireInPathGoal(this));
         // Carrying flint and steel? Use it like a player: light the ground under a food animal for the
         // killing blow (the animal dies burning, so the meat drops COOKED — then the mob stamps that fire
         // back out), and occasionally torch the ground under any other target that isn't already alight.

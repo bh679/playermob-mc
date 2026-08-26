@@ -96,6 +96,9 @@ import java.util.Collection;
  *       session: when {@code on}, a PlayerMob carrying flint and steel lights the ground under a food
  *       animal for the killing blow (so the meat drops cooked, then puts that fire out) and occasionally
  *       torches the ground under an enemy mid-fight. A session override of the config flag.</li>
+ *   <li>{@code /playermob dousefires [on|off]} — toggle (or report) the fire-avoidance reflex for this
+ *       session: when {@code on}, a PlayerMob walking toward a fire block usually stops short and puts
+ *       it out instead of walking in. A session override of the config flag.</li>
  *   <li>{@code /playermob huntforfood [on|off]} — toggle (or report) animal-hunting for this session:
  *       when {@code on}, a hungry PlayerMob hunts a nearby adult food animal (cow/pig/chicken/sheep/rabbit)
  *       for meat; {@code off} leaves animals alone entirely. A session override of the config flag.</li>
@@ -200,6 +203,10 @@ public final class ReincarnateCommand {
                     .executes(ReincarnateCommand::queryExtinguishWithBucket)
                     .then(Commands.literal("on").executes(ctx -> setExtinguishWithBucket(ctx, true)))
                     .then(Commands.literal("off").executes(ctx -> setExtinguishWithBucket(ctx, false))))
+                .then(Commands.literal("dousefires")
+                    .executes(ReincarnateCommand::queryDouseFires)
+                    .then(Commands.literal("on").executes(ctx -> setDouseFires(ctx, true)))
+                    .then(Commands.literal("off").executes(ctx -> setDouseFires(ctx, false))))
                 .then(Commands.literal("huntforfood")
                     .executes(ReincarnateCommand::queryHuntForFood)
                     .then(Commands.literal("on").executes(ctx -> setHuntForFood(ctx, true)))
@@ -1159,6 +1166,23 @@ public final class ReincarnateCommand {
     private static int setFlintAndSteelCombat(CommandContext<CommandSourceStack> ctx, boolean enabled) {
         PlayerMobConfig.setFlintAndSteelCombat(enabled);
         ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob flint-and-steel use "
+            + (enabled ? "enabled" : "disabled") + " for this session."), false);
+        return 1;
+    }
+
+    /** {@code /playermob dousefires} — report whether PlayerMobs stop to put out fire in their path. */
+    private static int queryDouseFires(CommandContext<CommandSourceStack> ctx) {
+        boolean on = PlayerMobConfig.douseFires();
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob fire avoidance is "
+            + (on ? "ON — a mob usually stops short of a fire in its path and puts it out"
+                  : "OFF — mobs walk straight into fire") + "."), false);
+        return 1;
+    }
+
+    /** {@code /playermob dousefires on|off} — flip the fire-avoidance reflex for this session. */
+    private static int setDouseFires(CommandContext<CommandSourceStack> ctx, boolean enabled) {
+        PlayerMobConfig.setDouseFires(enabled);
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob fire avoidance "
             + (enabled ? "enabled" : "disabled") + " for this session."), false);
         return 1;
     }
