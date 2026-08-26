@@ -65,7 +65,7 @@ import java.util.Collection;
  *       stamped with that player's last completed life.</li>
  *   <li>{@code /playermob life <player>} — read the in-progress life tally and the
  *       traits it would currently distil to (verify tracking without dying).</li>
- *   <li>{@code /playermob summon <displayName> [<pos>] [<friendliness>] [<fightFlight>] [named [<customName>]]}
+ *   <li>{@code /playermob summon <displayName> [<pos>] [<friendliness>] [<fightFlight>] [<reactionSpeed>] [named [<customName>]]}
  *       — spawn a PlayerMob wearing that skin, at an optional position (default: the command source), with
  *       optional locked traits (default: random). {@code displayName} is a local-folder skin name (a PNG in
  *       {@code config/playermob/skins}) if one matches, otherwise a player name whose skin is resolved.
@@ -162,7 +162,12 @@ public final class ReincarnateCommand {
                                     .executes(ctx -> summon(ctx, false))
                                     .then(namedFlag())
                                     .then(summonStaySubtree())
-                                    .then(summonNbtArg()))))))
+                                    .then(summonNbtArg())
+                                    .then(Commands.argument("reactionSpeed", IntegerArgumentType.integer(0, 10))
+                                        .executes(ctx -> summon(ctx, false))
+                                        .then(namedFlag())
+                                        .then(summonStaySubtree())
+                                        .then(summonNbtArg())))))))
                 .then(Commands.literal("debug")
                     .then(Commands.literal("spawnlog")
                         .executes(ReincarnateCommand::querySpawnLog)
@@ -1378,7 +1383,7 @@ public final class ReincarnateCommand {
         String summary = String.format(
             "%s — attacks %d, kills %d (%d in self-defence), damage %.1f (%.1f in self-defence), "
                 + "kindness %.1f, harms %d, timidity %.1f "
-                + "→ would reincarnate Fight/Flight %d, Friendliness %d%s",
+                + "→ would reincarnate Fight/Flight %d, Friendliness %d (reaction speed rolls fresh)%s",
             nameOf(profile), tally.attacks(), tally.kills(), tally.defensiveKills(),
             tally.damageDealt(), tally.defensiveDamage(), tally.kindness(), tally.harms(),
             tally.timidity(),
@@ -1507,7 +1512,7 @@ public final class ReincarnateCommand {
     }
 
     /**
-     * {@code /playermob summon <displayName> [<pos>] [<friendliness>] [<fightFlight>] [named [<customName>]]}
+     * {@code /playermob summon <displayName> [<pos>] [<friendliness>] [<fightFlight>] [<reactionSpeed>] [named [<customName>]]}
      * — spawn a PlayerMob wearing the named player's skin. The mob appears immediately (with a rolled
      * skin) at {@code pos} (or the command source); the named player's real skin is resolved off-thread
      * and applied a moment later, falling back to the rolled skin if the name can't be resolved
@@ -1536,6 +1541,8 @@ public final class ReincarnateCommand {
             ? IntegerArgumentType.getInteger(ctx, "friendliness") : null;
         Integer fightFlight = has(ctx, "fightFlight")
             ? IntegerArgumentType.getInteger(ctx, "fightFlight") : null;
+        Integer reactionSpeed = has(ctx, "reactionSpeed")
+            ? IntegerArgumentType.getInteger(ctx, "reactionSpeed") : null;
         String customName = has(ctx, "customName")
             ? StringArgumentType.getString(ctx, "customName")
             : (nameMob ? name : null);
@@ -1543,7 +1550,8 @@ public final class ReincarnateCommand {
         ServerLevel level = source.getLevel();
         Vec3 at = pos != null ? pos : source.getPosition();
         float yRot = source.getRotation().y;
-        PlayerMobEntity mob = PlayerMobSummon.summon(level, at.x, at.y, at.z, yRot, fightFlight, friendliness);
+        PlayerMobEntity mob = PlayerMobSummon.summon(level, at.x, at.y, at.z, yRot,
+            fightFlight, friendliness, reactionSpeed);
         if (mob == null) {
             source.sendFailure(Component.literal("Could not create a PlayerMob."));
             return null;

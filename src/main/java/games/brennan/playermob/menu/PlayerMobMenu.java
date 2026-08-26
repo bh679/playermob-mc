@@ -183,7 +183,7 @@ public class PlayerMobMenu extends AbstractContainerMenu {
      * Handle the Creative disposition-editor +/- buttons, sent over the vanilla
      * container-button channel ({@code MultiPlayerGameMode.handleInventoryButtonClick}
      * → here on the server). Server-authoritative: only a Creative player editing a
-     * live mob may change disposition. Ids {@code 0..3} map to trait adjustments
+     * live mob may change disposition. Ids {@code 0..5} map to trait adjustments
      * ({@link games.brennan.playermob.entity.TraitEditButtons}); higher ids map to
      * per-relationship feeling adjustments
      * ({@link games.brennan.playermob.entity.FeelingEditButtons}). All clamped; no

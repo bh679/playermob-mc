@@ -221,6 +221,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private static final EntityDataAccessor<Integer> DATA_FRIENDLINESS =
         SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.INT);
 
+    private static final EntityDataAccessor<Integer> DATA_REACTION_SPEED =
+        SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.INT);
+
     /** Encoded feeling ledger ({@code "uuid=feeling;…"}) for the client menu UI. */
     private static final EntityDataAccessor<String> DATA_FEELINGS =
         SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.STRING);
@@ -746,6 +749,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         builder.define(DATA_SKIN_SLIM, false);
         builder.define(DATA_FIGHT_FLIGHT, DispositionTraits.DEFAULT);
         builder.define(DATA_FRIENDLINESS, DispositionTraits.DEFAULT);
+        builder.define(DATA_REACTION_SPEED, DispositionTraits.DEFAULT);
         builder.define(DATA_FEELINGS, "");
         builder.define(DATA_OBJECTIVES, "");
     }
@@ -759,6 +763,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         this.entityData.define(DATA_SKIN_SLIM, false);
         this.entityData.define(DATA_FIGHT_FLIGHT, DispositionTraits.DEFAULT);
         this.entityData.define(DATA_FRIENDLINESS, DispositionTraits.DEFAULT);
+        this.entityData.define(DATA_REACTION_SPEED, DispositionTraits.DEFAULT);
         this.entityData.define(DATA_FEELINGS, "");
         this.entityData.define(DATA_OBJECTIVES, "");
     }*///?}
@@ -1857,12 +1862,15 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * roll. Used by {@code /playermob summon} to honour its optional trait arguments. Values clamp
      * to {@code [0, 10]}.
      */
-    public void setExplicitTraits(Integer fightFlight, Integer friendliness) {
+    public void setExplicitTraits(Integer fightFlight, Integer friendliness, Integer reactionSpeed) {
         if (fightFlight != null) {
             traits.setFightFlight(fightFlight);
         }
         if (friendliness != null) {
             traits.setFriendliness(friendliness);
+        }
+        if (reactionSpeed != null) {
+            traits.setReactionSpeed(reactionSpeed);
         }
     }
 
@@ -1872,6 +1880,29 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
 
     public int friendliness() {
         return traits.friendliness();
+    }
+
+    public int reactionSpeed() {
+        return traits.reactionSpeed();
+    }
+
+    /**
+     * Scale a fixed delay constant by this mob's reaction speed — {@link ReactionSpeed#ticks}.
+     * Goal code keeps its tuned constant as the documented neutral baseline and wraps the use
+     * site in this, so the tuning intent stays readable: {@code mob.reactTicks(EMPTY_SCAN_COOLDOWN)}.
+     */
+    public int reactTicks(int baseTicks) {
+        return ReactionSpeed.ticks(traits.reactionSpeed(), baseTicks);
+    }
+
+    /**
+     * Roll a delay in the inclusive window {@code [min, max]}, biased low for a fast-reacting
+     * mob and high for a slow one — {@link ReactionSpeed#roll}. Replaces the
+     * {@code min + getRandom().nextInt(span + 1)} idiom at every tuned-window call site; at the
+     * neutral reaction speed the two are distributionally identical.
+     */
+    public int reactRoll(int min, int max) {
+        return ReactionSpeed.roll(traits.reactionSpeed(), min, max, getRandom());
     }
 
     /** The mob's current feeling (0–10, default 5) toward a specific entity. */
@@ -2124,6 +2155,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private void pushDispositionToClient() {
         this.entityData.set(DATA_FIGHT_FLIGHT, traits.fightFlight());
         this.entityData.set(DATA_FRIENDLINESS, traits.friendliness());
+        this.entityData.set(DATA_REACTION_SPEED, traits.reactionSpeed());
         this.entityData.set(DATA_FEELINGS, feelings.encode());
     }
 
@@ -2135,6 +2167,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     /** Client-synced friendliness (0–10), for the menu UI. */
     public int getSyncedFriendliness() {
         return this.entityData.get(DATA_FRIENDLINESS);
+    }
+
+    /** Client-synced reaction speed (0–10), for the menu UI. */
+    public int getSyncedReactionSpeed() {
+        return this.entityData.get(DATA_REACTION_SPEED);
     }
 
     /** Client-synced feelings (UUID → 0–10), decoded from the synced string. */

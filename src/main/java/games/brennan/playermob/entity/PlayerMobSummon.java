@@ -38,7 +38,7 @@ public final class PlayerMobSummon {
      * Returns the spawned mob, or {@code null} if the entity could not be created.
      */
     public static PlayerMobEntity summon(ServerLevel level, double x, double y, double z, float yRot,
-                                         Integer fightFlight, Integer friendliness) {
+                                         Integer fightFlight, Integer friendliness, Integer reactionSpeed) {
         PlayerMobEntity mob = create(level);
         if (mob == null) {
             return null;
@@ -48,7 +48,7 @@ public final class PlayerMobSummon {
         *///?} else {
         mob.moveTo(x, y, z, yRot, 0.0F);
         //?}
-        mob.setExplicitTraits(fightFlight, friendliness);
+        mob.setExplicitTraits(fightFlight, friendliness, reactionSpeed);
         // The caller applies the real skin AFTER finalizeSpawn (a local file synchronously, a player name
         // asynchronously), so defer auto-naming to it — naming here would label the mob off the rolled skin.
         mob.setDeferAutoName(true);

@@ -185,7 +185,8 @@ public final class PlayerLifeRecord {
      * cruelty in the way hunting something down is. {@code harms} is never discounted;
      * there is no self-defence in hurting someone's loved one.
      * Both are rounded and clamped to {@code [0, 10]} and marked explicit so the
-     * mob's spawn roll leaves them untouched.
+     * mob's spawn roll leaves them untouched. Reaction speed is <em>not</em> derived — it
+     * is left unset and rolls at spawn like any other new mob.
      */
     public DispositionTraits toTraits() {
         // Defensive tallies are subsets of the totals: full-weight the rest, tenth-weight those.
@@ -202,7 +203,11 @@ public final class PlayerLifeRecord {
         int friendliness = clampTrait(DispositionTraits.DEFAULT + kindness * KINDNESS_TO_FRIENDLY - cruelty);
 
         DispositionTraits traits = new DispositionTraits();
-        traits.set(fightFlight, friendliness);
+        traits.setFightFlight(fightFlight);
+        traits.setFriendliness(friendliness);
+        // Reaction speed is deliberately left unset, so it rolls normally at spawn: no life
+        // statistic here (damage, kills, kindness, timidity) is a credible proxy for reflexes,
+        // and deriving one from them would be noise dressed up as continuity.
         return traits;
     }
 
