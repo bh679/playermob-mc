@@ -116,7 +116,7 @@ public final class StayNearGoal extends Goal implements DescribableGoal {
         }
         mob.getLookControl().setLookAt(target.x, target.y, target.z);
         if (--repathCooldown <= 0 || mob.getNavigation().isDone()) {
-            repathCooldown = REPATH_INTERVAL;
+            repathCooldown = mob.reactTicks(REPATH_INTERVAL);
             issueMove();
         }
     }

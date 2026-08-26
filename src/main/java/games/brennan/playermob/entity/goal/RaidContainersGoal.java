@@ -123,7 +123,7 @@ public final class RaidContainersGoal extends Goal implements DescribableGoal {
 
         BlockPos found = findClosestContainer();
         if (found == null) {
-            scanCooldown = EMPTY_SCAN_COOLDOWN;
+            scanCooldown = mob.reactTicks(EMPTY_SCAN_COOLDOWN);
             return false;
         }
         targetPos = found;
@@ -168,7 +168,7 @@ public final class RaidContainersGoal extends Goal implements DescribableGoal {
         phaseTicks = 0;
         currentSlot = 0;
         nextSwapAt = -1;
-        scanCooldown = POST_VISIT_COOLDOWN;
+        scanCooldown = mob.reactTicks(POST_VISIT_COOLDOWN);
     }
 
     @Override
@@ -198,7 +198,7 @@ public final class RaidContainersGoal extends Goal implements DescribableGoal {
      */
     private void updateSneak() {
         if (--sneakCheckTicks <= 0) {
-            sneakCheckTicks = SNEAK_CHECK_INTERVAL;
+            sneakCheckTicks = mob.reactTicks(SNEAK_CHECK_INTERVAL);
             sneaking = mob.nearestWhereReaction(Reaction.FLEE, SNEAK_WATCH_RANGE) != null;
         }
         mob.setCrouching(sneaking);
@@ -226,7 +226,7 @@ public final class RaidContainersGoal extends Goal implements DescribableGoal {
 
     /** Hold for {@link #OPEN_PAUSE_TICKS} so the mob visibly "considers" the contents before grabbing. */
     private void tickOpening() {
-        if (phaseTicks >= OPEN_PAUSE_TICKS) {
+        if (phaseTicks >= mob.reactTicks(OPEN_PAUSE_TICKS)) {
             phase = Phase.LOOTING;
             phaseTicks = 0;
             currentSlot = 0;
@@ -260,8 +260,7 @@ public final class RaidContainersGoal extends Goal implements DescribableGoal {
                 phaseTicks = 0;
                 return;
             }
-            int delay = MIN_SWAP_DELAY_TICKS
-                + mob.getRandom().nextInt(MAX_SWAP_DELAY_TICKS - MIN_SWAP_DELAY_TICKS + 1);
+            int delay = mob.reactRoll(MIN_SWAP_DELAY_TICKS, MAX_SWAP_DELAY_TICKS);
             nextSwapAt = mob.tickCount + delay;
             return;
         }
@@ -279,7 +278,7 @@ public final class RaidContainersGoal extends Goal implements DescribableGoal {
     }
 
     private void tickClosing() {
-        if (phaseTicks >= CLOSE_PAUSE_TICKS) {
+        if (phaseTicks >= mob.reactTicks(CLOSE_PAUSE_TICKS)) {
             stop();
         }
     }

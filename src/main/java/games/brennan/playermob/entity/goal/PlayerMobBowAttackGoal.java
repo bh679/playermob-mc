@@ -28,6 +28,13 @@ public final class PlayerMobBowAttackGoal extends Goal {
     private final double speedModifier;
     private final float attackRadiusSqr;
 
+    /**
+     * Ticks of unbroken line of sight before the mob plants and starts strafing rather than
+     * closing — how long it takes to commit to the shot. The vanilla value, scaled by
+     * reaction speed at the use site.
+     */
+    private static final int SEE_TIME_TO_COMMIT = 20;
+
     private int attackTime = -1;
     private int seeTime;
     private boolean strafingClockwise;
@@ -96,7 +103,7 @@ public final class PlayerMobBowAttackGoal extends Goal {
             --this.seeTime;
         }
 
-        if (!(distSqr > (double) this.attackRadiusSqr) && this.seeTime >= 20) {
+        if (!(distSqr > (double) this.attackRadiusSqr) && this.seeTime >= this.mob.reactTicks(SEE_TIME_TO_COMMIT)) {
             this.mob.getNavigation().stop();
             ++this.strafingTime;
         } else {
@@ -136,8 +143,10 @@ public final class PlayerMobBowAttackGoal extends Goal {
                     this.mob.stopUsingItem();
                     this.mob.performRangedAttack(target, BowItem.getPowerForTime(ticksUsing));
                     // Firerate floor is the 20-tick draw above; fightFlight adds the extra
-                    // beat — 0 at ff10 (draw-limited) up to 200 ticks at ff0.
-                    this.attackTime = DispositionResolver.rangedAttackExtraDelayTicks(this.mob.fightFlight());
+                    // beat — 0 at ff10 (draw-limited) up to 200 ticks at ff0 — and reaction
+                    // speed stretches or compresses that beat.
+                    this.attackTime = DispositionResolver.rangedAttackExtraDelayTicks(
+                        this.mob.fightFlight(), this.mob.reactionSpeed());
                 }
             }
         } else if (--this.attackTime <= 0 && this.seeTime >= -60) {

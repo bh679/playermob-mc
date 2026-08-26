@@ -223,6 +223,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private static final EntityDataAccessor<Integer> DATA_FRIENDLINESS =
         SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.INT);
 
+    private static final EntityDataAccessor<Integer> DATA_REACTION_SPEED =
+        SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.INT);
+
     /** Encoded feeling ledger ({@code "uuid=feeling;…"}) for the client menu UI. */
     private static final EntityDataAccessor<String> DATA_FEELINGS =
         SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.STRING);
@@ -624,6 +627,19 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private int lovedMarchDir;
     private boolean hasLovedMarchOverride;
     /** Re-scan cadence (ticks) for the loved-player march redirect; the march goals read the cache every tick. */
+    /**
+     * How long a neutral-reaction mob takes to round on whoever just hit it. Scaled by reaction
+     * speed ({@link ReactionSpeed#ticks}), so a twitchy mob spins immediately while a sluggish
+     * one wears a blow or two first — the difference between a mob that feels alert and one that
+     * feels slow, without changing whether it retaliates at all.
+     */
+    private static final int RETALIATE_REACTION_TICKS = 10;
+
+    /** Who this mob is about to round on, once {@link #retaliateAtTick} arrives; null when idle. */
+    private LivingEntity pendingRetaliationTarget;
+    /** Server tick at which {@link #pendingRetaliationTarget} becomes the hurt-by target. */
+    private int retaliateAtTick;
+
     private static final int LOVED_MARCH_REFRESH_TICKS = 10;
 
     /**
@@ -748,6 +764,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         builder.define(DATA_SKIN_SLIM, false);
         builder.define(DATA_FIGHT_FLIGHT, DispositionTraits.DEFAULT);
         builder.define(DATA_FRIENDLINESS, DispositionTraits.DEFAULT);
+        builder.define(DATA_REACTION_SPEED, DispositionTraits.DEFAULT);
         builder.define(DATA_FEELINGS, "");
         builder.define(DATA_OBJECTIVES, "");
     }
@@ -761,6 +778,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         this.entityData.define(DATA_SKIN_SLIM, false);
         this.entityData.define(DATA_FIGHT_FLIGHT, DispositionTraits.DEFAULT);
         this.entityData.define(DATA_FRIENDLINESS, DispositionTraits.DEFAULT);
+        this.entityData.define(DATA_REACTION_SPEED, DispositionTraits.DEFAULT);
         this.entityData.define(DATA_FEELINGS, "");
         this.entityData.define(DATA_OBJECTIVES, "");
     }*///?}
@@ -992,6 +1010,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     protected void customServerAiStep() {
         super.customServerAiStep();
     //?}
+        // A blow landed a few ticks ago may now be due a response — see armRetaliation.
+        releasePendingRetaliation();
+
         LivingEntity target = getTarget();
         // The mob dropping a target for its OWN reasons (climbing back onto a train, or a
         // creative/spectator player it ignores) is not the player getting away — flag it so the
@@ -1092,7 +1113,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // stalls against a panel — measured the same way as the stuck signal below.
         Direction.Axis travelAxis = DoorObstruction.travelAxis(this, getX(), getZ());
         boolean tryingToMove = !getNavigation().isDone();
-        if (!offTrainDoorStuck.tick(getX(), getZ(), tryingToMove) || travelAxis == null) {
+        if (!offTrainDoorStuck.tick(getX(), getZ(), tryingToMove,
+                reactTicks(DoorStuckMonitor.STUCK_TICKS),
+                reactTicks(DoorStuckMonitor.COOLDOWN_TICKS))
+                || travelAxis == null) {
             return;
         }
         DoorObstruction.Obstruction blocking = DoorObstruction.nearestObstructing(
@@ -1119,7 +1143,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * {@link #pushDispositionToClient} so the open menu updates live.
      */
     private void tickFeelingEvents() {
-        if ((this.tickCount + getId()) % SOCIAL_SCAN_INTERVAL != 0) {
+        if ((this.tickCount + getId()) % reactTicks(SOCIAL_SCAN_INTERVAL) != 0) {
             return;
         }
         boolean changed = false;
@@ -1879,12 +1903,15 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * roll. Used by {@code /playermob summon} to honour its optional trait arguments. Values clamp
      * to {@code [0, 10]}.
      */
-    public void setExplicitTraits(Integer fightFlight, Integer friendliness) {
+    public void setExplicitTraits(Integer fightFlight, Integer friendliness, Integer reactionSpeed) {
         if (fightFlight != null) {
             traits.setFightFlight(fightFlight);
         }
         if (friendliness != null) {
             traits.setFriendliness(friendliness);
+        }
+        if (reactionSpeed != null) {
+            traits.setReactionSpeed(reactionSpeed);
         }
     }
 
@@ -1894,6 +1921,45 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
 
     public int friendliness() {
         return traits.friendliness();
+    }
+
+    public int reactionSpeed() {
+        return traits.reactionSpeed();
+    }
+
+    /**
+     * Scale a fixed delay constant by this mob's reaction speed — {@link ReactionSpeed#ticks}.
+     * Goal code keeps its tuned constant as the documented neutral baseline and wraps the use
+     * site in this, so the tuning intent stays readable: {@code mob.reactTicks(EMPTY_SCAN_COOLDOWN)}.
+     */
+    public int reactTicks(int baseTicks) {
+        return ReactionSpeed.ticks(traits.reactionSpeed(), baseTicks);
+    }
+
+    /**
+     * Roll a delay in the inclusive window {@code [min, max]}, biased low for a fast-reacting
+     * mob and high for a slow one — {@link ReactionSpeed#roll}. Replaces the
+     * {@code min + getRandom().nextInt(span + 1)} idiom at every tuned-window call site; at the
+     * neutral reaction speed the two are distributionally identical.
+     */
+    public int reactRoll(int min, int max) {
+        return ReactionSpeed.roll(traits.reactionSpeed(), min, max, getRandom());
+    }
+
+    /**
+     * Scale an anticipation horizon — a quantity that should grow, not shrink, with reaction
+     * speed. See {@link ReactionSpeed#ticksInverse}.
+     */
+    public int reactTicksInverse(int baseTicks) {
+        return ReactionSpeed.ticksInverse(traits.reactionSpeed(), baseTicks);
+    }
+
+    /**
+     * This mob's reflex blind window: a threat landing sooner than this is not reacted to at
+     * all. Zero at reaction 10. See {@link ReactionSpeed#reflexWindowTicks}.
+     */
+    public int reactReflexWindow(int atNeutral) {
+        return ReactionSpeed.reflexWindowTicks(traits.reactionSpeed(), atNeutral);
     }
 
     /** The mob's current feeling (0–10, default 5) toward a specific entity. */
@@ -2140,12 +2206,62 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         return best;
     }
 
+    // ---- Delayed retaliation (reaction speed) -----------------------------
+
+    /**
+     * Hold back the hurt-by target for this mob's reaction time. {@code super.hurt} has already
+     * set {@code lastHurtByMob}, which vanilla's {@code HurtByTargetGoal} would act on next
+     * tick; clearing it and re-setting it from {@link #releasePendingRetaliation} is what makes
+     * the pause visible in play.
+     *
+     * <p>Only ever arms — never re-arms. A mob under sustained fire would otherwise have its
+     * timer reset by every incoming blow and never swing back at all, which reads as broken
+     * rather than slow. A reaction-10 mob has no delay and retaliates in the same tick, exactly
+     * as before this trait existed.</p>
+     */
+    private void armRetaliation(LivingEntity attacker) {
+        int delay = reactTicks(RETALIATE_REACTION_TICKS);
+        if (delay <= 0) {
+            return;   // instant reflex: leave the vanilla lastHurtByMob exactly as it was
+        }
+        if (pendingRetaliationTarget != null) {
+            return;   // already winding up — don't let the next hit restart the clock
+        }
+        pendingRetaliationTarget = attacker;
+        retaliateAtTick = tickCount + delay;
+        setLastHurtByMob(null);
+    }
+
+    /**
+     * Hand a wound-up retaliation to the vanilla hurt-by targeting once the mob's reaction time
+     * has elapsed. Drops the pending target instead if it died or left the world in the
+     * meantime, or if the mob has since found something else to fight.
+     */
+    private void releasePendingRetaliation() {
+        if (pendingRetaliationTarget == null) {
+            return;
+        }
+        if (!pendingRetaliationTarget.isAlive() || pendingRetaliationTarget.isRemoved()) {
+            pendingRetaliationTarget = null;
+            return;
+        }
+        if (tickCount < retaliateAtTick) {
+            return;
+        }
+        LivingEntity attacker = pendingRetaliationTarget;
+        pendingRetaliationTarget = null;
+        if (getTarget() == null) {
+            setLastHurtByMob(attacker);
+        }
+    }
+
     // ---- Client-synced disposition (for the menu UI) ----------------------
 
     /** Push the server-side traits + feelings into the synced fields the client reads. */
     private void pushDispositionToClient() {
         this.entityData.set(DATA_FIGHT_FLIGHT, traits.fightFlight());
         this.entityData.set(DATA_FRIENDLINESS, traits.friendliness());
+        this.entityData.set(DATA_REACTION_SPEED, traits.reactionSpeed());
         this.entityData.set(DATA_FEELINGS, feelings.encode());
     }
 
@@ -2157,6 +2273,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     /** Client-synced friendliness (0–10), for the menu UI. */
     public int getSyncedFriendliness() {
         return this.entityData.get(DATA_FRIENDLINESS);
+    }
+
+    /** Client-synced reaction speed (0–10), for the menu UI. */
+    public int getSyncedReactionSpeed() {
+        return this.entityData.get(DATA_REACTION_SPEED);
     }
 
     /** Client-synced feelings (UUID → 0–10), decoded from the synced string. */
@@ -2702,7 +2823,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (isOperatingDoor() || this.recovering) {
             return false;
         }
-        this.doorOpTicks = DOOR_OP_TICKS;
+        this.doorOpTicks = reactTicks(DOOR_OP_TICKS);
         return true;
     }
 
@@ -2724,7 +2845,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (this.doorOpFacing) {
             getLookControl().setLookAt(getX() + this.doorOpDx, getEyeY() + this.doorOpDy, getZ() + this.doorOpDz);
         }
-        if (this.doorOpTicks == DOOR_OP_REACH_TICKS) {
+        if (this.doorOpTicks == reactTicks(DOOR_OP_REACH_TICKS)) {
             if (this.doorOpFacing) {
                 swing(InteractionHand.MAIN_HAND);
             }
@@ -3921,6 +4042,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
                 if (response == DispositionResolver.HurtResponse.FLEE) {
                     setTarget(null);
                     setLastHurtByMob(null);
+                    pendingRetaliationTarget = null;   // fleeing outranks a queued swing back
+                } else {
+                    armRetaliation(attacker);
                 }
             }
         }

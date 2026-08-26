@@ -79,7 +79,7 @@ public final class FollowLovedOneGoal extends Goal implements DescribableGoal {
         }
         LivingEntity candidate = mob.findFollowTarget();
         if (candidate == null || !tooFarFrom(candidate)) {
-            scanCooldown = IDLE_SCAN_COOLDOWN; // no one to chase right now — ease off the wide scan
+            scanCooldown = mob.reactTicks(IDLE_SCAN_COOLDOWN); // no one to chase right now — ease off the wide scan
             return false;
         }
         this.loved = candidate;
@@ -124,7 +124,7 @@ public final class FollowLovedOneGoal extends Goal implements DescribableGoal {
         }
         mob.getLookControl().setLookAt(loved, 30.0F, 30.0F);
         if (--repathCooldown <= 0 || mob.getNavigation().isDone()) {
-            repathCooldown = REPATH_INTERVAL;
+            repathCooldown = mob.reactTicks(REPATH_INTERVAL);
             issueMove();
         }
     }

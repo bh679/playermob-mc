@@ -32,6 +32,12 @@ public final class PlayerMobCrossbowAttackGoal extends Goal {
     /** Re-path cadence while closing distance, in ticks (1–2s). Matches vanilla. */
     private static final UniformInt PATHFINDING_DELAY_RANGE = TimeUtil.rangeOfSeconds(1, 2);
 
+    /**
+     * Ticks of unbroken line of sight before the mob stops closing and settles in to shoot.
+     * The vanilla value, scaled by reaction speed at the use site.
+     */
+    private static final int SEE_TIME_TO_SETTLE = 5;
+
     private final PlayerMobEntity mob;
     private final double speedModifier;
     private final float attackRadiusSqr;
@@ -106,14 +112,16 @@ public final class PlayerMobCrossbowAttackGoal extends Goal {
         }
 
         double distSqr = this.mob.distanceToSqr(target);
-        boolean shouldClose = (distSqr > (double) this.attackRadiusSqr || this.seeTime < 5)
+        boolean shouldClose = (distSqr > (double) this.attackRadiusSqr
+            || this.seeTime < this.mob.reactTicks(SEE_TIME_TO_SETTLE))
             && this.attackDelay == 0;
         if (shouldClose) {
             --this.updatePathDelay;
             if (this.updatePathDelay <= 0) {
                 this.mob.getNavigation().moveTo(target,
                     this.canRun() ? this.speedModifier : this.speedModifier * 0.5);
-                this.updatePathDelay = PATHFINDING_DELAY_RANGE.sample(this.mob.getRandom());
+                this.updatePathDelay = this.mob.reactTicks(
+                    PATHFINDING_DELAY_RANGE.sample(this.mob.getRandom()));
             }
         } else {
             this.updatePathDelay = 0;
@@ -140,8 +148,10 @@ public final class PlayerMobCrossbowAttackGoal extends Goal {
                 this.mob.releaseUsingItem();
                 this.crossbowState = CrossbowState.CHARGED;
                 // Firerate floor is the charge duration above; fightFlight adds the extra
-                // beat — 0 at ff10 (charge-limited) up to 200 ticks at ff0.
-                this.attackDelay = DispositionResolver.rangedAttackExtraDelayTicks(this.mob.fightFlight());
+                // beat — 0 at ff10 (charge-limited) up to 200 ticks at ff0 — and reaction
+                // speed stretches or compresses that beat.
+                this.attackDelay = DispositionResolver.rangedAttackExtraDelayTicks(
+                    this.mob.fightFlight(), this.mob.reactionSpeed());
                 this.mob.setChargingCrossbow(false);
             }
         } else if (this.crossbowState == CrossbowState.CHARGED) {

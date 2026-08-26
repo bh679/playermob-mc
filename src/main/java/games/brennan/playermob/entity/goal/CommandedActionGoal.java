@@ -256,7 +256,7 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
             }
             mob.getNavigation().stop();
             struck = true;
-            followThroughTicks = STRIKE_FOLLOW_THROUGH_TICKS;
+            followThroughTicks = mob.reactTicks(STRIKE_FOLLOW_THROUGH_TICKS);
         }
         if (--followThroughTicks <= 0) {
             phase = Phase.DONE;
@@ -271,7 +271,7 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
         if (target != null) {
             faceBodyToward(target);
         }
-        if (swingTicks % SWING_INTERVAL_TICKS == 0) {
+        if (swingTicks % mob.reactTicks(SWING_INTERVAL_TICKS) == 0) {
             mob.swing(InteractionHand.MAIN_HAND);
             swingsDone++;
         }
@@ -362,7 +362,7 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
             phase = Phase.DONE;
             return;
         }
-        if (++fleeRepathTicks >= FLEE_REPATH_INTERVAL || mob.getNavigation().isDone()) {
+        if (++fleeRepathTicks >= mob.reactTicks(FLEE_REPATH_INTERVAL) || mob.getNavigation().isDone()) {
             fleeRepathTicks = 0;
             LivingEntity target = order.targetEntity();
             Vec3 threat = target != null ? target.position() : fleeOrigin;

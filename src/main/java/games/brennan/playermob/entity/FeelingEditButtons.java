@@ -24,8 +24,13 @@ import java.util.UUID;
  */
 public final class FeelingEditButtons {
 
-    /** Feeling button ids start here ({@code 0..3} are reserved by {@link TraitEditButtons}). */
-    public static final int FEELING_BASE = 4;
+    /**
+     * Feeling button ids start immediately after the trait ids reserved by
+     * {@link TraitEditButtons} (currently {@code 0..5}). Derived rather than hard-coded so
+     * adding a trait can never silently overlap the relationship rows — both the client
+     * buttons and the server routing read this same constant.
+     */
+    public static final int FEELING_BASE = TraitEditButtons.ID_COUNT;
     /** Number of editable relationship rows; must equal the screen's row cap. */
     public static final int MAX_ROWS = 7;
     /** Feeling change per click. */

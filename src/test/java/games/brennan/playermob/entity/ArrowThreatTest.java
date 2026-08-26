@@ -2,6 +2,7 @@ package games.brennan.playermob.entity;
 
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -73,5 +74,30 @@ class ArrowThreatTest {
     void descendingArrowAimedAtTheMobIsAThreat() {
         // Lobbed shot dropping in from above-and-east, heading down at the mob.
         assertTrue(incoming(6, 6, 0, -3, -3, 0), "incoming arc should be a threat");
+    }
+
+    @Test
+    void anArrowInsideTheReflexWindowIsNotAThreat() {
+        // 3 blocks out at 3 blocks/tick — one tick from impact. A mob with a 4-tick reflex
+        // window cannot get the shield up, so it must not be reported as blockable.
+        assertFalse(ArrowThreat.isIncoming(0, 0, 0, -3, 0, 0, 3, 0, 0, 0.5, 4.0, 20.0),
+            "a point-blank arrow is inside the blind window");
+        // The same arrow IS a threat to a mob whose window has closed (reaction 10).
+        assertTrue(ArrowThreat.isIncoming(0, 0, 0, -3, 0, 0, 3, 0, 0, 0.5, 0.0, 20.0),
+            "with no blind window the same arrow is blockable");
+    }
+
+    @Test
+    void theMinLeadFloorStillRejectsWhatTheMaxHorizonRejected() {
+        // Beyond the horizon is still no threat regardless of the new floor.
+        assertFalse(ArrowThreat.isIncoming(0, 0, 0, -300, 0, 0, 3, 0, 0, 0.5, 0.0, 20.0));
+    }
+
+    @Test
+    void aZeroFloorMatchesTheOriginalOverload() {
+        // The floor-less overload must keep behaving exactly as it always did.
+        assertEquals(
+            ArrowThreat.isIncoming(0, 0, 0, -30, 0, 0, 3, 0, 0, 0.5, 20.0),
+            ArrowThreat.isIncoming(0, 0, 0, -30, 0, 0, 3, 0, 0, 0.5, 0.0, 20.0));
     }
 }

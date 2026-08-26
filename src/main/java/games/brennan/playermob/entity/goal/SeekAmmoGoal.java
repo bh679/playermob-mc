@@ -80,7 +80,7 @@ public final class SeekAmmoGoal extends Goal implements DescribableGoal {
 
         ItemEntity found = findClosestAmmo();
         if (found == null) {
-            scanCooldown = EMPTY_SCAN_COOLDOWN;
+            scanCooldown = mob.reactTicks(EMPTY_SCAN_COOLDOWN);
             return false;
         }
         target = found;
@@ -113,7 +113,7 @@ public final class SeekAmmoGoal extends Goal implements DescribableGoal {
         mob.getNavigation().stop();
         target = null;
         phaseTicks = 0;
-        scanCooldown = POST_VISIT_COOLDOWN;
+        scanCooldown = mob.reactTicks(POST_VISIT_COOLDOWN);
     }
 
     @Override

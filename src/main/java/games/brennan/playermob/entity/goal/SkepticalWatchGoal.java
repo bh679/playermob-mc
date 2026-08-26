@@ -82,8 +82,7 @@ public final class SkepticalWatchGoal extends Goal implements DescribableGoal {
 
     @Override
     public void start() {
-        this.stareTicksLeft = MIN_STARE_TICKS
-            + mob.getRandom().nextInt(MAX_STARE_TICKS - MIN_STARE_TICKS + 1);
+        this.stareTicksLeft = mob.reactRoll(MIN_STARE_TICKS, MAX_STARE_TICKS);
         mob.getNavigation().stop();
     }
 
@@ -112,7 +111,7 @@ public final class SkepticalWatchGoal extends Goal implements DescribableGoal {
         mob.lowerShield();
         this.watched = null;
         this.stareTicksLeft = 0;
-        this.cooldownTicks = RESUME_COOLDOWN_TICKS;
+        this.cooldownTicks = mob.reactTicks(RESUME_COOLDOWN_TICKS);
     }
 
     @Override

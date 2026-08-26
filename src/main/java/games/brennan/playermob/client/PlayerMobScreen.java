@@ -83,6 +83,23 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     // Wide enough for the bars + the right-aligned edit buttons before the objectives divider.
     private static final int DISPOSITION_WIDTH = 136;
 
+    /**
+     * Trait rows sit {@value #TRAIT_ROW_PITCH}px apart, so each trait added below costs the
+     * window that much height (see {@link #WINDOW_HEIGHT}). Kept as one constant so the row
+     * offsets and the window height can't drift apart.
+     */
+    private static final int TRAIT_ROW_PITCH = 23;
+
+    /**
+     * Window height. The disposition panel was tuned to fill a 186px window exactly with two
+     * trait rows and {@link #MAX_RELATIONSHIP_ROWS} relationships, so the third trait row costs
+     * one {@link #TRAIT_ROW_PITCH}. Growing the window rather than compressing the rows keeps
+     * every existing row at its tuned spacing.
+     */
+    private static final int WINDOW_HEIGHT = 186 + TRAIT_ROW_PITCH;
+    /** The "Inventory" label's y in the original 186px window — pinned, see the constructor. */
+    private static final int INVENTORY_LABEL_Y = 186 - 94;
+
     // Vertical offsets of each panel element from the panel top (topPos + PANEL_TOP).
     // Shared by the renderer (labels/bars) and init() (edit buttons) so they stay aligned.
     private static final int TRAITS_HEADER_DY = 0;
@@ -90,8 +107,10 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     private static final int FF_BAR_DY = 26;
     private static final int FRIEND_LABEL_DY = 35;
     private static final int FRIEND_BAR_DY = 49;
-    private static final int REL_HEADER_DY = 58;
-    private static final int REL_ROWS_DY = 69;
+    private static final int REACT_LABEL_DY = 58;
+    private static final int REACT_BAR_DY = 72;
+    private static final int REL_HEADER_DY = 81;
+    private static final int REL_ROWS_DY = 92;
 
     // Trait edit cluster: [-] value [+], right-aligned to the bar's right edge.
     private static final int BUTTON_SIZE = 12;
@@ -130,28 +149,30 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     private boolean editMode = false;
     /** Persistent header toggle that flips {@link #editMode}; relabels "Edit" ⇄ "Done". */
     private Button editToggle;
-    /** The four trait {@code [-]}/{@code [+]} arrows (two per trait), hidden unless {@link #editMode}. */
+    /** The six trait {@code [-]}/{@code [+]} arrows (two per trait), hidden unless {@link #editMode}. */
     private final List<Button> traitButtons = new ArrayList<>();
 
     public PlayerMobScreen(PlayerMobMenu menu, Inventory playerInv, Component title) {
         //? if >=26 {
         /*// 26.x made imageWidth/imageHeight final — they're passed through the 5-arg super ctor.
-        // (176 inventory + disposition panel + objectives column; height 186.)
+        // (176 inventory + disposition panel + objectives column.)
         super(menu, playerInv, title,
-            INVENTORY_WIDTH + DISPOSITION_WIDTH + OBJECTIVES_GUTTER, 186);
+            INVENTORY_WIDTH + DISPOSITION_WIDTH + OBJECTIVES_GUTTER, WINDOW_HEIGHT);
         *///?} else {
         super(menu, playerInv, title);
         // 176 inventory + disposition panel + objectives column.
         this.imageWidth = INVENTORY_WIDTH + DISPOSITION_WIDTH + OBJECTIVES_GUTTER;
-        this.imageHeight = 186;
+        this.imageHeight = WINDOW_HEIGHT;
         //?}
-        // Recompute since the field initialiser used the default height.
-        this.inventoryLabelY = this.imageHeight - 94;
+        // Pinned to the slot grid, NOT derived from imageHeight: the menu's slot coordinates are
+        // absolute, so growing the window for a third trait row must not drag the "Inventory"
+        // label away from the slots it labels. The extra height shows as a strip below the hotbar.
+        this.inventoryLabelY = INVENTORY_LABEL_Y;
     }
 
     /**
      * Add the Creative disposition-edit buttons: the persistent {@code Edit} toggle plus
-     * the (initially hidden) two trait pairs and one pair per relationship row. Runs after
+     * the (initially hidden) three trait pairs and one pair per relationship row. Runs after
      * {@code super.init()} has set {@code leftPos}/{@code topPos}, so button bounds resolve to
      * absolute screen coordinates. Skipped on the client fallback (no resolved mob — the panel
      * renders "(no data)" instead).
@@ -167,6 +188,7 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
         traitButtons.clear();
         addTraitButtons(top + FF_LABEL_DY, TraitEditButtons.FIGHT_FLIGHT_DOWN, TraitEditButtons.FIGHT_FLIGHT_UP);
         addTraitButtons(top + FRIEND_LABEL_DY, TraitEditButtons.FRIENDLINESS_DOWN, TraitEditButtons.FRIENDLINESS_UP);
+        addTraitButtons(top + REACT_LABEL_DY, TraitEditButtons.REACTION_SPEED_DOWN, TraitEditButtons.REACTION_SPEED_UP);
         rebuildRelationshipButtons();
     }
 
@@ -502,6 +524,7 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
         //?}
         drawTrait(g, x, top + FF_LABEL_DY, top + FF_BAR_DY, "Fight/Flight", mob.getSyncedFightFlight());
         drawTrait(g, x, top + FRIEND_LABEL_DY, top + FRIEND_BAR_DY, "Friendliness", mob.getSyncedFriendliness());
+        drawTrait(g, x, top + REACT_LABEL_DY, top + REACT_BAR_DY, "Reaction", mob.getSyncedReactionSpeed());
 
         //? if >=26 {
         /*g.text(this.font, Component.literal("Relationships"), x, top + REL_HEADER_DY, LABEL_COLOR, false);

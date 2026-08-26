@@ -85,7 +85,7 @@ public final class AdvanceCarriageGoal extends Goal implements DescribableGoal {
             return false;
         }
         if (!TrainConfinement.isConfined(mob)) {
-            scanCooldown = EMPTY_SCAN_COOLDOWN;
+            scanCooldown = mob.reactTicks(EMPTY_SCAN_COOLDOWN);
             return false;
         }
         if (mob.getTarget() != null) {
@@ -93,7 +93,7 @@ public final class AdvanceCarriageGoal extends Goal implements DescribableGoal {
         }
         int dir = mob.effectiveTrainMarchDir();
         if (dir == 0) {
-            scanCooldown = EMPTY_SCAN_COOLDOWN; // not latched yet, or a loved player shares our carriage (idle with them)
+            scanCooldown = mob.reactTicks(EMPTY_SCAN_COOLDOWN); // not latched yet, or a loved player shares our carriage (idle with them)
             return false;
         }
         Vec3 next = TrainConfinement.nextCarriageTarget(mob, dir);
@@ -128,7 +128,7 @@ public final class AdvanceCarriageGoal extends Goal implements DescribableGoal {
         target = null;
         phaseTicks = 0;
         repathCooldown = 0;
-        scanCooldown = POST_VISIT_COOLDOWN;
+        scanCooldown = mob.reactTicks(POST_VISIT_COOLDOWN);
     }
 
     @Override
@@ -159,7 +159,7 @@ public final class AdvanceCarriageGoal extends Goal implements DescribableGoal {
             return;
         }
         if (--repathCooldown <= 0 || mob.getNavigation().isDone()) {
-            repathCooldown = REPATH_INTERVAL;
+            repathCooldown = mob.reactTicks(REPATH_INTERVAL);
             issueMove();
         }
     }

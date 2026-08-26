@@ -93,7 +93,7 @@ public final class HarvestCropsGoal extends Goal implements DescribableGoal {
 
         BlockPos found = findClosestRipeCrop();
         if (found == null) {
-            scanCooldown = EMPTY_SCAN_COOLDOWN;
+            scanCooldown = mob.reactTicks(EMPTY_SCAN_COOLDOWN);
             return false;
         }
         targetPos = found;
@@ -131,7 +131,7 @@ public final class HarvestCropsGoal extends Goal implements DescribableGoal {
         }
         phase = Phase.IDLE;
         phaseTicks = 0;
-        scanCooldown = POST_VISIT_COOLDOWN;
+        scanCooldown = mob.reactTicks(POST_VISIT_COOLDOWN);
     }
 
     @Override
@@ -180,7 +180,7 @@ public final class HarvestCropsGoal extends Goal implements DescribableGoal {
         if (phaseTicks == 1) {
             mob.swing(InteractionHand.MAIN_HAND);
         }
-        if (phaseTicks >= HARVEST_WINDUP_TICKS) {
+        if (phaseTicks >= mob.reactTicks(HARVEST_WINDUP_TICKS)) {
             harvest(state);
             stop();
         }

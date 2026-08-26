@@ -60,7 +60,7 @@ public final class EndCrystalCombatGoal extends Goal implements DescribableGoal 
     private static final int WALK_TIMEOUT_TICKS = 200;      // 10s to reach the target before giving up
     private static final int BRACE_TICKS = 8;               // hold behind cover before punching (≥ the 5-tick shield warm-up)
     private static final int BUILD_GAP_MIN = 5;             // min ticks between placing successive rig blocks
-    private static final int BUILD_GAP_SPAN = 16;           // +0..15 → a 5-20 tick gap, so the mob visibly builds
+    private static final int BUILD_GAP_MAX = 20;            // a 5-20 tick gap, so the mob visibly builds
     private static final int BUILD_STEPS = 4;               // base, crystal, cover, cover-top
     private static final int POST_CYCLE_COOLDOWN = 10;      // brief settle after a completed detonation before re-arming
     private static final int FAIL_COOLDOWN = 40;            // 2s pause after a failed rig, so we don't thrash
@@ -177,13 +177,13 @@ public final class EndCrystalCombatGoal extends Goal implements DescribableGoal 
             if (!startBuild(target)) {
                 // Couldn't build a bunker here — stand down and let the normal fight goal take over for a beat.
                 phase = Phase.DONE;
-                cooldown = FAIL_COOLDOWN;
+                cooldown = mob.reactTicks(FAIL_COOLDOWN);
             }
             return;
         }
         if (++walkTicks > WALK_TIMEOUT_TICKS) {
             phase = Phase.DONE;
-            cooldown = FAIL_COOLDOWN;
+            cooldown = mob.reactTicks(FAIL_COOLDOWN);
             return;
         }
         mob.getNavigation().moveTo(target, speed);
@@ -231,7 +231,8 @@ public final class EndCrystalCombatGoal extends Goal implements DescribableGoal 
     }
 
     /**
-     * Lay the bunker one block at a time, {@link #BUILD_GAP_MIN}–20 ticks apart, so the mob visibly builds rather than
+     * Lay the bunker one block at a time, {@link #BUILD_GAP_MIN}–{@link #BUILD_GAP_MAX} ticks apart, so the mob
+     * visibly builds rather than
      * conjuring it: obsidian base → crystal on top → the two cover blocks between it and the crystal. When the last
      * block is down it braces. {@link #canContinueToUse} keeps the goal alive so a started rig always finishes.
      */
@@ -246,7 +247,7 @@ public final class EndCrystalCombatGoal extends Goal implements DescribableGoal 
             enterBrace();
             return;
         }
-        buildDelay = BUILD_GAP_MIN + mob.getRandom().nextInt(BUILD_GAP_SPAN); // 5-20 ticks between blocks
+        buildDelay = mob.reactRoll(BUILD_GAP_MIN, BUILD_GAP_MAX); // 5-20 ticks, skewed by reaction speed
     }
 
     /** Perform one placement of the staged build (see {@link #tickBuild()}), swinging as the mob sets each block. */
@@ -324,7 +325,7 @@ public final class EndCrystalCombatGoal extends Goal implements DescribableGoal 
         if (shieldEngaged && !mob.isUsingItem() && mob.getOffhandItem().is(Items.SHIELD)) {
             mob.startUsingItem(InteractionHand.OFF_HAND);
         }
-        if (++braceTicks < BRACE_TICKS) {
+        if (++braceTicks < mob.reactTicks(BRACE_TICKS)) {
             return;
         }
         // Braced — punch the crystal (a real melee hit) to detonate it, covered by the block + crouch + shield.
@@ -340,7 +341,7 @@ public final class EndCrystalCombatGoal extends Goal implements DescribableGoal 
             walkTicks = 0;
         } else {
             phase = Phase.DONE;
-            cooldown = POST_CYCLE_COOLDOWN;
+            cooldown = mob.reactTicks(POST_CYCLE_COOLDOWN);
         }
     }
 

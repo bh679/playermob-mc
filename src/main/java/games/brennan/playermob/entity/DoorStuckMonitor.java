@@ -54,13 +54,26 @@ public final class DoorStuckMonitor {
      * @return {@code true} exactly on the tick a stuck-recovery should fire
      */
     public boolean tick(double x, double z, boolean tryingToMove) {
+        return tick(x, z, tryingToMove, STUCK_TICKS, COOLDOWN_TICKS);
+    }
+
+    /**
+     * As {@link #tick(double, double, boolean)}, but with caller-supplied thresholds — so a mob's
+     * reaction speed can decide how long it flounders before noticing it is wedged, and how long
+     * it waits before it is willing to notice again. Kept as parameters rather than a trait
+     * dependency so this stays pure, primitives-only, and testable without a world.
+     *
+     * @param stuckTicks    consecutive no-progress ticks before recovery fires
+     * @param cooldownTicks anti-flap window armed after firing
+     */
+    public boolean tick(double x, double z, boolean tryingToMove, int stuckTicks, int cooldownTicks) {
         boolean progressed = !hasLast || horizontalSqr(x, z) > PROGRESS_EPS_SQR;
         lastX = x;
         lastZ = z;
         hasLast = true;
 
-        if (cooldownTicks > 0) {
-            cooldownTicks--;
+        if (this.cooldownTicks > 0) {
+            this.cooldownTicks--;
             noProgressTicks = 0;
             return false;
         }
@@ -68,9 +81,9 @@ public final class DoorStuckMonitor {
             noProgressTicks = 0;
             return false;
         }
-        if (++noProgressTicks >= STUCK_TICKS) {
+        if (++noProgressTicks >= stuckTicks) {
             noProgressTicks = 0;
-            cooldownTicks = COOLDOWN_TICKS;
+            this.cooldownTicks = cooldownTicks;
             return true;
         }
         return false;

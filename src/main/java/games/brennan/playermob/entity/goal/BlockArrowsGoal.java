@@ -69,8 +69,22 @@ public final class BlockArrowsGoal extends Goal {
     /** Added to the mob's half-width to size the "this arrow will hit me" disc. */
     private static final double HIT_MARGIN = 0.5;
 
-    /** Don't start blocking arrows whose closest approach is more than this many ticks out (~1s). */
+    /**
+     * Don't start blocking arrows whose closest approach is more than this many ticks out (~1s)
+     * — the anticipation horizon at the neutral reaction speed. Scaled <em>up</em> for a fast
+     * mob (it spots the shot further out) via {@link PlayerMobEntity#reactTicksInverse}.
+     */
     private static final double MAX_LEAD_TICKS = 20.0;
+
+    /**
+     * The reflex blind window at the neutral reaction speed: an arrow landing sooner than this
+     * many ticks is not blocked, because the mob could not get the shield up in time. Ramps to
+     * 8 ticks at reaction 0 and to 0 at reaction 10 — see
+     * {@link games.brennan.playermob.entity.ReactionSpeed#reflexWindowTicks}. This is what makes
+     * reaction speed legible in play: shoot two mobs from point-blank range and only the quick
+     * one gets its guard up.
+     */
+    private static final int MIN_LEAD_TICKS = 4;
 
     /** Cosine of the aim-cone half-angle for player shooters (~53°). Higher = tighter. */
     private static final double AIM_COS_THRESHOLD = 0.6;
@@ -250,6 +264,10 @@ public final class BlockArrowsGoal extends Goal {
      * Nearest in-flight arrow on a collision course with the mob, or {@code null}.
      * Skips the mob's own shots and (via {@link ArrowThreat}'s velocity gate) arrows
      * already stuck in the ground. Secondary trigger — see class javadoc.
+     *
+     * <p>Both ends of the lead window come from the mob's reaction speed: the horizon it
+     * anticipates over ({@link #MAX_LEAD_TICKS}) and the blind window it cannot react inside
+     * ({@link #MIN_LEAD_TICKS}).</p>
      */
     private AbstractArrow findIncomingArrow() {
         double mobX = mob.getX();
@@ -268,7 +286,9 @@ public final class BlockArrowsGoal extends Goal {
             Vec3 v = arrow.getDeltaMovement();
             if (!ArrowThreat.isIncoming(mobX, mobY, mobZ,
                     arrow.getX(), arrow.getY(), arrow.getZ(),
-                    v.x, v.y, v.z, hitRadius, MAX_LEAD_TICKS)) {
+                    v.x, v.y, v.z, hitRadius,
+                    mob.reactReflexWindow(MIN_LEAD_TICKS),
+                    mob.reactTicksInverse((int) MAX_LEAD_TICKS))) {
                 continue;
             }
             double distSqr = arrow.distanceToSqr(mobX, mobY, mobZ);

@@ -2,6 +2,7 @@ package games.brennan.playermob.entity.goal;
 
 import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.entity.DispositionResolver;
+import games.brennan.playermob.entity.ModdedRangedWeapons;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.LivingEntity;
@@ -23,6 +24,13 @@ import java.util.EnumSet;
  * ({@link DispositionResolver#rangedAttackExtraDelayTicks}) before starting the next reload.</p>
  */
 public final class ModdedRangedAttackGoal extends Goal {
+
+    /**
+     * Ticks of unbroken line of sight before the mob plants and starts strafing rather than
+     * closing — how long it takes to commit to the shot. Mirrors the bow goal; scaled by
+     * reaction speed at the use site.
+     */
+    private static final int SEE_TIME_TO_COMMIT = 20;
 
     private final PlayerMobEntity mob;
     private final double speedModifier;
@@ -109,7 +117,7 @@ public final class ModdedRangedAttackGoal extends Goal {
             --this.seeTime;
         }
 
-        if (!(distSqr > (double) this.attackRadiusSqr) && this.seeTime >= 20) {
+        if (!(distSqr > (double) this.attackRadiusSqr) && this.seeTime >= this.mob.reactTicks(SEE_TIME_TO_COMMIT)) {
             this.mob.getNavigation().stop();
             ++this.strafingTime;
         } else {
@@ -154,7 +162,8 @@ public final class ModdedRangedAttackGoal extends Goal {
                     ModdedGunFire.fire(this.mob, target);
                     this.mob.consumeOneModdedAmmo(this.mob.getMainHandItem()); // one cartridge per shot
                 }
-                this.postShotCooldown = DispositionResolver.rangedAttackExtraDelayTicks(this.mob.fightFlight());
+                this.postShotCooldown = DispositionResolver.rangedAttackExtraDelayTicks(
+                    this.mob.fightFlight(), this.mob.reactionSpeed());
             }
             return;
         }
@@ -168,7 +177,10 @@ public final class ModdedRangedAttackGoal extends Goal {
         if (canSee && inRange && this.mob.hasRangedAmmo(this.mob.getMainHandItem())) {
             this.mob.startUsingItem(InteractionHand.MAIN_HAND);
             this.reloading = true;
-            this.reloadTicksLeft = PlayerMobConfig.moddedRanged().holdTicks(this.mob.getMainHandItem());
+            // Reaction speed scales the load/aim hold, re-clamped to the bounds the config parser
+            // enforces so a fast mob can't drop below a mod's minimum sane animation length.
+            this.reloadTicksLeft = ModdedRangedWeapons.clampHold(this.mob.reactTicks(
+                PlayerMobConfig.moddedRanged().holdTicks(this.mob.getMainHandItem())));
         }
     }
 }
