@@ -38,7 +38,11 @@ public final class FlintAndSteelPolicy {
     /** Width of the rate window, in ticks (10 seconds). */
     public static final int RATE_WINDOW_TICKS = 200;
 
-    /** Wind-up for drawing the flint and steel, and for putting it away again. */
+    /**
+     * Wind-up for drawing the flint and steel, and for putting it away again — the neutral
+     * (reaction 5) window. {@code FlintAndSteelIgniteGoal} rolls it through
+     * {@code PlayerMobEntity.reactRoll}, so a quick-reacting mob lands low in it more often.
+     */
     public static final int SWAP_MIN_TICKS = 4;
     public static final int SWAP_MAX_TICKS = 20;
 
@@ -149,11 +153,6 @@ public final class FlintAndSteelPolicy {
         System.arraycopy(window, 1, next, 0, window.length - 1);
         next[window.length - 1] = now;
         return next;
-    }
-
-    /** Wind-up ticks for swapping the flint and steel in or out — {@value #SWAP_MIN_TICKS}–{@value #SWAP_MAX_TICKS}. */
-    public static int swapDelayTicks(RandomSource random) {
-        return inclusive(random, SWAP_MIN_TICKS, SWAP_MAX_TICKS);
     }
 
     /** Ticks a cooking fire is left standing — {@value #BURN_MIN_TICKS}–{@value #BURN_MAX_TICKS}. */

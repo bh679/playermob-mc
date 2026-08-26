@@ -908,6 +908,24 @@
       "released": false,
       "released_in": null,
       "released_at": null
+    },
+    {
+      "id": "reaction-scaled-flint-and-steel",
+      "version": "0.96.0",
+      "type": "feat",
+      "title": "Reaction speed now shapes the fire behaviours",
+      "summary": "A PlayerMob's reaction speed already decided how quickly it noticed and committed to everything else; now it shapes the fire behaviours too. Quick-reacting mobs draw and stow flint and steel faster, recover faster from a light that fizzles, and snap out of the double-take before stamping out a fire in their path. Slow ones dawdle through all of it. A default mob behaves exactly as before.",
+      "highlights": [
+        "Drawing and stowing flint and steel is quicker for a fast-reacting mob, slower for a sluggish one",
+        "A mob that fails to light the ground re-arms sooner or later depending on its reaction speed",
+        "The hesitation before punching out a fire in its path \u2014 and every water-bucket swap \u2014 is now reaction-scaled",
+        "Give-up timers, the cooking burn time and the rate limits are untouched, so a fast mob never quits early or turns into a flamethrower"
+      ],
+      "pr": 198,
+      "date": "2026-08-26",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }

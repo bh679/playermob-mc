@@ -103,10 +103,6 @@ class FlintAndSteelPolicyTest {
     void randomWindUpsStayInsideTheirStatedRanges() {
         RandomSource random = RandomSource.create(1234L);
         for (int i = 0; i < 500; i++) {
-            int swap = FlintAndSteelPolicy.swapDelayTicks(random);
-            assertTrue(swap >= FlintAndSteelPolicy.SWAP_MIN_TICKS && swap <= FlintAndSteelPolicy.SWAP_MAX_TICKS,
-                "swap delay in 4..20, got " + swap);
-
             int burn = FlintAndSteelPolicy.burnTicks(random);
             assertTrue(burn >= FlintAndSteelPolicy.BURN_MIN_TICKS && burn <= FlintAndSteelPolicy.BURN_MAX_TICKS,
                 "burn ticks in 3..40, got " + burn);
