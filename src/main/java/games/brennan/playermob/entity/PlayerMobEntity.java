@@ -17,6 +17,7 @@ import games.brennan.playermob.entity.goal.DoorOperationGoal;
 import games.brennan.playermob.entity.goal.EatFoodGoal;
 import games.brennan.playermob.entity.goal.FireBucketGoal;
 import games.brennan.playermob.entity.goal.FleeFromCategoryGoal;
+import games.brennan.playermob.entity.goal.FlintAndSteelIgniteGoal;
 import games.brennan.playermob.entity.goal.FollowLovedOneGoal;
 import games.brennan.playermob.entity.goal.FriendlyGreetGoal;
 import games.brennan.playermob.entity.goal.HarvestCropsGoal;
@@ -837,6 +838,15 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // canUse() goes false and the attack goal re-draws ranged. Ammo is weapon-aware (arrows for bows,
         // arrows or fireworks for crossbows). No-op when seekArrowsWhenEmpty/requireArrows is off (mob melees).
         this.goalSelector.addGoal(2, new SeekAmmoGoal(this, /* speed */ 1.0, /* scanRadius */ 10.0));
+        // Carrying flint and steel? Use it like a player: light the ground under a food animal for the
+        // killing blow (the animal dies burning, so the meat drops COOKED — then the mob stamps that fire
+        // back out), and occasionally torch the ground under any other target that isn't already alight.
+        // Registered BEFORE the attack goal at the same priority so it owns MOVE+LOOK for the whole
+        // draw → light → stow ritual and the attack goal can't land a flint-and-steel hit mid-swap; its
+        // canUse() is narrow (config on, mobGriefing on, flint and steel on hand, a trigger reached, under
+        // the 5-per-10s rate cap) so the normal fight goals run the rest of the time. Gated on mobGriefing
+        // (it places a real fire block). See FlintAndSteelIgniteGoal.
+        this.goalSelector.addGoal(2, new FlintAndSteelIgniteGoal(this, /* speed */ 1.0));
         this.goalSelector.addGoal(2, new WeaponAwareAttackGoal(this, 1.0, 8.0f));
         // Follow the one it loves (a player or another PlayerMob): priority 2 so it
         // deprioritises every own-task (raid 3, harvest 6, train-advance 7, stroll 8) to tag

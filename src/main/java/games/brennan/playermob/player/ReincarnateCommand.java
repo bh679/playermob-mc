@@ -92,6 +92,10 @@ import java.util.Collection;
  *       this session: when {@code on}, a PlayerMob carrying end crystals + obsidian + solid cover blocks
  *       bombs its target with end crystals instead of fighting with bow/melee. A session override of the
  *       config flag.</li>
+ *   <li>{@code /playermob flintcombat [on|off]} — toggle (or report) flint-and-steel use for this
+ *       session: when {@code on}, a PlayerMob carrying flint and steel lights the ground under a food
+ *       animal for the killing blow (so the meat drops cooked, then puts that fire out) and occasionally
+ *       torches the ground under an enemy mid-fight. A session override of the config flag.</li>
  *   <li>{@code /playermob huntforfood [on|off]} — toggle (or report) animal-hunting for this session:
  *       when {@code on}, a hungry PlayerMob hunts a nearby adult food animal (cow/pig/chicken/sheep/rabbit)
  *       for meat; {@code off} leaves animals alone entirely. A session override of the config flag.</li>
@@ -188,6 +192,10 @@ public final class ReincarnateCommand {
                     .executes(ReincarnateCommand::queryEndCrystalCombat)
                     .then(Commands.literal("on").executes(ctx -> setEndCrystalCombat(ctx, true)))
                     .then(Commands.literal("off").executes(ctx -> setEndCrystalCombat(ctx, false))))
+                .then(Commands.literal("flintcombat")
+                    .executes(ReincarnateCommand::queryFlintAndSteelCombat)
+                    .then(Commands.literal("on").executes(ctx -> setFlintAndSteelCombat(ctx, true)))
+                    .then(Commands.literal("off").executes(ctx -> setFlintAndSteelCombat(ctx, false))))
                 .then(Commands.literal("extinguishwithbucket")
                     .executes(ReincarnateCommand::queryExtinguishWithBucket)
                     .then(Commands.literal("on").executes(ctx -> setExtinguishWithBucket(ctx, true)))
@@ -1134,6 +1142,23 @@ public final class ReincarnateCommand {
     private static int setTntCombat(CommandContext<CommandSourceStack> ctx, boolean enabled) {
         PlayerMobConfig.setTntCombat(enabled);
         ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob TNT combat "
+            + (enabled ? "enabled" : "disabled") + " for this session."), false);
+        return 1;
+    }
+
+    /** {@code /playermob flintcombat} — report whether PlayerMobs use flint and steel in the field. */
+    private static int queryFlintAndSteelCombat(CommandContext<CommandSourceStack> ctx) {
+        boolean on = PlayerMobConfig.flintAndSteelCombat();
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob flint-and-steel use is "
+            + (on ? "ON — a mob with flint and steel cooks its animal kills and occasionally torches enemies"
+                  : "OFF — mobs never reach for flint and steel in a fight") + "."), false);
+        return 1;
+    }
+
+    /** {@code /playermob flintcombat on|off} — flip flint-and-steel use for this session. */
+    private static int setFlintAndSteelCombat(CommandContext<CommandSourceStack> ctx, boolean enabled) {
+        PlayerMobConfig.setFlintAndSteelCombat(enabled);
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob flint-and-steel use "
             + (enabled ? "enabled" : "disabled") + " for this session."), false);
         return 1;
     }
