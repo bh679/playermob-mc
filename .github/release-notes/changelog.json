@@ -856,6 +856,19 @@
       "released": true,
       "released_in": "v0.92.0",
       "released_at": "2026-08-24T14:23:48Z"
+    },
+    {
+      "id": "playermob-flint-steel-pickup",
+      "version": "0.93.0",
+      "type": "feat",
+      "title": "PlayerMobs pick up dropped flint and steel",
+      "summary": "PlayerMobs now grab flint and steel they see lying on the ground and hold onto it, so they're ready to use it to light TNT in a fight.",
+      "highlights": [],
+      "pr": 194,
+      "date": "2026-08-26",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
