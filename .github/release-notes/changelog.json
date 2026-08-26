@@ -866,13 +866,32 @@
       "highlights": [],
       "pr": 194,
       "date": "2026-08-26",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.94.0",
+      "released_at": "2026-08-26T03:11:20Z"
+    },
+    {
+      "id": "playermob-flint-steel-fire",
+      "version": "0.94.0",
+      "type": "feat",
+      "title": "PlayerMobs cook their kills, torch their enemies, and put fires out",
+      "summary": "A PlayerMob carrying flint and steel now uses it the way you would \u2014 and, for the first time, reacts to fire instead of walking straight into it. It sets an animal alight just before the killing blow so the meat drops cooked, occasionally torches the ground under an enemy mid-fight, and stops short of a fire in its path to put it out. It always lights the block its target is standing on, with the tool actually drawn \u2014 never by magic.",
+      "highlights": [
+        "Cooks its kills: an animal one swing from death gets the ground lit under it, dies burning, and drops cooked meat \u2014 then the fire is stamped back out a moment later",
+        "Torches enemies: against anything not already on fire it occasionally lights the ground under its target and leaves it burning, at most 5 times in 10 seconds",
+        "Draws the tool for real: a 4-20 tick swap in and out, and the fire is placed by right-clicking the block below its target, so rain and bad surfaces refuse it just like they would for you",
+        "Puts fires out: walking toward a fire it usually stops short, hesitates a beat, and punches it out \u2014 or empties a water bucket on it and scoops the water back if it carries one",
+        "Still fallible: it misses roughly one fire in four and walks in, then runs for water as before"
+      ],
+      "pr": 195,
+      "date": "2026-08-26",
+      "released": true,
+      "released_in": "v0.94.0",
+      "released_at": "2026-08-26T03:11:20Z"
     },
     {
       "id": "reaction-speed-trait",
-      "version": "0.94.0",
+      "version": "0.95.0",
       "type": "feat",
       "title": "Reaction speed \u2014 the third PlayerMob trait",
       "summary": "PlayerMobs are now born with a third trait alongside fight/flight and friendliness: reaction speed, 0-10, visible and editable in the Creative menu. It doesn't change what a mob decides, only how fast it acts \u2014 so two mobs with identical nerve can feel completely different in a fight.",

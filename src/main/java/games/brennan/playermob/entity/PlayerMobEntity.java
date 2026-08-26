@@ -14,9 +14,11 @@ import games.brennan.playermob.entity.goal.CrossGroupGapGoal;
 import games.brennan.playermob.entity.goal.DefendLovedOneGoal;
 import games.brennan.playermob.entity.goal.DigThroughGoal;
 import games.brennan.playermob.entity.goal.DoorOperationGoal;
+import games.brennan.playermob.entity.goal.DouseFireInPathGoal;
 import games.brennan.playermob.entity.goal.EatFoodGoal;
 import games.brennan.playermob.entity.goal.FireBucketGoal;
 import games.brennan.playermob.entity.goal.FleeFromCategoryGoal;
+import games.brennan.playermob.entity.goal.FlintAndSteelIgniteGoal;
 import games.brennan.playermob.entity.goal.FollowLovedOneGoal;
 import games.brennan.playermob.entity.goal.FriendlyGreetGoal;
 import games.brennan.playermob.entity.goal.HarvestCropsGoal;
@@ -838,6 +840,26 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // mines fill blocking the march. No flags (like PlayerMobDoorGoal) so it never evicts the
         // advance goal — the mob keeps stepping into the gap as the wall clears. No-op off a train.
         this.goalSelector.addGoal(1, new DigThroughGoal(this));
+        // Fire in the way? Stop short, hesitate, and put it out rather than walking into it. Priority 1
+        // for the same reason as the flint-and-steel goal below: the trigger fires mid-walk while a
+        // lower-priority movement goal already holds MOVE/LOOK, and only a strictly higher-priority goal
+        // can preempt a running one. Deliberately fallible (~1 fire in 4 is missed), and it never fires
+        // while the mob is already alight — that's the priority-0 FireBucketGoal's job. See
+        // DouseFireInPathGoal.
+        this.goalSelector.addGoal(1, new DouseFireInPathGoal(this));
+        // Carrying flint and steel? Use it like a player: light the ground under a food animal for the
+        // killing blow (the animal dies burning, so the meat drops COOKED — then the mob stamps that fire
+        // back out), and occasionally torch the ground under any other target that isn't already alight.
+        // Priority 1, ABOVE the attack goal, and for the same reason DoorOperationGoal sits there: both
+        // triggers fire *mid-fight*, and a same-priority goal can never interrupt one that's already
+        // running (vanilla GoalSelector only lets a STRICTLY higher-priority goal preempt) — at priority 2
+        // the already-running WeaponAwareAttackGoal would hold MOVE/LOOK and this would never get to run.
+        // From here it briefly takes the slot for the whole draw → light → stow ritual (so the attack goal
+        // can't land a flint-and-steel hit mid-swap) and hands it straight back. Its canUse() is narrow —
+        // config on, mobGriefing on, flint and steel on hand, a trigger reached, under the 5-per-10s rate
+        // cap — so the normal fight goals own combat the rest of the time. Gated on mobGriefing (it places
+        // a real fire block). See FlintAndSteelIgniteGoal.
+        this.goalSelector.addGoal(1, new FlintAndSteelIgniteGoal(this, /* speed */ 1.0));
         // Carrying TNT + a way to light it? Bomb the enemy instead of trading bow/melee blows — registered
         // BEFORE the seek/attack goals at the same priority so its canUse() (config on, mobGriefing on, TNT +
         // an igniter on hand) wins the MOVE slot while armed. When it runs out of TNT/igniters its canUse()

@@ -4,17 +4,10 @@ import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.sounds.SoundEvents;
-import net.minecraft.sounds.SoundSource;
 import net.minecraft.tags.FluidTags;
-import net.minecraft.world.Container;
-import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.ai.goal.Goal;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.EnumSet;
 import java.util.Optional;
@@ -42,11 +35,11 @@ import java.util.Optional;
  * {@code getJumpControl().jump()} directly, which doesn't require owning the flag, mirroring
  * {@link TrainRecoveryGoal}.</p>
  *
- * <p>The vanilla water bucket is emptied/filled by placing and removing the source block directly
- * (this goal only ever fires for {@link Items#WATER_BUCKET}), rather than through a fake-player
- * raytrace — that keeps the water landing exactly where we chose (at the feet, against the floor)
- * instead of wherever a raytrace happens to hit. Placing water and picking it back up is ordinary
- * bucket use, not world-griefing, so this isn't gated on {@code mobGriefing}.</p>
+ * <p>The bucket mechanics themselves live in {@link WaterBucketUse}, shared with
+ * {@link DouseFireInPathGoal}: the source block is placed and removed directly rather than through a
+ * fake-player raytrace, which keeps the water landing exactly where we chose (at the feet, against
+ * the floor) instead of wherever a raytrace happens to hit. Placing water and picking it back up is
+ * ordinary bucket use, not world-griefing, so this isn't gated on {@code mobGriefing}.</p>
  */
 public final class FireBucketGoal extends Goal implements DescribableGoal {
 
@@ -85,19 +78,7 @@ public final class FireBucketGoal extends Goal implements DescribableGoal {
     }
 
     private boolean hasBucketAnywhere() {
-        return mob.getMainHandItem().is(Items.WATER_BUCKET)
-            || mob.getOffhandItem().is(Items.WATER_BUCKET)
-            || packHasBucket();
-    }
-
-    private boolean packHasBucket() {
-        Container pack = mob.getInventory();
-        for (int i = 0; i < pack.getContainerSize(); i++) {
-            if (pack.getItem(i).is(Items.WATER_BUCKET)) {
-                return true;
-            }
-        }
-        return false;
+        return WaterBucketUse.hasBucketAnywhere(mob);
     }
 
     /** Nearest existing water block within scan range, or {@code null} if there's none loaded nearby. */
@@ -192,12 +173,7 @@ public final class FireBucketGoal extends Goal implements DescribableGoal {
         if (--waitTicks > 0) {
             return;
         }
-        if (mob.getOffhandItem().is(Items.WATER_BUCKET)) {
-            ItemStack off = mob.getOffhandItem();
-            ItemStack main = mob.getMainHandItem();
-            mob.setItemSlot(EquipmentSlot.OFFHAND, main);
-            mob.setItemSlot(EquipmentSlot.MAINHAND, off);
-        } else if (!mob.equipWeapon(Items.WATER_BUCKET)) {
+        if (!WaterBucketUse.drawIntoMainHand(mob)) {
             // Shouldn't happen — canUse() just confirmed a bucket somewhere — but bail cleanly if it did.
             phase = Phase.DONE;
             return;
@@ -228,7 +204,7 @@ public final class FireBucketGoal extends Goal implements DescribableGoal {
             }
             return;
         }
-        emptyBucket(pos);
+        WaterBucketUse.empty(mob, pos);
         waterPos = pos.immutable();
         phase = Phase.APPROACH;
     }
@@ -252,7 +228,7 @@ public final class FireBucketGoal extends Goal implements DescribableGoal {
             return;
         }
         if (mob.level().getFluidState(waterPos).is(FluidTags.WATER)) {
-            fillBucket(waterPos);
+            WaterBucketUse.fill(mob, waterPos);
         }
         phase = Phase.DONE;
     }
@@ -265,24 +241,6 @@ public final class FireBucketGoal extends Goal implements DescribableGoal {
         if (mob.onGround()) {
             mob.getJumpControl().jump();
         }
-    }
-
-    /** Place a water source at {@code pos} and turn the held water bucket into an empty one. */
-    private void emptyBucket(BlockPos pos) {
-        Level level = mob.level();
-        level.setBlock(pos, Blocks.WATER.defaultBlockState(), 3);
-        mob.setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(Items.BUCKET));
-        level.playSound(null, pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
-            SoundEvents.BUCKET_EMPTY, SoundSource.NEUTRAL, 1.0F, 1.0F);
-    }
-
-    /** Remove the water source at {@code pos} and turn the held empty bucket back into a water one. */
-    private void fillBucket(BlockPos pos) {
-        Level level = mob.level();
-        level.setBlock(pos, Blocks.AIR.defaultBlockState(), 3);
-        mob.setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(Items.WATER_BUCKET));
-        level.playSound(null, pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
-            SoundEvents.BUCKET_FILL, SoundSource.NEUTRAL, 1.0F, 1.0F);
     }
 
     /**

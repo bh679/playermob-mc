@@ -48,7 +48,9 @@ public final class PlayerMobConfig {
     private static final String KEY_MELEE_ENGAGE_DISTANCE = "meleeEngageDistance";
     private static final String KEY_TNT_COMBAT = "tntCombat";
     private static final String KEY_END_CRYSTAL_COMBAT = "endCrystalCombat";
+    private static final String KEY_FLINT_AND_STEEL_COMBAT = "flintAndSteelCombat";
     private static final String KEY_EXTINGUISH_WITH_BUCKET = "extinguishWithBucket";
+    private static final String KEY_DOUSE_FIRES = "douseFires";
     private static final String KEY_HUNT_FOR_FOOD = "huntForFood";
     private static final String KEY_EXACT_NAMES = "exactNames";
     private static final String KEY_ORDER_FAILURE_MESSAGES = "orderFailureMessages";
@@ -103,8 +105,12 @@ public final class PlayerMobConfig {
     public static final boolean DEFAULT_TNT_COMBAT = true;
     /** A PlayerMob carrying end crystals + obsidian + a solid cover block bombs its target with crystals; on by default (needs mobGriefing). */
     public static final boolean DEFAULT_END_CRYSTAL_COMBAT = true;
+    /** A PlayerMob carrying flint and steel cooks its animal kills with it and occasionally torches enemies; on by default (needs mobGriefing). */
+    public static final boolean DEFAULT_FLINT_AND_STEEL_COMBAT = true;
     /** A PlayerMob on fire and holding a water bucket douses itself with it; on by default. */
     public static final boolean DEFAULT_EXTINGUISH_WITH_BUCKET = true;
+    /** A PlayerMob usually notices a fire in its path and puts it out before walking in; on by default. */
+    public static final boolean DEFAULT_DOUSE_FIRES = true;
     /** A hungry PlayerMob hunts nearby food animals (cow/pig/chicken/sheep/rabbit); on by default. */
     public static final boolean DEFAULT_HUNT_FOR_FOOD = true;
     /** Chest / barrel / shulker-box raiding is on for every PlayerMob by default. */
@@ -222,7 +228,9 @@ public final class PlayerMobConfig {
     private static volatile float meleeEngageDistance = DEFAULT_MELEE_ENGAGE_DISTANCE;
     private static volatile boolean tntCombat = DEFAULT_TNT_COMBAT;
     private static volatile boolean endCrystalCombat = DEFAULT_END_CRYSTAL_COMBAT;
+    private static volatile boolean flintAndSteelCombat = DEFAULT_FLINT_AND_STEEL_COMBAT;
     private static volatile boolean extinguishWithBucket = DEFAULT_EXTINGUISH_WITH_BUCKET;
+    private static volatile boolean douseFires = DEFAULT_DOUSE_FIRES;
     private static volatile boolean huntForFood = DEFAULT_HUNT_FOR_FOOD;
     private static volatile boolean exactNames = DEFAULT_EXACT_NAMES;
     private static volatile boolean orderFailureMessages = DEFAULT_ORDER_FAILURE_MESSAGES;
@@ -355,12 +363,32 @@ public final class PlayerMobConfig {
     }
 
     /**
+     * When true (default), a PlayerMob carrying flint and steel uses it the way a player does: it sets a
+     * food animal alight just before the killing blow so the meat drops cooked (then stamps that fire back
+     * out), and occasionally torches the block an enemy is standing on mid-fight. Also requires the
+     * {@code mobGriefing} gamerule (it places a real fire block). See {@code FlintAndSteelIgniteGoal}.
+     */
+    public static boolean flintAndSteelCombat() {
+        return flintAndSteelCombat;
+    }
+
+    /**
      * When true (default), a PlayerMob that's on fire and holding a water bucket empties it onto the
      * ground, jumps in to douse itself, then — a short while after the fire is out — scoops the
      * water back into the bucket. See {@code FireBucketGoal}.
      */
     public static boolean extinguishWithBucket() {
         return extinguishWithBucket;
+    }
+
+    /**
+     * When true (default), a PlayerMob walking toward a fire block usually notices it, stops short,
+     * hesitates a beat and puts it out — punching it out bare-handed, or emptying a water bucket on it
+     * if it carries one and scooping the water back. Deliberately fallible: it misses roughly one fire
+     * in four and walks straight in. See {@code DouseFireInPathGoal}.
+     */
+    public static boolean douseFires() {
+        return douseFires;
     }
 
     /**
@@ -577,11 +605,27 @@ public final class PlayerMobConfig {
     }
 
     /**
+     * Toggle flint-and-steel use at runtime (e.g. from {@code /playermob flintcombat on|off}). A session
+     * override — not written back to the file, which stays the startup default.
+     */
+    public static void setFlintAndSteelCombat(boolean enabled) {
+        flintAndSteelCombat = enabled;
+    }
+
+    /**
      * Toggle bucket self-extinguishing at runtime (e.g. from {@code /playermob extinguishwithbucket on|off}).
      * A session override — not written back to the file, which stays the startup default.
      */
     public static void setExtinguishWithBucket(boolean enabled) {
         extinguishWithBucket = enabled;
+    }
+
+    /**
+     * Toggle the fire-avoidance reflex at runtime (e.g. from {@code /playermob dousefires on|off}). A
+     * session override — not written back to the file, which stays the startup default.
+     */
+    public static void setDouseFires(boolean enabled) {
+        douseFires = enabled;
     }
 
     /**
@@ -687,7 +731,9 @@ public final class PlayerMobConfig {
             meleeEngageDistance = v.meleeEngageDistance();
             tntCombat = v.tntCombat();
             endCrystalCombat = v.endCrystalCombat();
+            flintAndSteelCombat = v.flintAndSteelCombat();
             extinguishWithBucket = v.extinguishWithBucket();
+            douseFires = v.douseFires();
             huntForFood = v.huntForFood();
             exactNames = v.exactNames();
             orderFailureMessages = v.orderFailureMessages();
@@ -707,14 +753,16 @@ public final class PlayerMobConfig {
                 KEY_TRAIN_DIG_THROUGH, trainDigThrough,
                 KEY_TRAIN_FOLLOW_LOVED_PLAYER, trainFollowLovedPlayer,
                 KEY_NATURAL_SPAWN_ENABLED, naturalSpawnEnabled, naturalSpawnScales.size());
-            LOGGER.info("[{}] combat config: {}={}, {}={}, {}={}, {}={}, {}={}, {}={}, {}={}, {}={}",
+            LOGGER.info("[{}] combat config: {}={}, {}={}, {}={}, {}={}, {}={}, {}={}, {}={}, {}={}, {}={}, {}={}",
                 PlayerMob.MOD_ID,
                 KEY_REQUIRE_ARROWS, requireArrows, KEY_SEEK_ARROWS_WHEN_EMPTY, seekArrowsWhenEmpty,
                 KEY_RANGED_ENGAGE_DISTANCE, rangedEngageDistance,
                 KEY_MELEE_ENGAGE_DISTANCE, meleeEngageDistance,
                 KEY_TNT_COMBAT, tntCombat,
                 KEY_END_CRYSTAL_COMBAT, endCrystalCombat,
+                KEY_FLINT_AND_STEEL_COMBAT, flintAndSteelCombat,
                 KEY_EXTINGUISH_WITH_BUCKET, extinguishWithBucket,
+                KEY_DOUSE_FIRES, douseFires,
                 KEY_HUNT_FOR_FOOD, huntForFood);
             LOGGER.info("[{}] scavenging config: {}={}, {}={}, {}={}",
                 PlayerMob.MOD_ID,
@@ -733,7 +781,8 @@ public final class PlayerMobConfig {
                   AutoNameMode autoNameMode,
                   boolean requireArrows, boolean seekArrowsWhenEmpty,
                   float rangedEngageDistance, float meleeEngageDistance, boolean tntCombat,
-                  boolean endCrystalCombat, boolean extinguishWithBucket, boolean huntForFood,
+                  boolean endCrystalCombat, boolean flintAndSteelCombat,
+                  boolean extinguishWithBucket, boolean douseFires, boolean huntForFood,
                   boolean exactNames, boolean orderFailureMessages,
                   ScavengeMode searchContainers, ScavengeMode searchArmorStands,
                   ScavengeMode collectFloorItems,
@@ -759,7 +808,9 @@ public final class PlayerMobConfig {
             engage[0], engage[1],
             parseBool(props.getProperty(KEY_TNT_COMBAT), DEFAULT_TNT_COMBAT),
             parseBool(props.getProperty(KEY_END_CRYSTAL_COMBAT), DEFAULT_END_CRYSTAL_COMBAT),
+            parseBool(props.getProperty(KEY_FLINT_AND_STEEL_COMBAT), DEFAULT_FLINT_AND_STEEL_COMBAT),
             parseBool(props.getProperty(KEY_EXTINGUISH_WITH_BUCKET), DEFAULT_EXTINGUISH_WITH_BUCKET),
+            parseBool(props.getProperty(KEY_DOUSE_FIRES), DEFAULT_DOUSE_FIRES),
             parseBool(props.getProperty(KEY_HUNT_FOR_FOOD), DEFAULT_HUNT_FOR_FOOD),
             parseBool(props.getProperty(KEY_EXACT_NAMES), DEFAULT_EXACT_NAMES),
             parseBool(props.getProperty(KEY_ORDER_FAILURE_MESSAGES), DEFAULT_ORDER_FAILURE_MESSAGES),
@@ -925,10 +976,23 @@ public final class PlayerMobConfig {
             .append("#   out of the kit, then reverting to normal bow/melee combat. Also requires the mobGriefing\n")
             .append("#   gamerule (it places blocks + triggers real explosions). Toggle live with\n")
             .append("#   /playermob endcrystalcombat on|off (session override). Default true.\n")
+            .append("# flintAndSteelCombat: when true, a PlayerMob carrying flint and steel uses it like a player\n")
+            .append("#   would. Hunting: it lights the block a food animal is standing on just before the killing\n")
+            .append("#   blow, so the animal dies burning and the meat drops cooked, then stamps that fire out a\n")
+            .append("#   moment later. Combat: against anything not already on fire it occasionally torches the\n")
+            .append("#   ground under its target and leaves it burning, at most 5 lights per 10 seconds. Also\n")
+            .append("#   requires the mobGriefing gamerule (it places a real fire block). Toggle live with\n")
+            .append("#   /playermob flintcombat on|off (session override). Default true.\n")
             .append("# extinguishWithBucket: when true, a PlayerMob that catches fire while holding a water\n")
             .append("#   bucket empties it onto the ground, jumps in to douse itself, then a short while after\n")
             .append("#   the fire is out scoops the water back into the bucket. Toggle live with\n")
             .append("#   /playermob extinguishwithbucket on|off (session override). Default true.\n")
+            .append("# douseFires: when true, a PlayerMob walking toward a fire block usually notices it, stops\n")
+            .append("#   short, hesitates a beat and puts it out — punching it out bare-handed, or emptying a\n")
+            .append("#   water bucket on it and scooping the water back if it carries one. Deliberately\n")
+            .append("#   fallible: it misses roughly one fire in four and walks straight in, then runs for\n")
+            .append("#   water as usual. Applies to fire it lit itself too. Toggle live with\n")
+            .append("#   /playermob dousefires on|off (session override). Default true.\n")
             .append("# huntForFood: when true, a hungry PlayerMob (no food carried, or hurt and low on carried\n")
             .append("#   nutrition) hunts a nearby adult food animal (cow, pig, chicken, sheep, rabbit) as its\n")
             .append("#   attack target, letting its weapon do the kill, then eats the drops. Set false to leave\n")
@@ -996,7 +1060,9 @@ public final class PlayerMobConfig {
             .append(KEY_MELEE_ENGAGE_DISTANCE).append("=").append(DEFAULT_MELEE_ENGAGE_DISTANCE).append("\n")
             .append(KEY_TNT_COMBAT).append("=").append(DEFAULT_TNT_COMBAT).append("\n")
             .append(KEY_END_CRYSTAL_COMBAT).append("=").append(DEFAULT_END_CRYSTAL_COMBAT).append("\n")
+            .append(KEY_FLINT_AND_STEEL_COMBAT).append("=").append(DEFAULT_FLINT_AND_STEEL_COMBAT).append("\n")
             .append(KEY_EXTINGUISH_WITH_BUCKET).append("=").append(DEFAULT_EXTINGUISH_WITH_BUCKET).append("\n")
+            .append(KEY_DOUSE_FIRES).append("=").append(DEFAULT_DOUSE_FIRES).append("\n")
             .append(KEY_HUNT_FOR_FOOD).append("=").append(DEFAULT_HUNT_FOR_FOOD).append("\n")
             .append(KEY_EXACT_NAMES).append("=").append(DEFAULT_EXACT_NAMES).append("\n")
             .append(KEY_ORDER_FAILURE_MESSAGES).append("=")
