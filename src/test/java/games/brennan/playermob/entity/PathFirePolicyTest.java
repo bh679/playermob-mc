@@ -36,30 +36,13 @@ class PathFirePolicyTest {
     }
 
     @Test
-    void reactionDelayStaysInsideTheSpecifiedRange() {
-        RandomSource random = RandomSource.create(7L);
-        boolean sawMin = false;
-        boolean sawMax = false;
-        for (int i = 0; i < 2000; i++) {
-            int delay = PathFirePolicy.reactionDelayTicks(random);
-            assertTrue(delay >= PathFirePolicy.REACTION_MIN_TICKS && delay <= PathFirePolicy.REACTION_MAX_TICKS,
-                "reaction delay in 5..40, got " + delay);
-            sawMin |= delay == PathFirePolicy.REACTION_MIN_TICKS;
-            sawMax |= delay == PathFirePolicy.REACTION_MAX_TICKS;
-        }
-        // Both bounds are reachable — an off-by-one in the inclusive range would show up here.
-        assertTrue(sawMin, "5 is reachable");
-        assertTrue(sawMax, "40 is reachable");
-    }
-
-    @Test
-    void bucketSwapStaysInsideTheSpecifiedRange() {
-        RandomSource random = RandomSource.create(11L);
-        for (int i = 0; i < 2000; i++) {
-            int swap = PathFirePolicy.bucketSwapTicks(random);
-            assertTrue(swap >= PathFirePolicy.BUCKET_SWAP_MIN_TICKS && swap <= PathFirePolicy.BUCKET_SWAP_MAX_TICKS,
-                "bucket swap in 4..20, got " + swap);
-        }
+    void windUpRangesMatchTheSpecifiedBounds() {
+        // The windows themselves are the neutral (reaction 5) baseline; DouseFireInPathGoal rolls them
+        // through PlayerMobEntity.reactRoll, whose bounds and skew are ReactionSpeedTest's business.
+        assertEquals(5, PathFirePolicy.REACTION_MIN_TICKS);
+        assertEquals(40, PathFirePolicy.REACTION_MAX_TICKS);
+        assertEquals(4, PathFirePolicy.BUCKET_SWAP_MIN_TICKS);
+        assertEquals(20, PathFirePolicy.BUCKET_SWAP_MAX_TICKS);
     }
 
     @Test

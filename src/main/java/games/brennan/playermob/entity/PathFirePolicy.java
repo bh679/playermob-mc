@@ -26,11 +26,18 @@ public final class PathFirePolicy {
     /** Odds the mob spots a fire in its path at all. The rest of the time it walks straight in. */
     public static final float NOTICE_CHANCE = 0.75F;
 
-    /** The delayed reaction — how long it stands and looks at the fire before acting. */
+    /**
+     * The delayed reaction — how long it stands and looks at the fire before acting. The neutral
+     * (reaction 5) window; {@code DouseFireInPathGoal} rolls it through
+     * {@code PlayerMobEntity.reactRoll}, so a quick-reacting mob lands low in it more often.
+     */
     public static final int REACTION_MIN_TICKS = 5;
     public static final int REACTION_MAX_TICKS = 40;
 
-    /** Wind-up for swapping a water bucket into the main hand, matching the flint-and-steel swap. */
+    /**
+     * Wind-up for swapping a water bucket into the main hand, matching the flint-and-steel swap.
+     * Reaction-skewed at the call site, like {@link #REACTION_MIN_TICKS}.
+     */
     public static final int BUCKET_SWAP_MIN_TICKS = 4;
     public static final int BUCKET_SWAP_MAX_TICKS = 20;
 
@@ -56,16 +63,6 @@ public final class PathFirePolicy {
         return random.nextFloat() < NOTICE_CHANCE;
     }
 
-    /** Ticks the mob hesitates before putting the fire out — {@value #REACTION_MIN_TICKS}–{@value #REACTION_MAX_TICKS}. */
-    public static int reactionDelayTicks(RandomSource random) {
-        return inclusive(random, REACTION_MIN_TICKS, REACTION_MAX_TICKS);
-    }
-
-    /** Ticks to draw a water bucket — {@value #BUCKET_SWAP_MIN_TICKS}–{@value #BUCKET_SWAP_MAX_TICKS}. */
-    public static int bucketSwapTicks(RandomSource random) {
-        return inclusive(random, BUCKET_SWAP_MIN_TICKS, BUCKET_SWAP_MAX_TICKS);
-    }
-
     /**
      * How many whole blocks ahead of itself the mob should probe, given its per-tick horizontal
      * displacement — {@code 0} when it isn't really going anywhere (idle jitter), else two steps,
@@ -77,9 +74,5 @@ public final class PathFirePolicy {
      */
     public static int stepsAhead(double dx, double dz) {
         return (dx * dx + dz * dz) < MOVE_EPS_SQR ? 0 : 2;
-    }
-
-    private static int inclusive(RandomSource random, int minInclusive, int maxInclusive) {
-        return random.nextInt(maxInclusive - minInclusive + 1) + minInclusive;
     }
 }

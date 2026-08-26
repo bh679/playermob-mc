@@ -26,7 +26,10 @@ import java.util.EnumSet;
  * catches alight, at which point the priority-0 {@link FireBucketGoal} takes over and it runs for
  * water. A mob that always stopped would simply never burn on a path fire, which reads as
  * omniscience. The hesitation is a long {@link PathFirePolicy#REACTION_MIN_TICKS}–
- * {@link PathFirePolicy#REACTION_MAX_TICKS} ticks for the same reason: a double-take, not a reflex.</p>
+ * {@link PathFirePolicy#REACTION_MAX_TICKS} ticks for the same reason: a double-take, not a reflex. That
+ * window — and every bucket swap in the routine — is skewed by the mob's
+ * {@link games.brennan.playermob.entity.DispositionTraits#reactionSpeed() reaction speed}, low for a
+ * quick mob and high for a slow one; at the neutral speed it is the plain uniform roll.</p>
  *
  * <p>It makes no exception for fire the mob lit itself. Its own combat fire from
  * {@link FlintAndSteelIgniteGoal} is just fire in the way like any other — though because both goals
@@ -42,7 +45,11 @@ import java.util.EnumSet;
  */
 public final class DouseFireInPathGoal extends Goal implements DescribableGoal {
 
-    /** How long a missed fire stays ignored, so a failed notice roll isn't re-rolled every tick. */
+    /**
+     * How long a missed fire stays ignored, so a failed notice roll isn't re-rolled every tick.
+     * Deliberately <em>not</em> reaction-scaled: it's a memory window, not a reaction — the same
+     * category as the mod's other recency timers.
+     */
     private static final int IGNORE_TICKS = 200;
     /** How many path nodes ahead to glance at. */
     private static final int PATH_LOOKAHEAD_NODES = 3;
@@ -108,7 +115,7 @@ public final class DouseFireInPathGoal extends Goal implements DescribableGoal {
         mob.getNavigation().stop();
         waterPos = null;
         phase = Phase.HESITATE;
-        waitTicks = PathFirePolicy.reactionDelayTicks(mob.getRandom());
+        waitTicks = mob.reactRoll(PathFirePolicy.REACTION_MIN_TICKS, PathFirePolicy.REACTION_MAX_TICKS);
     }
 
     @Override
@@ -147,7 +154,7 @@ public final class DouseFireInPathGoal extends Goal implements DescribableGoal {
         }
         if (WaterBucketUse.hasBucketAnywhere(mob)) {
             phase = Phase.SWAP_IN;
-            waitTicks = PathFirePolicy.bucketSwapTicks(mob.getRandom());
+            waitTicks = bucketSwapTicks();
         } else {
             phase = Phase.DOUSE;
         }
@@ -176,7 +183,7 @@ public final class DouseFireInPathGoal extends Goal implements DescribableGoal {
             WaterBucketUse.empty(mob, firePos);
             waterPos = firePos.immutable();
             phase = Phase.PICKUP;
-            waitTicks = PathFirePolicy.bucketSwapTicks(mob.getRandom());
+            waitTicks = bucketSwapTicks();
             return;
         }
         // Bare-handed: fire breaks in one hit and drops nothing, exactly as a player punching it out.
@@ -196,7 +203,7 @@ public final class DouseFireInPathGoal extends Goal implements DescribableGoal {
         }
         waterPos = null;
         phase = Phase.SWAP_OUT;
-        waitTicks = PathFirePolicy.bucketSwapTicks(mob.getRandom());
+        waitTicks = bucketSwapTicks();
     }
 
     /** Put the bucket away and pick a weapon back up before handing the slot back. */
@@ -206,6 +213,17 @@ public final class DouseFireInPathGoal extends Goal implements DescribableGoal {
         }
         mob.equipBestMeleeInHand();
         phase = Phase.DONE;
+    }
+
+    /**
+     * Wind-up for drawing, refilling or stowing the water bucket, skewed low for a quick-reacting mob
+     * and high for a slow one. Every bucket pause in this goal runs through here, so this one call is
+     * where reaction speed reaches all of them; at the neutral reaction speed it is the uniform
+     * {@link PathFirePolicy#BUCKET_SWAP_MIN_TICKS}–{@link PathFirePolicy#BUCKET_SWAP_MAX_TICKS} roll it
+     * replaces.
+     */
+    private int bucketSwapTicks() {
+        return mob.reactRoll(PathFirePolicy.BUCKET_SWAP_MIN_TICKS, PathFirePolicy.BUCKET_SWAP_MAX_TICKS);
     }
 
     /**

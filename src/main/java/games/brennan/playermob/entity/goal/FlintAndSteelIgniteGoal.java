@@ -66,9 +66,16 @@ public final class FlintAndSteelIgniteGoal extends Goal implements DescribableGo
 
     /** How close (squared) the mob gets before it lights the ground — ~3.5 blocks, matching {@link TntCombatGoal}. */
     private static final double REACH_SQR = 12.25;
-    /** Give up walking in after ~5s and let the normal fight goal take back over. */
+    /**
+     * Give up walking in after ~5s and let the normal fight goal take back over. Deliberately
+     * <em>not</em> reaction-scaled: it's a give-up guard, not a reaction — scaling it would make a
+     * quick-reacting mob abandon the approach sooner, which is backwards.
+     */
     private static final int WALK_TIMEOUT_TICKS = 100;
-    /** Pause before this goal re-arms after a failed attempt, so it doesn't thrash the combat slot. */
+    /**
+     * Pause before this goal re-arms after a failed attempt, so it doesn't thrash the combat slot.
+     * The neutral (reaction 5) baseline — {@link #fail()} scales it.
+     */
     private static final int FAIL_COOLDOWN = 40;
 
     /** Which drive triggered this run — only {@link Mode#COOK} puts its fire back out. */
@@ -205,7 +212,7 @@ public final class FlintAndSteelIgniteGoal extends Goal implements DescribableGo
                 return;
             }
             phase = Phase.SWAP_IN;
-            waitTicks = FlintAndSteelPolicy.swapDelayTicks(mob.getRandom());
+            waitTicks = swapDelayTicks();
             return;
         }
         if (++walkTicks > WALK_TIMEOUT_TICKS) {
@@ -259,6 +266,8 @@ public final class FlintAndSteelIgniteGoal extends Goal implements DescribableGo
         rateWindow = FlintAndSteelPolicy.recordIgnite(rateWindow, now);
         if (mode == Mode.COOK) {
             phase = Phase.WAIT_BURN;
+            // Not reaction-scaled: how long a fire takes to cook meat is a property of the world, not of
+            // how quickly this mob notices things.
             waitTicks = FlintAndSteelPolicy.burnTicks(mob.getRandom());
         } else {
             // Combat fire is left standing as an area hazard; just re-roll the "occasionally" gap.
@@ -301,7 +310,7 @@ public final class FlintAndSteelIgniteGoal extends Goal implements DescribableGo
 
     private void enterSwapOut() {
         phase = Phase.SWAP_OUT;
-        waitTicks = FlintAndSteelPolicy.swapDelayTicks(mob.getRandom());
+        waitTicks = swapDelayTicks();
     }
 
     /** Hand the mob back a proper weapon; {@link WeaponAwareAttackGoal} re-selects on its next tick. */
@@ -330,7 +339,17 @@ public final class FlintAndSteelIgniteGoal extends Goal implements DescribableGo
     /** Stand down for a beat and let the normal fight goal take the slot back. */
     private void fail() {
         phase = Phase.DONE;
-        cooldown = FAIL_COOLDOWN;
+        cooldown = mob.reactTicks(FAIL_COOLDOWN);
+    }
+
+    /**
+     * Wind-up for drawing the flint and steel or putting it away, skewed low for a quick-reacting mob
+     * and high for a slow one. Both swap sites run through here, so this one call is where reaction
+     * speed reaches the whole ritual; at the neutral reaction speed it is the uniform
+     * {@link FlintAndSteelPolicy#SWAP_MIN_TICKS}–{@link FlintAndSteelPolicy#SWAP_MAX_TICKS} roll it replaces.
+     */
+    private int swapDelayTicks() {
+        return mob.reactRoll(FlintAndSteelPolicy.SWAP_MIN_TICKS, FlintAndSteelPolicy.SWAP_MAX_TICKS);
     }
 
     /**
