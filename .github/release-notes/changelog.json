@@ -866,9 +866,9 @@
       "highlights": [],
       "pr": 194,
       "date": "2026-08-26",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.94.0",
+      "released_at": "2026-08-26T03:11:20Z"
     },
     {
       "id": "playermob-flint-steel-fire",
@@ -886,9 +886,9 @@
       ],
       "pr": 195,
       "date": "2026-08-26",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.94.0",
+      "released_at": "2026-08-26T03:11:20Z"
     }
   ]
 }
