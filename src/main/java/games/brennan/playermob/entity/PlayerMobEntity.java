@@ -30,6 +30,7 @@ import games.brennan.playermob.entity.goal.RaidContainersGoal;
 import games.brennan.playermob.entity.goal.SeekAmmoGoal;
 import games.brennan.playermob.entity.goal.SkepticalWatchGoal;
 import games.brennan.playermob.entity.goal.StayNearGoal;
+import games.brennan.playermob.entity.goal.StepOffHazardGoal;
 import games.brennan.playermob.entity.goal.EndCrystalCombatGoal;
 import games.brennan.playermob.entity.goal.TntCombatGoal;
 import games.brennan.playermob.entity.goal.TrainRecoveryGoal;
@@ -796,6 +797,13 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     @Override
     protected void registerGoals() {
         this.goalSelector.addGoal(0, new FloatGoal(this));
+        // Standing on something that hurts — magma, fire, a lit campfire, a berry bush, powder snow?
+        // Flinch, then step onto the nearest block that doesn't. Priority 0 and registered BEFORE
+        // FireBucketGoal on purpose: getting off the thing that is setting you alight outranks running
+        // for water, and vanilla's GoalSelector breaks a same-priority tie by registration order. No-op
+        // unless the mob is actually stood on a hazard it isn't immune to, and it hands the slot straight
+        // back once it's clear. See StepOffHazardGoal.
+        this.goalSelector.addGoal(0, new StepOffHazardGoal(this, /* speed */ 1.2));
         // On fire? Get to water — priority 0 (same tier as FloatGoal, which only holds the JUMP
         // flag so there's no conflict) so this preempts literally everything else, including an
         // explicit player order and train recovery: a same-priority goal can never interrupt
