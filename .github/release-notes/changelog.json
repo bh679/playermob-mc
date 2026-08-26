@@ -869,6 +869,26 @@
       "released": false,
       "released_in": null,
       "released_at": null
+    },
+    {
+      "id": "reaction-speed-trait",
+      "version": "0.94.0",
+      "type": "feat",
+      "title": "Reaction speed \u2014 the third PlayerMob trait",
+      "summary": "PlayerMobs are now born with a third trait alongside fight/flight and friendliness: reaction speed, 0-10, visible and editable in the Creative menu. It doesn't change what a mob decides, only how fast it acts \u2014 so two mobs with identical nerve can feel completely different in a fight.",
+      "highlights": [
+        "Quick mobs block point-blank arrows that a sluggish mob simply eats",
+        "Reaction speed sets how fast a mob commits to a shot and how quickly it re-fires",
+        "Being hit no longer turns a mob instantly \u2014 slow ones take a beat to round on you",
+        "Spotting items, chests, crops and loved ones scales with reaction speed",
+        "Chores speed up or drag: block-laying, chest looting, harvesting, door handling",
+        "The five archetype spawn eggs each get a reaction speed suiting their character"
+      ],
+      "pr": 197,
+      "date": "2026-08-26",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
