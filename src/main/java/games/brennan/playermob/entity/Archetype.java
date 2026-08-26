@@ -10,8 +10,10 @@ package games.brennan.playermob.entity;
  * <p>The constant <b>names</b> back the egg registry IDs
  * ({@code player_mob_<name>_spawn_egg}) and the <b>declaration order</b> fixes
  * the creative-menu order, so neither may be reordered without a content-migration
- * story. Each maps to a {@code (fightFlight, friendliness)} pair chosen to
- * reproduce the archetype's feel toward players:</p>
+ * story. Each maps to a {@code (fightFlight, friendliness, reactionSpeed)} triple chosen
+ * to reproduce the archetype's feel toward players. Reaction speed does not change what an
+ * archetype decides — only how sharply it acts, so a skeptical mob reads as twitchy and a
+ * passive one as unhurried:</p>
  *
  * <ul>
  *   <li>{@link #AGGRESSIVE} — territorial + high fight → watches then attacks.</li>
@@ -22,20 +24,22 @@ package games.brennan.playermob.entity;
  */
 public enum Archetype {
 
-    AGGRESSIVE(9, 1, 0xB02E26), // red
-    FRIENDLY(4, 9, 0x5E7C16),   // green
-    PASSIVE(5, 4, 0x8E8E8E),    // grey
-    SKEPTICAL(5, 3, 0xE0A030),  // amber
-    SHY(1, 1, 0x3AB3DA);        // light blue
+    AGGRESSIVE(9, 1, 7, 0xB02E26), // red — presses its attack sharply
+    FRIENDLY(4, 9, 5, 0x5E7C16),   // green — unremarkable reflexes, all warmth
+    PASSIVE(5, 4, 4, 0x8E8E8E),    // grey — unhurried
+    SKEPTICAL(5, 3, 8, 0xE0A030),  // amber — a watcher, so quick on the draw
+    SHY(1, 1, 6, 0x3AB3DA);        // light blue — jumpy, quick to bolt
 
     public final int fightFlight;
     public final int friendliness;
+    public final int reactionSpeed;
     /** Spawn-egg spot colour, so the variants read apart in the creative menu. */
     public final int eggColor;
 
-    Archetype(int fightFlight, int friendliness, int eggColor) {
+    Archetype(int fightFlight, int friendliness, int reactionSpeed, int eggColor) {
         this.fightFlight = fightFlight;
         this.friendliness = friendliness;
+        this.reactionSpeed = reactionSpeed;
         this.eggColor = eggColor;
     }
 }

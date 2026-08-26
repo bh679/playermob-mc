@@ -128,7 +128,7 @@ public final class PlayerMobRegistry {
 
     /**
      * The {@code entity_data} an archetype egg stamps onto the mob it spawns —
-     * the preset's two trait values. Both load as explicit, so
+     * the preset's trait values. All load as explicit, so
      * {@code finalizeSpawn}'s roll leaves them untouched (see {@link DispositionTraits}).
      */
     public static CompoundTag archetypeEggData(Archetype archetype) {
@@ -138,6 +138,7 @@ public final class PlayerMobRegistry {
         tag.putString("id", PLAYER_MOB_ID.toString());
         tag.putInt(DispositionTraits.TAG_FIGHT_FLIGHT, archetype.fightFlight);
         tag.putInt(DispositionTraits.TAG_FRIENDLINESS, archetype.friendliness);
+        tag.putInt(DispositionTraits.TAG_REACTION_SPEED, archetype.reactionSpeed);
         return tag;
     }
 
