@@ -881,8 +881,7 @@
         "Torches enemies: against anything not already on fire it occasionally lights the ground under its target and leaves it burning, at most 5 times in 10 seconds",
         "Draws the tool for real: a 4-20 tick swap in and out, and the fire is placed by right-clicking the block below its target, so rain and bad surfaces refuse it just like they would for you",
         "Puts fires out: walking toward a fire it usually stops short, hesitates a beat, and punches it out \u2014 or empties a water bucket on it and scoops the water back if it carries one",
-        "Still fallible: it misses roughly one fire in four and walks in, then runs for water as before",
-        "New /playermob flintcombat and /playermob dousefires toggles, both on by default"
+        "Still fallible: it misses roughly one fire in four and walks in, then runs for water as before"
       ],
       "pr": 195,
       "date": "2026-08-26",
