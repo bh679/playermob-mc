@@ -64,6 +64,21 @@ public final class PlayerLifeRecord {
      */
     static final double DEFENSIVE_SCALE = 0.1;
 
+    /**
+     * Fight/Flight points gained per act of sabotage — bringing an explosive aboard a carriage
+     * somebody built by hand. Not routed through {@code aggression}: sabotage is aimed at a
+     * <em>place</em>, never at a mob, so it must not read as cruelty toward the mobs the player
+     * actually met. It moves Fight/Flight and nothing else.
+     */
+    static final double SABOTAGE_TO_FIGHT = 0.5;
+    /**
+     * Ceiling on the Fight/Flight one life can earn from sabotage alone — six acts reach it.
+     * Capped because a stack of TNT is one decision, not sixty-four: without this, a single
+     * demolition would pin the trait at maximum and drown out everything else the life did.
+     * The tally itself is never capped, so the rate stays re-tunable.
+     */
+    static final double MAX_SABOTAGE_FIGHT = 3.0;
+
     // ---- NBT keys ---------------------------------------------------------
     static final String TAG_DAMAGE = "DamageDealt";
     static final String TAG_KILLS = "Kills";
@@ -73,10 +88,11 @@ public final class PlayerLifeRecord {
     static final String TAG_DEFENSIVE_DAMAGE = "DefensiveDamage";
     static final String TAG_DEFENSIVE_KILLS = "DefensiveKills";
     static final String TAG_TIMIDITY = "Timidity";
+    static final String TAG_SABOTAGE = "Sabotage";
 
     /** A fresh life — no conduct recorded yet. */
     public static final PlayerLifeRecord EMPTY =
-        new PlayerLifeRecord(0.0F, 0, 0.0F, 0, 0, 0.0F, 0, 0.0F);
+        new PlayerLifeRecord(0.0F, 0, 0.0F, 0, 0, 0.0F, 0, 0.0F, 0.0F);
 
     private final float damageDealt;
     private final int kills;
@@ -89,9 +105,11 @@ public final class PlayerLifeRecord {
     private final int defensiveKills;
     /** Flight banked by not fighting back: damage endured unanswered, plus escapes made. */
     private final float timidity;
+    /** Acts of sabotage against a build somebody made by hand. */
+    private final float sabotage;
 
     PlayerLifeRecord(float damageDealt, int kills, float kindness, int harms, int attacks,
-                     float defensiveDamage, int defensiveKills, float timidity) {
+                     float defensiveDamage, int defensiveKills, float timidity, float sabotage) {
         this.damageDealt = damageDealt;
         this.kills = kills;
         this.kindness = kindness;
@@ -100,6 +118,7 @@ public final class PlayerLifeRecord {
         this.defensiveDamage = defensiveDamage;
         this.defensiveKills = defensiveKills;
         this.timidity = Math.max(0.0F, timidity);
+        this.sabotage = Math.max(0.0F, sabotage);
     }
 
     public float damageDealt() { return damageDealt; }
@@ -113,15 +132,17 @@ public final class PlayerLifeRecord {
     public int defensiveKills() { return defensiveKills; }
     /** Damage endured from mobs that never got a blow back, plus a bonus per mob escaped. */
     public float timidity() { return timidity; }
+    /** How many times this life brought an explosive into a carriage somebody built. */
+    public float sabotage() { return sabotage; }
 
     /** True for a life with no recorded conduct (used to skip empty saves). */
     public boolean isEmpty() {
         return damageDealt == 0.0F && kills == 0 && kindness == 0.0F && harms == 0 && attacks == 0
-            && timidity == 0.0F;
+            && timidity == 0.0F && sabotage == 0.0F;
     }
 
     /** The kind of player→mob action being credited; routes a magnitude to the right tally. */
-    public enum Signal { ATTACK, KILL, CROUCH, GIFT, TRAVEL, DEFEND, HARM, FLEE, TAME }
+    public enum Signal { ATTACK, KILL, CROUCH, GIFT, TRAVEL, DEFEND, HARM, FLEE, TAME, SABOTAGE }
 
     /** As {@link #credit(Signal, float, boolean)}, treating the action as unprovoked. */
     public PlayerLifeRecord credit(Signal signal, float magnitude) {
@@ -131,8 +152,8 @@ public final class PlayerLifeRecord {
     /**
      * Return a fresh record with {@code signal} applied. {@code magnitude} is the
      * damage amount for {@link Signal#ATTACK}, the gift value for {@link Signal#GIFT}, and the
-     * Flight points banked (or, when negative, handed back) for {@link Signal#FLEE}; it is
-     * ignored for the fixed-weight signals.
+     * Flight points banked (or, when negative, handed back) for {@link Signal#FLEE}, and the
+     * number of acts for {@link Signal#SABOTAGE}; it is ignored for the fixed-weight signals.
      *
      * <p>{@code defensive} marks an {@link Signal#ATTACK}/{@link Signal#KILL} against a mob
      * that had already taken combat intent toward the player. The blow is tallied in full
@@ -145,28 +166,32 @@ public final class PlayerLifeRecord {
             case ATTACK -> {
                 float dealt = Math.max(0.0F, magnitude);
                 yield new PlayerLifeRecord(damageDealt + dealt, kills, kindness, harms, attacks + 1,
-                    defensive ? defensiveDamage + dealt : defensiveDamage, defensiveKills, timidity);
+                    defensive ? defensiveDamage + dealt : defensiveDamage, defensiveKills, timidity,
+                    sabotage);
             }
             case KILL   -> new PlayerLifeRecord(damageDealt, kills + 1, kindness, harms, attacks,
                                defensiveDamage, defensive ? defensiveKills + 1 : defensiveKills,
-                               timidity);
+                               timidity, sabotage);
             case CROUCH -> withKindness(CROUCH_KINDNESS);
             case TRAVEL -> withKindness(TRAVEL_KINDNESS);
             case DEFEND -> withKindness(DEFEND_KINDNESS);
             case TAME   -> withKindness(TAME_KINDNESS);
             case GIFT   -> withKindness(Math.max(0.0F, magnitude));
             case HARM   -> new PlayerLifeRecord(damageDealt, kills, kindness, harms + 1, attacks,
-                               defensiveDamage, defensiveKills, timidity);
+                               defensiveDamage, defensiveKills, timidity, sabotage);
             // Signed: a negative magnitude is a mob handing back what it had banked, once the
             // player finally hit it. The constructor floors the tally at 0.
             case FLEE   -> new PlayerLifeRecord(damageDealt, kills, kindness, harms, attacks,
-                               defensiveDamage, defensiveKills, timidity + magnitude);
+                               defensiveDamage, defensiveKills, timidity + magnitude, sabotage);
+            case SABOTAGE -> new PlayerLifeRecord(damageDealt, kills, kindness, harms, attacks,
+                               defensiveDamage, defensiveKills, timidity,
+                               sabotage + Math.max(0.0F, magnitude));
         };
     }
 
     private PlayerLifeRecord withKindness(float delta) {
         return new PlayerLifeRecord(damageDealt, kills, kindness + delta, harms, attacks,
-            defensiveDamage, defensiveKills, timidity);
+            defensiveDamage, defensiveKills, timidity, sabotage);
     }
 
     /**
@@ -175,7 +200,9 @@ public final class PlayerLifeRecord {
      *   <li><b>Fight/Flight</b> rises with combat aggression (damage dealt + kills) and falls
      *       with timidity — damage taken from a mob that never got a blow back, plus a bonus per
      *       mob broken away from clean. The two weigh the same per point, so a life reads
-     *       neutral 5 only when it never met violence, or gave back exactly what it took.</li>
+     *       neutral 5 only when it never met violence, or gave back exactly what it took.
+     *       Sabotage — explosives brought into a carriage somebody built — pushes it up too,
+     *       on its own capped term, and touches Friendliness not at all.</li>
      *   <li><b>Friendliness</b> = neutral 5 shifted up by kindness and down by cruelty
      *       (damage, kills, harming loved ones). A cruel life reincarnates unfriendly;
      *       a kind one, welcoming.</li>
@@ -197,9 +224,13 @@ public final class PlayerLifeRecord {
         double cruelty = weightedDamage * DAMAGE_CRUELTY + weightedKills * KILL_CRUELTY
             + harms * HARM_CRUELTY;
 
+        // Sabotage is scored apart from aggression and capped: see MAX_SABOTAGE_FIGHT.
+        double sabotageFight = Math.min(sabotage * SABOTAGE_TO_FIGHT, MAX_SABOTAGE_FIGHT);
+
         int fightFlight = clampTrait(DispositionTraits.DEFAULT
             + aggression * AGGRESSION_TO_FIGHT
-            - timidity * TIMIDITY_TO_FLIGHT);
+            - timidity * TIMIDITY_TO_FLIGHT
+            + sabotageFight);
         int friendliness = clampTrait(DispositionTraits.DEFAULT + kindness * KINDNESS_TO_FRIENDLY - cruelty);
 
         DispositionTraits traits = new DispositionTraits();
@@ -227,6 +258,7 @@ public final class PlayerLifeRecord {
         tag.putFloat(TAG_DEFENSIVE_DAMAGE, defensiveDamage);
         tag.putInt(TAG_DEFENSIVE_KILLS, defensiveKills);
         tag.putFloat(TAG_TIMIDITY, timidity);
+        tag.putFloat(TAG_SABOTAGE, sabotage);
     }
 
     /** Read a record back; missing keys default to zero (forward/backward compatible). */
@@ -243,6 +275,9 @@ public final class PlayerLifeRecord {
             NbtCompat.getIntOr(tag, TAG_DEFENSIVE_KILLS, 0),
             // Missing on saves from before restraint was scored ⇒ 0 ⇒ that life reads exactly
             // as aggressive as the build that wrote it scored it.
-            NbtCompat.getFloatOr(tag, TAG_TIMIDITY, 0f));
+            NbtCompat.getFloatOr(tag, TAG_TIMIDITY, 0f),
+            // Missing on saves from before sabotage was scored ⇒ 0 ⇒ that life reads exactly
+            // as it did on the build that wrote it.
+            NbtCompat.getFloatOr(tag, TAG_SABOTAGE, 0f));
     }
 }
