@@ -932,12 +932,8 @@
       "version": "0.97.0",
       "type": "feat",
       "title": "Sabotage is remembered",
-      "summary": "Wrecking somebody's work now leaves a mark on you. A host mod can report an act of sabotage \u2014 an explosive brought into a build made by hand \u2014 and it feeds into the temperament your echo is born with. Your next echo comes back readier for a fight.",
-      "highlights": [
-        "Half a Fight/Flight point per act, capped at three per life \u2014 a few sticks of TNT change your echo; a whole stack does not change it further.",
-        "Friendliness is untouched. Sabotage says something about a place, not about how you treated anything alive.",
-        "Old worlds are unaffected: lives saved before this score exactly as they always did."
-      ],
+      "summary": "Wrecking somebody's work leaves a mark on the temperament your echo is born with.",
+      "highlights": [],
       "pr": 199,
       "date": "2026-08-29",
       "released": false,
