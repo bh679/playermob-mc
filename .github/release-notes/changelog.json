@@ -926,6 +926,19 @@
       "released": true,
       "released_in": "v0.96.0",
       "released_at": "2026-08-26T08:07:16Z"
+    },
+    {
+      "id": "sabotage-fightflight",
+      "version": "0.97.0",
+      "type": "feat",
+      "title": "Traps are remembered",
+      "summary": "Setting a trap for whoever comes through next leaves a mark on the temperament your echo is born with.",
+      "highlights": [],
+      "pr": 199,
+      "date": "2026-08-29",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }

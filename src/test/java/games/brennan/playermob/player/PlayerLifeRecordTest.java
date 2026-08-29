@@ -363,4 +363,83 @@ class PlayerLifeRecordTest {
     void loadFromEmptyTagIsEmptyRecord() {
         assertTrue(PlayerLifeRecord.load(new CompoundTag()).isEmpty());
     }
+
+    // ---- sabotage ----
+
+    @Test
+    void sabotageRaisesFightFlightHalfAPointAtATime() {
+        // 5 + 0.5 rounds up to 6; the second act lands squarely on it.
+        assertEquals(6, sabotaged(1).toTraits().fightFlight());
+        assertEquals(6, sabotaged(2).toTraits().fightFlight());
+        assertEquals(7, sabotaged(4).toTraits().fightFlight());
+    }
+
+    @Test
+    void sabotageStopsAtThreePoints() {
+        assertEquals(8, sabotaged(6).toTraits().fightFlight());    // 5 + 3.0, the cap exactly
+        assertEquals(8, sabotaged(12).toTraits().fightFlight());   // a whole stack changes nothing
+        assertEquals(8, sabotaged(500).toTraits().fightFlight());
+    }
+
+    @Test
+    void theCapBindsTheScoreNotTheTally() {
+        // The raw count keeps counting past the cap, so the rate stays re-tunable later.
+        assertEquals(12.0F, sabotaged(12).sabotage(), EPS);
+    }
+
+    @Test
+    void sabotageLeavesFriendlinessAlone() {
+        // It is aimed at a place, not at a mob. Nothing here says how the player treated
+        // anything alive, so Friendliness must not move.
+        assertEquals(DispositionTraits.DEFAULT, sabotaged(6).toTraits().friendliness());
+    }
+
+    @Test
+    void sabotageStacksOnTopOfCombatAggression() {
+        PlayerLifeRecord r = sabotaged(6).credit(Signal.ATTACK, 20.0F);   // +3 capped, +2 aggression
+        assertEquals(10, r.toTraits().fightFlight());
+        assertEquals(3, r.toTraits().friendliness());                      // cruelty from the damage only
+    }
+
+    @Test
+    void aNegativeMagnitudeCannotUnsabotage() {
+        assertEquals(1.0F, sabotaged(1).credit(Signal.SABOTAGE, -5.0F).sabotage(), EPS);
+    }
+
+    @Test
+    void sabotageAloneIsNotAnEmptyRecord() {
+        // PlayerLifeStore skips empty records when it writes, so a life that ONLY sabotaged
+        // would be dropped from the save file if isEmpty() ignored this tally.
+        assertFalse(sabotaged(1).isEmpty());
+    }
+
+    @Test
+    void nbtRoundTripCarriesSabotage() {
+        PlayerLifeRecord r = sabotaged(3).credit(Signal.ATTACK, 4.0F);
+        CompoundTag tag = new CompoundTag();
+        r.save(tag);
+        PlayerLifeRecord back = PlayerLifeRecord.load(tag);
+        assertEquals(3.0F, back.sabotage(), EPS);
+        assertEquals(r.toTraits().fightFlight(), back.toTraits().fightFlight());
+        assertEquals(r.toTraits().friendliness(), back.toTraits().friendliness());
+    }
+
+    @Test
+    void legacyTagWithoutTheSabotageKeyLoadsAsInnocent() {
+        CompoundTag tag = new CompoundTag();
+        PlayerLifeRecord.EMPTY.credit(Signal.ATTACK, 20.0F).save(tag);
+        tag.remove(PlayerLifeRecord.TAG_SABOTAGE);
+        PlayerLifeRecord back = PlayerLifeRecord.load(tag);
+        assertEquals(0.0F, back.sabotage(), EPS);
+        assertEquals(DispositionTraits.DEFAULT + 2, back.toTraits().fightFlight());
+    }
+
+    /** A life whose only conduct was {@code acts} acts of sabotage. */
+    private static PlayerLifeRecord sabotaged(int acts) {
+        PlayerLifeRecord r = PlayerLifeRecord.EMPTY;
+        for (int i = 0; i < acts; i++) {
+            r = r.credit(Signal.SABOTAGE, 1.0F);
+        }
+        return r;
+    }
 }
