@@ -48,6 +48,7 @@ public final class PlayerMobConfig {
     private static final String KEY_MELEE_ENGAGE_DISTANCE = "meleeEngageDistance";
     private static final String KEY_TNT_COMBAT = "tntCombat";
     private static final String KEY_END_CRYSTAL_COMBAT = "endCrystalCombat";
+    private static final String KEY_WITHER_SUMMON = "witherSummon";
     private static final String KEY_FLINT_AND_STEEL_COMBAT = "flintAndSteelCombat";
     private static final String KEY_EXTINGUISH_WITH_BUCKET = "extinguishWithBucket";
     private static final String KEY_DOUSE_FIRES = "douseFires";
@@ -105,6 +106,8 @@ public final class PlayerMobConfig {
     public static final boolean DEFAULT_TNT_COMBAT = true;
     /** A PlayerMob carrying end crystals + obsidian + a solid cover block bombs its target with crystals; on by default (needs mobGriefing). */
     public static final boolean DEFAULT_END_CRYSTAL_COMBAT = true;
+    /** A cornered, furious PlayerMob that hates its enemy and carries soul blocks + wither skulls builds a wither; on by default (needs mobGriefing). */
+    public static final boolean DEFAULT_WITHER_SUMMON = true;
     /** A PlayerMob carrying flint and steel cooks its animal kills with it and occasionally torches enemies; on by default (needs mobGriefing). */
     public static final boolean DEFAULT_FLINT_AND_STEEL_COMBAT = true;
     /** A PlayerMob on fire and holding a water bucket douses itself with it; on by default. */
@@ -228,6 +231,7 @@ public final class PlayerMobConfig {
     private static volatile float meleeEngageDistance = DEFAULT_MELEE_ENGAGE_DISTANCE;
     private static volatile boolean tntCombat = DEFAULT_TNT_COMBAT;
     private static volatile boolean endCrystalCombat = DEFAULT_END_CRYSTAL_COMBAT;
+    private static volatile boolean witherSummon = DEFAULT_WITHER_SUMMON;
     private static volatile boolean flintAndSteelCombat = DEFAULT_FLINT_AND_STEEL_COMBAT;
     private static volatile boolean extinguishWithBucket = DEFAULT_EXTINGUISH_WITH_BUCKET;
     private static volatile boolean douseFires = DEFAULT_DOUSE_FIRES;
@@ -360,6 +364,18 @@ public final class PlayerMobConfig {
      */
     public static boolean endCrystalCombat() {
         return endCrystalCombat;
+    }
+
+    /**
+     * When true (default), a PlayerMob that is <em>losing</em> a fight it takes personally builds a wither as a last
+     * resort: it must be below half hearts, be fully aggressive by nature (fight/flight &ge; 8), hate the enemy it is
+     * fighting, and carry the kit (4 soul sand/soil + 3 wither skeleton skulls). It lays the vanilla pattern a few
+     * blocks ahead, the last skull brings the boss up through vanilla's own spawn check, and then the mob runs — the
+     * wither is nobody's ally. Also requires the {@code mobGriefing} gamerule (it places blocks and looses a boss on
+     * the terrain). See {@code WitherSummonGoal}.
+     */
+    public static boolean witherSummon() {
+        return witherSummon;
     }
 
     /**
@@ -605,6 +621,14 @@ public final class PlayerMobConfig {
     }
 
     /**
+     * Toggle wither summoning at runtime (e.g. from {@code /playermob withersummon on|off}). A session override —
+     * not written back to the file, which stays the startup default.
+     */
+    public static void setWitherSummon(boolean enabled) {
+        witherSummon = enabled;
+    }
+
+    /**
      * Toggle flint-and-steel use at runtime (e.g. from {@code /playermob flintcombat on|off}). A session
      * override — not written back to the file, which stays the startup default.
      */
@@ -731,6 +755,7 @@ public final class PlayerMobConfig {
             meleeEngageDistance = v.meleeEngageDistance();
             tntCombat = v.tntCombat();
             endCrystalCombat = v.endCrystalCombat();
+            witherSummon = v.witherSummon();
             flintAndSteelCombat = v.flintAndSteelCombat();
             extinguishWithBucket = v.extinguishWithBucket();
             douseFires = v.douseFires();
@@ -753,13 +778,14 @@ public final class PlayerMobConfig {
                 KEY_TRAIN_DIG_THROUGH, trainDigThrough,
                 KEY_TRAIN_FOLLOW_LOVED_PLAYER, trainFollowLovedPlayer,
                 KEY_NATURAL_SPAWN_ENABLED, naturalSpawnEnabled, naturalSpawnScales.size());
-            LOGGER.info("[{}] combat config: {}={}, {}={}, {}={}, {}={}, {}={}, {}={}, {}={}, {}={}, {}={}, {}={}",
+            LOGGER.info("[{}] combat config: {}={}, {}={}, {}={}, {}={}, {}={}, {}={}, {}={}, {}={}, {}={}, {}={}, {}={}",
                 PlayerMob.MOD_ID,
                 KEY_REQUIRE_ARROWS, requireArrows, KEY_SEEK_ARROWS_WHEN_EMPTY, seekArrowsWhenEmpty,
                 KEY_RANGED_ENGAGE_DISTANCE, rangedEngageDistance,
                 KEY_MELEE_ENGAGE_DISTANCE, meleeEngageDistance,
                 KEY_TNT_COMBAT, tntCombat,
                 KEY_END_CRYSTAL_COMBAT, endCrystalCombat,
+                KEY_WITHER_SUMMON, witherSummon,
                 KEY_FLINT_AND_STEEL_COMBAT, flintAndSteelCombat,
                 KEY_EXTINGUISH_WITH_BUCKET, extinguishWithBucket,
                 KEY_DOUSE_FIRES, douseFires,
@@ -781,7 +807,7 @@ public final class PlayerMobConfig {
                   AutoNameMode autoNameMode,
                   boolean requireArrows, boolean seekArrowsWhenEmpty,
                   float rangedEngageDistance, float meleeEngageDistance, boolean tntCombat,
-                  boolean endCrystalCombat, boolean flintAndSteelCombat,
+                  boolean endCrystalCombat, boolean witherSummon, boolean flintAndSteelCombat,
                   boolean extinguishWithBucket, boolean douseFires, boolean huntForFood,
                   boolean exactNames, boolean orderFailureMessages,
                   ScavengeMode searchContainers, ScavengeMode searchArmorStands,
@@ -808,6 +834,7 @@ public final class PlayerMobConfig {
             engage[0], engage[1],
             parseBool(props.getProperty(KEY_TNT_COMBAT), DEFAULT_TNT_COMBAT),
             parseBool(props.getProperty(KEY_END_CRYSTAL_COMBAT), DEFAULT_END_CRYSTAL_COMBAT),
+            parseBool(props.getProperty(KEY_WITHER_SUMMON), DEFAULT_WITHER_SUMMON),
             parseBool(props.getProperty(KEY_FLINT_AND_STEEL_COMBAT), DEFAULT_FLINT_AND_STEEL_COMBAT),
             parseBool(props.getProperty(KEY_EXTINGUISH_WITH_BUCKET), DEFAULT_EXTINGUISH_WITH_BUCKET),
             parseBool(props.getProperty(KEY_DOUSE_FIRES), DEFAULT_DOUSE_FIRES),
@@ -976,6 +1003,13 @@ public final class PlayerMobConfig {
             .append("#   out of the kit, then reverting to normal bow/melee combat. Also requires the mobGriefing\n")
             .append("#   gamerule (it places blocks + triggers real explosions). Toggle live with\n")
             .append("#   /playermob endcrystalcombat on|off (session override). Default true.\n")
+            .append("# witherSummon: when true, a PlayerMob losing a fight it takes personally builds a wither as\n")
+            .append("#   a last resort. It must be below half hearts, fully aggressive by nature (fight/flight >= 8),\n")
+            .append("#   hate the enemy it is fighting, and carry the kit (4 soul sand/soil + 3 wither skeleton\n")
+            .append("#   skulls): it lays the vanilla pattern a few blocks ahead, the last skull brings the boss up\n")
+            .append("#   through vanilla's own spawn check, and then it runs — the wither is nobody's ally. Also\n")
+            .append("#   requires the mobGriefing gamerule (it places blocks + looses a boss on the terrain). Toggle\n")
+            .append("#   live with /playermob withersummon on|off (session override). Default true.\n")
             .append("# flintAndSteelCombat: when true, a PlayerMob carrying flint and steel uses it like a player\n")
             .append("#   would. Hunting: it lights the block a food animal is standing on just before the killing\n")
             .append("#   blow, so the animal dies burning and the meat drops cooked, then stamps that fire out a\n")
@@ -1060,6 +1094,7 @@ public final class PlayerMobConfig {
             .append(KEY_MELEE_ENGAGE_DISTANCE).append("=").append(DEFAULT_MELEE_ENGAGE_DISTANCE).append("\n")
             .append(KEY_TNT_COMBAT).append("=").append(DEFAULT_TNT_COMBAT).append("\n")
             .append(KEY_END_CRYSTAL_COMBAT).append("=").append(DEFAULT_END_CRYSTAL_COMBAT).append("\n")
+            .append(KEY_WITHER_SUMMON).append("=").append(DEFAULT_WITHER_SUMMON).append("\n")
             .append(KEY_FLINT_AND_STEEL_COMBAT).append("=").append(DEFAULT_FLINT_AND_STEEL_COMBAT).append("\n")
             .append(KEY_EXTINGUISH_WITH_BUCKET).append("=").append(DEFAULT_EXTINGUISH_WITH_BUCKET).append("\n")
             .append(KEY_DOUSE_FIRES).append("=").append(DEFAULT_DOUSE_FIRES).append("\n")

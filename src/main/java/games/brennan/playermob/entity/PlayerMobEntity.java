@@ -34,6 +34,7 @@ import games.brennan.playermob.entity.goal.EndCrystalCombatGoal;
 import games.brennan.playermob.entity.goal.TntCombatGoal;
 import games.brennan.playermob.entity.goal.TrainRecoveryGoal;
 import games.brennan.playermob.entity.goal.WeaponAwareAttackGoal;
+import games.brennan.playermob.entity.goal.WitherSummonGoal;
 import games.brennan.playermob.player.PlayerLifeRecord;
 import games.brennan.playermob.player.PlayerLifeStore;
 import games.brennan.playermob.player.GlobalLifeStore;
@@ -871,6 +872,13 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // behind the cover with a shield up, and punches the crystal to set it off; when it runs out of the kit its
         // canUse() goes false and the normal fight goals take back over. Gated on mobGriefing (places blocks + explodes).
         this.goalSelector.addGoal(2, new EndCrystalCombatGoal(this, /* speed */ 1.0));
+        // Cornered, furious, and it hates whoever it is fighting? Build a wither. The rarest escalation of the
+        // lot — same priority-2 slot, registered after the two bombers so they keep first dibs, and gated on a
+        // stack of conditions (below half hearts, fight/flight >= 8, hate toward the target, 4 soul blocks +
+        // 3 wither skulls on hand) so it stays a genuine last resort rather than a party trick. It lays the
+        // vanilla pattern a few blocks ahead, the final skull spawns the boss through vanilla's own check, and
+        // then the mob runs — the wither is nobody's ally. Gated on mobGriefing (places blocks + looses a boss).
+        this.goalSelector.addGoal(2, new WitherSummonGoal(this, /* speed */ 1.0));
         // Out of ammo mid-fight? Fetch a nearby dropped round before fighting — registered BEFORE the attack
         // goal at the same priority so its narrow canUse() (ranged weapon owned, no ammo, enemy not too close,
         // a round within reach) wins the MOVE slot; otherwise the attack goal runs. After a restock its

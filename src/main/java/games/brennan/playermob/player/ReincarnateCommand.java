@@ -92,6 +92,10 @@ import java.util.Collection;
  *       this session: when {@code on}, a PlayerMob carrying end crystals + obsidian + solid cover blocks
  *       bombs its target with end crystals instead of fighting with bow/melee. A session override of the
  *       config flag.</li>
+ *   <li>{@code /playermob withersummon [on|off]} — toggle (or report) wither summoning for this session:
+ *       when {@code on}, a PlayerMob that is below half hearts, fully aggressive by nature, hates the enemy
+ *       it is fighting, and carries 4 soul sand/soil + 3 wither skeleton skulls builds a wither as a last
+ *       resort and then runs from it. A session override of the config flag.</li>
  *   <li>{@code /playermob flintcombat [on|off]} — toggle (or report) flint-and-steel use for this
  *       session: when {@code on}, a PlayerMob carrying flint and steel lights the ground under a food
  *       animal for the killing blow (so the meat drops cooked, then puts that fire out) and occasionally
@@ -200,6 +204,10 @@ public final class ReincarnateCommand {
                     .executes(ReincarnateCommand::queryEndCrystalCombat)
                     .then(Commands.literal("on").executes(ctx -> setEndCrystalCombat(ctx, true)))
                     .then(Commands.literal("off").executes(ctx -> setEndCrystalCombat(ctx, false))))
+                .then(Commands.literal("withersummon")
+                    .executes(ReincarnateCommand::queryWitherSummon)
+                    .then(Commands.literal("on").executes(ctx -> setWitherSummon(ctx, true)))
+                    .then(Commands.literal("off").executes(ctx -> setWitherSummon(ctx, false))))
                 .then(Commands.literal("flintcombat")
                     .executes(ReincarnateCommand::queryFlintAndSteelCombat)
                     .then(Commands.literal("on").executes(ctx -> setFlintAndSteelCombat(ctx, true)))
@@ -1205,6 +1213,24 @@ public final class ReincarnateCommand {
     private static int setEndCrystalCombat(CommandContext<CommandSourceStack> ctx, boolean enabled) {
         PlayerMobConfig.setEndCrystalCombat(enabled);
         ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob end-crystal combat "
+            + (enabled ? "enabled" : "disabled") + " for this session."), false);
+        return 1;
+    }
+
+    /** {@code /playermob withersummon} — report whether a cornered PlayerMob may build a wither. */
+    private static int queryWitherSummon(CommandContext<CommandSourceStack> ctx) {
+        boolean on = PlayerMobConfig.witherSummon();
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob wither summoning is "
+            + (on ? "ON — a furious mob below half hearts that hates its enemy and carries soul blocks + "
+                    + "wither skulls builds a wither, then runs"
+                  : "OFF — mobs never build withers") + "."), false);
+        return 1;
+    }
+
+    /** {@code /playermob withersummon on|off} — flip wither summoning for this session. */
+    private static int setWitherSummon(CommandContext<CommandSourceStack> ctx, boolean enabled) {
+        PlayerMobConfig.setWitherSummon(enabled);
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob wither summoning "
             + (enabled ? "enabled" : "disabled") + " for this session."), false);
         return 1;
     }
