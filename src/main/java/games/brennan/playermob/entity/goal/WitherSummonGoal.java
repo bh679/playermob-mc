@@ -20,10 +20,12 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.WitherSkullBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.SkullBlockEntity;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.EnumSet;
-import java.util.List;
 
 /**
  * The last resort: a PlayerMob that is losing a fight it cares about <em>builds a wither</em>.
@@ -37,7 +39,10 @@ import java.util.List;
  * <pre>APPROACH → BUILD (four soul blocks, then the three skulls, one at a time) → FLEE</pre>
  *
  * <p>The rig is the vanilla pattern ({@code ^^^} / {@code ###} / {@code ~#~}) laid a few blocks ahead of the mob
- * toward its target — geometry from {@link WitherSummonPolicy#placementCandidates}. Blocks go in one at a time
+ * toward its target — geometry from {@link WitherSummonPolicy#placementCandidates}. Every block of it must be
+ * <b>placeable by hand</b>: inside the mob's block reach and in its line of sight, checked for the whole footprint
+ * before building starts and again for each block as it goes down, so a mob knocked out of position walks back
+ * into place instead of reaching through a wall. Blocks go in one at a time
  * with a visible gap, and the <b>centre skull is placed last</b>: right after it lands the goal calls vanilla's
  * own {@link WitherSkullBlock#checkSpawn} on that position, which is exactly what a real player's placement
  * triggers — so the boss arrives through the vanilla path (pattern check, blocks cleared, invulnerable charge-up,
@@ -64,6 +69,10 @@ public final class WitherSummonGoal extends Goal implements DescribableGoal {
     private static final int BUILD_GAP_MIN = 5;             // min ticks between placing successive rig blocks
     private static final int BUILD_GAP_MAX = 20;            // a 5-20 tick gap, so the mob visibly builds
     private static final int BUILD_STEPS = 7;               // 4 soul blocks + 3 skulls
+    /** Vanilla player block reach (4.5 blocks), squared — the mob places what a player could place. */
+    private static final double REACH_SQR = 20.25;
+    private static final int BUILD_STALL_LIMIT = 60;        // 3s of failing to get back in reach before giving up
+    private static final int SPAWN_RETRY_TICKS = 20;        // keep re-offering a finished rig to vanilla for 1s
     private static final int FLEE_TICKS = 240;              // 12s of running — past the wither's ~11s charge-up
     private static final int FLEE_REPATH_INTERVAL = 20;     // re-pick a retreat spot this often
     private static final double FLEE_SPEED = 1.35;          // faster than a fight walk — this is a real panic
@@ -85,6 +94,10 @@ public final class WitherSummonGoal extends Goal implements DescribableGoal {
     private int buildStep;
     private int buildDelay;
     private Rig rig;
+    /** Ticks spent unable to place the current block (out of reach or sight) — bails at {@link #BUILD_STALL_LIMIT}. */
+    private int buildStall;
+    /** Ticks left to re-offer a finished rig to vanilla's spawn check (see {@link #tickFlee}). */
+    private int spawnRetry;
     private int fleeTicks;
     private int fleeRepathTicks;
 
@@ -147,6 +160,8 @@ public final class WitherSummonGoal extends Goal implements DescribableGoal {
     public void start() {
         phase = Phase.APPROACH;
         walkTicks = 0;
+        buildStall = 0;
+        spawnRetry = 0;
         rig = null;
     }
 
@@ -155,6 +170,7 @@ public final class WitherSummonGoal extends Goal implements DescribableGoal {
         mob.setSprinting(false);
         mob.getNavigation().stop();
         phase = Phase.DONE;
+        spawnRetry = 0;
         rig = null;
         // Hand the mob back a proper weapon; WeaponAwareAttackGoal re-selects ranged/melee on its next tick.
         mob.equipBestMeleeInHand();
@@ -230,18 +246,46 @@ public final class WitherSummonGoal extends Goal implements DescribableGoal {
         return null;
     }
 
-    /** Every block of the rig must be replaceable, and the bottom soul block needs a sturdy floor under it. */
+    /**
+     * Every block of the rig must be replaceable and <b>placeable by hand</b> — within the mob's block reach and
+     * in its line of sight — and the bottom soul block needs a sturdy floor under it. The reach/sight rule is what
+     * keeps the mob honest: it builds what a player standing there could build, never through a wall or at range.
+     */
     private boolean canBuild(Level level, Rig candidate) {
         BlockPos floor = candidate.bottom().below();
         if (!level.getBlockState(floor).isFaceSturdy(level, floor, Direction.UP)) {
             return false;
         }
         for (BlockPos pos : candidate.allPositions()) {
-            if (!level.getBlockState(pos).canBeReplaced()) {
+            if (!level.getBlockState(pos).canBeReplaced() || !canReach(level, pos)) {
                 return false;
             }
         }
         return true;
+    }
+
+    /** True when {@code pos} is within the mob's block reach and it can see the spot it's placing into. */
+    private boolean canReach(Level level, BlockPos pos) {
+        Vec3 eye = mob.getEyePosition();
+        Vec3 center = Vec3.atCenterOf(pos);
+        if (eye.distanceToSqr(center) > REACH_SQR) {
+            return false;
+        }
+        return hasClearLineOfSight(level, eye, pos, center);
+    }
+
+    /**
+     * True when a straight line from {@code eye} reaches {@code pos} without passing through another block's
+     * collision shape. The same three-clause test {@code RaidContainersGoal#hasClearLineOfSight} uses for chests
+     * (a hit on the target block itself, or at/beyond its centre, counts as visible), and {@code COLLIDER} for the
+     * same reason: glass occludes, as it does for every other mob.
+     */
+    private boolean hasClearLineOfSight(Level level, Vec3 eye, BlockPos pos, Vec3 center) {
+        BlockHitResult hit = level.clip(new ClipContext(
+            eye, center, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mob));
+        return hit.getType() == HitResult.Type.MISS
+            || hit.getBlockPos().equals(pos)
+            || hit.getLocation().distanceToSqr(eye) + 1.0e-4 >= center.distanceToSqr(eye);
     }
 
     /**
@@ -256,6 +300,20 @@ public final class WitherSummonGoal extends Goal implements DescribableGoal {
             buildDelay--;
             return;
         }
+        // Knocked out of position mid-rig? Walk back into reach rather than placing the next block through a
+        // wall or from across the clearing — the same rule the site validation applies up front.
+        if (!canReach(mob.level(), stepPos(buildStep))) {
+            if (++buildStall > BUILD_STALL_LIMIT) {
+                phase = Phase.DONE;
+                cooldown = mob.reactTicks(FAIL_COOLDOWN);
+                return;
+            }
+            mob.getNavigation().moveTo(rig.midCenter().getX() + 0.5, rig.midCenter().getY(),
+                rig.midCenter().getZ() + 0.5, speed);
+            return;
+        }
+        buildStall = 0;
+        mob.getNavigation().stop();
         performBuildStep(buildStep);
         mob.swing(InteractionHand.MAIN_HAND);
         if (++buildStep >= BUILD_STEPS) {
@@ -265,16 +323,22 @@ public final class WitherSummonGoal extends Goal implements DescribableGoal {
         buildDelay = mob.reactRoll(BUILD_GAP_MIN, BUILD_GAP_MAX); // 5-20 ticks, skewed by reaction speed
     }
 
+    /** Where the block for {@code step} goes — soul blocks first (steps 0-3), then the three skulls (4-6). */
+    private BlockPos stepPos(int step) {
+        return step < WitherSummonPolicy.SOUL_BLOCKS_NEEDED
+            ? rig.soulPositions().get(step)
+            : rig.skullPositions().get(step - WitherSummonPolicy.SOUL_BLOCKS_NEEDED);
+    }
+
     /** Perform one placement of the staged build — soul blocks first (steps 0-3), then the three skulls (4-6). */
     private void performBuildStep(int step) {
         Level level = mob.level();
         SimpleContainer pack = mob.getInventory();
+        BlockPos pos = stepPos(step);
         if (step < WitherSummonPolicy.SOUL_BLOCKS_NEEDED) {
-            placeSoulBlock(level, pack, rig.soulPositions().get(step));
+            placeSoulBlock(level, pack, pos);
             return;
         }
-        List<BlockPos> skulls = rig.skullPositions();
-        BlockPos pos = skulls.get(step - WitherSummonPolicy.SOUL_BLOCKS_NEEDED);
         placeSkull(level, pack, pos);
         if (step == BUILD_STEPS - 1) {
             summon(level, pos);
@@ -319,6 +383,7 @@ public final class WitherSummonGoal extends Goal implements DescribableGoal {
 
     private void enterFlee() {
         phase = Phase.FLEE;
+        spawnRetry = SPAWN_RETRY_TICKS;
         fleeTicks = FLEE_TICKS;
         fleeRepathTicks = 0;
         mob.getNavigation().stop();
@@ -332,6 +397,14 @@ public final class WitherSummonGoal extends Goal implements DescribableGoal {
      * charge-up on purpose: the blast that ends it is what kills a mob that stopped running too early.
      */
     private void tickFlee() {
+        // Keep offering a finished rig to vanilla for a moment. The spawn check is idempotent — it only fires
+        // when the whole pattern stands, and consumes the blocks when it does — so re-running it costs nothing
+        // and rescues a rig whose last skull landed while some other block was momentarily missing (a complete
+        // pattern standing in the world with no boss on it is the one failure this behaviour can leave behind).
+        if (spawnRetry > 0) {
+            spawnRetry--;
+            summon(mob.level(), rig.skullCenter());
+        }
         Vec3 danger = Vec3.atCenterOf(rig.midCenter());
         if (--fleeTicks <= 0 || mob.distanceToSqr(danger) >= FLEE_SAFE_SQR) {
             phase = Phase.DONE;
