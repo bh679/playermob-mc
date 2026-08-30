@@ -48,8 +48,11 @@ import java.util.List;
  * away from the rig (the retreat picker {@link TntCombatGoal} uses) for a few seconds before standing down. It
  * frequently dies anyway; that is the nature of a panic button.</p>
  *
- * <p>Runs at the priority-2 combat tier after the TNT and end-crystal bombers, so those keep first dibs. No JUMP
- * flag, so the priority-0 {@code FloatGoal} still owns JUMP in water (see the goal-JUMP gotcha). Gated on
+ * <p>Runs at <b>priority 1</b>, above the priority-2 attack goal — the same slot, and for the same reason, as
+ * {@link FlintAndSteelIgniteGoal}: the trigger fires <em>mid-fight</em>, when the attack goal is already running
+ * and holding MOVE, and vanilla's {@code GoalSelector} only lets a <em>strictly</em> higher-priority goal preempt
+ * a running one. At priority 2 this would never get the slot in the one situation it exists for. The gates below
+ * are narrow enough that ordinary combat keeps the slot the rest of the time. No JUMP flag, so the priority-0 {@code FloatGoal} still owns JUMP in water (see the goal-JUMP gotcha). Gated on
  * {@link PlayerMobConfig#witherSummon()} and the {@code mobGriefing} gamerule (it places blocks and spawns a boss
  * that wrecks terrain), and on {@link TrainConfinement} so a train-bound mob doesn't raise a wither in a carriage.</p>
  */
@@ -61,7 +64,7 @@ public final class WitherSummonGoal extends Goal implements DescribableGoal {
     private static final int BUILD_GAP_MIN = 5;             // min ticks between placing successive rig blocks
     private static final int BUILD_GAP_MAX = 20;            // a 5-20 tick gap, so the mob visibly builds
     private static final int BUILD_STEPS = 7;               // 4 soul blocks + 3 skulls
-    private static final int FLEE_TICKS = 120;              // 6s of running before standing down
+    private static final int FLEE_TICKS = 240;              // 12s of running — past the wither's ~11s charge-up
     private static final int FLEE_REPATH_INTERVAL = 20;     // re-pick a retreat spot this often
     private static final double FLEE_SPEED = 1.35;          // faster than a fight walk — this is a real panic
     private static final double FLEE_RADIUS = 16.0;         // retreat-spot search radius
@@ -325,7 +328,8 @@ public final class WitherSummonGoal extends Goal implements DescribableGoal {
     /**
      * Get away from what it just made. The mob runs until it is {@link #FLEE_SAFE_SQR} clear of the rig or
      * {@link #FLEE_TICKS} run out (it may well be boxed in, or already dying), then stands down for a long
-     * {@link #POST_SUMMON_COOLDOWN} — one wither per crisis.
+     * {@link #POST_SUMMON_COOLDOWN} — one wither per crisis. The window outlasts the boss's invulnerable
+     * charge-up on purpose: the blast that ends it is what kills a mob that stopped running too early.
      */
     private void tickFlee() {
         Vec3 danger = Vec3.atCenterOf(rig.midCenter());

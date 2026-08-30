@@ -861,6 +861,16 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // cap — so the normal fight goals own combat the rest of the time. Gated on mobGriefing (it places
         // a real fire block). See FlintAndSteelIgniteGoal.
         this.goalSelector.addGoal(1, new FlintAndSteelIgniteGoal(this, /* speed */ 1.0));
+        // Cornered, furious, and it hates whoever it is fighting? Build a wither. The rarest escalation of the
+        // lot, and priority 1 for the same reason the flint-and-steel goal is: the trigger fires MID-FIGHT, when
+        // the priority-2 attack goal is already running and holding MOVE — and vanilla GoalSelector only lets a
+        // STRICTLY higher-priority goal preempt a running one, so at priority 2 this would never get the slot in
+        // the one situation it exists for. Its canUse() is about as narrow as they come (config on, mobGriefing
+        // on, a hated live target, below half hearts, fight/flight >= 8, and 4 soul blocks + 3 wither skulls on
+        // hand), so normal combat owns the slot the rest of the time. It lays the vanilla pattern a few blocks
+        // ahead, the final skull spawns the boss through vanilla's own check, and then the mob runs — the wither
+        // is nobody's ally. Gated on mobGriefing (places blocks + looses a boss on the terrain).
+        this.goalSelector.addGoal(1, new WitherSummonGoal(this, /* speed */ 1.0));
         // Carrying TNT + a way to light it? Bomb the enemy instead of trading bow/melee blows — registered
         // BEFORE the seek/attack goals at the same priority so its canUse() (config on, mobGriefing on, TNT +
         // an igniter on hand) wins the MOVE slot while armed. When it runs out of TNT/igniters its canUse()
@@ -872,13 +882,6 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // behind the cover with a shield up, and punches the crystal to set it off; when it runs out of the kit its
         // canUse() goes false and the normal fight goals take back over. Gated on mobGriefing (places blocks + explodes).
         this.goalSelector.addGoal(2, new EndCrystalCombatGoal(this, /* speed */ 1.0));
-        // Cornered, furious, and it hates whoever it is fighting? Build a wither. The rarest escalation of the
-        // lot — same priority-2 slot, registered after the two bombers so they keep first dibs, and gated on a
-        // stack of conditions (below half hearts, fight/flight >= 8, hate toward the target, 4 soul blocks +
-        // 3 wither skulls on hand) so it stays a genuine last resort rather than a party trick. It lays the
-        // vanilla pattern a few blocks ahead, the final skull spawns the boss through vanilla's own check, and
-        // then the mob runs — the wither is nobody's ally. Gated on mobGriefing (places blocks + looses a boss).
-        this.goalSelector.addGoal(2, new WitherSummonGoal(this, /* speed */ 1.0));
         // Out of ammo mid-fight? Fetch a nearby dropped round before fighting — registered BEFORE the attack
         // goal at the same priority so its narrow canUse() (ranged weapon owned, no ammo, enemy not too close,
         // a round within reach) wins the MOVE slot; otherwise the attack goal runs. After a restock its
