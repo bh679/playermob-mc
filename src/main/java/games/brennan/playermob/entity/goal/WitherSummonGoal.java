@@ -4,18 +4,23 @@ import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.compat.GameRuleCompat;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.PlayerMobEntity;
+import games.brennan.playermob.compat.WitherSpawnCompat;
 import games.brennan.playermob.entity.WitherSummonPolicy;
 import games.brennan.playermob.entity.WitherSummonPolicy.Rig;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.SimpleContainer;
+import com.mojang.logging.LogUtils;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.boss.wither.WitherBoss;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.ai.util.DefaultRandomPos;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.WitherSkullBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -23,7 +28,10 @@ import net.minecraft.world.level.block.entity.SkullBlockEntity;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import org.slf4j.Logger;
 
 import java.util.EnumSet;
 
@@ -36,7 +44,7 @@ import java.util.EnumSet;
  * {@link WitherSummonPolicy#FF_WITHER_MIN}), and it <b>hates</b> the enemy it is fighting. A timid mob flees, a
  * merely-annoyed mob keeps swinging; only a furious, cornered mob that loathes its foe raises a wither.</p>
  *
- * <pre>APPROACH → BUILD (four soul blocks, then the three skulls, one at a time) → FLEE</pre>
+ * <pre>BUILD (four soul blocks, then the three skulls, one at a time) → FLEE</pre>
  *
  * <p>The rig is the vanilla pattern ({@code ^^^} / {@code ###} / {@code ~#~}) laid a few blocks ahead of the mob
  * toward its target — geometry from {@link WitherSummonPolicy#placementCandidates}. Every block of it must be
@@ -63,9 +71,11 @@ import java.util.EnumSet;
  */
 public final class WitherSummonGoal extends Goal implements DescribableGoal {
 
-    /** How close (squared) the mob gets before it builds — ~5 blocks, so the rig lands between it and the enemy. */
+    private static final Logger LOGGER = LogUtils.getLogger();
+
+    /** How close (squared) the target must already be — ~5 blocks, so the rig lands between the mob and it. */
     private static final double SETUP_REACH_SQR = 25.0;
-    private static final int WALK_TIMEOUT_TICKS = 200;      // 10s to reach the target before giving up
+    private static final int SITE_RECHECK_TICKS = 10;       // don't re-scan for a site every single tick
     private static final int BUILD_GAP_MIN = 5;             // min ticks between placing successive rig blocks
     private static final int BUILD_GAP_MAX = 20;            // a 5-20 tick gap, so the mob visibly builds
     private static final int BUILD_STEPS = 7;               // 4 soul blocks + 3 skulls
@@ -73,6 +83,7 @@ public final class WitherSummonGoal extends Goal implements DescribableGoal {
     private static final double REACH_SQR = 20.25;
     private static final int BUILD_STALL_LIMIT = 60;        // 3s of failing to get back in reach before giving up
     private static final int SPAWN_RETRY_TICKS = 20;        // keep re-offering a finished rig to vanilla for 1s
+    private static final double WITHER_SEARCH = 16.0;       // how far to look for "did a wither actually appear?"
     private static final int FLEE_TICKS = 240;              // 12s of running — past the wither's ~11s charge-up
     private static final int FLEE_REPATH_INTERVAL = 20;     // re-pick a retreat spot this often
     private static final double FLEE_SPEED = 1.35;          // faster than a fight walk — this is a real panic
@@ -80,16 +91,19 @@ public final class WitherSummonGoal extends Goal implements DescribableGoal {
     private static final int FLEE_VERTICAL = 7;             // retreat-spot vertical search range
     private static final double FLEE_SAFE_SQR = 256.0;      // 16 blocks clear of the rig is far enough
     private static final int POST_SUMMON_COOLDOWN = 600;    // 30s before the mob would even consider another
-    private static final int FAIL_COOLDOWN = 100;           // 5s pause after a failed site, so we don't thrash
+    private static final int FAIL_COOLDOWN = 200;           // 10s pause after a failed rig, so we don't thrash
 
-    private enum Phase { APPROACH, BUILD, FLEE, DONE }
+    private enum Phase { BUILD, FLEE, DONE }
 
     private final PlayerMobEntity mob;
     private final double speed;
 
     private Phase phase = Phase.DONE;
-    private int walkTicks;
     private int cooldown;
+    /** Throttles the site scan in {@link #canUse()} so it isn't run every tick while a kitted mob fights. */
+    private int siteRecheck;
+    /** The site {@link #canUse()} found and {@link #start()} will build on. */
+    private Rig pendingRig;
     /** Staged-build cursor: 0-3 soul blocks, 4-5 outer skulls, 6 the centre skull, {@code >=BUILD_STEPS}=done. */
     private int buildStep;
     private int buildDelay;
@@ -108,13 +122,37 @@ public final class WitherSummonGoal extends Goal implements DescribableGoal {
         setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
     }
 
+    /**
+     * Only takes the combat slot when it can act <em>right now</em>: every gate in {@link #armed()}, a target
+     * already in build range, and a validated rig site from where the mob stands. That last clause matters as much
+     * as the rest — this goal outranks the attack goal, so a version that took the slot and then went looking for
+     * somewhere to build left the mob wandering around its enemy without swinging. A mob that can't build never
+     * takes the slot at all, and since it's in melee range during a fight anyway, the trigger still lands in
+     * exactly the situation the behaviour exists for.
+     */
     @Override
     public boolean canUse() {
         if (cooldown > 0) {
             cooldown--;
             return false;
         }
-        return armed();
+        if (siteRecheck > 0) {
+            siteRecheck--;
+            return false;
+        }
+        if (!armed()) {
+            return false;
+        }
+        LivingEntity target = mob.getTarget();
+        if (target == null || mob.distanceToSqr(target) > SETUP_REACH_SQR) {
+            return false;
+        }
+        pendingRig = firstBuildableSite(mob.level(), target);
+        if (pendingRig == null) {
+            siteRecheck = SITE_RECHECK_TICKS; // nowhere to build from here — let the fight carry on
+            return false;
+        }
+        return true;
     }
 
     @Override
@@ -122,11 +160,8 @@ public final class WitherSummonGoal extends Goal implements DescribableGoal {
         if (phase == Phase.DONE || !mob.isAlive()) {
             return false;
         }
-        if (phase == Phase.BUILD || phase == Phase.FLEE) {
-            return true; // finish the rig and the run — bailing would strand a half-built wither
-        }
-        LivingEntity target = mob.getTarget();
-        return target != null && target.isAlive() && !target.isRemoved();
+        // Once building starts, finish the rig and the run — bailing would strand a half-built wither.
+        return phase == Phase.BUILD || phase == Phase.FLEE;
     }
 
     /** All the gates: config on, mobGriefing on, not train-confined, a hated live target, cornered, furious, kitted. */
@@ -158,11 +193,14 @@ public final class WitherSummonGoal extends Goal implements DescribableGoal {
 
     @Override
     public void start() {
-        phase = Phase.APPROACH;
-        walkTicks = 0;
+        rig = pendingRig;
+        pendingRig = null;
+        phase = Phase.BUILD;
+        buildStep = 0;
+        buildDelay = 0;   // lay the first block on the next build tick
         buildStall = 0;
         spawnRetry = 0;
-        rig = null;
+        debug("raising a wither at {} (target {})", rig.bottom(), nameOfTarget());
     }
 
     @Override
@@ -184,56 +222,10 @@ public final class WitherSummonGoal extends Goal implements DescribableGoal {
     @Override
     public void tick() {
         switch (phase) {
-            case APPROACH -> tickApproach();
             case BUILD -> tickBuild();
             case FLEE -> tickFlee();
             default -> { /* DONE — canContinueToUse ends the goal next evaluation */ }
         }
-    }
-
-    private void tickApproach() {
-        LivingEntity target = mob.getTarget();
-        if (target == null || !target.isAlive()) {
-            phase = Phase.DONE;
-            return;
-        }
-        mob.getLookControl().setLookAt(target, 30.0F, 30.0F);
-        if (mob.distanceToSqr(target) <= SETUP_REACH_SQR) {
-            mob.getNavigation().stop();
-            if (!startBuild(target)) {
-                // Nowhere to raise it here — stand down and let the normal fight goal take over for a beat.
-                phase = Phase.DONE;
-                cooldown = mob.reactTicks(FAIL_COOLDOWN);
-            }
-            return;
-        }
-        if (++walkTicks > WALK_TIMEOUT_TICKS) {
-            phase = Phase.DONE;
-            cooldown = mob.reactTicks(FAIL_COOLDOWN);
-            return;
-        }
-        mob.getNavigation().moveTo(target, speed);
-    }
-
-    /**
-     * Pick a buildable site and begin. The whole seven-block footprint is validated up front so a doomed rig never
-     * starts (a half-built wither is just wasted skulls), then the blocks go up one per {@link #tickBuild() build
-     * tick}. Returns whether building started (else the caller stands the goal down).
-     */
-    private boolean startBuild(LivingEntity target) {
-        if (!WitherSummonPolicy.hasKit(mob.getInventory())) {
-            return false;
-        }
-        Level level = mob.level();
-        Rig site = firstBuildableSite(level, target);
-        if (site == null) {
-            return false;
-        }
-        rig = site;
-        buildStep = 0;
-        buildDelay = 0; // lay the first block on the next build tick
-        phase = Phase.BUILD;
-        return true;
     }
 
     /** The first candidate rig (best-aligned facing first) whose footprint is clear and whose floor holds it up. */
@@ -381,6 +373,80 @@ public final class WitherSummonGoal extends Goal implements DescribableGoal {
         }
     }
 
+    /** True while every block of the rig is still the block the mob put there — i.e. the pattern is whole. */
+    private boolean patternStands(Level level) {
+        for (BlockPos pos : rig.soulPositions()) {
+            BlockState state = level.getBlockState(pos);
+            if (!state.is(Blocks.SOUL_SAND) && !state.is(Blocks.SOUL_SOIL)) {
+                return false;
+            }
+        }
+        for (BlockPos pos : rig.skullPositions()) {
+            if (!level.getBlockState(pos).is(Blocks.WITHER_SKELETON_SKULL)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** True when a wither is already up near the rig — vanilla's check fired, and there's nothing left to do. */
+    private boolean witherNearby(Level level) {
+        AABB around = new AABB(rig.bottom()).inflate(WITHER_SEARCH);
+        return !level.getEntitiesOfClass(WitherBoss.class, around).isEmpty();
+    }
+
+    /**
+     * Finish the summon ourselves when vanilla's check has had its chance and declined.
+     *
+     * <p>{@link WitherSkullBlock#checkSpawn} has to <em>search</em> for the pattern around the skull it was given,
+     * and in play it has been seen to leave a complete, correct rig standing with no boss on it — a rig a player
+     * could finish by breaking and replacing one skull. The goal doesn't need that search: it knows all seven
+     * positions, because it placed them. So it does exactly what vanilla does at coordinates it already has —
+     * break the pattern blocks (with their break particles), seat an invulnerable wither on the bottom block, and
+     * award the summon criterion to everyone nearby, so <i>Withering Heights</i> unlocks either way.</p>
+     */
+    private void fallbackSummon(Level level) {
+        if (witherNearby(level)) {
+            debug("vanilla spawn check raised the wither at {}", rig.bottom());
+            return;
+        }
+        if (!patternStands(level)) {
+            debug("rig at {} no longer whole — abandoning it", rig.bottom());
+            return;
+        }
+        for (BlockPos pos : rig.allPositions()) {
+            level.levelEvent(2001, pos, Block.getId(level.getBlockState(pos))); // the block-break effect
+            level.setBlock(pos, Blocks.AIR.defaultBlockState(), 2);
+        }
+        WitherBoss wither = WitherSpawnCompat.create(level);
+        if (wither == null) {
+            debug("could not create a wither for the rig at {}", rig.bottom());
+            return;
+        }
+        BlockPos seat = rig.bottom();
+        WitherSpawnCompat.seat(wither, seat.getX() + 0.5, seat.getY() + 0.55, seat.getZ() + 0.5, mob.getYRot());
+        wither.makeInvulnerable();
+        level.addFreshEntity(wither);
+        for (ServerPlayer player : level.getEntitiesOfClass(ServerPlayer.class,
+                wither.getBoundingBox().inflate(50.0))) {
+            WitherSpawnCompat.awardSummonCriterion(player, wither);
+        }
+        debug("vanilla check declined the rig at {} — summoned the wither directly", seat);
+    }
+
+    /** Opt-in tracing (the existing {@code debugSpawnLog} config), so a misfire says which branch ran. */
+    private void debug(String message, Object... args) {
+        if (PlayerMobConfig.debugSpawnLog()) {
+            LOGGER.info("[playermob] wither: " + message, args);
+        }
+    }
+
+    /** The current target's name for the trace lines, or {@code "nothing"} if it has none. */
+    private String nameOfTarget() {
+        LivingEntity target = mob.getTarget();
+        return target != null ? target.getName().getString() : "nothing";
+    }
+
     private void enterFlee() {
         phase = Phase.FLEE;
         spawnRetry = SPAWN_RETRY_TICKS;
@@ -403,7 +469,11 @@ public final class WitherSummonGoal extends Goal implements DescribableGoal {
         // pattern standing in the world with no boss on it is the one failure this behaviour can leave behind).
         if (spawnRetry > 0) {
             spawnRetry--;
-            summon(mob.level(), rig.skullCenter());
+            if (spawnRetry == 0) {
+                fallbackSummon(mob.level()); // window closed — finish it ourselves if vanilla didn't
+            } else {
+                summon(mob.level(), rig.skullCenter());
+            }
         }
         Vec3 danger = Vec3.atCenterOf(rig.midCenter());
         if (--fleeTicks <= 0 || mob.distanceToSqr(danger) >= FLEE_SAFE_SQR) {
@@ -431,8 +501,7 @@ public final class WitherSummonGoal extends Goal implements DescribableGoal {
         LivingEntity target = mob.getTarget();
         String name = target != null ? target.getName().getString() : null;
         return switch (phase) {
-            case APPROACH -> name != null ? "closing on " + name : "closing in";
-            case BUILD -> "raising a wither";
+            case BUILD -> name != null ? "raising a wither on " + name : "raising a wither";
             case FLEE -> "running from the wither";
             default -> null;
         };
