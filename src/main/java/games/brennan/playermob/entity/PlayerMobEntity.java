@@ -713,6 +713,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     /** The deferred open/close, run once at the reach tick; {@code null} when the caller performs the action itself. */
     private Runnable doorOpAction;
 
+    /**
+     * True while {@code AdvanceCarriageGoal} / {@code CrossGroupGapGoal} is walking this mob to the
+     * next carriage. The Dungeon-Train door reflex's "assume the train axis" fallback (see
+     * {@link DoorHeading}) applies only then — a mob raiding a side room must never have its door
+     * decided on that assumption. Transient AI state (never saved).
+     */
+    private boolean marchingCarriages;
+
     public PlayerMobEntity(EntityType<? extends PlayerMobEntity> type, Level level) {
         super(type, level);
         // Preserve combat-kill XP parity. Monster's constructor sets xpReward=5;
@@ -1056,11 +1064,12 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             // Remember we're aboard, so TrainRecoveryGoal can tell "fell off" from
             // "never boarded" (see ticksSinceOnTrain / RECOVERY_WINDOW_TICKS).
             lastOnTrainTick = tickCount;
-            // Open any door we're up against — and, when wedged, close one whose open swing is
-            // blocking us. Vanilla's DoorInteractGoal opens doors by inspecting nav path nodes +
-            // collision, which doesn't fire on a moving Sable carriage — so the train seam reaches
-            // for the door block directly (in the carriage's own coordinate space), every tick,
-            // regardless of which goal owns movement.
+            // Toggle any door that blocks the way we're going (assuming the train's axis while
+            // marching), and — if we've been wedged for a while anyway — probe: try a nearby door
+            // and give ourselves a moment to walk. Vanilla's DoorInteractGoal opens doors by
+            // inspecting nav path nodes + collision, which doesn't fire on a moving Sable carriage —
+            // so the train seam reaches for the door block directly (in the carriage's own
+            // coordinate space), every tick, regardless of which goal owns movement.
             TrainConfinement.openBlockingDoor(this);
             // ...and, when wedged against soft fill (ice/dirt/mud/moss/logs) packing a carriage,
             // mine it to clear the march. Like the door reflex it reaches into the carriage's
@@ -2773,11 +2782,26 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
 
     /**
      * Whether door-opening is currently suppressed for this mob (see {@link #holdDoorsClosed()}).
-     * Consulted by {@link PlayerMobDoorGoal} and the Dungeon-Train door reflex so neither reopens a
-     * door the stuck-recovery just closed.
+     * Consulted by {@link PlayerMobDoorGoal} (off a train) so it doesn't reopen a door the
+     * stuck-recovery just closed. The Dungeon-Train reflex doesn't read it — it pins the door its
+     * own probe just set instead.
      */
     public boolean isHoldingDoorsClosed() {
         return this.doorCloseHoldTicks > 0;
+    }
+
+    /**
+     * Mark whether this mob is currently marching between carriages (set by the two train march
+     * goals on start/stop). Read by the Dungeon-Train door reflex: only a marching mob that has no
+     * confident heading assumes it is travelling along the train's axis.
+     */
+    public void setMarchingCarriages(boolean marching) {
+        this.marchingCarriages = marching;
+    }
+
+    /** Whether a train march goal is currently walking this mob to the next carriage. */
+    public boolean isMarchingCarriages() {
+        return this.marchingCarriages;
     }
 
     /**
@@ -2793,16 +2817,20 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * @param dy the door centre's Y offset from the mob's eyes
      * @param dz the door centre's Z offset from the mob's eyes
      * @param action the deferred open/close (e.g. {@link DoorObstruction#setOpen})
+     * @return whether the operation was armed; {@code false} means one is already running (or
+     *         the mob is recovering) and <em>nothing was scheduled</em> — callers that record a
+     *         cooldown or a probe against the door must not do so on {@code false}
      */
-    public void beginDoorOperation(double dx, double dy, double dz, Runnable action) {
+    public boolean beginDoorOperation(double dx, double dy, double dz, Runnable action) {
         if (!armDoorOperation()) {
-            return;
+            return false;
         }
         this.doorOpFacing = true;
         this.doorOpDx = dx;
         this.doorOpDy = dy;
         this.doorOpDz = dz;
         this.doorOpAction = action;
+        return true;
     }
 
     /**

@@ -123,6 +123,7 @@ public final class CrossGroupGapGoal extends Goal implements DescribableGoal {
         settleTicks = 0;
         repathCooldown = 0;
         leap.reset();
+        mob.setMarchingCarriages(true); // the door reflex may assume the train axis while we walk
         issueMove();
     }
 
@@ -130,6 +131,7 @@ public final class CrossGroupGapGoal extends Goal implements DescribableGoal {
     public void stop() {
         mob.getNavigation().stop();
         mob.setCrossingGap(false);
+        mob.setMarchingCarriages(false);
         leap.reset();
         target = null;
         phaseTicks = 0;
