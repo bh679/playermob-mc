@@ -72,6 +72,19 @@ public final class StuckDoorPolicy {
         return toggle(preferred(doors, NO_DOOR));
     }
 
+    /** Strikes on one door beyond which the retry interval stops growing. */
+    static final int MAX_BACKOFF_STRIKES = 4;
+
+    /**
+     * How long the stuck monitor waits before the next strike on a door that has already been
+     * probed {@code strikes} times: the base interval, growing linearly with the strikes and
+     * capped at {@link #MAX_BACKOFF_STRIKES}×. A wedge the door can't explain (the mob is stuck on
+     * something else) then flaps the door less and less instead of every few seconds forever.
+     */
+    public static int retryCooldown(int baseTicks, int strikes) {
+        return baseTicks * Math.max(1, Math.min(strikes, MAX_BACKOFF_STRIKES));
+    }
+
     /**
      * Whether the path-aware reflex may act on {@code key}: never the door a probe just set
      * while that probe's pin is live, so the reflex can't undo the attempt before the mob has

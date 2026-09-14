@@ -52,33 +52,34 @@ class DoorHeadingTest {
     }
 
     @Test
-    void stalledMobFallsBackToTrainAxisOnlyWhileMarching() {
-        DoorHeading marching = new DoorHeading();
-        walk(marching, 0, WALK, 6, true);      // walked Z (routing around furniture) while marching
+    void marchingIsAlwaysTheTrainAxisEvenWhileDetouringAlongZ() {
+        DoorHeading h = new DoorHeading();
+        assertEquals(Axis.X, walk(h, 0, WALK, 6, true), "a Z detour on a march is not a heading");
+        assertEquals(Axis.X, h.tick(0, 6 * WALK, true), "…nor is standing still");
+    }
+
+    @Test
+    void aStaleHeadingDecaysOnceTheMobStops() {
+        DoorHeading h = new DoorHeading();
+        walk(h, 0, WALK, 6, false);            // walked Z (to a chest, say)
         Axis a = Axis.Z;
         int ticks = 0;
-        while (a == Axis.Z && ticks < 40) {    // now stands still: Z decays to the X fallback
-            a = marching.tick(0, 6 * WALK, true);
+        while (a == Axis.Z && ticks < 40) {    // now stands still: Z decays away
+            a = h.tick(0, 6 * WALK, false);
             ticks++;
         }
-        assertEquals(Axis.X, a, "a marching mob standing still assumes the train axis");
+        assertEquals(Axis.NONE, a, "a stopped mob has no heading");
         // walk() leaves the last step unfed, so the first "idle" tick is one more real step (acc
         // ≈0.62); at 0.85/tick that drops below 0.3 five ticks later. (From full walking steady
         // state, ≈1.0, decay alone takes eight.) Pinned so retuning is visible.
         assertEquals(6, ticks, "the stale Z heading decays within a few idle ticks");
-
-        DoorHeading raiding = new DoorHeading();
-        walk(raiding, 0, WALK, 6, false);
-        for (int i = 0; i < 40; i++) {
-            a = raiding.tick(0, 6 * WALK, false);
-        }
-        assertEquals(Axis.NONE, a, "a mob that isn't marching never assumes an axis");
     }
 
     @Test
-    void zWalkWhileMarchingIsHonouredOverTheFallback() {
+    void marchEndHandsOverToAnAlreadySettledDisplacementHeading() {
         DoorHeading h = new DoorHeading();
-        assertEquals(Axis.Z, walk(h, 0, WALK, 6, true), "real Z routing beats the X assumption");
+        walk(h, 0, WALK, 6, true);             // accumulators fed even while marching
+        assertEquals(Axis.Z, h.tick(0, 6 * WALK, false), "the moment the march ends, the real heading is known");
     }
 
     @Test

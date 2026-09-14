@@ -1,6 +1,8 @@
 package games.brennan.playermob.entity;
 
+import com.mojang.logging.LogUtils;
 import games.brennan.playermob.PlayerMobConfig;
+import org.slf4j.Logger;
 import games.brennan.playermob.PlayerMobRegistry;
 import games.brennan.playermob.compat.PlayerMobSocialHooks;
 import games.brennan.playermob.compat.ReincarnationRecord;
@@ -721,6 +723,20 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      */
     private boolean marchingCarriages;
 
+    /**
+     * Ticks a march is still considered "on" after its goal stops. A door operation evicts the
+     * march goal (DoorOperationGoal claims MOVE) for ~10 ticks and the goal takes another ~10 to
+     * re-arm; without this grace the door reflex would see the mob flicker out of "marching" mid
+     * doorway and drop the train-axis assumption at exactly the wrong moment.
+     */
+    private static final int MARCH_GRACE_TICKS = 40;
+
+    /** Tick until which {@link #isMarchingCarriages()} stays true after the march goal stopped. */
+    private int marchGraceUntilTick;
+
+    /** Objective-transition trace (gated on {@code debugSpawnLog}) — the Creative readout, in the log. */
+    private static final Logger OBJECTIVE_LOGGER = LogUtils.getLogger();
+
     public PlayerMobEntity(EntityType<? extends PlayerMobEntity> type, Level level) {
         super(type, level);
         // Preserve combat-kill XP parity. Monster's constructor sets xpReward=5;
@@ -1099,6 +1115,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             String readout = ObjectiveReadout.of(this.goalSelector, this.targetSelector);
             if (!readout.equals(this.entityData.get(DATA_OBJECTIVES))) {
                 this.entityData.set(DATA_OBJECTIVES, readout);
+                if (PlayerMobConfig.debugSpawnLog()) {
+                    OBJECTIVE_LOGGER.info("[Objective] mob={} name={} {}",
+                        getId(), getName().getString(), readout.replace('\n', ' '));
+                }
             }
         }
     }
@@ -2796,12 +2816,18 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * confident heading assumes it is travelling along the train's axis.
      */
     public void setMarchingCarriages(boolean marching) {
+        if (this.marchingCarriages && !marching) {
+            this.marchGraceUntilTick = this.tickCount + MARCH_GRACE_TICKS;
+        }
         this.marchingCarriages = marching;
     }
 
-    /** Whether a train march goal is currently walking this mob to the next carriage. */
+    /**
+     * Whether a train march goal is walking this mob to the next carriage — or stopped within the
+     * last {@link #MARCH_GRACE_TICKS} (a door operation or a re-arm pause, not a change of plan).
+     */
     public boolean isMarchingCarriages() {
-        return this.marchingCarriages;
+        return this.marchingCarriages || this.tickCount < this.marchGraceUntilTick;
     }
 
     /**

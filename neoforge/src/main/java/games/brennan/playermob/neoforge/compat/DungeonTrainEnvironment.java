@@ -583,10 +583,13 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         Vector3d sub = c.ship().worldToShip(new Vector3d(self.getX(), self.getY(), self.getZ()));
         Vector3d subEye = c.ship().worldToShip(new Vector3d(self.getX(), self.getEyeY(), self.getZ()));
 
-        // Hand-openable doors (wooden/copper): the path-aware reflex + stuck probe. Handled (or
+        // Hand-openable doors (wooden/copper): the path-aware reflex + stuck probe. At the forward
+        // group boundary the only door ahead opens onto the inter-group gap — the mob is waiting
+        // to leap (CrossGroupGapGoal), not wedged — so the probe is withheld there. Handled (or
         // deliberately silent) ⇒ done for this tick.
+        boolean atBoundary = atForwardBoundary(self);
         if (TrainDoorReflex.tick(playerMob, level,
-                new Vec3(sub.x, sub.y, sub.z), new Vec3(subEye.x, subEye.y, subEye.z))) {
+                new Vec3(sub.x, sub.y, sub.z), new Vec3(subEye.x, subEye.y, subEye.z), !atBoundary)) {
             return;
         }
 
@@ -594,7 +597,7 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         // Needs a known heading; and never the group-boundary door: opening it would walk the mob
         // into the inter-group gap (crossing it is behaviour #2). nextCarriageTarget is null there.
         Direction.Axis travelAxis = TrainDoorReflex.currentAxis(playerMob);
-        if (travelAxis == null || atForwardBoundary(self)) {
+        if (travelAxis == null || atBoundary) {
             return;
         }
         BlockPos subPos = BlockPos.containing(sub.x, sub.y, sub.z);

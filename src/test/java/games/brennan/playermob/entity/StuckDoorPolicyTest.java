@@ -79,6 +79,15 @@ class StuckDoorPolicyTest {
     }
 
     @Test
+    void retryBacksOffWithStrikesUpToACap() {
+        assertEquals(60, StuckDoorPolicy.retryCooldown(60, 0), "no strikes yet: base interval");
+        assertEquals(60, StuckDoorPolicy.retryCooldown(60, 1));
+        assertEquals(120, StuckDoorPolicy.retryCooldown(60, 2));
+        assertEquals(240, StuckDoorPolicy.retryCooldown(60, 4), "cap reached");
+        assertEquals(240, StuckDoorPolicy.retryCooldown(60, 9), "…and held there");
+    }
+
+    @Test
     void reflexMayNotTouchThePinnedDoorUntilThePinExpires() {
         assertFalse(StuckDoorPolicy.reflexMayTouch(5, 5, 10), "pinned door is off limits");
         assertTrue(StuckDoorPolicy.reflexMayTouch(6, 5, 10), "other doors are fine");
