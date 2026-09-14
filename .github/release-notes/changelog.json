@@ -939,6 +939,23 @@
       "released": true,
       "released_in": "v0.97.0",
       "released_at": "2026-08-29T16:55:08Z"
+    },
+    {
+      "id": "train-door-axis-and-stuck-probe",
+      "version": "0.98.0",
+      "type": "fix",
+      "title": "PlayerMobs no longer get stuck on Dungeon Train doors",
+      "summary": "On a Dungeon Train, a PlayerMob could wedge against a door for good \u2014 shoving a closed door confused its sense of which way it was going, and it never tried anything else. Marching mobs now judge doors by the train's own direction, so corridor doors open ahead of them and stay open, and a mob that still gets stuck tries the door both ways (then backs off) instead of standing there.",
+      "highlights": [
+        "Doors along the march open ahead of the mob and are no longer closed in its own face",
+        "A wedged mob probes the nearest door, then the other way, then moves on \u2014 with growing pauses so doors don't flap",
+        "Mobs waiting at a carriage-group edge to leap the gap no longer fiddle with the boundary door"
+      ],
+      "pr": 201,
+      "date": "2026-09-14",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }

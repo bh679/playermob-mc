@@ -52,7 +52,6 @@ import net.minecraft.world.entity.Mob;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.block.ButtonBlock;
-import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.LeverBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
@@ -96,7 +95,9 @@ import java.util.WeakHashMap;
  * same far-offset space the navigation paths in), not at the mob's apparent world
  * position — so door-opening converts the mob's position via
  * {@link games.brennan.dungeontrain.ship.ManagedShip#worldToShip}. Wooden and copper
- * doors are hand-openable and opened directly; iron doors are redstone-only, so the mob
+ * doors are hand-openable and handled by {@link TrainDoorReflex} (path-aware toggling that
+ * assumes the train's axis while marching, plus a try-a-door probe once the mob is wedged);
+ * iron doors are redstone-only, so the mob
  * turns to a reachable button/lever it has line of sight to and swings to operate it. The
  * group-boundary door is left shut
  * (opening it would march the mob into the inter-group gap — behaviour #2), and
@@ -117,9 +118,6 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
     /** Diagnostics for why a boarding spot could not be found (gated on debugSpawnLog). */
     private static final Logger LOGGER = LogUtils.getLogger();
 
-    /** How far around the mob to look for a door it's standing against. */
-    private static final int DOOR_REACH = 2;
-
     /** How far from an iron door to look for its button/lever control. */
     private static final int CONTROL_REACH = 3;
 
@@ -137,22 +135,6 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
      * own drift. Server-thread only; weak keys so entries vanish with the mob.
      */
     private static final Map<Entity, double[]> CONTROL_GAZE = new WeakHashMap<>();
-
-    /** Ticks a just-toggled hand door is left alone before it may be toggled again — anti-flap. */
-    private static final int DOOR_TOGGLE_COOLDOWN = 20;
-
-    /** How close another PlayerMob must be for a mob to hold a door open rather than close it on them. */
-    private static final double DOOR_COMPANION_REACH = 2.5;
-
-    /**
-     * Per-mob "I just toggled this door" memory for the path-aware door reflex:
-     * {@code {doorPosLong, ticksLeft}}. A door that obstructed the mob's travel axis is toggled
-     * to clear it; toggling makes it stop obstructing that axis, so the obstruction scan won't
-     * re-pick it on its own — this cooldown is the belt-and-suspenders guard against a flickering
-     * heading re-toggling the same door before the mob has crossed. Server-thread only; weak keys
-     * so entries vanish with the mob, exactly like {@link #CONTROL_GAZE}.
-     */
-    private static final Map<Entity, long[]> DOOR_COOLDOWN = new WeakHashMap<>();
 
     @Override
     public boolean isOnTrain(Entity self) {
@@ -599,78 +581,31 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         // paths), not at the mob's apparent world position — convert there to find the door, and
         // measure the heading there too so the carriage's carry-along drift is stripped out.
         Vector3d sub = c.ship().worldToShip(new Vector3d(self.getX(), self.getY(), self.getZ()));
-        BlockPos subPos = BlockPos.containing(sub.x, sub.y, sub.z);
+        Vector3d subEye = c.ship().worldToShip(new Vector3d(self.getX(), self.getEyeY(), self.getZ()));
 
-        // Path-aware: only touch a door that actually blocks the way the mob is going, toggling it
-        // to whichever state clears that axis (a closed door blocks its facing axis, an open one the
-        // perpendicular axis). No confident heading yet ⇒ leave every door alone this tick.
-        Direction.Axis travelAxis = DoorObstruction.travelAxis(playerMob, sub.x, sub.z);
-        if (travelAxis == null) {
-            return;
-        }
-
-        long[] cooldown = DOOR_COOLDOWN.get(self);
-        if (cooldown != null && cooldown[1] > 0) {
-            cooldown[1]--;
-        }
-
-        // Hand-openable doors (wooden/copper) toggle directly. Try the sub-level position first,
-        // then the world position in case a build projects carriage blocks at the apparent location.
-        DoorObstruction.Obstruction hand =
-            DoorObstruction.nearestObstructing(level, subPos, DOOR_REACH, travelAxis, DoorObstruction.HAND_DOOR);
-        if (hand == null) {
-            hand = DoorObstruction.nearestObstructing(
-                level, self.blockPosition(), DOOR_REACH, travelAxis, DoorObstruction.HAND_DOOR);
-        }
-        if (hand != null) {
-            long posLong = hand.pos().asLong();
-            BlockPos doorPos = hand.pos();
-            boolean desiredOpen = !hand.state().getValue(DoorBlock.OPEN);
-            boolean coolingSameDoor = cooldown != null && cooldown[0] == posLong && cooldown[1] > 0;
-            // Don't slam a door shut on a companion. The "close it to clear my perpendicular axis"
-            // reflex, run independently per mob, otherwise fights another mob's "open it to clear my
-            // facing axis" reflex on the SAME door — two PlayerMobs flapping one door open/closed
-            // (now common when a pair travels together). So a mob holds off *closing* while another
-            // PlayerMob is right beside it; whoever's left closes it once alone. Opening is never held.
-            boolean holdOpenForCompanion = !desiredOpen && anotherPlayerMobBeside(level, playerMob);
-            if (!coolingSameDoor && !holdOpenForCompanion) {
-                // Defer the open/close into a deliberate window: the mob faces the door, swings, then
-                // operates it, interrupting combat/movement (DoorOperationGoal) rather than flipping it
-                // silently. The eye→door offset is taken in the carriage's sub-level frame, which equals
-                // the world-frame offset (rotation is locked to identity), so it's the right look target.
-                Vector3d subEye = c.ship().worldToShip(new Vector3d(self.getX(), self.getEyeY(), self.getZ()));
-                playerMob.beginDoorOperation(
-                    doorPos.getX() + 0.5 - subEye.x,
-                    doorPos.getY() + 0.5 - subEye.y,
-                    doorPos.getZ() + 0.5 - subEye.z,
-                    () -> DoorObstruction.setOpen(self, level, doorPos, desiredOpen));
-                DOOR_COOLDOWN.put(self, new long[]{posLong, DOOR_TOGGLE_COOLDOWN});
-            }
+        // Hand-openable doors (wooden/copper): the path-aware reflex + stuck probe. At the forward
+        // group boundary the only door ahead opens onto the inter-group gap — the mob is waiting
+        // to leap (CrossGroupGapGoal), not wedged — so the probe is withheld there. Handled (or
+        // deliberately silent) ⇒ done for this tick.
+        boolean atBoundary = atForwardBoundary(self);
+        if (TrainDoorReflex.tick(playerMob, level,
+                new Vec3(sub.x, sub.y, sub.z), new Vec3(subEye.x, subEye.y, subEye.z), !atBoundary)) {
             return;
         }
 
         // Iron doors are redstone-only — open a closed one that's blocking us via its button/lever.
-        // But never the group-boundary door: opening it would walk the mob into the inter-group gap
-        // (crossing it is behaviour #2). nextCarriageTarget is null there.
-        if (atForwardBoundary(self)) {
+        // Needs a known heading; and never the group-boundary door: opening it would walk the mob
+        // into the inter-group gap (crossing it is behaviour #2). nextCarriageTarget is null there.
+        Direction.Axis travelAxis = TrainDoorReflex.currentAxis(playerMob);
+        if (travelAxis == null || atBoundary) {
             return;
         }
-        DoorObstruction.Obstruction iron =
-            DoorObstruction.nearestObstructing(level, subPos, DOOR_REACH, travelAxis, DoorObstruction.CLOSED_IRON_DOOR);
+        BlockPos subPos = BlockPos.containing(sub.x, sub.y, sub.z);
+        DoorObstruction.Obstruction iron = DoorObstruction.nearestObstructing(
+            level, subPos, TrainDoorReflex.DOOR_REACH, travelAxis, DoorObstruction.CLOSED_IRON_DOOR);
         if (iron != null && operateControlNear(playerMob, level, c, iron.pos())) {
             playerMob.interruptForDoorOperation(); // pause combat/movement for the control press too
         }
-    }
-
-    /**
-     * Whether another {@link PlayerMobEntity} is right beside {@code self} (within {@link
-     * #DOOR_COMPANION_REACH}). Used to hold a door open rather than close it on a companion —
-     * two mobs otherwise flap a shared door, each closing it to clear its own path while the
-     * other reopens it.
-     */
-    private static boolean anotherPlayerMobBeside(ServerLevel level, PlayerMobEntity self) {
-        AABB box = self.getBoundingBox().inflate(DOOR_COMPANION_REACH);
-        return !level.getEntitiesOfClass(PlayerMobEntity.class, box, other -> other != self).isEmpty();
     }
 
     /**
@@ -812,7 +747,7 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
      * Per-mob dig progress: a stuck detector (fed the carriage's sub-level coords so the
      * carry-along drift is stripped out), whether a stuck-triggered episode is active, and the
      * current target block + break timing. Server-thread only; weak keys so entries vanish with the
-     * mob, exactly like {@link #CONTROL_GAZE}/{@link #DOOR_COOLDOWN}.
+     * mob, exactly like {@link #CONTROL_GAZE}.
      */
     private static final class DigState {
         final DoorStuckMonitor stuck = new DoorStuckMonitor();

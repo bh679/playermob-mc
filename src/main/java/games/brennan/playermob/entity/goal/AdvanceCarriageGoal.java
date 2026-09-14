@@ -119,12 +119,14 @@ public final class AdvanceCarriageGoal extends Goal implements DescribableGoal {
     public void start() {
         phaseTicks = 0;
         repathCooldown = 0;
+        mob.setMarchingCarriages(true); // the door reflex may assume the train axis while we walk
         issueMove();
     }
 
     @Override
     public void stop() {
         mob.getNavigation().stop();
+        mob.setMarchingCarriages(false);
         target = null;
         phaseTicks = 0;
         repathCooldown = 0;

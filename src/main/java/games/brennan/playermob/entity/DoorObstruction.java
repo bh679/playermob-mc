@@ -7,7 +7,10 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
 import java.util.function.Predicate;
@@ -126,6 +129,52 @@ public final class DoorObstruction {
             }
         }
         return best;
+    }
+
+    /**
+     * Every door within {@code reach} of {@code base} that passes {@code accept}, regardless of
+     * whether it obstructs anything — the candidate set for the stuck probe, which has given up
+     * proving and is trying doors. Each door is reported once, by its <em>lower</em> half (the
+     * scan sees both halves; the upper half is folded onto the lower so a door standing at the
+     * mob's feet and one whose lower half sits a step down both resolve to one identity). Same
+     * cube as {@link #nearestObstructing}, in whatever frame {@code level}'s blocks live in.
+     */
+    public static List<Obstruction> nearbyDoors(Level level, BlockPos base, int reach, Predicate<BlockState> accept) {
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        Map<BlockPos, Obstruction> found = new LinkedHashMap<>();
+        for (int dy = 0; dy <= 1; dy++) {
+            for (int dx = -reach; dx <= reach; dx++) {
+                for (int dz = -reach; dz <= reach; dz++) {
+                    cursor.set(base.getX() + dx, base.getY() + dy, base.getZ() + dz);
+                    BlockState state = level.getBlockState(cursor);
+                    if (!(state.getBlock() instanceof DoorBlock)) {
+                        continue;
+                    }
+                    BlockPos lower = state.getValue(DoorBlock.HALF) == DoubleBlockHalf.UPPER
+                        ? cursor.below() : cursor.immutable();
+                    if (found.containsKey(lower)) {
+                        continue;
+                    }
+                    BlockState lowerState = level.getBlockState(lower);
+                    if (lowerState.getBlock() instanceof DoorBlock && accept.test(lowerState)) {
+                        found.put(lower, new Obstruction(lower, lowerState));
+                    }
+                }
+            }
+        }
+        return List.copyOf(found.values());
+    }
+
+    /**
+     * Adapt a scanned door to the Minecraft-free {@link StuckDoorPolicy.DoorCandidate}: keyed
+     * by its packed position, with its facing axis, open state, and squared distance from
+     * {@code base}.
+     */
+    public static StuckDoorPolicy.DoorCandidate toCandidate(Obstruction door, BlockPos base) {
+        boolean facingIsX = door.state().getValue(DoorBlock.FACING).getAxis() == Direction.Axis.X;
+        boolean open = door.state().getValue(DoorBlock.OPEN);
+        return new StuckDoorPolicy.DoorCandidate(
+            door.pos().asLong(), facingIsX, open, (long) door.pos().distSqr(base));
     }
 
     /**

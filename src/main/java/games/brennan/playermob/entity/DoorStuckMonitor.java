@@ -34,10 +34,10 @@ public final class DoorStuckMonitor {
     static final double PROGRESS_EPS_SQR = 0.02 * 0.02;
 
     /** Consecutive no-progress ticks (while trying to move) before a recovery fires. ~1.5 s. */
-    static final int STUCK_TICKS = 30;
+    public static final int STUCK_TICKS = 30;
 
     /** Ticks after a fire during which the monitor stays silent, giving the close time to help. ~1.5 s. */
-    static final int COOLDOWN_TICKS = 30;
+    public static final int COOLDOWN_TICKS = 30;
 
     private boolean hasLast;
     private double lastX;
