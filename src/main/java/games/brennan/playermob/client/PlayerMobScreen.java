@@ -49,8 +49,10 @@ import java.util.UUID;
  * container-button channel (see {@link PlayerMobMenu#clickMenuButton}); the
  * server clamps and re-syncs, so the panel reflects the edit next frame.
  * Relationship rows are ordered by UUID (stable) so a row stays put while you
- * adjust it. A right-hand <b>objectives column</b> shows the mob's live goal
- * stack.</p>
+ * adjust it. In edit mode the Relationships header also gains a {@code [+]} that opens the
+ * <b>add-relation picker</b> ({@link RelationPicker}) — a list of nearby PlayerMobs the
+ * server snapshotted, shown in place of the objectives column, with a Mirror toggle. A
+ * right-hand <b>objectives column</b> shows the mob's live goal stack.</p>
  *
  * <p>{@link Environment} {@code CLIENT}-only — stripped from dedicated server
  * jars at load time, same pattern as {@code PlayerMobRenderer}. Registered per
@@ -151,6 +153,11 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     private Button editToggle;
     /** The six trait {@code [-]}/{@code [+]} arrows (two per trait), hidden unless {@link #editMode}. */
     private final List<Button> traitButtons = new ArrayList<>();
+    /** {@code [+]} on the Relationships header that opens {@link #picker}; hidden unless {@link #editMode}. */
+    private Button addRelationButton;
+    /** The add-relation picker's state + widgets; survives re-init so a resize keeps it open. */
+    private final RelationPicker picker = new RelationPicker(
+        this::sendButton, this::addRenderableWidget, this::removeWidget);
 
     public PlayerMobScreen(PlayerMobMenu menu, Inventory playerInv, Component title) {
         //? if >=26 {
@@ -190,6 +197,16 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
         addTraitButtons(top + FRIEND_LABEL_DY, TraitEditButtons.FRIENDLINESS_DOWN, TraitEditButtons.FRIENDLINESS_UP);
         addTraitButtons(top + REACT_LABEL_DY, TraitEditButtons.REACTION_SPEED_DOWN, TraitEditButtons.REACTION_SPEED_UP);
         rebuildRelationshipButtons();
+        addAddRelationButton(top);
+        picker.init(this.leftPos + OBJECTIVES_X, this.topPos);
+    }
+
+    /** The {@code [+]} on the Relationships header line, right-aligned like the row arrows. */
+    private void addAddRelationButton(int top) {
+        addRelationButton = Button.builder(Component.literal("+"), b -> picker.open())
+            .bounds(relPlusX(), top + REL_HEADER_DY - 1, REL_BTN_SIZE, REL_BTN_SIZE).build();
+        addRelationButton.visible = editMode;
+        addRenderableWidget(addRelationButton);
     }
 
     /**
@@ -226,6 +243,12 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
         }
         for (Button b : relationshipButtons) {
             b.visible = editMode;
+        }
+        if (addRelationButton != null) {
+            addRelationButton.visible = editMode;
+        }
+        if (!editMode) {
+            picker.close(); // "Done" also dismisses an open picker
         }
     }
 
@@ -277,6 +300,7 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
         if (mob != null && !stableFeelingOrder(mob).equals(relationshipOrder)) {
             rebuildRelationshipButtons();
         }
+        picker.tick(this.menu.candidateEntityIds());
     }
 
     /**
@@ -406,6 +430,10 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
         PlayerMobEntity mob = this.menu.getMob();
         if (mob == null) {
             return; // client fallback before the entity resolved — no live state
+        }
+        if (picker.isOpen()) {
+            drawPickerColumn(guiGraphics);
+            return;
         }
 
         int gx = OBJECTIVES_X + 7;
@@ -612,6 +640,60 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     }
     //?}
 
+    /**
+     * The add-relation picker in place of the objectives column: header, then each candidate
+     * row's face + name drawn over its (empty-labelled) row button. Window-local coordinates,
+     * like {@link #drawObjectivesColumn}. A candidate whose entity hasn't been tracked yet
+     * (the data-slot sync can beat the entity-track packet by a tick) shows "…" and its row
+     * is disabled until it resolves.
+     */
+    //? if >=26 {
+    /*private void drawPickerColumn(GuiGraphicsExtractor g) {
+    *///?} else {
+    private void drawPickerColumn(GuiGraphics g) {
+    //?}
+        int gx = OBJECTIVES_X + RelationPicker.PAD;
+        //? if >=26 {
+        /*g.text(this.font, "Add relation", gx + 3, RelationPicker.HEADER_Y, OBJECTIVES_HEADER_COLOR, false);
+        *///?} else {
+        g.drawString(this.font, "Add relation", gx + 3, RelationPicker.HEADER_Y, OBJECTIVES_HEADER_COLOR, false);
+        //?}
+        List<Integer> ids = picker.candidateIds();
+        if (ids.isEmpty()) {
+            //? if >=26 {
+            /*g.text(this.font, "no PlayerMobs nearby", gx + 3, RelationPicker.ROWS_Y + 2, OBJECTIVES_SUB_COLOR, false);
+            *///?} else {
+            g.drawString(this.font, "no PlayerMobs nearby", gx + 3, RelationPicker.ROWS_Y + 2, OBJECTIVES_SUB_COLOR, false);
+            //?}
+            return;
+        }
+        Minecraft mc = Minecraft.getInstance();
+        for (int row = 0; row < ids.size(); row++) {
+            int y = RelationPicker.ROWS_Y + row * RelationPicker.ROW_H + 2; // centre 8px face in the 12px button
+            Entity e = mc.level == null ? null : mc.level.getEntity(ids.get(row));
+            boolean resolved = e instanceof PlayerMobEntity;
+            picker.setRowActive(row, resolved);
+            if (!resolved) {
+                //? if >=26 {
+                /*g.text(this.font, "…", gx + 3, y, OBJECTIVES_SUB_COLOR, false);
+                *///?} else {
+                g.drawString(this.font, "…", gx + 3, y, OBJECTIVES_SUB_COLOR, false);
+                //?}
+                continue;
+            }
+            UUID id = e.getUUID();
+            //? if >=26 {
+            /*PlayerFaceExtractor.extractRenderState(g, resolveFaceTexture(id), gx + 3, y, FACE_SIZE, true, false, 0xFFFFFFFF);
+            g.text(this.font, trimTo(nameCache.computeIfAbsent(id, this::computeName), RelationPicker.WIDTH - FACE_SIZE - 10),
+                gx + 3 + FACE_SIZE + 3, y, OBJECTIVES_TEXT_COLOR, false);
+            *///?} else {
+            PlayerFaceRenderer.draw(g, resolveFaceTexture(id), gx + 3, y, FACE_SIZE, true, false);
+            g.drawString(this.font, trimTo(nameCache.computeIfAbsent(id, this::computeName), RelationPicker.WIDTH - FACE_SIZE - 10),
+                gx + 3 + FACE_SIZE + 3, y, OBJECTIVES_TEXT_COLOR, false);
+            //?}
+        }
+    }
+
     // ---- Identity / face resolution (client-side) -------------------------
 
     private String computeName(UUID id) {
@@ -671,8 +753,12 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
 
     /** Truncate a name to fit the relationship row's name column (face … value [-] [+]). */
     private String trim(String name) {
-        int maxWidth = BAR_WIDTH - (FACE_SIZE + 3)
-            - (2 * REL_BTN_SIZE + REL_BTN_GAP) - this.font.width("10.0") - 4;
+        return trimTo(name, BAR_WIDTH - (FACE_SIZE + 3)
+            - (2 * REL_BTN_SIZE + REL_BTN_GAP) - this.font.width("10.0") - 4);
+    }
+
+    /** Truncate {@code name} with an ellipsis so it fits within {@code maxWidth} px. */
+    private String trimTo(String name, int maxWidth) {
         if (this.font.width(name) <= maxWidth) {
             return name;
         }

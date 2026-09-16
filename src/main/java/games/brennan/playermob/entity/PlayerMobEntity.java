@@ -2349,6 +2349,28 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         return handled;
     }
 
+    /** True once this mob has an entry (of any feeling) for {@code id} — i.e. it has "met" them. */
+    public boolean hasMet(UUID id) {
+        return feelings.has(id);
+    }
+
+    /**
+     * Creative editor: introduce this mob to {@code other} without waiting for a line-of-sight
+     * encounter — adds a neutral ledger entry for {@code other}, and with {@code mirror} the
+     * reverse entry on {@code other} too (see {@code RelationPickerButtons}). Each side is then
+     * edited independently with the per-row feeling arrows. Server-side; idempotent (an existing
+     * entry is left as it is); persists through the existing {@code feelings.save} NBT path and
+     * re-syncs both mobs so open menus update next frame.
+     */
+    public void addEditorRelation(PlayerMobEntity other, boolean mirror) {
+        this.feelings.encounter(other.getUUID());
+        this.pushDispositionToClient();
+        if (mirror) {
+            other.feelings.encounter(this.getUUID());
+            other.pushDispositionToClient();
+        }
+    }
+
     /** True if the main hand holds a recognised weapon (drives the provoked fight/flee choice). */
     public boolean isArmed() {
         return isWeapon(getMainHandItem());
