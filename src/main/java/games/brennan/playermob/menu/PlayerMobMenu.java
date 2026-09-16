@@ -4,6 +4,7 @@ package games.brennan.playermob.menu;
 import com.mojang.datafixers.util.Pair;
 //?}
 import games.brennan.playermob.PlayerMobRegistry;
+import games.brennan.playermob.entity.LinkEditButtons;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.entity.RelationPickerButtons;
 //? if >=26 {
@@ -16,6 +17,7 @@ import net.minecraft.world.SimpleContainer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
@@ -150,10 +152,10 @@ public class PlayerMobMenu extends AbstractContainerMenu {
 
     /** Re-snapshot the nearby-PlayerMob candidate list and publish it through the data slots. */
     private void rescanCandidates() {
-        List<PlayerMobEntity> found = RelationCandidates.scan(mob);
+        List<LivingEntity> found = RelationCandidates.scan(mob);
         List<UUID> uuids = new ArrayList<>(found.size());
         List<Integer> ids = new ArrayList<>(found.size());
-        for (PlayerMobEntity candidate : found) {
+        for (LivingEntity candidate : found) {
             uuids.add(candidate.getUUID());
             ids.add(candidate.getId());
         }
@@ -163,7 +165,7 @@ public class PlayerMobMenu extends AbstractContainerMenu {
 
     /**
      * Resolve a pick button against the snapshot and add the relation. The row must still be
-     * a live PlayerMob within twice the scan range (it may have wandered since the scan); on
+     * a live PlayerMob / player within twice the scan range (it may have wandered since the scan); on
      * success the list is re-scanned so the newly-met mob drops out of the picker.
      *
      * @return {@code true} if {@code id} was a picker button (handled, even if the row was stale).
@@ -181,7 +183,8 @@ public class PlayerMobMenu extends AbstractContainerMenu {
             return true;
         }
         Entity picked = level.getEntity(candidateUuids.get(row));
-        if (picked instanceof PlayerMobEntity other && other.isAlive() && other != mob
+        if (picked instanceof LivingEntity other && other.isAlive() && other != mob
+            && RelationCandidates.isCandidateKind(other)
             && other.distanceToSqr(mob) <= 4.0 * RelationCandidates.PICK_RANGE * RelationCandidates.PICK_RANGE) {
             mob.addEditorRelation(other, RelationPickerButtons.isMirror(id));
         }
@@ -265,14 +268,16 @@ public class PlayerMobMenu extends AbstractContainerMenu {
      * ({@link games.brennan.playermob.entity.TraitEditButtons}); higher ids map to
      * per-relationship feeling adjustments
      * ({@link games.brennan.playermob.entity.FeelingEditButtons}), then the add-relation
-     * picker ({@link RelationPickerButtons}). All clamped; no custom packets.
+     * picker ({@link RelationPickerButtons}) and the per-row Mirror link toggles
+     * ({@link LinkEditButtons}). All clamped; no custom packets.
      */
     @Override
     public boolean clickMenuButton(Player player, int id) {
         if (mob == null || !player.isCreative()) {
             return false;
         }
-        return mob.applyTraitEditButton(id) || mob.applyFeelingEditButton(id) || handlePickerButton(id);
+        return mob.applyTraitEditButton(id) || mob.applyFeelingEditButton(id)
+            || mob.applyLinkEditButton(id) || handlePickerButton(id);
     }
 
     @Override

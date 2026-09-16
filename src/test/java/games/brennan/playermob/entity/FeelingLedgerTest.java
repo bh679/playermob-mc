@@ -364,4 +364,47 @@ class FeelingLedgerTest {
         assertTrue(back.isAnswered(fought), "a blow struck back still counts after a reload");
         assertEquals(0.0f, back.recordFor(fought).unansweredTimidity(), EPS);
     }
+
+    // ---- Editor Mirror link ------------------------------------------------
+
+    @Test
+    void linkFlagRoundTripsThroughSyncString() {
+        UUID linked = new UUID(0L, 1L);
+        UUID plain = new UUID(0L, 2L);
+        FeelingLedger ledger = new FeelingLedger();
+        ledger.set(linked, 7.0f);
+        ledger.set(plain, 3.0f);
+        ledger.setLinked(linked, true);
+        assertTrue(ledger.isLinked(linked));
+        assertFalse(ledger.isLinked(plain));
+
+        String encoded = ledger.encode();
+        Map<UUID, Float> feelings = FeelingLedger.decode(encoded);
+        assertEquals(7.0f, feelings.get(linked), EPS, "marker must not corrupt the value");
+        assertEquals(3.0f, feelings.get(plain), EPS);
+        assertEquals(java.util.Set.of(linked), FeelingLedger.decodeLinked(encoded));
+
+        ledger.setLinked(linked, false);
+        assertTrue(FeelingLedger.decodeLinked(ledger.encode()).isEmpty());
+        assertTrue(FeelingLedger.decodeLinked("").isEmpty());
+        assertTrue(FeelingLedger.decodeLinked(null).isEmpty());
+    }
+
+    @Test
+    void linkFlagSurvivesSaveLoadAndDefaultsFalse() {
+        UUID linked = new UUID(0L, 1L);
+        UUID plain = new UUID(0L, 2L);
+        FeelingLedger ledger = new FeelingLedger();
+        ledger.set(linked, 8.0f);
+        ledger.setLinked(linked, true);
+        ledger.set(plain, 2.0f);
+        CompoundTag tag = new CompoundTag();
+        ledger.save(tag);
+
+        FeelingLedger back = new FeelingLedger();
+        back.load(tag);
+        assertTrue(back.isLinked(linked));
+        assertFalse(back.isLinked(plain), "missing Linked key reads as unlinked");
+        assertEquals(8.0f, back.feelingToward(linked), EPS);
+    }
 }

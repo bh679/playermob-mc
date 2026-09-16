@@ -2,6 +2,8 @@ package games.brennan.playermob.menu;
 
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.entity.RelationPickerButtons;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.ContainerData;
 import net.minecraft.world.inventory.SimpleContainerData;
 
@@ -31,19 +33,23 @@ public final class RelationCandidates {
     }
 
     /**
-     * Nearby PlayerMobs {@code mob} could be introduced to: alive, not itself, not already in
-     * its ledger, nearest first, capped at {@link RelationPickerButtons#MAX_CANDIDATES}.
-     * Server-side.
+     * Nearby individuals {@code mob} could be introduced to — PlayerMobs and (non-spectator)
+     * players: alive, not itself, not already in its ledger, nearest first, capped at
+     * {@link RelationPickerButtons#MAX_CANDIDATES}. Server-side.
      */
-    public static List<PlayerMobEntity> scan(PlayerMobEntity mob) {
-        List<PlayerMobEntity> nearby = mob.level().getEntitiesOfClass(PlayerMobEntity.class,
+    public static List<LivingEntity> scan(PlayerMobEntity mob) {
+        List<LivingEntity> sorted = new ArrayList<>(mob.level().getEntitiesOfClass(LivingEntity.class,
             mob.getBoundingBox().inflate(PICK_RANGE),
-            e -> e != mob && e.isAlive() && !mob.hasMet(e.getUUID()));
-        List<PlayerMobEntity> sorted = new ArrayList<>(nearby);
+            e -> e != mob && e.isAlive() && isCandidateKind(e) && !mob.hasMet(e.getUUID())));
         sorted.sort(Comparator.comparingDouble(mob::distanceToSqr));
         return sorted.size() > RelationPickerButtons.MAX_CANDIDATES
             ? List.copyOf(sorted.subList(0, RelationPickerButtons.MAX_CANDIDATES))
             : List.copyOf(sorted);
+    }
+
+    /** True for the kinds of individual a ledger can hold: a PlayerMob, or a player who isn't spectating. */
+    public static boolean isCandidateKind(LivingEntity e) {
+        return e instanceof PlayerMobEntity || (e instanceof Player p && !p.isSpectator());
     }
 
     /** Encode {@code entityIds} (at most {@code MAX_CANDIDATES}; extras dropped) into {@code data}. */

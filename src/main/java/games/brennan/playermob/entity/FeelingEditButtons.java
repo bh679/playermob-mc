@@ -1,6 +1,7 @@
 package games.brennan.playermob.entity;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -68,6 +69,20 @@ public final class FeelingEditButtons {
      *     row (a non-feeling id, or a stale/out-of-range row, returns {@code false}
      *     and leaves the ledger untouched).
      */
+    /**
+     * The individual a feeling button {@code id} addresses — the row-th UUID in
+     * {@link FeelingLedger#uuidsSorted()} — or empty for a non-feeling id or a stale /
+     * out-of-range row. Lets the entity mirror the edit to that individual when linked.
+     */
+    public static Optional<UUID> targetOf(int id, FeelingLedger ledger) {
+        if (!isFeelingButton(id)) {
+            return Optional.empty();
+        }
+        List<UUID> order = ledger.uuidsSorted();
+        int row = rowOf(id);
+        return row < 0 || row >= order.size() ? Optional.empty() : Optional.of(order.get(row));
+    }
+
     public static boolean apply(int id, FeelingLedger ledger) {
         if (!isFeelingButton(id)) {
             return false;

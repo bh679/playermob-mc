@@ -45,7 +45,7 @@ public final class RelationPicker {
     private final Consumer<AbstractWidget> removeWidget;
 
     private boolean open = false;
-    /** Add the reverse entry on the picked mob too. Default on — "introduce them to each other". */
+    /** Add the reverse entry on a picked PlayerMob too and link the pair (see LinkEditButtons). Default on. */
     private boolean mirror = true;
 
     private int columnX;

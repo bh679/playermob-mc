@@ -1,35 +1,35 @@
 package games.brennan.playermob.client;
 
-import games.brennan.playermob.compat.SkinCompat;
 import games.brennan.playermob.entity.FeelingEditButtons;
+import games.brennan.playermob.entity.LinkEditButtons;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.entity.TraitEditButtons;
 import games.brennan.playermob.menu.PlayerMobMenu;
+import games.brennan.playermob.menu.RelationCandidates;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.Minecraft;
 //? if >=26 {
 /*import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.PlayerFaceExtractor;
-import net.minecraft.resources.Identifier;
 *///?} else {
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.PlayerFaceRenderer;
-import net.minecraft.resources.ResourceLocation;
 //?}
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
-import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.Slot;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -42,12 +42,15 @@ import java.util.UUID;
  * <p>A middle <b>disposition panel</b> shows the mob's two personal traits
  * (Fight/Flight, Friendliness) and a <b>Relationships</b> list — one row per
  * individual the mob has met, each with that target's face, name, and feeling
- * (0–10, hate→love). All read live from the entity's synced disposition fields,
+ * (0–10, hate→love) plus, for a PlayerMob target, that mob's feeling <em>back</em> toward
+ * this one ({@code ←7.0}, read from the other mob's own synced ledger). All read live from the entity's synced disposition fields,
  * so values update while the menu is open. An <b>Edit</b> toggle in the panel
  * header reveals the per-trait and per-relationship {@code [-]}/{@code [+]}
  * buttons (hidden by default) that edit values in Creative over the vanilla
  * container-button channel (see {@link PlayerMobMenu#clickMenuButton}); the
- * server clamps and re-syncs, so the panel reflects the edit next frame.
+ * server clamps and re-syncs, so the panel reflects the edit next frame. Each PlayerMob row
+ * also has an {@code [M]} <b>Mirror</b> toggle ({@link LinkEditButtons}) that links the two
+ * mobs' feelings for editor edits (green underline = linked).
  * Relationship rows are ordered by UUID (stable) so a row stays put while you
  * adjust it. In edit mode the Relationships header also gains a {@code [+]} that opens the
  * <b>add-relation picker</b> ({@link RelationPicker}) — a list of nearby PlayerMobs the
@@ -124,9 +127,10 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     private static final int EDIT_TOGGLE_W = 30;
     private static final int EDIT_TOGGLE_H = 12;
 
-    // Per-relationship feeling edit buttons: [-] [+] at the right of each row.
+    // Per-relationship edit buttons: [M] [-] [+] at the right of each row.
     private static final int REL_BTN_SIZE = 10;
     private static final int REL_BTN_GAP = 1;
+    private static final int LINKED_COLOR = 0xFF30B030;
 
     // ---- Creative objectives column — right of the disposition panel ----
     private static final int OBJECTIVES_X = INVENTORY_WIDTH + DISPOSITION_WIDTH;
@@ -135,11 +139,13 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     private static final int OBJECTIVES_TEXT_COLOR = 0xFF404040;
     private static final int OBJECTIVES_SUB_COLOR = 0xFF707070;
 
-    /** Names are stable for a session — resolve once per UUID. */
-    private final Map<UUID, String> nameCache = new HashMap<>();
+    /** Name / face / feeling-back lookups for the relationship rows (names cached per session). */
+    private final RelationIdentity identity = new RelationIdentity();
 
     /** Per-relationship feeling edit buttons, rebuilt when the relationship set changes. */
     private final List<Button> relationshipButtons = new ArrayList<>();
+    /** Per-relationship {@code [M]} Mirror toggles (row-indexed); hidden on player rows. */
+    private final List<Button> linkButtons = new ArrayList<>();
     /** Stable UUID order the relationship buttons were last built for (change ⇒ rebuild). */
     private List<UUID> relationshipOrder = List.of();
 
@@ -244,6 +250,9 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
         for (Button b : relationshipButtons) {
             b.visible = editMode;
         }
+        for (int row = 0; row < linkButtons.size(); row++) {
+            linkButtons.get(row).visible = editMode && !RelationIdentity.isPlayer(relationshipOrder.get(row));
+        }
         if (addRelationButton != null) {
             addRelationButton.visible = editMode;
         }
@@ -263,7 +272,11 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
         for (Button b : relationshipButtons) {
             this.removeWidget(b);
         }
+        for (Button b : linkButtons) {
+            this.removeWidget(b);
+        }
         relationshipButtons.clear();
+        linkButtons.clear();
         PlayerMobEntity mob = this.menu.getMob();
         if (mob == null) {
             relationshipOrder = List.of();
@@ -277,7 +290,19 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
             final int row = i;
             addRelationshipButton(relMinusX(), by, FeelingEditButtons.idFor(row, false), "-");
             addRelationshipButton(relPlusX(), by, FeelingEditButtons.idFor(row, true), "+");
+            addLinkButton(relLinkX(), by, LinkEditButtons.idFor(row), relationshipOrder.get(row));
         }
+    }
+
+    /** The {@code [M]} Mirror toggle for one row — only meaningful for a PlayerMob target. */
+    private void addLinkButton(int x, int y, int id, UUID target) {
+        Button b = Button.builder(Component.literal("M"), btn -> sendButton(id))
+            .bounds(x, y, REL_BTN_SIZE, REL_BTN_SIZE)
+            .tooltip(Tooltip.create(Component.literal("Mirror: keep this feeling and the other mob's feeling back in sync")))
+            .build();
+        b.visible = editMode && !RelationIdentity.isPlayer(target);
+        linkButtons.add(b);
+        this.addRenderableWidget(b);
     }
 
     private void addRelationshipButton(int x, int y, int id, String glyph) {
@@ -320,6 +345,10 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
 
     private int relPlusX() {
         return this.leftPos + PANEL_X + BAR_WIDTH - REL_BTN_SIZE;
+    }
+
+    private int relLinkX() {
+        return relMinusX() - REL_BTN_SIZE - REL_BTN_GAP;
     }
 
     /** A {@code [-] [+]} button pair for one trait, on its label line. Hidden unless {@link #editMode}. */
@@ -573,10 +602,11 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
         // Same stable UUID order as the edit buttons and the server mapping, so each
         // row's [-]/[+] edits the individual shown on that row.
         List<UUID> order = stableFeelingOrder(mob);
+        Set<UUID> linked = mob.getSyncedLinked();
         int shown = Math.min(MAX_RELATIONSHIP_ROWS, order.size());
         for (int i = 0; i < shown; i++) {
             UUID id = order.get(i);
-            drawRelationshipRow(g, x, y, id, feelings.get(id));
+            drawRelationshipRow(g, x, y, id, feelings.get(id), RelationIdentity.backFeeling(mob, id), linked.contains(id));
             y += ROW_HEIGHT;
         }
         if (order.size() > shown) {
@@ -618,27 +648,52 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
         g.fill(x, barY, x + filled, barY + 3, 0xFF4060C0);
     }
 
+    /**
+     * One relationship row: face, name, the other mob's feeling back ({@code ←7.0}, muted, or
+     * {@code –} for a player / unloaded mob), this mob's feeling, then the {@code [M] [-] [+]}
+     * widgets. A linked row gets a green underline beneath its {@code [M]} (edit mode only,
+     * where the button is).
+     */
     //? if >=26 {
-    /*private void drawRelationshipRow(GuiGraphicsExtractor g, int x, int y, UUID id, float feeling) {
+    /*private void drawRelationshipRow(GuiGraphicsExtractor g, int x, int y, UUID id, float feeling,
+                                     Float back, boolean linked) {
         // PlayerFaceRenderer became PlayerFaceExtractor in 26.2: it blits the 8x8 base face +
         // hat overlay from the 64x64 skin using normalised (0-1) UVs internally. White, opaque.
-        PlayerFaceExtractor.extractRenderState(g, resolveFaceTexture(id), x, y, FACE_SIZE, true, false, 0xFFFFFFFF);
-        String name = nameCache.computeIfAbsent(id, this::computeName);
+        PlayerFaceExtractor.extractRenderState(g, RelationIdentity.faceTexture(id), x, y, FACE_SIZE, true, false, 0xFFFFFFFF);
+        String name = identity.name(id);
         g.text(this.font, Component.literal(trim(name)), x + FACE_SIZE + 3, y, VALUE_COLOR, false);
         String value = String.format(Locale.ROOT, "%.1f", feeling);
-        int vx = relMinusX() - 2 - this.font.width(value); // just left of the [-] button
+        int vx = relLinkX() - 2 - this.font.width(value); // just left of the [M] button
         g.text(this.font, Component.literal(value), vx, y, feelingColor(feeling), false);
+        String backText = backText(back);
+        g.text(this.font, Component.literal(backText), vx - 3 - this.font.width(backText), y,
+            back == null ? MUTED_COLOR : feelingColor(back), false);
+        if (linked && editMode) {
+            g.fill(relLinkX(), y + REL_BTN_SIZE, relLinkX() + REL_BTN_SIZE, y + REL_BTN_SIZE + 1, LINKED_COLOR);
+        }
     }
     *///?} else {
-    private void drawRelationshipRow(GuiGraphics g, int x, int y, UUID id, float feeling) {
-        PlayerFaceRenderer.draw(g, resolveFaceTexture(id), x, y, FACE_SIZE, true, false);
-        String name = nameCache.computeIfAbsent(id, this::computeName);
+    private void drawRelationshipRow(GuiGraphics g, int x, int y, UUID id, float feeling,
+                                     Float back, boolean linked) {
+        PlayerFaceRenderer.draw(g, RelationIdentity.faceTexture(id), x, y, FACE_SIZE, true, false);
+        String name = identity.name(id);
         g.drawString(this.font, Component.literal(trim(name)), x + FACE_SIZE + 3, y, VALUE_COLOR, false);
         String value = String.format(Locale.ROOT, "%.1f", feeling);
-        int vx = relMinusX() - 2 - this.font.width(value); // just left of the [-] button
+        int vx = relLinkX() - 2 - this.font.width(value); // just left of the [M] button
         g.drawString(this.font, Component.literal(value), vx, y, feelingColor(feeling), false);
+        String backText = backText(back);
+        g.drawString(this.font, Component.literal(backText), vx - 3 - this.font.width(backText), y,
+            back == null ? MUTED_COLOR : feelingColor(back), false);
+        if (linked && editMode) {
+            g.fill(relLinkX(), y + REL_BTN_SIZE, relLinkX() + REL_BTN_SIZE, y + REL_BTN_SIZE + 1, LINKED_COLOR);
+        }
     }
     //?}
+
+    /** {@code ←7.0} for a known feeling back, {@code –} when there is none to show. */
+    private static String backText(Float back) {
+        return back == null ? "–" : "←" + String.format(Locale.ROOT, "%.1f", back);
+    }
 
     /**
      * The add-relation picker in place of the objectives column: header, then each candidate
@@ -661,9 +716,9 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
         List<Integer> ids = picker.candidateIds();
         if (ids.isEmpty()) {
             //? if >=26 {
-            /*g.text(this.font, "no PlayerMobs nearby", gx + 3, RelationPicker.ROWS_Y + 2, OBJECTIVES_SUB_COLOR, false);
+            /*g.text(this.font, "nobody nearby", gx + 3, RelationPicker.ROWS_Y + 2, OBJECTIVES_SUB_COLOR, false);
             *///?} else {
-            g.drawString(this.font, "no PlayerMobs nearby", gx + 3, RelationPicker.ROWS_Y + 2, OBJECTIVES_SUB_COLOR, false);
+            g.drawString(this.font, "nobody nearby", gx + 3, RelationPicker.ROWS_Y + 2, OBJECTIVES_SUB_COLOR, false);
             //?}
             return;
         }
@@ -671,7 +726,7 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
         for (int row = 0; row < ids.size(); row++) {
             int y = RelationPicker.ROWS_Y + row * RelationPicker.ROW_H + 2; // centre 8px face in the 12px button
             Entity e = mc.level == null ? null : mc.level.getEntity(ids.get(row));
-            boolean resolved = e instanceof PlayerMobEntity;
+            boolean resolved = e instanceof LivingEntity living && RelationCandidates.isCandidateKind(living);
             picker.setRowActive(row, resolved);
             if (!resolved) {
                 //? if >=26 {
@@ -683,91 +738,23 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
             }
             UUID id = e.getUUID();
             //? if >=26 {
-            /*PlayerFaceExtractor.extractRenderState(g, resolveFaceTexture(id), gx + 3, y, FACE_SIZE, true, false, 0xFFFFFFFF);
-            g.text(this.font, trimTo(nameCache.computeIfAbsent(id, this::computeName), RelationPicker.WIDTH - FACE_SIZE - 10),
+            /*PlayerFaceExtractor.extractRenderState(g, RelationIdentity.faceTexture(id), gx + 3, y, FACE_SIZE, true, false, 0xFFFFFFFF);
+            g.text(this.font, RelationIdentity.trimTo(this.font, identity.name(id), RelationPicker.WIDTH - FACE_SIZE - 10),
                 gx + 3 + FACE_SIZE + 3, y, OBJECTIVES_TEXT_COLOR, false);
             *///?} else {
-            PlayerFaceRenderer.draw(g, resolveFaceTexture(id), gx + 3, y, FACE_SIZE, true, false);
-            g.drawString(this.font, trimTo(nameCache.computeIfAbsent(id, this::computeName), RelationPicker.WIDTH - FACE_SIZE - 10),
+            PlayerFaceRenderer.draw(g, RelationIdentity.faceTexture(id), gx + 3, y, FACE_SIZE, true, false);
+            g.drawString(this.font, RelationIdentity.trimTo(this.font, identity.name(id), RelationPicker.WIDTH - FACE_SIZE - 10),
                 gx + 3 + FACE_SIZE + 3, y, OBJECTIVES_TEXT_COLOR, false);
             //?}
         }
-    }
-
-    // ---- Identity / face resolution (client-side) -------------------------
-
-    private String computeName(UUID id) {
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.getConnection() != null) {
-            PlayerInfo info = mc.getConnection().getPlayerInfo(id);
-            if (info != null) {
-                //? if >=26 {
-                /*return info.getProfile().name(); // authlib 9: GameProfile.getName() → name()
-                *///?} else {
-                return info.getProfile().getName();
-                //?}
-            }
-        }
-        if (mc.level != null) {
-            for (Entity e : mc.level.entitiesForRendering()) {
-                if (e.getUUID().equals(id)) {
-                    return e.getName().getString();
-                }
-            }
-        }
-        return id.toString().substring(0, 8);
-    }
-
-    /**
-     * Resolve a face texture for {@code id}: a tab-list player's skin, else a
-     * loaded PlayerMob's skin, else a generic Steve/Alex default. Re-resolved
-     * each frame so async-loading player skins flip in once cached.
-     */
-    //? if >=26 {
-    /*private Identifier resolveFaceTexture(UUID id) {
-    *///?} else {
-    private ResourceLocation resolveFaceTexture(UUID id) {
-    //?}
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.getConnection() != null) {
-            PlayerInfo info = mc.getConnection().getPlayerInfo(id);
-            if (info != null) {
-                // var: SkinCompat.playerInfoTexture returns Identifier on 26, ResourceLocation pre-26.
-                var texture = SkinCompat.playerInfoTexture(info);
-                if (texture != null) {
-                    return texture;
-                }
-            }
-        }
-        if (mc.level != null) {
-            for (Entity e : mc.level.entitiesForRendering()) {
-                if (e.getUUID().equals(id) && e instanceof PlayerMobEntity pm) {
-                    return PlayerMobRenderer.resolveSkin(pm);
-                }
-            }
-        }
-        return SkinCompat.defaultTextureFor(id);
     }
 
     // ---- helpers ----------------------------------------------------------
 
     /** Truncate a name to fit the relationship row's name column (face … value [-] [+]). */
     private String trim(String name) {
-        return trimTo(name, BAR_WIDTH - (FACE_SIZE + 3)
-            - (2 * REL_BTN_SIZE + REL_BTN_GAP) - this.font.width("10.0") - 4);
-    }
-
-    /** Truncate {@code name} with an ellipsis so it fits within {@code maxWidth} px. */
-    private String trimTo(String name, int maxWidth) {
-        if (this.font.width(name) <= maxWidth) {
-            return name;
-        }
-        String ellipsis = "…";
-        String trimmed = name;
-        while (!trimmed.isEmpty() && this.font.width(trimmed + ellipsis) > maxWidth) {
-            trimmed = trimmed.substring(0, trimmed.length() - 1);
-        }
-        return trimmed + ellipsis;
+        return RelationIdentity.trimTo(this.font, name, BAR_WIDTH - (FACE_SIZE + 3)
+            - (3 * REL_BTN_SIZE + 2 * REL_BTN_GAP) - this.font.width("←10.0 10.0") - 7);
     }
 
     /** Hate (red) → neutral → love (green) colour for a 0–10 feeling. */

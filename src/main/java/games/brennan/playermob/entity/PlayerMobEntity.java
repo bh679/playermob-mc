@@ -142,6 +142,8 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -2314,6 +2316,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         return FeelingLedger.decode(this.entityData.get(DATA_FEELINGS));
     }
 
+    /** Client-synced set of relationships carrying the editor Mirror link. */
+    public Set<UUID> getSyncedLinked() {
+        return FeelingLedger.decodeLinked(this.entityData.get(DATA_FEELINGS));
+    }
+
     /**
      * Apply a Creative trait-editor button (see {@link TraitEditButtons}) and
      * re-sync the result to watching clients so the open menu updates next frame.
@@ -2345,8 +2352,59 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         boolean handled = FeelingEditButtons.apply(buttonId, feelings);
         if (handled) {
             pushDispositionToClient();
+            FeelingEditButtons.targetOf(buttonId, feelings)
+                .filter(feelings::isLinked)
+                .ifPresent(this::mirrorFeelingTo);
         }
         return handled;
+    }
+
+    /**
+     * Creative editor: toggle the <b>Mirror</b> link on one relationship row (see
+     * {@link LinkEditButtons}). The flag is kept symmetric — the other PlayerMob's record for
+     * this mob gets the same flag — and turning it on copies this mob's feeling across, so the
+     * pair reads the same value from that moment. A player target has no ledger, so the toggle is
+     * a no-op there (the screen hides it).
+     *
+     * @return {@code true} if {@code buttonId} mapped to a link toggle.
+     */
+    public boolean applyLinkEditButton(int buttonId) {
+        Optional<UUID> target = LinkEditButtons.targetOf(buttonId, feelings);
+        if (target.isEmpty()) {
+            return LinkEditButtons.isLinkButton(buttonId);
+        }
+        UUID id = target.get();
+        PlayerMobEntity other = liveMobByUuid(id);
+        if (other == null) {
+            return true;
+        }
+        boolean linked = !feelings.isLinked(id);
+        feelings.setLinked(id, linked);
+        other.feelings.setLinked(getUUID(), linked);
+        if (linked) {
+            other.feelings.set(getUUID(), feelings.feelingToward(id));
+        }
+        pushDispositionToClient();
+        other.pushDispositionToClient();
+        return true;
+    }
+
+    /** Copy this mob's feeling toward {@code id} onto that PlayerMob's feeling back toward us. */
+    private void mirrorFeelingTo(UUID id) {
+        PlayerMobEntity other = liveMobByUuid(id);
+        if (other != null) {
+            other.feelings.set(getUUID(), feelings.feelingToward(id));
+            other.pushDispositionToClient();
+        }
+    }
+
+    /** The live PlayerMob with {@code id} in this mob's server level, or null (player, unloaded, dead). */
+    private PlayerMobEntity liveMobByUuid(UUID id) {
+        if (!(level() instanceof ServerLevel server)) {
+            return null;
+        }
+        return server.getEntity(id) instanceof PlayerMobEntity other && other.isAlive() && other != this
+            ? other : null;
     }
 
     /** True once this mob has an entry (of any feeling) for {@code id} — i.e. it has "met" them. */
@@ -2355,20 +2413,23 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     }
 
     /**
-     * Creative editor: introduce this mob to {@code other} without waiting for a line-of-sight
-     * encounter — adds a neutral ledger entry for {@code other}, and with {@code mirror} the
-     * reverse entry on {@code other} too (see {@code RelationPickerButtons}). Each side is then
-     * edited independently with the per-row feeling arrows. Server-side; idempotent (an existing
-     * entry is left as it is); persists through the existing {@code feelings.save} NBT path and
-     * re-syncs both mobs so open menus update next frame.
+     * Creative editor: introduce this mob to {@code other} (a PlayerMob or a player) without
+     * waiting for a line-of-sight encounter — adds a neutral ledger entry for {@code other}. With
+     * {@code mirror} and a PlayerMob target, the reverse entry is added too and both records get
+     * the Mirror link (see {@link #applyLinkEditButton}); a player has no ledger, so {@code mirror}
+     * is ignored for them. Server-side; an existing entry keeps its feeling; persists through the
+     * existing {@code feelings.save} NBT path and re-syncs both mobs so open menus update next frame.
      */
-    public void addEditorRelation(PlayerMobEntity other, boolean mirror) {
+    public void addEditorRelation(Entity other, boolean mirror) {
         this.feelings.encounter(other.getUUID());
-        this.pushDispositionToClient();
-        if (mirror) {
-            other.feelings.encounter(this.getUUID());
-            other.pushDispositionToClient();
+        if (mirror && other instanceof PlayerMobEntity mob) {
+            mob.feelings.encounter(this.getUUID());
+            this.feelings.setLinked(mob.getUUID(), true);
+            mob.feelings.setLinked(this.getUUID(), true);
+            mob.feelings.set(this.getUUID(), this.feelings.feelingToward(mob.getUUID()));
+            mob.pushDispositionToClient();
         }
+        this.pushDispositionToClient();
     }
 
     /** True if the main hand holds a recognised weapon (drives the provoked fight/flee choice). */

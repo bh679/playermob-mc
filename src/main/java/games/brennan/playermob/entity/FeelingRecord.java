@@ -37,6 +37,10 @@ package games.brennan.playermob.entity;
  *   <li>{@code escaped} — they have already been credited for getting away from this mob once.
  *       Latches so an echo that re-acquires and loses them all afternoon still pays out once.
  *       Persisted.</li>
+ *   <li>{@code linked} — Creative-editor <b>Mirror</b>: editor edits to this feeling are copied
+ *       to the other PlayerMob's feeling back toward this mob (and vice versa — both records carry
+ *       the flag). Authoring convenience only: organic gameplay changes stay per side. Persisted;
+ *       meaningless (never set) for a player target, which has no ledger.</li>
  *   <li>{@code lastWitnessTick} — game tick of the last witnessed combat event (defend / harm)
  *       credited for this individual; debounces repeat-crediting of one event. <b>Session-scoped:
  *       not persisted</b> — vanilla combat timestamps reset on reload, so a stale saved value would
@@ -46,7 +50,7 @@ package games.brennan.playermob.entity;
 public record FeelingRecord(float feeling, float crouchBudgetUsed, float crouchCap,
                             int defendCount, int lastCarriageIndex, int lastWitnessTick,
                             boolean provoked, float unansweredTimidity, boolean answered,
-                            boolean escaped) {
+                            boolean escaped, boolean linked) {
 
     public static final float DEFAULT = 5.0F;
     public static final float MIN = 0.0F;
@@ -89,20 +93,20 @@ public record FeelingRecord(float feeling, float crouchBudgetUsed, float crouchC
 
     /** A fresh, neutral individual — the default returned for anyone not in the ledger. */
     public static final FeelingRecord NEUTRAL =
-        new FeelingRecord(DEFAULT, 0.0F, CROUCH_CAP_BASE, 0, NO_CARRIAGE, 0, false, 0.0F, false, false);
+        new FeelingRecord(DEFAULT, 0.0F, CROUCH_CAP_BASE, 0, NO_CARRIAGE, 0, false, 0.0F, false, false, false);
 
     /** Copy with an absolute feeling (clamped); all other state preserved. */
     public FeelingRecord withFeeling(float value) {
         return new FeelingRecord(clamp(value), crouchBudgetUsed, crouchCap,
             defendCount, lastCarriageIndex, lastWitnessTick, provoked,
-            unansweredTimidity, answered, escaped);
+            unansweredTimidity, answered, escaped, linked);
     }
 
     /** Copy with the witnessed-event tick updated (debounce bookkeeping). */
     public FeelingRecord withWitnessTick(int tick) {
         return new FeelingRecord(feeling, crouchBudgetUsed, crouchCap,
             defendCount, lastCarriageIndex, tick, provoked,
-            unansweredTimidity, answered, escaped);
+            unansweredTimidity, answered, escaped, linked);
     }
 
     /**
@@ -116,7 +120,7 @@ public record FeelingRecord(float feeling, float crouchBudgetUsed, float crouchC
         }
         return new FeelingRecord(feeling, crouchBudgetUsed, crouchCap,
             defendCount, lastCarriageIndex, lastWitnessTick, true,
-            unansweredTimidity, answered, escaped);
+            unansweredTimidity, answered, escaped, linked);
     }
 
     /**
@@ -130,7 +134,7 @@ public record FeelingRecord(float feeling, float crouchBudgetUsed, float crouchC
         }
         return new FeelingRecord(feeling, crouchBudgetUsed, crouchCap,
             defendCount, lastCarriageIndex, lastWitnessTick, provoked,
-            unansweredTimidity + points, false, escaped);
+            unansweredTimidity + points, false, escaped, linked);
     }
 
     /**
@@ -143,7 +147,7 @@ public record FeelingRecord(float feeling, float crouchBudgetUsed, float crouchC
             return this;
         }
         return new FeelingRecord(feeling, crouchBudgetUsed, crouchCap,
-            defendCount, lastCarriageIndex, lastWitnessTick, provoked, 0.0F, true, escaped);
+            defendCount, lastCarriageIndex, lastWitnessTick, provoked, 0.0F, true, escaped, linked);
     }
 
     /** Copy marked "they already got away from me once" — one-way, so the escape pays out once. */
@@ -153,7 +157,17 @@ public record FeelingRecord(float feeling, float crouchBudgetUsed, float crouchC
         }
         return new FeelingRecord(feeling, crouchBudgetUsed, crouchCap,
             defendCount, lastCarriageIndex, lastWitnessTick, provoked,
-            unansweredTimidity, answered, true);
+            unansweredTimidity, answered, true, linked);
+    }
+
+    /** Copy with the editor Mirror link set/cleared; {@code this} when unchanged. */
+    public FeelingRecord withLinked(boolean value) {
+        if (linked == value) {
+            return this;
+        }
+        return new FeelingRecord(feeling, crouchBudgetUsed, crouchCap,
+            defendCount, lastCarriageIndex, lastWitnessTick, provoked,
+            unansweredTimidity, answered, escaped, value);
     }
 
     /**
@@ -178,7 +192,7 @@ public record FeelingRecord(float feeling, float crouchBudgetUsed, float crouchC
         }
         return new FeelingRecord(clamp(feeling + delta), crouchBudgetUsed, newCap,
             defendCount, lastCarriageIndex, lastWitnessTick, provoked,
-            unansweredTimidity, answered, escaped);
+            unansweredTimidity, answered, escaped, linked);
     }
 
     /** One debounced crouch at neutral strength — see {@link #afterCrouch(float)}. */
@@ -199,7 +213,7 @@ public record FeelingRecord(float feeling, float crouchBudgetUsed, float crouchC
         float step = CROUCH_STEP * scale;
         return new FeelingRecord(clamp(feeling + step), crouchBudgetUsed + step,
             crouchCap, defendCount, lastCarriageIndex, lastWitnessTick, provoked,
-            unansweredTimidity, answered, escaped);
+            unansweredTimidity, answered, escaped, linked);
     }
 
     /** One credited defence at neutral strength — see {@link #afterDefend(float)}. */
@@ -219,7 +233,7 @@ public record FeelingRecord(float feeling, float crouchBudgetUsed, float crouchC
         }
         return new FeelingRecord(clamp(feeling + DEFEND_STEP * scale), crouchBudgetUsed, crouchCap,
             defendCount + 1, lastCarriageIndex, lastWitnessTick, provoked,
-            unansweredTimidity, answered, escaped);
+            unansweredTimidity, answered, escaped, linked);
     }
 
     /**
@@ -232,14 +246,14 @@ public record FeelingRecord(float feeling, float crouchBudgetUsed, float crouchC
         if (lastCarriageIndex == NO_CARRIAGE) {
             return new FeelingRecord(feeling, crouchBudgetUsed, crouchCap,
                 defendCount, newIndex, lastWitnessTick, provoked,
-                unansweredTimidity, answered, escaped);
+                unansweredTimidity, answered, escaped, linked);
         }
         if (newIndex == lastCarriageIndex) {
             return this;
         }
         return new FeelingRecord(clamp(feeling + TRAVEL_STEP), crouchBudgetUsed, crouchCap,
             defendCount, newIndex, lastWitnessTick, provoked,
-            unansweredTimidity, answered, escaped);
+            unansweredTimidity, answered, escaped, linked);
     }
 
     /**

@@ -116,4 +116,13 @@ class FeelingEditButtonsTest {
         assertEquals(4.0F, ledger.feelingToward(U2));
         assertEquals(8.0F, ledger.feelingToward(U3));
     }
+
+    @Test
+    void targetOfResolvesTheRowsUuid() {
+        FeelingLedger ledger = ledgerOf(5f, 5f, 5f);
+        assertEquals(java.util.Optional.of(U1), FeelingEditButtons.targetOf(FeelingEditButtons.idFor(0, true), ledger));
+        assertEquals(java.util.Optional.of(U3), FeelingEditButtons.targetOf(FeelingEditButtons.idFor(2, false), ledger));
+        assertTrue(FeelingEditButtons.targetOf(FeelingEditButtons.idFor(3, true), ledger).isEmpty(), "stale row");
+        assertTrue(FeelingEditButtons.targetOf(0, ledger).isEmpty(), "trait id");
+    }
 }

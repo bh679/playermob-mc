@@ -8,8 +8,10 @@ import net.minecraft.nbt.Tag;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -44,6 +46,9 @@ public final class FeelingLedger {
     static final String TAG_TIMIDITY = "Timidity";
     static final String TAG_ANSWERED = "Answered";
     static final String TAG_ESCAPED = "Escaped";
+    static final String TAG_LINKED = "Linked";
+    /** Trailing marker on an {@link #encode()} token whose record is editor-linked. */
+    static final char LINKED_MARK = '!';
     // NB: lastWitnessTick is deliberately NOT persisted — it's session-scoped (see FeelingRecord).
 
     public static final float DEFAULT = FeelingRecord.DEFAULT;
@@ -178,6 +183,16 @@ public final class FeelingLedger {
         put(id, recordFor(id).withFeeling(value));
     }
 
+    /** True if the editor Mirror link is set on the entry for {@code id} (false when absent). */
+    public boolean isLinked(UUID id) {
+        return recordFor(id).linked();
+    }
+
+    /** Set/clear the editor Mirror link on {@code id}'s entry (creating a neutral entry if needed). */
+    public void setLinked(UUID id, boolean linked) {
+        put(id, recordFor(id).withLinked(linked));
+    }
+
     /** One debounced crouch toward {@code id} at neutral strength. */
     public boolean crouch(UUID id) {
         return crouch(id, 1.0F);
@@ -252,9 +267,10 @@ public final class FeelingLedger {
     }
 
     /**
-     * Compact {@code "uuid=feeling;uuid=feeling"} encoding of <b>all</b> entries, for
+     * Compact {@code "uuid=feeling;uuid=feeling!"} encoding of <b>all</b> entries, for
      * syncing the roster to the client menu via a synced String. The menu only needs
-     * each feeling; the richer record fields are server-side.
+     * each feeling plus the editor {@linkplain #isLinked link flag} (a trailing
+     * {@link #LINKED_MARK}); the richer record fields are server-side.
      */
     public String encode() {
         StringBuilder sb = new StringBuilder();
@@ -263,8 +279,31 @@ public final class FeelingLedger {
                 sb.append(';');
             }
             sb.append(e.getKey()).append('=').append(e.getValue().feeling());
+            if (e.getValue().linked()) {
+                sb.append(LINKED_MARK);
+            }
         }
         return sb.toString();
+    }
+
+    /** The UUIDs whose entries carry the editor link flag in an {@link #encode()} string. */
+    public static Set<UUID> decodeLinked(String encoded) {
+        Set<UUID> linked = new HashSet<>();
+        if (encoded == null || encoded.isEmpty()) {
+            return linked;
+        }
+        for (String token : encoded.split(";")) {
+            int eq = token.indexOf('=');
+            if (eq <= 0 || token.charAt(token.length() - 1) != LINKED_MARK) {
+                continue;
+            }
+            try {
+                linked.add(UUID.fromString(token.substring(0, eq)));
+            } catch (IllegalArgumentException ignored) {
+                // skip malformed token
+            }
+        }
+        return linked;
     }
 
     /**
@@ -282,9 +321,13 @@ public final class FeelingLedger {
             if (eq <= 0) {
                 continue;
             }
+            String value = token.substring(eq + 1);
+            if (!value.isEmpty() && value.charAt(value.length() - 1) == LINKED_MARK) {
+                value = value.substring(0, value.length() - 1);
+            }
             try {
                 UUID id = UUID.fromString(token.substring(0, eq));
-                map.put(id, FeelingRecord.clamp(Float.parseFloat(token.substring(eq + 1))));
+                map.put(id, FeelingRecord.clamp(Float.parseFloat(value)));
             } catch (IllegalArgumentException ignored) {
                 // skip malformed token
             }
@@ -328,6 +371,9 @@ public final class FeelingLedger {
             if (r.escaped()) {
                 entry.putBoolean(TAG_ESCAPED, true);
             }
+            if (r.linked()) {
+                entry.putBoolean(TAG_LINKED, true);
+            }
             // lastWitnessTick is session-scoped (combat ticks reset on reload) — not persisted.
             list.add(entry);
         }
@@ -365,10 +411,12 @@ public final class FeelingLedger {
                 float timidity = Math.max(0.0F, NbtCompat.getFloatOr(entry, TAG_TIMIDITY, 0.0F));
                 boolean answered = NbtCompat.getBooleanOr(entry, TAG_ANSWERED, false);
                 boolean escaped = NbtCompat.getBooleanOr(entry, TAG_ESCAPED, false);
+                // Editor Mirror link — missing key ⇒ false, so pre-link saves read as unlinked.
+                boolean linked = NbtCompat.getBooleanOr(entry, TAG_LINKED, false);
                 // lastWitnessTick resets to 0 on load — session-scoped debounce, not persisted.
                 feelings.put(NbtCompat.getUUID(entry, TAG_UUID), new FeelingRecord(
                     feeling, crouchUsed, crouchCap, defendCount, lastCarriage, 0, provoked,
-                    answered ? 0.0F : timidity, answered, escaped));
+                    answered ? 0.0F : timidity, answered, escaped, linked));
             }
         }
         prune();
