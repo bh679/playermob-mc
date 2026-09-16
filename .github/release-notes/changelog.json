@@ -970,9 +970,9 @@
       ],
       "pr": 203,
       "date": "2026-09-16",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.99.0",
+      "released_at": "2026-09-16T09:05:52Z"
     }
   ]
 }
