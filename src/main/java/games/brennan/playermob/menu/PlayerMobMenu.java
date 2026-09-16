@@ -4,7 +4,9 @@ package games.brennan.playermob.menu;
 import com.mojang.datafixers.util.Pair;
 //?}
 import games.brennan.playermob.PlayerMobRegistry;
+import games.brennan.playermob.entity.LinkEditButtons;
 import games.brennan.playermob.entity.PlayerMobEntity;
+import games.brennan.playermob.entity.RelationPickerButtons;
 //? if >=26 {
 /*import net.minecraft.resources.Identifier;
 *///?} else {
@@ -12,14 +14,21 @@ import net.minecraft.resources.ResourceLocation;
 //?}
 import net.minecraft.world.Container;
 import net.minecraft.world.SimpleContainer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.InventoryMenu;
+import net.minecraft.world.inventory.SimpleContainerData;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
 
 /**
  * Container menu for editing a {@link PlayerMobEntity}'s gear and backpack —
@@ -45,6 +54,13 @@ import net.minecraft.world.item.ItemStack;
  * edits re-sync to clients via vanilla entity equipment tracking. No custom
  * packets — once opened, vanilla syncs every slot.</p>
  *
+ * <p>The Creative editor's <b>add-relation picker</b> also rides vanilla channels: the
+ * server snapshots nearby PlayerMobs into {@link #candidateData} (synced
+ * {@code ContainerData}, see {@link RelationCandidates}) and the client picks one by row
+ * index over the container-button channel ({@link RelationPickerButtons}). The data slots
+ * must be added by <b>both</b> constructor paths — including the client fallback — so the
+ * slot count matches server-side.</p>
+ *
  * <p>Vanilla types only — this class is shared by all three loaders and must
  * not touch any loader API.</p>
  */
@@ -65,6 +81,14 @@ public class PlayerMobMenu extends AbstractContainerMenu {
     private final Container equipment;
     private final Container backpack;
 
+    /** Synced snapshot of pickable nearby PlayerMobs (entity ids, hi/lo-split) — see {@link RelationCandidates}. */
+    private final SimpleContainerData candidateData = new SimpleContainerData(RelationCandidates.SLOT_COUNT);
+    /**
+     * Server-side twin of {@link #candidateData}: the UUID behind each row, captured at the same
+     * scan so a pick resolves to exactly the mob that row showed. Empty on the client.
+     */
+    private List<UUID> candidateUuids = List.of();
+
     /**
      * Server-side constructor — binds directly to the live {@code mob}.
      */
@@ -84,6 +108,10 @@ public class PlayerMobMenu extends AbstractContainerMenu {
         addEquipmentSlots();
         addBackpackSlots();
         addPlayerInventory(playerInv);
+        addDataSlots(candidateData);
+        if (mob != null && !mob.level().isClientSide()) {
+            rescanCandidates();
+        }
     }
 
     /**
@@ -109,6 +137,59 @@ public class PlayerMobMenu extends AbstractContainerMenu {
      */
     public PlayerMobEntity getMob() {
         return mob;
+    }
+
+    /**
+     * Client: the entity ids of the PlayerMobs the server last offered to the add-relation
+     * picker, in row order (row {@code i} ↔ {@link RelationPickerButtons#idFor}). Resolve each
+     * via {@code level.getEntity(id)} — an entry can precede its entity-track packet by a tick.
+     */
+    public List<Integer> candidateEntityIds() {
+        return RelationCandidates.read(candidateData);
+    }
+
+    // ---- Add-relation picker (server) --------------------------------------
+
+    /** Re-snapshot the nearby-PlayerMob candidate list and publish it through the data slots. */
+    private void rescanCandidates() {
+        List<LivingEntity> found = RelationCandidates.scan(mob);
+        List<UUID> uuids = new ArrayList<>(found.size());
+        List<Integer> ids = new ArrayList<>(found.size());
+        for (LivingEntity candidate : found) {
+            uuids.add(candidate.getUUID());
+            ids.add(candidate.getId());
+        }
+        candidateUuids = List.copyOf(uuids);
+        RelationCandidates.write(candidateData, ids);
+    }
+
+    /**
+     * Resolve a pick button against the snapshot and add the relation. The row must still be
+     * a live PlayerMob / player within twice the scan range (it may have wandered since the scan); on
+     * success the list is re-scanned so the newly-met mob drops out of the picker.
+     *
+     * @return {@code true} if {@code id} was a picker button (handled, even if the row was stale).
+     */
+    private boolean handlePickerButton(int id) {
+        if (RelationPickerButtons.isRefresh(id)) {
+            rescanCandidates();
+            return true;
+        }
+        if (!RelationPickerButtons.isPickButton(id)) {
+            return false;
+        }
+        int row = RelationPickerButtons.rowOf(id);
+        if (row >= candidateUuids.size() || !(mob.level() instanceof ServerLevel level)) {
+            return true;
+        }
+        Entity picked = level.getEntity(candidateUuids.get(row));
+        if (picked instanceof LivingEntity other && other.isAlive() && other != mob
+            && RelationCandidates.isCandidateKind(other)
+            && other.distanceToSqr(mob) <= 4.0 * RelationCandidates.PICK_RANGE * RelationCandidates.PICK_RANGE) {
+            mob.addEditorRelation(other, RelationPickerButtons.isMirror(id));
+        }
+        rescanCandidates();
+        return true;
     }
 
     // ---- Slot layout ------------------------------------------------------
@@ -186,15 +267,17 @@ public class PlayerMobMenu extends AbstractContainerMenu {
      * live mob may change disposition. Ids {@code 0..5} map to trait adjustments
      * ({@link games.brennan.playermob.entity.TraitEditButtons}); higher ids map to
      * per-relationship feeling adjustments
-     * ({@link games.brennan.playermob.entity.FeelingEditButtons}). All clamped; no
-     * custom packets.
+     * ({@link games.brennan.playermob.entity.FeelingEditButtons}), then the add-relation
+     * picker ({@link RelationPickerButtons}) and the per-row Mirror link toggles
+     * ({@link LinkEditButtons}). All clamped; no custom packets.
      */
     @Override
     public boolean clickMenuButton(Player player, int id) {
         if (mob == null || !player.isCreative()) {
             return false;
         }
-        return mob.applyTraitEditButton(id) || mob.applyFeelingEditButton(id);
+        return mob.applyTraitEditButton(id) || mob.applyFeelingEditButton(id)
+            || mob.applyLinkEditButton(id) || handlePickerButton(id);
     }
 
     @Override

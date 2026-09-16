@@ -956,6 +956,23 @@
       "released": true,
       "released_in": "v0.98.0",
       "released_at": "2026-09-14T11:17:45Z"
+    },
+    {
+      "id": "editor-add-relation-picker",
+      "version": "0.99.0",
+      "type": "feat",
+      "title": "Editor: add relationships from the PlayerMob menu",
+      "summary": "The Creative PlayerMob editor can now introduce a mob to nearby PlayerMobs and players directly, and keep a pair of mobs' feelings for each other in sync.",
+      "highlights": [
+        "A [+] on the Relationships list (in Edit mode) picks from PlayerMobs and players within 32 blocks that the mob hasn't met yet.",
+        "Mirror adds the relationship on both mobs and links them, so editing one side's feeling updates the other.",
+        "Each row now shows what the other mob feels back, and has an [M] toggle to link or unlink the pair."
+      ],
+      "pr": 203,
+      "date": "2026-09-16",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
