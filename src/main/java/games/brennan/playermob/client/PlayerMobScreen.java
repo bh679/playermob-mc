@@ -131,6 +131,8 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     private static final int REL_BTN_SIZE = 10;
     private static final int REL_BTN_GAP = 1;
     private static final int LINKED_COLOR = 0xFF30B030;
+    /** The feeling-back column is drawn at this fraction of the font size (a secondary value). */
+    private static final float BACK_TEXT_SCALE = 0.7F;
 
     // ---- Creative objectives column — right of the disposition panel ----
     private static final int OBJECTIVES_X = INVENTORY_WIDTH + DISPOSITION_WIDTH;
@@ -665,12 +667,23 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
         String value = String.format(Locale.ROOT, "%.1f", feeling);
         int vx = relLinkX() - 2 - this.font.width(value); // just left of the [M] button
         g.text(this.font, Component.literal(value), vx, y, feelingColor(feeling), false);
-        String backText = backText(back);
-        g.text(this.font, Component.literal(backText), vx - 3 - this.font.width(backText), y,
-            back == null ? MUTED_COLOR : feelingColor(back), false);
+        drawBackValue(g, backText(back), vx - 3, y, back == null ? MUTED_COLOR : feelingColor(back));
         if (linked && editMode) {
             g.fill(relLinkX(), y + REL_BTN_SIZE, relLinkX() + REL_BTN_SIZE, y + REL_BTN_SIZE + 1, LINKED_COLOR);
         }
+    }
+
+    // Small right-aligned text: scale the pose around the draw so the string renders at
+    // BACK_TEXT_SCALE, bottom-aligned with the full-size value beside it. The extractor captures
+    // the matrix per draw, so a push/scale/pop around one string leaves the rest untouched.
+    private void drawBackValue(GuiGraphicsExtractor g, String text, int rightX, int y, int color) {
+        float s = BACK_TEXT_SCALE;
+        int w = Math.round(this.font.width(text) * s);
+        int top = y + Math.round(this.font.lineHeight * (1 - s));
+        g.pose().pushMatrix();
+        g.pose().scale(s);
+        g.text(this.font, text, Math.round((rightX - w) / s), Math.round(top / s), color, false);
+        g.pose().popMatrix();
     }
     *///?} else {
     private void drawRelationshipRow(GuiGraphics g, int x, int y, UUID id, float feeling,
@@ -681,12 +694,24 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
         String value = String.format(Locale.ROOT, "%.1f", feeling);
         int vx = relLinkX() - 2 - this.font.width(value); // just left of the [M] button
         g.drawString(this.font, Component.literal(value), vx, y, feelingColor(feeling), false);
-        String backText = backText(back);
-        g.drawString(this.font, Component.literal(backText), vx - 3 - this.font.width(backText), y,
-            back == null ? MUTED_COLOR : feelingColor(back), false);
+        drawBackValue(g, backText(back), vx - 3, y, back == null ? MUTED_COLOR : feelingColor(back));
         if (linked && editMode) {
             g.fill(relLinkX(), y + REL_BTN_SIZE, relLinkX() + REL_BTN_SIZE, y + REL_BTN_SIZE + 1, LINKED_COLOR);
         }
+    }
+
+    /**
+     * Small right-aligned text: scale the pose around the draw so the string renders at
+     * {@link #BACK_TEXT_SCALE}, bottom-aligned with the full-size value beside it.
+     */
+    private void drawBackValue(GuiGraphics g, String text, int rightX, int y, int color) {
+        float s = BACK_TEXT_SCALE;
+        int w = Math.round(this.font.width(text) * s);
+        int top = y + Math.round(this.font.lineHeight * (1 - s));
+        g.pose().pushPose();
+        g.pose().scale(s, s, 1.0F);
+        g.drawString(this.font, text, Math.round((rightX - w) / s), Math.round(top / s), color, false);
+        g.pose().popPose();
     }
     //?}
 
@@ -754,7 +779,7 @@ public class PlayerMobScreen extends AbstractContainerScreen<PlayerMobMenu> {
     /** Truncate a name to fit the relationship row's name column (face … value [-] [+]). */
     private String trim(String name) {
         return RelationIdentity.trimTo(this.font, name, BAR_WIDTH - (FACE_SIZE + 3)
-            - (3 * REL_BTN_SIZE + 2 * REL_BTN_GAP) - this.font.width("←10.0 10.0") - 7);
+            - (3 * REL_BTN_SIZE + 2 * REL_BTN_GAP) - this.font.width("10.0") - Math.round(this.font.width("←10.0") * BACK_TEXT_SCALE) - 7);
     }
 
     /** Hate (red) → neutral → love (green) colour for a 0–10 feeling. */
