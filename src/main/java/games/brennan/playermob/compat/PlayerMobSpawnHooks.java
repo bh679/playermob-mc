@@ -5,8 +5,9 @@ import games.brennan.playermob.entity.PlayerMobEntity;
 import org.slf4j.Logger;
 
 /**
- * Optional-mod integration seam announcing that a PlayerMob has spawned as a reincarnation
- * (an "echo") of a stored past life — used by Dungeon Train's remote-echo encounter journal.
+ * Optional-mod integration seam announcing PlayerMob spawns an integrating mod may want to react to:
+ * a PlayerMob spawning as a reincarnation (an "echo") of a stored past life — used by Dungeon Train's
+ * remote-echo encounter journal — and a Dungeon-Train friend-pair companion spawning beside its leader.
  *
  * <p>Mirrors {@link PlayerMobSocialHooks}: the observer defaults to a no-op and is replaced
  * exactly once, at boot, by a consuming mod (from inside its {@code ModList.isLoaded("playermob")}
@@ -19,8 +20,9 @@ import org.slf4j.Logger;
  * supplied by an integrating mod (cross-world; never the live player themselves). A consumer that
  * only cares about cross-world "remote echoes" filters on {@code remote == true}.</p>
  *
- * <p>Server-thread only: fired from {@code PlayerReincarnation.maybeReincarnateOnSpawn}, which runs
- * inside {@code PlayerMobEntity.finalizeSpawn}. The dispatcher swallows observer exceptions so a
+ * <p>Server-thread only: the echo event fires from {@code PlayerReincarnation.maybeReincarnateOnSpawn}
+ * and the companion event from {@code PlayerMobEntity#spawnRandomFriend}, both inside
+ * {@code PlayerMobEntity.finalizeSpawn}. The dispatcher swallows observer exceptions so a
  * buggy consumer can never disrupt the spawn flow (the echo is already materialised when it fires).</p>
  */
 public final class PlayerMobSpawnHooks {
@@ -39,6 +41,21 @@ public final class PlayerMobSpawnHooks {
          *               player); {@code false} for a local death-log reincarnation
          */
         default void onEchoSpawned(PlayerMobEntity mob, ReincarnationRecord record, boolean remote) {}
+
+        /**
+         * A random friend companion is about to spawn beside {@code leader} (the Dungeon-Train
+         * friend-pair). The companion is built with {@code EntityType.create} and never runs
+         * {@code finalizeSpawn}, so anything that normally hooks {@code finalizeSpawn} — e.g. a mob
+         * namer — never sees it; this is the place to name, equip or tag it instead.
+         *
+         * <p>Fired <em>before</em> {@code addFreshEntity}, after the companion's skin and traits are
+         * rolled and it is linked to {@code leader} as a max friend. Not fired for a friend-echo, which
+         * is already titled "Echo of X".</p>
+         *
+         * @param companion the not-yet-added companion
+         * @param leader    the PlayerMob whose {@code finalizeSpawn} rolled the pair
+         */
+        default void onCompanionSpawned(PlayerMobEntity companion, PlayerMobEntity leader) {}
     }
 
     private static volatile SpawnObserver observer = new SpawnObserver() {};
@@ -62,6 +79,18 @@ public final class PlayerMobSpawnHooks {
             observer.onEchoSpawned(mob, record, remote);
         } catch (Throwable t) {
             LOGGER.warn("[playermob] echo-spawn observer threw; ignoring", t);
+        }
+    }
+
+    /**
+     * Announce that {@code companion} is about to spawn beside {@code leader}. Best-effort: any
+     * exception the observer throws is logged and swallowed, so a consumer fault never breaks the spawn.
+     */
+    public static void onCompanionSpawned(PlayerMobEntity companion, PlayerMobEntity leader) {
+        try {
+            observer.onCompanionSpawned(companion, leader);
+        } catch (Throwable t) {
+            LOGGER.warn("[playermob] companion-spawn observer threw; ignoring", t);
         }
     }
 }
