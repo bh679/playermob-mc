@@ -973,6 +973,22 @@
       "released": true,
       "released_in": "v0.99.0",
       "released_at": "2026-09-16T09:05:52Z"
+    },
+    {
+      "id": "companion-spawn-seam",
+      "version": "0.100.0",
+      "type": "feat",
+      "title": "Friends who board the train together can both be named",
+      "summary": "When a PlayerMob boards a Dungeon Train with a friend, the friend now announces itself to mods that name PlayerMobs, so it no longer stands next to a named partner with a blank head.",
+      "highlights": [
+        "New companion-spawn event on the PlayerMob spawn seam, so integrating mods can name, equip or tag a friend-pair companion",
+        "Friend-echoes keep their \"Echo of \u2026\" name, unchanged"
+      ],
+      "pr": 205,
+      "date": "2026-09-28",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
