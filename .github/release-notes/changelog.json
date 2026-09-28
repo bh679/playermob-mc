@@ -975,8 +975,24 @@
       "released_at": "2026-09-16T09:05:52Z"
     },
     {
-      "id": "gifts-feeding-kindness",
+      "id": "companion-spawn-seam",
       "version": "0.100.0",
+      "type": "feat",
+      "title": "Friends who board the train together can both be named",
+      "summary": "When a PlayerMob boards a Dungeon Train with a friend, the friend now announces itself to mods that name PlayerMobs, so it no longer stands next to a named partner with a blank head.",
+      "highlights": [
+        "New companion-spawn event on the PlayerMob spawn seam, so integrating mods can name, equip or tag a friend-pair companion",
+        "Friend-echoes keep their \"Echo of \u2026\" name, unchanged"
+      ],
+      "pr": 205,
+      "date": "2026-09-28",
+      "released": true,
+      "released_in": "v0.100.0",
+      "released_at": "2026-09-28T17:22:18Z"
+    },
+    {
+      "id": "gifts-feeding-kindness",
+      "version": "0.101.0",
       "type": "feat",
       "title": "Gifts mean more, and caring for animals shapes your echo",
       "summary": "PlayerMobs now value what you give them far more: every gift warms them up about twice as much as before. Feeding animals by hand also counts toward the kind of person you were, so the echo you leave behind comes back a little friendlier.",
