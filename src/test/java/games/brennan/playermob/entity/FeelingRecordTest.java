@@ -28,11 +28,11 @@ class FeelingRecordTest {
 
     @Test
     void giftDeltaFloorScaleAndCap() {
-        assertEquals(0.5f, FeelingRecord.giftDelta(0, 0), EPS);   // non-gear / no upgrade → floor
-        assertEquals(0.5f, FeelingRecord.giftDelta(5, 7), EPS);   // worse than current → floor
-        assertEquals(1.0f, FeelingRecord.giftDelta(7, 5), EPS);   // +2 score → 0.5 + 0.5
-        assertEquals(2.5f, FeelingRecord.giftDelta(8, 0), EPS);   // +8 score → 0.5 + 2.0
-        assertEquals(3.0f, FeelingRecord.giftDelta(99, 0), EPS);  // capped at GIFT_MAX
+        assertEquals(1.0f, FeelingRecord.giftDelta(0, 0), EPS);   // non-gear / no upgrade → floor
+        assertEquals(1.0f, FeelingRecord.giftDelta(5, 7), EPS);   // worse than current → floor
+        assertEquals(2.0f, FeelingRecord.giftDelta(7, 5), EPS);   // +2 score → 1.0 + 1.0
+        assertEquals(5.0f, FeelingRecord.giftDelta(8, 0), EPS);   // +8 score → 1.0 + 4.0, the cap exactly
+        assertEquals(5.0f, FeelingRecord.giftDelta(99, 0), EPS);  // capped at GIFT_MAX
     }
 
     // ---- crouch ----

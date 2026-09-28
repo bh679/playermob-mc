@@ -9,6 +9,8 @@
     "PlayerDeathMixin",
     "TamableAnimalTameMixin",
     "AbstractHorseTameMixin",
+    "AnimalFeedMixin",
+    "AbstractHorseFeedMixin",
     "OwnableEntityOwnerMixin",
     "RaiderTargetsPlayerMobMixin",
     "LivingHurtWitnessMixin",

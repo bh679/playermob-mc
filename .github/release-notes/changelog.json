@@ -989,6 +989,23 @@
       "released": true,
       "released_in": "v0.100.0",
       "released_at": "2026-09-28T17:22:18Z"
+    },
+    {
+      "id": "gifts-feeding-kindness",
+      "version": "0.101.0",
+      "type": "feat",
+      "title": "Gifts mean more, and caring for animals shapes your echo",
+      "summary": "PlayerMobs now value what you give them far more: every gift warms them up about twice as much as before. Feeding animals by hand also counts toward the kind of person you were, so the echo you leave behind comes back a little friendlier.",
+      "highlights": [
+        "Gifts raise a PlayerMob's feeling about twice as much, with a much bigger jump for a real gear upgrade",
+        "Breeding, growing, healing or feeding animals (horses included) makes your echo friendlier, up to a limit per life",
+        "/playermob life now shows how many animals you've fed"
+      ],
+      "pr": 204,
+      "date": "2026-09-28",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }

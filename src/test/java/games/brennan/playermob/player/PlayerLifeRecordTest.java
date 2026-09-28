@@ -434,6 +434,69 @@ class PlayerLifeRecordTest {
         assertEquals(DispositionTraits.DEFAULT + 2, back.toTraits().fightFlight());
     }
 
+    // ---- feeding ----
+
+    @Test
+    void feedingRaisesFriendlinessAQuarterPointAtATime() {
+        assertEquals(5, fed(1).toTraits().friendliness());   // 5.25 rounds down
+        assertEquals(6, fed(2).toTraits().friendliness());   // 5.5 rounds up
+        assertEquals(7, fed(6).toTraits().friendliness());   // 6.5 rounds up
+    }
+
+    @Test
+    void feedingStopsAtTwoPoints() {
+        assertEquals(7, fed(8).toTraits().friendliness());     // 5 + 2.0, the cap exactly
+        assertEquals(7, fed(500).toTraits().friendliness());   // a breeding pen changes nothing more
+        assertEquals(500.0F, fed(500).fed(), EPS);             // the tally itself keeps counting
+    }
+
+    @Test
+    void feedingLeavesFightFlightAlone() {
+        assertEquals(DispositionTraits.DEFAULT, fed(8).toTraits().fightFlight());
+    }
+
+    @Test
+    void feedingStacksWithKindnessAndCruelty() {
+        assertEquals(9, fed(8).credit(Signal.TAME, 0).toTraits().friendliness());    // 5 + 2 + 2
+        assertEquals(5, fed(8).credit(Signal.KILL, 0).toTraits().friendliness());    // 5 + 2 - 2
+    }
+
+    @Test
+    void feedingAloneIsNotAnEmptyRecord() {
+        assertFalse(fed(1).isEmpty());
+    }
+
+    @Test
+    void aNegativeMagnitudeCannotUnfeed() {
+        assertEquals(1.0F, fed(1).credit(Signal.FEED, -5.0F).fed(), EPS);
+    }
+
+    @Test
+    void nbtRoundTripCarriesFeeding() {
+        CompoundTag tag = new CompoundTag();
+        fed(3).save(tag);
+        assertEquals(3.0F, PlayerLifeRecord.load(tag).fed(), EPS);
+    }
+
+    @Test
+    void legacyTagWithoutTheFedKeyLoadsAsUnfed() {
+        CompoundTag tag = new CompoundTag();
+        PlayerLifeRecord.EMPTY.credit(Signal.GIFT, 2.0F).save(tag);
+        tag.remove(PlayerLifeRecord.TAG_FED);
+        PlayerLifeRecord back = PlayerLifeRecord.load(tag);
+        assertEquals(0.0F, back.fed(), EPS);
+        assertEquals(DispositionTraits.DEFAULT + 2, back.toTraits().friendliness());
+    }
+
+    /** A life whose only conduct was feeding {@code feeds} animals. */
+    private static PlayerLifeRecord fed(int feeds) {
+        PlayerLifeRecord r = PlayerLifeRecord.EMPTY;
+        for (int i = 0; i < feeds; i++) {
+            r = r.credit(Signal.FEED, 1.0F);
+        }
+        return r;
+    }
+
     /** A life whose only conduct was {@code acts} acts of sabotage. */
     private static PlayerLifeRecord sabotaged(int acts) {
         PlayerLifeRecord r = PlayerLifeRecord.EMPTY;

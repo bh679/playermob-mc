@@ -79,6 +79,19 @@ public final class PlayerLifeRecord {
      */
     static final double MAX_SABOTAGE_FIGHT = 3.0;
 
+    /**
+     * Friendliness points gained per animal fed by hand — breeding it, growing its young, healing
+     * it, gentling a horse. Scored on its own term rather than as {@code kindness}: feeding is
+     * cheap and repeatable, so it is capped where a gift or a defence is not.
+     */
+    static final double FEED_TO_FRIENDLY = 0.25;
+    /**
+     * Ceiling on the Friendliness one life can earn from feeding alone — eight feeds reach it.
+     * Capped so a breeding pen can nudge an echo friendly without farming it to maximum. The
+     * tally itself is never capped, so the rate stays re-tunable.
+     */
+    static final double MAX_FEED_FRIENDLY = 2.0;
+
     // ---- NBT keys ---------------------------------------------------------
     static final String TAG_DAMAGE = "DamageDealt";
     static final String TAG_KILLS = "Kills";
@@ -89,10 +102,11 @@ public final class PlayerLifeRecord {
     static final String TAG_DEFENSIVE_KILLS = "DefensiveKills";
     static final String TAG_TIMIDITY = "Timidity";
     static final String TAG_SABOTAGE = "Sabotage";
+    static final String TAG_FED = "Fed";
 
     /** A fresh life — no conduct recorded yet. */
     public static final PlayerLifeRecord EMPTY =
-        new PlayerLifeRecord(0.0F, 0, 0.0F, 0, 0, 0.0F, 0, 0.0F, 0.0F);
+        new PlayerLifeRecord(0.0F, 0, 0.0F, 0, 0, 0.0F, 0, 0.0F, 0.0F, 0.0F);
 
     private final float damageDealt;
     private final int kills;
@@ -107,9 +121,12 @@ public final class PlayerLifeRecord {
     private final float timidity;
     /** Acts of sabotage against a build somebody made by hand. */
     private final float sabotage;
+    /** Animals this life fed by hand. */
+    private final float fed;
 
     PlayerLifeRecord(float damageDealt, int kills, float kindness, int harms, int attacks,
-                     float defensiveDamage, int defensiveKills, float timidity, float sabotage) {
+                     float defensiveDamage, int defensiveKills, float timidity, float sabotage,
+                     float fed) {
         this.damageDealt = damageDealt;
         this.kills = kills;
         this.kindness = kindness;
@@ -119,6 +136,7 @@ public final class PlayerLifeRecord {
         this.defensiveKills = defensiveKills;
         this.timidity = Math.max(0.0F, timidity);
         this.sabotage = Math.max(0.0F, sabotage);
+        this.fed = Math.max(0.0F, fed);
     }
 
     public float damageDealt() { return damageDealt; }
@@ -134,15 +152,17 @@ public final class PlayerLifeRecord {
     public float timidity() { return timidity; }
     /** How many times this life brought an explosive into a carriage somebody built. */
     public float sabotage() { return sabotage; }
+    /** How many times this life fed an animal by hand. */
+    public float fed() { return fed; }
 
     /** True for a life with no recorded conduct (used to skip empty saves). */
     public boolean isEmpty() {
         return damageDealt == 0.0F && kills == 0 && kindness == 0.0F && harms == 0 && attacks == 0
-            && timidity == 0.0F && sabotage == 0.0F;
+            && timidity == 0.0F && sabotage == 0.0F && fed == 0.0F;
     }
 
     /** The kind of player→mob action being credited; routes a magnitude to the right tally. */
-    public enum Signal { ATTACK, KILL, CROUCH, GIFT, TRAVEL, DEFEND, HARM, FLEE, TAME, SABOTAGE }
+    public enum Signal { ATTACK, KILL, CROUCH, GIFT, TRAVEL, DEFEND, HARM, FLEE, TAME, SABOTAGE, FEED }
 
     /** As {@link #credit(Signal, float, boolean)}, treating the action as unprovoked. */
     public PlayerLifeRecord credit(Signal signal, float magnitude) {
@@ -153,7 +173,7 @@ public final class PlayerLifeRecord {
      * Return a fresh record with {@code signal} applied. {@code magnitude} is the
      * damage amount for {@link Signal#ATTACK}, the gift value for {@link Signal#GIFT}, and the
      * Flight points banked (or, when negative, handed back) for {@link Signal#FLEE}, and the
-     * number of acts for {@link Signal#SABOTAGE}; it is ignored for the fixed-weight signals.
+     * number of acts for {@link Signal#SABOTAGE} and {@link Signal#FEED}; it is ignored for the fixed-weight signals.
      *
      * <p>{@code defensive} marks an {@link Signal#ATTACK}/{@link Signal#KILL} against a mob
      * that had already taken combat intent toward the player. The blow is tallied in full
@@ -167,31 +187,34 @@ public final class PlayerLifeRecord {
                 float dealt = Math.max(0.0F, magnitude);
                 yield new PlayerLifeRecord(damageDealt + dealt, kills, kindness, harms, attacks + 1,
                     defensive ? defensiveDamage + dealt : defensiveDamage, defensiveKills, timidity,
-                    sabotage);
+                    sabotage, fed);
             }
             case KILL   -> new PlayerLifeRecord(damageDealt, kills + 1, kindness, harms, attacks,
                                defensiveDamage, defensive ? defensiveKills + 1 : defensiveKills,
-                               timidity, sabotage);
+                               timidity, sabotage, fed);
             case CROUCH -> withKindness(CROUCH_KINDNESS);
             case TRAVEL -> withKindness(TRAVEL_KINDNESS);
             case DEFEND -> withKindness(DEFEND_KINDNESS);
             case TAME   -> withKindness(TAME_KINDNESS);
             case GIFT   -> withKindness(Math.max(0.0F, magnitude));
             case HARM   -> new PlayerLifeRecord(damageDealt, kills, kindness, harms + 1, attacks,
-                               defensiveDamage, defensiveKills, timidity, sabotage);
+                               defensiveDamage, defensiveKills, timidity, sabotage, fed);
             // Signed: a negative magnitude is a mob handing back what it had banked, once the
             // player finally hit it. The constructor floors the tally at 0.
             case FLEE   -> new PlayerLifeRecord(damageDealt, kills, kindness, harms, attacks,
-                               defensiveDamage, defensiveKills, timidity + magnitude, sabotage);
+                               defensiveDamage, defensiveKills, timidity + magnitude, sabotage, fed);
             case SABOTAGE -> new PlayerLifeRecord(damageDealt, kills, kindness, harms, attacks,
                                defensiveDamage, defensiveKills, timidity,
-                               sabotage + Math.max(0.0F, magnitude));
+                               sabotage + Math.max(0.0F, magnitude), fed);
+            case FEED   -> new PlayerLifeRecord(damageDealt, kills, kindness, harms, attacks,
+                               defensiveDamage, defensiveKills, timidity, sabotage,
+                               fed + Math.max(0.0F, magnitude));
         };
     }
 
     private PlayerLifeRecord withKindness(float delta) {
         return new PlayerLifeRecord(damageDealt, kills, kindness + delta, harms, attacks,
-            defensiveDamage, defensiveKills, timidity, sabotage);
+            defensiveDamage, defensiveKills, timidity, sabotage, fed);
     }
 
     /**
@@ -205,7 +228,8 @@ public final class PlayerLifeRecord {
      *       on its own capped term, and touches Friendliness not at all.</li>
      *   <li><b>Friendliness</b> = neutral 5 shifted up by kindness and down by cruelty
      *       (damage, kills, harming loved ones). A cruel life reincarnates unfriendly;
-     *       a kind one, welcoming.</li>
+     *       a kind one, welcoming. Feeding animals by hand pushes it up too, on its own
+     *       capped term.</li>
      * </ul>
      * Both combat terms weigh self-defence — blows against a mob that picked the fight —
      * at {@link #DEFENSIVE_SCALE}: killing what came for you is neither aggression nor
@@ -231,7 +255,11 @@ public final class PlayerLifeRecord {
             + aggression * AGGRESSION_TO_FIGHT
             - timidity * TIMIDITY_TO_FLIGHT
             + sabotageFight);
-        int friendliness = clampTrait(DispositionTraits.DEFAULT + kindness * KINDNESS_TO_FRIENDLY - cruelty);
+        // Feeding is scored apart from kindness and capped: see MAX_FEED_FRIENDLY.
+        double feedFriendly = Math.min(fed * FEED_TO_FRIENDLY, MAX_FEED_FRIENDLY);
+
+        int friendliness = clampTrait(DispositionTraits.DEFAULT + kindness * KINDNESS_TO_FRIENDLY
+            + feedFriendly - cruelty);
 
         DispositionTraits traits = new DispositionTraits();
         traits.setFightFlight(fightFlight);
@@ -259,6 +287,7 @@ public final class PlayerLifeRecord {
         tag.putInt(TAG_DEFENSIVE_KILLS, defensiveKills);
         tag.putFloat(TAG_TIMIDITY, timidity);
         tag.putFloat(TAG_SABOTAGE, sabotage);
+        tag.putFloat(TAG_FED, fed);
     }
 
     /** Read a record back; missing keys default to zero (forward/backward compatible). */
@@ -278,6 +307,8 @@ public final class PlayerLifeRecord {
             NbtCompat.getFloatOr(tag, TAG_TIMIDITY, 0f),
             // Missing on saves from before sabotage was scored ⇒ 0 ⇒ that life reads exactly
             // as it did on the build that wrote it.
-            NbtCompat.getFloatOr(tag, TAG_SABOTAGE, 0f));
+            NbtCompat.getFloatOr(tag, TAG_SABOTAGE, 0f),
+            // Missing on saves from before feeding was scored ⇒ 0 ⇒ likewise unchanged.
+            NbtCompat.getFloatOr(tag, TAG_FED, 0f));
     }
 }

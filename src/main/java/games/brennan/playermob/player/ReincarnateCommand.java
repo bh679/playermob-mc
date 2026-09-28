@@ -1431,10 +1431,10 @@ public final class ReincarnateCommand {
         boolean hasPast = GlobalLifeStore.get(source.getServer()).hasAnyForPlayer(idOf(profile));
         String summary = String.format(
             "%s — attacks %d, kills %d (%d in self-defence), damage %.1f (%.1f in self-defence), "
-                + "kindness %.1f, harms %d, timidity %.1f "
+                + "kindness %.1f, fed %.0f, harms %d, timidity %.1f "
                 + "→ would reincarnate Fight/Flight %d, Friendliness %d (reaction speed rolls fresh)%s",
             nameOf(profile), tally.attacks(), tally.kills(), tally.defensiveKills(),
-            tally.damageDealt(), tally.defensiveDamage(), tally.kindness(), tally.harms(),
+            tally.damageDealt(), tally.defensiveDamage(), tally.kindness(), tally.fed(), tally.harms(),
             tally.timidity(),
             traits.fightFlight(), traits.friendliness(),
             hasPast ? " (has a stored past life)" : "");
