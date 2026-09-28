@@ -83,10 +83,10 @@ public record FeelingRecord(float feeling, float crouchBudgetUsed, float crouchC
     public static final float ESCAPE_TIMIDITY = 10.0F;
 
     /** Smallest / largest feeling a gift can add. */
-    public static final float GIFT_MIN = 0.5F;
-    public static final float GIFT_MAX = 3.0F;
+    public static final float GIFT_MIN = 1.0F;
+    public static final float GIFT_MAX = 5.0F;
     /** Feeling added per point the gift out-scores the mob's current gear. */
-    public static final double GIFT_PER_SCORE = 0.25;
+    public static final double GIFT_PER_SCORE = 0.5;
 
     /** Sentinel "not yet seen on a train" carriage index (real indices are signed, incl. 0). */
     public static final int NO_CARRIAGE = Integer.MIN_VALUE;
