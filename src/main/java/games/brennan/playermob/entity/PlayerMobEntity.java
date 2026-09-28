@@ -5,6 +5,7 @@ import games.brennan.playermob.PlayerMobConfig;
 import org.slf4j.Logger;
 import games.brennan.playermob.PlayerMobRegistry;
 import games.brennan.playermob.compat.PlayerMobSocialHooks;
+import games.brennan.playermob.compat.PlayerMobSpawnHooks;
 import games.brennan.playermob.compat.ReincarnationRecord;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.goal.AdvanceCarriageGoal;
@@ -1732,7 +1733,8 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * <p>Either companion is built with {@code EntityType.create} + {@code addFreshEntity}, which does
      * <em>not</em> invoke {@link #finalizeSpawn} — so it neither re-rolls a pair nor recurses, and a
      * spawn yields exactly a duo, never a chain. Egg / {@code /summon} spawns aren't {@code EVENT},
-     * so this is a no-op for them.</p>
+     * so this is a no-op for them. Because the random buddy skips {@code finalizeSpawn}, it is
+     * announced via {@link PlayerMobSpawnHooks#onCompanionSpawned} so an integrating mod can name it.</p>
      *
      * @return whether a companion (friend or friend-echo) actually spawned — used by the
      *     {@link DtSpawnDebug} readout to colour the spawn message.
@@ -1818,6 +1820,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // normal full roll here — URL skin included.
         friend.rollSpawnDefaults(world.getRandom(), false, true);
         linkAsFriends(friend);
+        // No finalizeSpawn means no finalizeSpawn-hooked naming (Adventure Item Names) — let an
+        // integrating mod name/equip the companion before it enters the world.
+        PlayerMobSpawnHooks.onCompanionSpawned(friend, this);
         level.addFreshEntity(friend);
         return true;
     }
