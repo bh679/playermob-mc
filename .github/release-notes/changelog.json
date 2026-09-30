@@ -1006,6 +1006,24 @@
       "released": true,
       "released_in": "v0.101.0",
       "released_at": "2026-09-28T18:28:27Z"
+    },
+    {
+      "id": "echo-draft-books",
+      "version": "0.102.0",
+      "type": "feat",
+      "title": "Your unfinished books come back with your echo",
+      "summary": "Die while still writing a book & quill and your echo brings the draft back with it. It never takes up any of the echo's own inventory. Take down your echo to get the book back, or win it over and the draft is the first thing it gives you, so you can pick up right where you left off.",
+      "highlights": [
+        "Only a book & quill with something written in it counts; blank and signed books are unchanged",
+        "Each draft comes back once: after you have it, later echoes of that death won't bring it again",
+        "Die with it again and your next echo carries the new draft",
+        "Can be turned off in playermob.properties (echoDraftBooks)"
+      ],
+      "pr": 208,
+      "date": "2026-09-30",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }

@@ -35,6 +35,15 @@ class PlayerMobConfigTest {
         assertEquals(PlayerMobConfig.DEFAULT_DEBUG_SPAWN_LOG, v.debugSpawnLog());
         assertEquals(PlayerMobConfig.DEFAULT_TRAIN_DIG_THROUGH, v.trainDigThrough());
         assertEquals(PlayerMobConfig.DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER, v.trainFollowLovedPlayer());
+        assertEquals(PlayerMobConfig.DEFAULT_ECHO_DRAFT_BOOKS, v.echoDraftBooks());
+    }
+
+    @Test
+    void echoDraftBooksParses() {
+        assertTrue(PlayerMobConfig.parse(props("echoDraftBooks", "true")).echoDraftBooks());
+        assertFalse(PlayerMobConfig.parse(props("echoDraftBooks", "false")).echoDraftBooks());
+        assertEquals(PlayerMobConfig.DEFAULT_ECHO_DRAFT_BOOKS,
+            PlayerMobConfig.parse(props("echoDraftBooks", "maybe")).echoDraftBooks());
     }
 
     @Test
