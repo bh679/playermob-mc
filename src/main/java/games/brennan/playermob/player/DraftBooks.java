@@ -129,7 +129,11 @@ public final class DraftBooks {
     /** One stack's vanilla item-stack compound — the form {@code GlobalLifeStore#claimDraft} matches on. */
     public static CompoundTag saveOne(ItemStack stack, Entity context) {
         //? if >=1.21.1 {
-        return (CompoundTag) stack.save(context.registryAccess());
+        // ItemStack.CODEC over registry-aware NBT ops: the one form shared by 1.21.1 and 26.x
+        // (26.x dropped ItemStack.save/parse). Empty stacks are rejected by the codec, so the
+        // callers skip them first.
+        return (CompoundTag) ItemStack.CODEC.encodeStart(nbtOps(context), stack)
+            .getOrThrow(msg -> new IllegalStateException("draft book did not encode: " + msg));
         //?} else {
         /*return stack.save(new CompoundTag());*/
         //?}
@@ -141,7 +145,7 @@ public final class DraftBooks {
         for (int i = 0; i < list.size(); i++) {
             CompoundTag entry = NbtCompat.compoundAt(list, i);
             //? if >=1.21.1 {
-            ItemStack stack = ItemStack.parse(context.registryAccess(), entry).orElse(ItemStack.EMPTY);
+            ItemStack stack = ItemStack.CODEC.parse(nbtOps(context), entry).result().orElse(ItemStack.EMPTY);
             //?} else {
             /*ItemStack stack = ItemStack.of(entry);*/
             //?}
@@ -151,6 +155,13 @@ public final class DraftBooks {
         }
         return out;
     }
+
+    //? if >=1.21.1 {
+    /** Registry-aware NBT ops for the item-stack codec (components need the registries). */
+    private static net.minecraft.resources.RegistryOps<Tag> nbtOps(Entity context) {
+        return net.minecraft.resources.RegistryOps.create(net.minecraft.nbt.NbtOps.INSTANCE, context.registryAccess());
+    }
+    //?}
 
     /** The compounds of {@code list} as a Java list — the {@code lives.dat} form ({@code List<CompoundTag>}). */
     public static List<CompoundTag> toCompounds(ListTag list) {
