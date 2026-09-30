@@ -235,7 +235,8 @@ public final class PlayerReincarnation {
             // A local echo shelves the drafts its life died holding (remote picks arrive stripped —
             // ReincarnationSources.pick — so this is only ever the author's own server's log).
             if (!remote && PlayerMobConfig.echoDraftBooks() && !echo.draftBooks().isEmpty()) {
-                mob.addDraftBooks(DraftBooks.load(DraftBooks.toListTag(echo.draftBooks()), mob));
+                mob.addDraftBooks(DraftBooks.load(DraftBooks.toListTag(echo.draftBooks()), mob),
+                    GlobalLifeReincarnationSource.recordId(echo));
             }
             // Name the echo after the past life so it reads as a returning soul — and,
             // because AdventureItemNames skips mobs that already carry a CustomName, so AIN

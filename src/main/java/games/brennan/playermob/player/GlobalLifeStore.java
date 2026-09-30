@@ -246,6 +246,35 @@ public final class GlobalLifeStore {
         save();
     }
 
+    /**
+     * Consume one draft off record {@code id}: an echo is about to hand {@code draft} (its vanilla
+     * item-stack NBT) back to the world — as a gift to its author or dropped on its death — so the
+     * death log forgets it and no later echo of that life carries it again. Returns {@code false}
+     * when the record no longer holds it (another echo of the same life already handed it over, or
+     * the log was reset), in which case the caller must not release it. Matches the exact NBT
+     * first; failing that, any remaining draft of the record (a codec that didn't round-trip
+     * byte-identically still consumes one).
+     */
+    public boolean claimDraft(long id, CompoundTag draft) {
+        for (int i = 0; i < history.size(); i++) {
+            DeathRecord r = history.get(i);
+            if (r.id() != id) {
+                continue;
+            }
+            if (r.drafts().isEmpty()) {
+                return false;
+            }
+            List<CompoundTag> left = new ArrayList<>(r.drafts());
+            int at = left.indexOf(draft);
+            left.remove(at < 0 ? 0 : at);
+            history.set(i, new DeathRecord(r.id(), r.uuid(), r.name(), r.carriage(), r.difficulty(),
+                r.snapshot(), r.friendSnapshots(), r.petSnapshots(), List.copyOf(left)));
+            save();
+            return true;
+        }
+        return false;
+    }
+
     private static List<CompoundTag> copyAll(List<CompoundTag> tags) {
         if (tags.isEmpty()) {
             return List.of();

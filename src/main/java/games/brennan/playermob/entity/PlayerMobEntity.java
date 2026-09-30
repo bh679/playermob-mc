@@ -324,6 +324,8 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private static final String TAG_STAY_NEAR = "StayNear";
     /** The draft-book shelf (see {@link #draftShelf}) — additive; omitted when empty. */
     private static final String TAG_DRAFTS = "Drafts";
+    /** The death-log record the shelf was filled from ({@link GlobalLifeStore.DeathRecord#id}); 0 = none. */
+    private static final String TAG_DRAFTS_RECORD = "DraftsRecord";
 
     // ---- Fields -----------------------------------------------------------
 
@@ -350,6 +352,8 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * ({@link #selectGiftFromInventory}).
      */
     private final List<ItemStack> draftShelf = new java.util.ArrayList<>();
+    /** Death-log record id the shelf came from, so a draft handed back is consumed there; 0 when unknown. */
+    private long draftRecordId = 0L;
 
     /**
      * BlockPos packed long → last-visited tickCount. Sweep on each scan;
@@ -2623,7 +2627,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // The author's own drafts come first — before any rung of the value cascade. Only ever to
         // the player this echo embodies; anyone else is offered the usual pack gift.
         if (isAuthorOfShelf(recipient)) {
-            ItemStack draft = takeDraftBook();
+            ItemStack draft = releaseDraftBook();
             if (!draft.isEmpty()) {
                 return draft;
             }
@@ -2645,13 +2649,50 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
 
     // ---- Draft shelf ------------------------------------------------------
 
-    /** Shelve {@code drafts} (copied; empty stacks skipped). See {@link #draftShelf}. */
-    public void addDraftBooks(List<ItemStack> drafts) {
+    /**
+     * Shelve {@code drafts} (copied; empty stacks skipped) taken from death-log record
+     * {@code recordId} ({@code 0} when they came from nowhere in particular). See {@link #draftShelf}.
+     */
+    public void addDraftBooks(List<ItemStack> drafts, long recordId) {
         for (ItemStack stack : drafts) {
             if (!stack.isEmpty()) {
                 draftShelf.add(stack.copy());
             }
         }
+        if (recordId != 0L) {
+            this.draftRecordId = recordId;
+        }
+    }
+
+    /** {@link #addDraftBooks(List, long)} with no backing record — the drafts are released unconditionally. */
+    public void addDraftBooks(List<ItemStack> drafts) {
+        addDraftBooks(drafts, 0L);
+    }
+
+    /**
+     * Take the next shelved draft that the death log still owes: each candidate is claimed off the
+     * backing record first ({@link GlobalLifeStore#claimDraft}), so once a draft has been handed back
+     * — by this echo or another echo of the same life — no echo ever releases it again. A draft the
+     * log no longer holds is silently discarded from the shelf. {@link ItemStack#EMPTY} when nothing
+     * is left to give.
+     */
+    private ItemStack releaseDraftBook() {
+        while (!draftShelf.isEmpty()) {
+            ItemStack draft = draftShelf.remove(0);
+            if (claimDraft(draft)) {
+                return draft;
+            }
+        }
+        return ItemStack.EMPTY;
+    }
+
+    /** True if the death log still owed {@code draft} (and now no longer does); true when no record backs the shelf. */
+    private boolean claimDraft(ItemStack draft) {
+        if (draftRecordId == 0L || level().isClientSide() || level().getServer() == null) {
+            return true;
+        }
+        return GlobalLifeStore.get(level().getServer())
+            .claimDraft(draftRecordId, games.brennan.playermob.player.DraftBooks.saveOne(draft, this));
     }
 
     /** True when the shelf holds at least one draft. */
@@ -4002,6 +4043,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // Draft shelf — additive; a mob with nothing shelved (nearly all of them) round-trips no key.
         if (!draftShelf.isEmpty()) {
             tag.put(TAG_DRAFTS, games.brennan.playermob.player.DraftBooks.save(draftShelf, this));
+            if (draftRecordId != 0L) {
+                tag.putLong(TAG_DRAFTS_RECORD, draftRecordId);
+            }
         }
     }
 
@@ -4013,9 +4057,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // Draft shelf — missing key (every pre-draft save, every non-echo) ⇒ empty shelf. Replaces
         // rather than appends so applyCustomData on a reused mob can't double up.
         draftShelf.clear();
+        draftRecordId = 0L;
         if (NbtCompat.containsOfType(tag, TAG_DRAFTS, Tag.TAG_LIST)) {
             draftShelf.addAll(games.brennan.playermob.player.DraftBooks.load(
                 NbtCompat.getListOfType(tag, TAG_DRAFTS, Tag.TAG_COMPOUND), this));
+            draftRecordId = NbtCompat.getLongOr(tag, TAG_DRAFTS_RECORD, 0L);
         }
         pushDispositionToClient();
         // Only mark the skin explicit when a key is really present — a trait-only
@@ -4138,10 +4184,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         }
         this.inventory.clearContent();
         // The draft shelf drops too — the author gets their unfinished books back off the corpse.
-        for (ItemStack draft : draftShelf) {
+        // Each drop is claimed off the death log first, so a draft already handed back (by this echo
+        // as a gift, or by another echo of the same life) is never released twice.
+        for (ItemStack draft = releaseDraftBook(); !draft.isEmpty(); draft = releaseDraftBook()) {
             this.dropAtLocation(draft);
         }
-        draftShelf.clear();
     }
 
     // ---- Provocation reaction --------------------------------------------

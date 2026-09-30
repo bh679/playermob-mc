@@ -123,6 +123,27 @@ class GlobalLifeStoreTest {
     }
 
     @Test
+    void claimDraftConsumesItOnceAcrossEchoes() {
+        GlobalLifeStore store = new GlobalLifeStore();
+        CompoundTag a = new CompoundTag();
+        a.putString("id", "minecraft:writable_book");
+        a.putString("marker", "a");
+        CompoundTag b = a.copy();
+        b.putString("marker", "b");
+        store.append(uuid(1), "P1", 0, "normal", snap("w"), List.of(), List.of(), List.of(a, b));
+        long id = store.allRecords().get(0).id();
+
+        assertTrue(store.claimDraft(id, b), "first hand-back of b is owed");
+        assertEquals(List.of(a), store.allRecords().get(0).drafts(), "b is gone, a remains");
+        // A second echo of the same life still holding b claims it: exact match is gone, so the
+        // fallback consumes the remaining draft (a) — one release per stored draft, never more.
+        assertTrue(store.claimDraft(id, b));
+        assertTrue(store.allRecords().get(0).drafts().isEmpty());
+        assertFalse(store.claimDraft(id, a), "nothing left to owe");
+        assertFalse(store.claimDraft(id + 99, a), "unknown record");
+    }
+
+    @Test
     void readLegacyLivesFormatMigratesWithUnknownCarriage() {
         // Pre-death-log global format: one snapshot per player under "Lives", no ids/carriage.
         CompoundTag tag = new CompoundTag();

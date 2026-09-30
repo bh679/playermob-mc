@@ -121,13 +121,18 @@ public final class DraftBooks {
             if (stack.isEmpty()) {
                 continue;
             }
-            //? if >=1.21.1 {
-            out.add(stack.save(context.registryAccess()));
-            //?} else {
-            /*out.add(stack.save(new CompoundTag()));*/
-            //?}
+            out.add(saveOne(stack, context));
         }
         return out;
+    }
+
+    /** One stack's vanilla item-stack compound — the form {@code GlobalLifeStore#claimDraft} matches on. */
+    public static CompoundTag saveOne(ItemStack stack, Entity context) {
+        //? if >=1.21.1 {
+        return (CompoundTag) stack.save(context.registryAccess());
+        //?} else {
+        /*return stack.save(new CompoundTag());*/
+        //?}
     }
 
     /** Inverse of {@link #save}: a stack that fails to parse (unknown item) is dropped, never a crash. */

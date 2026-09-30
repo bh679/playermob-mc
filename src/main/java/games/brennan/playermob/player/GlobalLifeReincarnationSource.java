@@ -56,6 +56,22 @@ public final class GlobalLifeReincarnationSource implements ReincarnationSource 
         return toRecords(GlobalLifeStore.get(server).recent(limit));
     }
 
+    /**
+     * The {@link GlobalLifeStore.DeathRecord#id} a record of this source stands for, or {@code 0} for
+     * any other source's record (whose key is not a death-log id) — the handle an echo keeps so a
+     * draft it hands back is consumed from the log ({@link GlobalLifeStore#claimDraft}).
+     */
+    public static long recordId(ReincarnationRecord record) {
+        if (!PlayerMob.MOD_ID.equals(record.sourceId())) {
+            return 0L;
+        }
+        try {
+            return Long.parseLong(record.key());
+        } catch (NumberFormatException e) {
+            return 0L;
+        }
+    }
+
     private static List<ReincarnationRecord> toRecords(List<GlobalLifeStore.DeathRecord> records) {
         List<ReincarnationRecord> out = new ArrayList<>(records.size());
         for (GlobalLifeStore.DeathRecord r : records) {
