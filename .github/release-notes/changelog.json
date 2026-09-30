@@ -1006,6 +1006,24 @@
       "released": true,
       "released_in": "v0.101.0",
       "released_at": "2026-09-28T18:28:27Z"
+    },
+    {
+      "id": "echo-draft-books",
+      "version": "0.102.0",
+      "type": "feat",
+      "title": "Your unfinished books come back with your echo",
+      "summary": "Die holding a book & quill you were still writing and the draft is passed to a local echo of that life. It rides outside the echo's own pack, so it never crowds out what the echo carries. Kill the echo to get it back, or befriend it and the draft is the first gift it offers you. Blank and signed books are unaffected, and echoes from other servers never carry drafts.",
+      "highlights": [
+        "Only unsigned book & quills with writing on a page count as drafts",
+        "Each draft is handed back once: later echoes of the same death will not carry it again",
+        "Dying again with the book logs it afresh for the next echo",
+        "New config: echoDraftBooks (default true)"
+      ],
+      "pr": 208,
+      "date": "2026-09-30",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
