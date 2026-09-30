@@ -181,6 +181,45 @@ class ReincarnationSourcesTest {
             List.of(onlyMine), NO_SERVER, q, Set.of(), me, RandomSource.create(1)));
     }
 
+    // ---- draft books are local-only ----
+
+    private static ReincarnationRecord recWithDraft(String source, String key, UUID player) {
+        CompoundTag book = new CompoundTag();
+        book.putString("id", "minecraft:writable_book");
+        return new ReincarnationRecord(source, key, player, key, 0, "", "", new CompoundTag(),
+            List.of(), List.of(), List.of(book));
+    }
+
+    @Test
+    void withoutDraftsStripsOnlyTheDrafts() {
+        ReincarnationRecord full = recWithDraft("playermob", "1", new UUID(0L, 1L));
+        ReincarnationRecord bare = full.withoutDrafts();
+        assertTrue(bare.draftBooks().isEmpty());
+        assertEquals(full.id(), bare.id());
+        assertEquals(full.playerId(), bare.playerId());
+        assertTrue(bare.withoutDrafts() == bare, "already bare returns itself");
+    }
+
+    @Test
+    void olderConstructorsCarryNoDrafts() {
+        assertTrue(rec("dp", "k", 0).draftBooks().isEmpty());
+        assertTrue(new ReincarnationRecord("dp", "k", new UUID(0L, 0L), "k", 0, "", "", new CompoundTag(),
+            List.of(), List.of()).draftBooks().isEmpty());
+    }
+
+    @Test
+    void localPickKeepsDraftsAndRemotePickWouldStripThem() {
+        // pickFrom is the pure core; the remote strip lives in pick() on top of it, expressed via
+        // withoutDrafts — so here we pin that a local-kind pick surfaces the drafts intact.
+        UUID me = new UUID(0L, 7L);
+        ReincarnationSource local = localSource(recWithDraft("playermob", "1", me));
+        ReincarnationQuery q = ReincarnationQuery.byCarriage(0, me);
+        ReincarnationRecord pick = ReincarnationSources.pickFrom(
+            List.of(local), NO_SERVER, q, Set.of(), null, RandomSource.create(1));
+        assertEquals(1, pick.draftBooks().size());
+        assertTrue(pick.withoutDrafts().draftBooks().isEmpty());
+    }
+
     // ---- read aggregation + cap ----
 
     @Test

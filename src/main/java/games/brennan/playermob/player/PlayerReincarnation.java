@@ -2,6 +2,7 @@ package games.brennan.playermob.player;
 
 import com.mojang.authlib.minecraft.MinecraftProfileTexture;
 import com.mojang.logging.LogUtils;
+import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.PlayerMobRegistry;
 import games.brennan.playermob.compat.PlayerMobSpawnHooks;
 import games.brennan.playermob.compat.FreePlayQuery;
@@ -137,12 +138,15 @@ public final class PlayerReincarnation {
                 List<CompoundTag> friends = captureFriendSnapshots(level, player);
                 // …and the animals they had tamed, so an echo of this life comes back with its pets.
                 List<CompoundTag> pets = capturePetSnapshots(level, player);
+                // …and the unsigned books they were still writing, so a LOCAL echo of this life can
+                // hand the drafts back (kept beside the snapshot, never inside it — see DraftBooks).
+                List<CompoundTag> drafts = captureDrafts(player);
                 // The completed snapshot is appended to the GLOBAL death log (cross-world).
                 GlobalLifeStore global = GlobalLifeStore.get(level.getServer());
                 // File the life under the difficulty it was lived on, so it is only ever offered back
                 // there (see ReincarnationDifficulty).
                 global.append(player.getUUID(), profileName(player), carriage,
-                    ReincarnationDifficulty.keyFor(level), snapshot, friends, pets);
+                    ReincarnationDifficulty.keyFor(level), snapshot, friends, pets, drafts);
             }
             // A new life begins on respawn whether or not the death was captured. The in-progress
             // tally is world-scoped, so reset it (a skipped life must not taint a later snapshot);
@@ -228,6 +232,11 @@ public final class PlayerReincarnation {
                 return null; // the chosen pool had no eligible life — stay a fresh mob
             }
             mob.applyCustomData(echo.snapshot().copy());
+            // A local echo shelves the drafts its life died holding (remote picks arrive stripped —
+            // ReincarnationSources.pick — so this is only ever the author's own server's log).
+            if (!remote && PlayerMobConfig.echoDraftBooks() && !echo.draftBooks().isEmpty()) {
+                mob.addDraftBooks(DraftBooks.load(DraftBooks.toListTag(echo.draftBooks()), mob));
+            }
             // Name the echo after the past life so it reads as a returning soul — and,
             // because AdventureItemNames skips mobs that already carry a CustomName, so AIN
             // doesn't overwrite it with a random PlayerMob name. AIN's finalizeSpawn naming
@@ -331,7 +340,8 @@ public final class PlayerReincarnation {
     private static void applyGear(PlayerMobEntity ghost, ServerPlayer player) {
         for (EquipmentSlot slot : WORN_SLOTS) {
             ItemStack worn = player.getItemBySlot(slot);
-            if (!worn.isEmpty()) {
+            // A draft in hand rides the shelf (captureDrafts), not the echo's hand — never both.
+            if (!worn.isEmpty() && !isShelvedDraft(worn)) {
                 ghost.setItemSlot(slot, worn.copy());
             }
         }
@@ -353,14 +363,35 @@ public final class PlayerReincarnation {
                 continue; // the held item already went to MAINHAND
             }
             ItemStack stack = items.get(i);
-            if (stack.isEmpty()) {
-                continue;
+            if (stack.isEmpty() || isShelvedDraft(stack)) {
+                continue; // drafts ride the shelf, not the backpack (see captureDrafts)
             }
             (ItemDataCompat.isFood(stack) ? foods : other).add(stack.copy());
         }
 
         SimpleContainer backpack = ghost.getInventory();
         fill(backpack, other, fill(backpack, foods, 0));
+    }
+
+    /** True when {@code stack} is a draft that {@link #captureDrafts} shelves (config on). */
+    private static boolean isShelvedDraft(ItemStack stack) {
+        return PlayerMobConfig.echoDraftBooks() && DraftBooks.isDraft(stack);
+    }
+
+    /**
+     * The unsigned-but-written books the player died holding, as vanilla item-stack NBT for the death
+     * log ({@link GlobalLifeStore.DeathRecord#drafts}). Empty when the feature is off. These stay out
+     * of the snapshot's gear ({@link #applyGear}) so a draft is never duplicated.
+     */
+    private static List<CompoundTag> captureDrafts(ServerPlayer player) {
+        if (!PlayerMobConfig.echoDraftBooks()) {
+            return List.of();
+        }
+        List<ItemStack> drafts = DraftBooks.collect(player);
+        if (drafts.isEmpty()) {
+            return List.of();
+        }
+        return DraftBooks.toCompounds(DraftBooks.save(drafts, player));
     }
 
     /** Drop {@code stacks} into the backpack from {@code startSlot}; returns the next free slot. */

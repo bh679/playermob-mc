@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -84,6 +85,41 @@ class GlobalLifeStoreTest {
         assertEquals("bob", NbtCompat.getStringOr(friends.get(1), "Marker", ""));
         // No friends -> no "Friends" tag written -> reads back empty (the path an older lives.dat takes).
         assertTrue(back.get(1).friendSnapshots().isEmpty());
+    }
+
+    @Test
+    void writeReadRoundTripPreservesDrafts() {
+        CompoundTag book = new CompoundTag();
+        book.putString("id", "minecraft:writable_book");
+        book.putInt("count", 1);
+        DeathRecord writer = new DeathRecord(1, uuid(1), "P1", 0, "normal", snap("w"),
+            List.of(), List.of(), List.of(book));
+        DeathRecord reader = new DeathRecord(2, uuid(2), "P2", 3, snap("r")); // 5-arg ctor -> no drafts
+
+        CompoundTag tag = new CompoundTag();
+        GlobalLifeStore.write(tag, List.of(writer, reader), 3L);
+        List<DeathRecord> back = new ArrayList<>();
+        GlobalLifeStore.read(tag, back);
+
+        assertEquals(List.of(book), back.get(0).drafts());
+        assertTrue(back.get(1).drafts().isEmpty());
+        // A record with no drafts writes no Drafts key at all (byte-identical to a pre-draft build).
+        ListTag deaths = NbtCompat.getListOfType(tag, "Deaths", net.minecraft.nbt.Tag.TAG_COMPOUND);
+        assertTrue(NbtCompat.compoundAt(deaths, 0).contains("Drafts"));
+        assertFalse(NbtCompat.compoundAt(deaths, 1).contains("Drafts"));
+    }
+
+    @Test
+    void appendStoresDefensiveCopiesOfDrafts() {
+        GlobalLifeStore store = new GlobalLifeStore();
+        CompoundTag book = new CompoundTag();
+        book.putString("id", "minecraft:writable_book");
+        List<CompoundTag> drafts = new ArrayList<>(List.of(book));
+        store.append(uuid(1), "P1", 0, "normal", snap("a"), List.of(), List.of(), drafts);
+        book.putString("id", "mutated");
+        drafts.clear();
+        assertEquals("minecraft:writable_book",
+            NbtCompat.getStringOr(store.allRecords().get(0).drafts().get(0), "id", ""));
     }
 
     @Test

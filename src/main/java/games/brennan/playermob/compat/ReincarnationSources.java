@@ -92,7 +92,10 @@ public final class ReincarnationSources {
         if (query.owner() != null) {
             metFor(query.owner()).add(chosen.id());
         }
-        return Optional.of(chosen);
+        // Draft books only ever ride a LOCAL echo: a remote pool that happened to fill the field
+        // (an older relay echoing the whole record back) is stripped here, so remote echoes behave
+        // exactly as they always have.
+        return Optional.of(remote ? chosen.withoutDrafts() : chosen);
     }
 
     /** The registered sources of the requested kind ({@code remote} true ⇒ external pools; false ⇒ the local log). */

@@ -41,6 +41,7 @@ import games.brennan.playermob.player.PlayerLifeRecord;
 import games.brennan.playermob.player.PlayerLifeStore;
 import games.brennan.playermob.player.GlobalLifeStore;
 import games.brennan.playermob.player.PlayerReincarnation;
+import games.brennan.playermob.player.SourceProfileSkin;
 import games.brennan.playermob.skin.LocalSkinFolder;
 import games.brennan.playermob.skin.LocalSkinRef;
 import games.brennan.playermob.skin.SkinDisplayName;
@@ -321,6 +322,8 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private static final String TAG_UUID = "UUID";
     private static final String TAG_TICK = "Tick";
     private static final String TAG_STAY_NEAR = "StayNear";
+    /** The draft-book shelf (see {@link #draftShelf}) — additive; omitted when empty. */
+    private static final String TAG_DRAFTS = "Drafts";
 
     // ---- Fields -----------------------------------------------------------
 
@@ -337,6 +340,16 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private final FeelingLedger feelings = new FeelingLedger();
 
     private final SimpleContainer inventory = new SimpleContainer(INVENTORY_SIZE);
+
+    /**
+     * The draft shelf: unsigned-but-written books an echo carries for the player whose life it
+     * embodies ({@link games.brennan.playermob.player.DraftBooks}). Deliberately <em>not</em> part of
+     * the {@link #inventory} backpack — unbounded, invisible to the menu, pickup/raid goals and the
+     * gear/gift scans — so the drafts never crowd out the 8 slots. Drops with everything else on
+     * death ({@link #dropCustomDeathLoot}) and is the mob's first gift to its author
+     * ({@link #selectGiftFromInventory}).
+     */
+    private final List<ItemStack> draftShelf = new java.util.ArrayList<>();
 
     /**
      * BlockPos packed long → last-visited tickCount. Sweep on each scan;
@@ -2607,6 +2620,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * only ever sourced from the backpack, so the mob never disarms itself.
      */
     public ItemStack selectGiftFromInventory(LivingEntity recipient) {
+        // The author's own drafts come first — before any rung of the value cascade. Only ever to
+        // the player this echo embodies; anyone else is offered the usual pack gift.
+        if (isAuthorOfShelf(recipient)) {
+            ItemStack draft = takeDraftBook();
+            if (!draft.isEmpty()) {
+                return draft;
+            }
+        }
         GiftPolicy.GiftTier top = GiftPolicy.tierFor(feelingToward(recipient), friendliness());
         boolean playerShaped = recipient instanceof Player || recipient instanceof PlayerMobEntity;
         for (GiftPolicy.GiftTier rung : GiftPolicy.cascadeFrom(top)) {
@@ -2620,6 +2641,46 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             }
         }
         return ItemStack.EMPTY;
+    }
+
+    // ---- Draft shelf ------------------------------------------------------
+
+    /** Shelve {@code drafts} (copied; empty stacks skipped). See {@link #draftShelf}. */
+    public void addDraftBooks(List<ItemStack> drafts) {
+        for (ItemStack stack : drafts) {
+            if (!stack.isEmpty()) {
+                draftShelf.add(stack.copy());
+            }
+        }
+    }
+
+    /** True when the shelf holds at least one draft. */
+    public boolean hasDraftBooks() {
+        return !draftShelf.isEmpty();
+    }
+
+    /** How many drafts are shelved. */
+    public int draftBookCount() {
+        return draftShelf.size();
+    }
+
+    /** Remove and return the first shelved draft, or {@link ItemStack#EMPTY} when the shelf is bare. */
+    public ItemStack takeDraftBook() {
+        return draftShelf.isEmpty() ? ItemStack.EMPTY : draftShelf.remove(0);
+    }
+
+    /**
+     * True when {@code entity} is the player whose life this mob embodies — the author the shelf is
+     * held for — and there is something on the shelf. Identity is the reincarnation ref in the skin
+     * field ({@link SourceProfileSkin}); a fresh (non-echo) mob never matches.
+     */
+    private boolean isAuthorOfShelf(LivingEntity entity) {
+        if (draftShelf.isEmpty() || !(entity instanceof Player player)) {
+            return false;
+        }
+        return SourceProfileSkin.decode(getSkinTextureUrl())
+            .map(ref -> player.getUUID().equals(ref.uuid()))
+            .orElse(false);
     }
 
     /**
@@ -3938,6 +3999,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             stayAnchor.save(stay);
             tag.put(TAG_STAY_NEAR, stay);
         }
+        // Draft shelf — additive; a mob with nothing shelved (nearly all of them) round-trips no key.
+        if (!draftShelf.isEmpty()) {
+            tag.put(TAG_DRAFTS, games.brennan.playermob.player.DraftBooks.save(draftShelf, this));
+        }
     }
 
     /** Read every PlayerMob custom field from {@code tag}. Version-agnostic (CompoundTag + NbtCompat). */
@@ -3945,6 +4010,13 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // Traits + feelings; missing keys keep defaults. Legacy *Personality keys ignored.
         traits.load(tag);
         feelings.load(tag);
+        // Draft shelf — missing key (every pre-draft save, every non-echo) ⇒ empty shelf. Replaces
+        // rather than appends so applyCustomData on a reused mob can't double up.
+        draftShelf.clear();
+        if (NbtCompat.containsOfType(tag, TAG_DRAFTS, Tag.TAG_LIST)) {
+            draftShelf.addAll(games.brennan.playermob.player.DraftBooks.load(
+                NbtCompat.getListOfType(tag, TAG_DRAFTS, Tag.TAG_COMPOUND), this));
+        }
         pushDispositionToClient();
         // Only mark the skin explicit when a key is really present — a trait-only
         // egg (archetype) carries no Skin* keys and must still roll a skin at spawn.
@@ -4065,6 +4137,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             this.dropAtLocation(stack);
         }
         this.inventory.clearContent();
+        // The draft shelf drops too — the author gets their unfinished books back off the corpse.
+        for (ItemStack draft : draftShelf) {
+            this.dropAtLocation(draft);
+        }
+        draftShelf.clear();
     }
 
     // ---- Provocation reaction --------------------------------------------

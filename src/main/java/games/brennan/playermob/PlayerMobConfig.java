@@ -32,6 +32,7 @@ public final class PlayerMobConfig {
 
     private static final String KEY_ECHO_FRIEND_CHANCE = "echoFriendChance";
     private static final String KEY_REINCARNATION_DIFFICULTY_ISOLATION = "reincarnationDifficultyIsolation";
+    private static final String KEY_ECHO_DRAFT_BOOKS = "echoDraftBooks";
     private static final String KEY_DEBUG_SPAWN_LOG = "debugSpawnLog";
     private static final String KEY_TRAIN_DIG_THROUGH = "trainDigThrough";
     private static final String KEY_TRAIN_FOLLOW_LOVED_PLAYER = "trainFollowLovedPlayer";
@@ -74,6 +75,12 @@ public final class PlayerMobConfig {
      * pools every difficulty together — the behaviour before the partition existed.
      */
     public static final boolean DEFAULT_REINCARNATION_DIFFICULTY_ISOLATION = true;
+    /**
+     * A player who dies holding an unsigned book &amp; quill with writing in it passes the draft to
+     * a <em>local</em> echo of that life (dropped on its death, or its first gift to the author); on
+     * by default. Off captures and hands over nothing.
+     */
+    public static final boolean DEFAULT_ECHO_DRAFT_BOOKS = true;
     /** Debug spawn logging ships off — when on it broadcasts a chat line on every DT auto-spawn. */
     public static final boolean DEFAULT_DEBUG_SPAWN_LOG = false;
     /** PlayerMobs dig through fill (ice/dirt/mud/moss/logs) blocking a Dungeon-Train carriage; on by default. */
@@ -217,6 +224,7 @@ public final class PlayerMobConfig {
 
     private static volatile float echoFriendChance = DEFAULT_ECHO_FRIEND_CHANCE;
     private static volatile boolean reincarnationDifficultyIsolation = DEFAULT_REINCARNATION_DIFFICULTY_ISOLATION;
+    private static volatile boolean echoDraftBooks = DEFAULT_ECHO_DRAFT_BOOKS;
     private static volatile boolean debugSpawnLog = DEFAULT_DEBUG_SPAWN_LOG;
     private static volatile boolean trainDigThrough = DEFAULT_TRAIN_DIG_THROUGH;
     private static volatile boolean trainFollowLovedPlayer = DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER;
@@ -263,6 +271,11 @@ public final class PlayerMobConfig {
      */
     public static boolean reincarnationDifficultyIsolation() {
         return reincarnationDifficultyIsolation;
+    }
+
+    /** Whether a local echo carries the unsigned-but-written books its life died holding. */
+    public static boolean echoDraftBooks() {
+        return echoDraftBooks;
     }
 
     public static boolean debugSpawnLog() {
@@ -720,6 +733,7 @@ public final class PlayerMobConfig {
             Values v = parse(props);
             echoFriendChance = v.echoFriendChance();
             reincarnationDifficultyIsolation = v.reincarnationDifficultyIsolation();
+            echoDraftBooks = v.echoDraftBooks();
             debugSpawnLog = v.debugSpawnLog();
             trainDigThrough = v.trainDigThrough();
             trainFollowLovedPlayer = v.trainFollowLovedPlayer();
@@ -776,6 +790,7 @@ public final class PlayerMobConfig {
 
     /** Parsed, validated values — split out (pure, no I/O) so the parsing rules are unit-tested. */
     record Values(float echoFriendChance, boolean reincarnationDifficultyIsolation,
+                  boolean echoDraftBooks,
                   boolean debugSpawnLog, boolean trainDigThrough,
                   boolean trainFollowLovedPlayer, boolean naturalSpawnEnabled,
                   AutoNameMode autoNameMode,
@@ -798,6 +813,7 @@ public final class PlayerMobConfig {
             clamp01(parseFloat(props.getProperty(KEY_ECHO_FRIEND_CHANCE), DEFAULT_ECHO_FRIEND_CHANCE)),
             parseBool(props.getProperty(KEY_REINCARNATION_DIFFICULTY_ISOLATION),
                 DEFAULT_REINCARNATION_DIFFICULTY_ISOLATION),
+            parseBool(props.getProperty(KEY_ECHO_DRAFT_BOOKS), DEFAULT_ECHO_DRAFT_BOOKS),
             parseBool(props.getProperty(KEY_DEBUG_SPAWN_LOG), DEFAULT_DEBUG_SPAWN_LOG),
             parseBool(props.getProperty(KEY_TRAIN_DIG_THROUGH), DEFAULT_TRAIN_DIG_THROUGH),
             parseBool(props.getProperty(KEY_TRAIN_FOLLOW_LOVED_PLAYER), DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER),
@@ -1048,9 +1064,14 @@ public final class PlayerMobConfig {
             .append("#   reincarnated on the vanilla difficulty it was lived on — echoes of a Hard run stay in\n")
             .append("#   Hard, Peaceful in Peaceful. Lives logged before this existed count as normal. Set false\n")
             .append("#   to pool every difficulty together, as older builds did.\n")
+            .append("# echoDraftBooks: when true (default), a player who dies holding an unsigned book & quill\n")
+            .append("#   with writing in it passes that draft to a local echo of theirs — kept apart from the\n")
+            .append("#   echo's 8-slot pack, dropped when the echo dies, and its first gift to the author once it\n")
+            .append("#   loves them. Blank and signed books are untouched; remote (relay) echoes never carry them.\n")
             .append(KEY_ECHO_FRIEND_CHANCE).append("=").append(DEFAULT_ECHO_FRIEND_CHANCE).append("\n")
             .append(KEY_REINCARNATION_DIFFICULTY_ISOLATION).append("=")
             .append(DEFAULT_REINCARNATION_DIFFICULTY_ISOLATION).append("\n")
+            .append(KEY_ECHO_DRAFT_BOOKS).append("=").append(DEFAULT_ECHO_DRAFT_BOOKS).append("\n")
             .append(KEY_DEBUG_SPAWN_LOG).append("=").append(DEFAULT_DEBUG_SPAWN_LOG).append("\n")
             .append(KEY_TRAIN_DIG_THROUGH).append("=").append(DEFAULT_TRAIN_DIG_THROUGH).append("\n")
             .append(KEY_TRAIN_FOLLOW_LOVED_PLAYER).append("=").append(DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER).append("\n")

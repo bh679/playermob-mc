@@ -40,10 +40,24 @@ import java.util.UUID;
  * @param friendSnapshots snapshots of the PlayerMobs that loved this player at death (may be empty)
  * @param petSnapshots    snapshots of the animals this life had tamed, replayed beside the echo and
  *                        tamed to it (may be empty)
+ * @param draftBooks      vanilla item-stack NBT of the unsigned-but-written books this life died
+ *                        holding, handed to a <em>local</em> echo of it so the author can keep
+ *                        writing (may be empty). Local-only by construction: {@link
+ *                        ReincarnationSources#pick} strips them from every remote pick, so a
+ *                        remote source may leave this empty — a relay never needs to carry them.
  */
 public record ReincarnationRecord(String sourceId, String key, UUID playerId, String name,
                                   int carriage, String skinUrl, String difficulty, CompoundTag snapshot,
-                                  List<CompoundTag> friendSnapshots, List<CompoundTag> petSnapshots) {
+                                  List<CompoundTag> friendSnapshots, List<CompoundTag> petSnapshots,
+                                  List<CompoundTag> draftBooks) {
+
+    /** A record with no draft books — every source written before drafts rode along (remote sources included). */
+    public ReincarnationRecord(String sourceId, String key, UUID playerId, String name,
+                               int carriage, String skinUrl, String difficulty, CompoundTag snapshot,
+                               List<CompoundTag> friendSnapshots, List<CompoundTag> petSnapshots) {
+        this(sourceId, key, playerId, name, carriage, skinUrl, difficulty, snapshot, friendSnapshots,
+            petSnapshots, List.of());
+    }
 
     /**
      * A record from a source that logs no pets — every source written before pets were captured.
@@ -64,6 +78,15 @@ public record ReincarnationRecord(String sourceId, String key, UUID playerId, St
                                int carriage, String skinUrl, CompoundTag snapshot,
                                List<CompoundTag> friendSnapshots) {
         this(sourceId, key, playerId, name, carriage, skinUrl, "", snapshot, friendSnapshots, List.of());
+    }
+
+    /** This record with its {@link #draftBooks} removed — what a remote pick hands out. Identity unchanged. */
+    public ReincarnationRecord withoutDrafts() {
+        if (draftBooks.isEmpty()) {
+            return this;
+        }
+        return new ReincarnationRecord(sourceId, key, playerId, name, carriage, skinUrl, difficulty, snapshot,
+            friendSnapshots, petSnapshots, List.of());
     }
 
     /** Pool-wide stable identity ({@code sourceId:key}) — keys the "already met this life" de-dup. */

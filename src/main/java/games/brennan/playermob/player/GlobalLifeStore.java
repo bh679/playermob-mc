@@ -63,6 +63,7 @@ public final class GlobalLifeStore {
     private static final String TAG_SNAPSHOT = "Snapshot";
     private static final String TAG_FRIENDS = "Friends";
     private static final String TAG_PETS = "Pets";
+    private static final String TAG_DRAFTS = "Drafts";
     private static final String TAG_DIFFICULTY = "Difficulty";
 
     /** NBT key, inside a friend snapshot, holding the label its friend-echo is titled with ("Echo of &lt;label&gt;"). */
@@ -89,10 +90,17 @@ public final class GlobalLifeStore {
      */
     public record DeathRecord(long id, UUID uuid, String name, int carriage, String difficulty,
                               CompoundTag snapshot, List<CompoundTag> friendSnapshots,
-                              List<CompoundTag> petSnapshots) {
+                              List<CompoundTag> petSnapshots, List<CompoundTag> drafts) {
         /** A death with no logged friends — keeps the legacy/test call-sites that predate friend capture. */
         public DeathRecord(long id, UUID uuid, String name, int carriage, CompoundTag snapshot) {
-            this(id, uuid, name, carriage, "", snapshot, List.of(), List.of());
+            this(id, uuid, name, carriage, "", snapshot, List.of(), List.of(), List.of());
+        }
+
+        /** A death with no draft books — every call-site that predates draft capture. */
+        public DeathRecord(long id, UUID uuid, String name, int carriage, String difficulty,
+                           CompoundTag snapshot, List<CompoundTag> friendSnapshots,
+                           List<CompoundTag> petSnapshots) {
+            this(id, uuid, name, carriage, difficulty, snapshot, friendSnapshots, petSnapshots, List.of());
         }
 
         /** A death with friends but no captured difficulty — the call-sites that predate the partition. */
@@ -222,8 +230,19 @@ public final class GlobalLifeStore {
      */
     public void append(UUID id, String name, int carriage, String difficulty, CompoundTag snapshot,
                        List<CompoundTag> friends, List<CompoundTag> pets) {
+        append(id, name, carriage, difficulty, snapshot, friends, pets, List.of());
+    }
+
+    /**
+     * As {@link #append(UUID, String, int, String, CompoundTag, List, List)}, also logging the
+     * unsigned-but-written books this life died holding ({@code drafts}, vanilla item-stack NBT — see
+     * {@link DraftBooks}). Kept <em>beside</em> the snapshot, never inside it: a local echo of this life
+     * is handed them, a relay shipping the snapshot never sees them.
+     */
+    public void append(UUID id, String name, int carriage, String difficulty, CompoundTag snapshot,
+                       List<CompoundTag> friends, List<CompoundTag> pets, List<CompoundTag> drafts) {
         history.add(new DeathRecord(nextId++, id, name, carriage, difficulty == null ? "" : difficulty,
-            snapshot.copy(), copyAll(friends), copyAll(pets)));
+            snapshot.copy(), copyAll(friends), copyAll(pets), copyAll(drafts)));
         save();
     }
 
@@ -342,6 +361,7 @@ public final class GlobalLifeStore {
             entry.put(TAG_SNAPSHOT, r.snapshot().copy());
             writeTagList(entry, TAG_FRIENDS, r.friendSnapshots());
             writeTagList(entry, TAG_PETS, r.petSnapshots());
+            writeTagList(entry, TAG_DRAFTS, r.drafts());
             deaths.add(entry);
         }
         tag.put(TAG_DEATHS, deaths);
@@ -368,7 +388,8 @@ public final class GlobalLifeStore {
             String difficulty = NbtCompat.getStringOr(entry, TAG_DIFFICULTY, "");
             out.add(new DeathRecord(id, NbtCompat.getUUID(entry, TAG_UUID), name, carriage, difficulty,
                 NbtCompat.getCompoundOrEmpty(entry, TAG_SNAPSHOT),
-                readTagList(entry, TAG_FRIENDS), readTagList(entry, TAG_PETS)));
+                readTagList(entry, TAG_FRIENDS), readTagList(entry, TAG_PETS),
+                readTagList(entry, TAG_DRAFTS)));
         }
         // Back-compat: the pre-death-log global format stored one snapshot per player under "Lives".
         if (out.isEmpty() && NbtCompat.containsOfType(tag, TAG_LEGACY_LIVES, Tag.TAG_LIST)) {
