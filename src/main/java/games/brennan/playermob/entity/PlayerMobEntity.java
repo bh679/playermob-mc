@@ -13,6 +13,7 @@ import games.brennan.playermob.entity.goal.AttackOrder;
 import games.brennan.playermob.entity.goal.BlockArrowsGoal;
 import games.brennan.playermob.entity.goal.CollectFloorItemsGoal;
 import games.brennan.playermob.entity.goal.CommandedActionGoal;
+import games.brennan.playermob.entity.goal.IdleInventoryGoal;
 import games.brennan.playermob.entity.goal.CrossGroupGapGoal;
 import games.brennan.playermob.entity.goal.DefendLovedOneGoal;
 import games.brennan.playermob.entity.goal.DigThroughGoal;
@@ -248,6 +249,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private static final EntityDataAccessor<String> DATA_OBJECTIVES =
         SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.STRING);
 
+    /**
+     * {@link MobActivity} ordinal — what the mob is visibly "up to" (container open, going
+     * through its gear). Resolved server-side by {@link #refreshActivity()} and synced so the
+     * client can draw the pose and floating panel. Network-only — never written to save NBT.
+     */
+    private static final EntityDataAccessor<Byte> DATA_ACTIVITY =
+        SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.BYTE);
+
     // ---- Constants --------------------------------------------------------
 
     /**
@@ -390,6 +399,24 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * entity may be removed before the goal selector ticks again.</p>
      */
     private BlockPos openContainerPos;
+
+    /** Ticks a gear-change shows the {@link MobActivity#INVENTORY} look at neutral reaction speed. */
+    private static final int LOADOUT_PULSE_TICKS = 30;
+
+    /** Per-tick step of the client-side activity blend — 5 ticks from rest to full pose. */
+    private static final float ACTIVITY_BLEND_STEP = 0.2F;
+
+    /** Server: ticks left on the gear-change pulse — see {@link #notifyLoadoutChanged()}. */
+    private int loadoutPulseTicks;
+
+    /** Server: the idle bag-check goal is running — see {@link #setIdleBrowsing}. */
+    private boolean idleBrowsing;
+
+    // Client: eased 0–1 weight of the activity pose, and the last activity that was showing (so
+    // the panel can fade out with the right face after the synced state has dropped to NONE).
+    private float activityBlend;
+    private float activityBlendO;
+    private MobActivity shownActivity = MobActivity.NONE;
 
     /**
      * Per-mob "tidiness" personality, rolled 50/50 at spawn (see
@@ -896,6 +923,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         builder.define(DATA_REACTION_SPEED, DispositionTraits.DEFAULT);
         builder.define(DATA_FEELINGS, "");
         builder.define(DATA_OBJECTIVES, "");
+        builder.define(DATA_ACTIVITY, (byte) 0);
     }
     //?} else {
     /*@Override
@@ -910,6 +938,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         this.entityData.define(DATA_REACTION_SPEED, DispositionTraits.DEFAULT);
         this.entityData.define(DATA_FEELINGS, "");
         this.entityData.define(DATA_OBJECTIVES, "");
+        this.entityData.define(DATA_ACTIVITY, (byte) 0);
     }*///?}
 
     /**
@@ -1041,6 +1070,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // goal; mutually exclusive because it only fires when the within-group target is
         // null. No-op off a train.
         this.goalSelector.addGoal(7, new CrossGroupGapGoal(this, PlayerSpeeds.CASUAL));
+        // Idle bag-check — cosmetic. Same priority as the stroll and registered first, so a mob
+        // mid-check isn't walked off by the stroll; anything above preempts it.
+        this.goalSelector.addGoal(8, new IdleInventoryGoal(this));
         this.goalSelector.addGoal(8, new WaterAvoidingRandomStrollGoal(this, PlayerSpeeds.CASUAL));
         this.goalSelector.addGoal(9, new LookAtPlayerGoal(this, LivingEntity.class, 8.0F));
         this.goalSelector.addGoal(10, new RandomLookAroundGoal(this));
@@ -1100,6 +1132,68 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // it each tick (both sides) so commanded and combat swings play out like a real player's.
         updateSwingTime();
         resolvePendingSkinPlayerName();
+        if (level().isClientSide()) {
+            tickActivityBlend();
+        }
+    }
+
+    // ---- Activity (container / gear / idle bag-check visuals) ------------
+
+    /** The synced activity — what the mob is visibly "up to". */
+    public MobActivity getActivity() {
+        return MobActivity.fromOrdinal(this.entityData.get(DATA_ACTIVITY));
+    }
+
+    /**
+     * Client: the activity whose panel should be drawn — the synced one, or the one that was
+     * last showing while its pose is still easing out.
+     */
+    public MobActivity getShownActivity() {
+        return shownActivity;
+    }
+
+    /** Client: eased 0–1 weight of the activity pose at this partial tick. */
+    public float getActivityBlend(float partialTick) {
+        return activityBlendO + (activityBlend - activityBlendO) * partialTick;
+    }
+
+    /** Server: flag the idle bag-check on/off — called by {@link IdleInventoryGoal}. */
+    public void setIdleBrowsing(boolean browsing) {
+        this.idleBrowsing = browsing;
+        refreshActivity();
+    }
+
+    /**
+     * Server: the mob just changed what it wears or wields on its own initiative — show it going
+     * through its gear for a moment. No-op mid-fight (see {@link MobActivity#resolve}).
+     */
+    private void notifyLoadoutChanged() {
+        this.loadoutPulseTicks = reactTicks(LOADOUT_PULSE_TICKS);
+        refreshActivity();
+    }
+
+    /** Server: re-resolve the activity and sync it only when it actually changed. */
+    private void refreshActivity() {
+        if (level().isClientSide()) return;
+        MobActivity next = MobActivity.resolve(PlayerMobConfig.activityAnimations(), isAlive(),
+            openContainerPos != null, getTarget() != null, loadoutPulseTicks, idleBrowsing);
+        byte wire = (byte) next.ordinal();
+        if (this.entityData.get(DATA_ACTIVITY) != wire) {
+            this.entityData.set(DATA_ACTIVITY, wire);
+        }
+    }
+
+    private void tickActivityBlend() {
+        MobActivity activity = getActivity();
+        if (activity != MobActivity.NONE) {
+            shownActivity = activity;
+        }
+        activityBlendO = activityBlend;
+        float step = activity != MobActivity.NONE ? ACTIVITY_BLEND_STEP : -ACTIVITY_BLEND_STEP;
+        activityBlend = Math.max(0.0F, Math.min(1.0F, activityBlend + step));
+        if (activityBlend == 0.0F && activityBlendO == 0.0F) {
+            shownActivity = MobActivity.NONE;
+        }
     }
 
     /**
@@ -1210,6 +1304,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             // close-when-stuck half — an open door can block the perpendicular path.
             recoverFromStuckDoor();
         }
+
+        if (loadoutPulseTicks > 0) {
+            loadoutPulseTicks--;
+        }
+        refreshActivity();
 
         // Refresh the Creative-only objective readout (synced to clients for the
         // under-name visualisation + right-click menu). Throttled — goal/phase
@@ -2582,6 +2681,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             ItemStack stack = inventory.getItem(i);
             if (!stack.isEmpty() && isWeapon(stack)) {
                 setItemSlot(EquipmentSlot.MAINHAND, inventory.removeItemNoUpdate(i));
+                notifyLoadoutChanged();
                 return;
             }
         }
@@ -3394,6 +3494,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
 
         setItemSlot(mobSlot, candidate.copy());
         stand.setItemSlot(fromSlot, current);
+        notifyLoadoutChanged();
         return true;
     }
 
@@ -3636,6 +3737,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             ItemStack leftover = EquipmentEvaluator.addToContainer(this.inventory, current);
             if (!leftover.isEmpty()) dropAtLocation(leftover);
         }
+        notifyLoadoutChanged();
         return 1;
     }
 
@@ -3706,6 +3808,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (getTarget() == null || getMainHandItem().isEmpty()) {
             equipBestMeleeInHand();
         }
+        notifyLoadoutChanged();
         return 1;
     }
 
@@ -4472,6 +4575,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     @Override
     public void die(DamageSource source) {
         closeOpenedContainer();
+        refreshActivity(); // a dead mob shows nothing — clears a pulse or bag-check too
         // Credit the real player who killed this mob with their lifetime aggression — discounted
         // when this mob was the aggressor (it hunted them, they finished it).
         if (getKillCredit() instanceof ServerPlayer sp) {
@@ -4546,6 +4650,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             return; // unknown container type; nothing to track
         }
         this.openContainerPos = pos.immutable();
+        refreshActivity();
     }
 
     /**
@@ -4556,6 +4661,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (openContainerPos == null) return;
         BlockPos pos = openContainerPos;
         openContainerPos = null;
+        refreshActivity();
 
         Level level = level();
         BlockEntity be = level.getBlockEntity(pos);

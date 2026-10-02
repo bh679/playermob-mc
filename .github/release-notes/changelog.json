@@ -1024,6 +1024,32 @@
       "released": false,
       "released_in": null,
       "released_at": null
+    },
+    {
+      "id": "activity-animations",
+      "version": "0.103.0",
+      "type": "feat",
+      "title": "PlayerMobs look busy",
+      "summary": "PlayerMobs now look busy when they're going through a chest or their own gear.",
+      "highlights": [],
+      "pr": 210,
+      "date": "2026-10-02",
+      "released": false,
+      "released_in": null,
+      "released_at": null
+    },
+    {
+      "id": "fix-26-2-startup-crash",
+      "version": "0.104.0",
+      "type": "fix",
+      "title": "Starts up again on Minecraft 26.2",
+      "summary": "The mod now loads on Minecraft 26.2.",
+      "highlights": [],
+      "pr": 213,
+      "date": "2026-10-02",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }

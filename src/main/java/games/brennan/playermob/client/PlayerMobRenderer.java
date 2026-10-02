@@ -170,13 +170,13 @@ public final class PlayerMobRenderer
     //? if >=26 {
     /*public PlayerMobRenderer(EntityRendererProvider.Context ctx) {
         super(ctx,
-              new PlayerModel(ctx.bakeLayer(ModelLayers.PLAYER), false), // wide
+              new PlayerMobModel(ctx.bakeLayer(ModelLayers.PLAYER), false), // wide
               SHADOW_RADIUS);
 
         // Bake both arm variants once. The wide model is the instance we just handed super
         // (now this.model / getModel()); the slim model is swapped in per-frame by submit().
         this.wideModel = this.getModel();
-        this.slimModel = new PlayerModel(ctx.bakeLayer(ModelLayers.PLAYER_SLIM), true); // slim
+        this.slimModel = new PlayerMobModel(ctx.bakeLayer(ModelLayers.PLAYER_SLIM), true); // slim
 
         // Armor layer — 26.x builds it from a baked ArmorModelSet (inner+outer humanoid armor)
         // plus the shared EquipmentLayerRenderer. PLAYER_ARMOR is the wide player armor set —
@@ -190,18 +190,21 @@ public final class PlayerMobRenderer
         // Held-item layer — draws whatever the mob holds in mainhand + offhand.
         // PlayerModel implements ArmedModel so the layer knows where to anchor.
         this.addLayer(new ItemInHandLayer<>(this));
+
+        // Floating panel shown while the mob has a container open or is going through its gear.
+        this.addLayer(new ActivityPanelLayer(this));
     }
     *///?} else {
     public PlayerMobRenderer(EntityRendererProvider.Context ctx) {
         super(ctx,
-              new PlayerModel<>(ctx.bakeLayer(ModelLayers.PLAYER), /* slim */ false),
+              new PlayerMobModel<>(ctx.bakeLayer(ModelLayers.PLAYER), /* slim */ false),
               SHADOW_RADIUS);
 
         // Bake both arm variants once. The wide model is the instance we just
         // handed super (now this.model / getModel()); the slim model is swapped
         // in per-frame by render() for mobs whose skin was authored slim.
         this.wideModel = this.getModel();
-        this.slimModel = new PlayerModel<>(ctx.bakeLayer(ModelLayers.PLAYER_SLIM), /* slim */ true);
+        this.slimModel = new PlayerMobModel<>(ctx.bakeLayer(ModelLayers.PLAYER_SLIM), /* slim */ true);
 
         // Armor layer — draws helmet/chest/legs/boots when slots are populated.
         // Inner / outer models are the standard (wide) player armor models —
@@ -215,6 +218,9 @@ public final class PlayerMobRenderer
         // Held-item layer — draws whatever the mob holds in mainhand + offhand.
         // PlayerModel implements ArmedModel so the layer knows where to anchor.
         this.addLayer(new ItemInHandLayer<>(this, ctx.getItemInHandRenderer()));
+
+        // Floating panel shown while the mob has a container open or is going through its gear.
+        this.addLayer(new ActivityPanelLayer(this));
     }
     //?}
 
@@ -227,7 +233,8 @@ public final class PlayerMobRenderer
 
     @Override
     public AvatarRenderState createRenderState() {
-        return new AvatarRenderState();
+        // The avatar state plus the activity snapshot — see PlayerMobModel.State.
+        return new PlayerMobModel.State();
     }
 
     @Override
@@ -257,6 +264,11 @@ public final class PlayerMobRenderer
             false);
         // Arm poses now live on the render state (ArmedEntityRenderState), not the model.
         applyArmPoses(entity, state);
+        // Activity pose + panel — read back by PlayerMobModel and ActivityPanelLayer.
+        if (state instanceof PlayerMobModel.State mobState) {
+            mobState.activityBlend = entity.getActivityBlend(partialTick);
+            mobState.shownActivity = entity.getShownActivity();
+        }
         // Creative objective readout, stashed per-state (see the readouts map).
         Minecraft mc = Minecraft.getInstance();
         boolean creative = mc.player != null && mc.player.isCreative();

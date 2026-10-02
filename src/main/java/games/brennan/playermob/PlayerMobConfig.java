@@ -53,6 +53,8 @@ public final class PlayerMobConfig {
     private static final String KEY_EXTINGUISH_WITH_BUCKET = "extinguishWithBucket";
     private static final String KEY_DOUSE_FIRES = "douseFires";
     private static final String KEY_HUNT_FOR_FOOD = "huntForFood";
+    private static final String KEY_ACTIVITY_ANIMATIONS = "activityAnimations";
+    private static final String KEY_IDLE_INVENTORY_SECONDS = "idleInventorySeconds";
     private static final String KEY_EXACT_NAMES = "exactNames";
     private static final String KEY_ORDER_FAILURE_MESSAGES = "orderFailureMessages";
 
@@ -120,6 +122,12 @@ public final class PlayerMobConfig {
     public static final boolean DEFAULT_DOUSE_FIRES = true;
     /** A hungry PlayerMob hunts nearby food animals (cow/pig/chicken/sheep/rabbit); on by default. */
     public static final boolean DEFAULT_HUNT_FOR_FOOD = true;
+    /** PlayerMobs show what they're up to (container open, changing gear, idle bag-check); on by default. */
+    public static final boolean DEFAULT_ACTIVITY_ANIMATIONS = true;
+    /** Average seconds between a resting PlayerMob's idle bag-checks; {@code 0} = never. */
+    public static final int DEFAULT_IDLE_INVENTORY_SECONDS = 45;
+    /** Upper bound on {@code idleInventorySeconds} — one hour. */
+    public static final int MAX_IDLE_INVENTORY_SECONDS = 3600;
     /** Chest / barrel / shulker-box raiding is on for every PlayerMob by default. */
     public static final ScavengeMode DEFAULT_SEARCH_CONTAINERS = ScavengeMode.ENABLED;
     /** Armor-stand stripping is on for every PlayerMob by default. */
@@ -240,6 +248,8 @@ public final class PlayerMobConfig {
     private static volatile boolean extinguishWithBucket = DEFAULT_EXTINGUISH_WITH_BUCKET;
     private static volatile boolean douseFires = DEFAULT_DOUSE_FIRES;
     private static volatile boolean huntForFood = DEFAULT_HUNT_FOR_FOOD;
+    private static volatile boolean activityAnimations = DEFAULT_ACTIVITY_ANIMATIONS;
+    private static volatile int idleInventorySeconds = DEFAULT_IDLE_INVENTORY_SECONDS;
     private static volatile boolean exactNames = DEFAULT_EXACT_NAMES;
     private static volatile boolean orderFailureMessages = DEFAULT_ORDER_FAILURE_MESSAGES;
     private static volatile ScavengeMode searchContainers = DEFAULT_SEARCH_CONTAINERS;
@@ -411,6 +421,23 @@ public final class PlayerMobConfig {
      */
     public static boolean huntForFood() {
         return huntForFood;
+    }
+
+    /**
+     * When true (default), a PlayerMob visibly shows what it is up to — arms reaching at a small
+     * floating panel — while it loots a container, right after it changes its own gear out of
+     * combat, and during idle bag-checks. Cosmetic only. See {@code MobActivity}.
+     */
+    public static boolean activityAnimations() {
+        return activityAnimations;
+    }
+
+    /**
+     * Average seconds between a resting PlayerMob's idle bag-checks (each lasts 2–5 s); {@code 0}
+     * means never. Clamped to 0–{@link #MAX_IDLE_INVENTORY_SECONDS}. See {@code IdleInventoryGoal}.
+     */
+    public static int idleInventorySeconds() {
+        return idleInventorySeconds;
     }
 
     /**
@@ -650,6 +677,22 @@ public final class PlayerMobConfig {
     }
 
     /**
+     * Toggle the activity visuals at runtime (e.g. from {@code /playermob activityanimations on|off}).
+     * A session override — not written back to the file, which stays the startup default.
+     */
+    public static void setActivityAnimations(boolean enabled) {
+        activityAnimations = enabled;
+    }
+
+    /**
+     * Set the idle bag-check interval at runtime (e.g. from {@code /playermob idleinventory <seconds>}),
+     * clamped to 0–{@link #MAX_IDLE_INVENTORY_SECONDS}. A session override — not written back to the file.
+     */
+    public static void setIdleInventorySeconds(int seconds) {
+        idleInventorySeconds = clampIdleInventorySeconds(seconds);
+    }
+
+    /**
      * Set the chest-raiding mode at runtime (e.g. from
      * {@code /playermob searchcontainers <enabled|disabled|onlynaturallyspawning>}). A session override —
      * not written back to the file, which stays the startup default.
@@ -749,6 +792,8 @@ public final class PlayerMobConfig {
             extinguishWithBucket = v.extinguishWithBucket();
             douseFires = v.douseFires();
             huntForFood = v.huntForFood();
+            activityAnimations = v.activityAnimations();
+            idleInventorySeconds = v.idleInventorySeconds();
             exactNames = v.exactNames();
             orderFailureMessages = v.orderFailureMessages();
             searchContainers = v.searchContainers();
@@ -798,6 +843,7 @@ public final class PlayerMobConfig {
                   float rangedEngageDistance, float meleeEngageDistance, boolean tntCombat,
                   boolean endCrystalCombat, boolean flintAndSteelCombat,
                   boolean extinguishWithBucket, boolean douseFires, boolean huntForFood,
+                  boolean activityAnimations, int idleInventorySeconds,
                   boolean exactNames, boolean orderFailureMessages,
                   ScavengeMode searchContainers, ScavengeMode searchArmorStands,
                   ScavengeMode collectFloorItems,
@@ -828,6 +874,9 @@ public final class PlayerMobConfig {
             parseBool(props.getProperty(KEY_EXTINGUISH_WITH_BUCKET), DEFAULT_EXTINGUISH_WITH_BUCKET),
             parseBool(props.getProperty(KEY_DOUSE_FIRES), DEFAULT_DOUSE_FIRES),
             parseBool(props.getProperty(KEY_HUNT_FOR_FOOD), DEFAULT_HUNT_FOR_FOOD),
+            parseBool(props.getProperty(KEY_ACTIVITY_ANIMATIONS), DEFAULT_ACTIVITY_ANIMATIONS),
+            clampIdleInventorySeconds(Math.round(parseFloat(
+                props.getProperty(KEY_IDLE_INVENTORY_SECONDS), DEFAULT_IDLE_INVENTORY_SECONDS))),
             parseBool(props.getProperty(KEY_EXACT_NAMES), DEFAULT_EXACT_NAMES),
             parseBool(props.getProperty(KEY_ORDER_FAILURE_MESSAGES), DEFAULT_ORDER_FAILURE_MESSAGES),
             ScavengeMode.fromString(props.getProperty(KEY_SEARCH_CONTAINERS), DEFAULT_SEARCH_CONTAINERS),
@@ -933,6 +982,10 @@ public final class PlayerMobConfig {
         }
     }
 
+    private static int clampIdleInventorySeconds(int seconds) {
+        return Math.max(0, Math.min(MAX_IDLE_INVENTORY_SECONDS, seconds));
+    }
+
     private static boolean parseBool(String raw, boolean fallback) {
         if (raw == null) {
             return fallback;
@@ -1014,6 +1067,13 @@ public final class PlayerMobConfig {
             .append("#   attack target, letting its weapon do the kill, then eats the drops. Set false to leave\n")
             .append("#   animals alone entirely. Toggle live with /playermob huntforfood on|off (session\n")
             .append("#   override). Default true.\n")
+            .append("# activityAnimations: when true, a PlayerMob shows what it is up to — arms reaching at a\n")
+            .append("#   small floating panel — while it loots a container, right after it changes its own\n")
+            .append("#   gear out of combat, and during idle bag-checks. Cosmetic only. Toggle live with\n")
+            .append("#   /playermob activityanimations on|off (session override). Default true.\n")
+            .append("# idleInventorySeconds: average seconds between a resting PlayerMob's idle bag-checks\n")
+            .append("#   (each lasts 2-5 seconds). 0 = never. Clamped to 0-3600. Set live with\n")
+            .append("#   /playermob idleinventory <seconds> (session override). Default 45.\n")
             .append("# exactNames: when true, a /playermob subcommand whose <name> argument matches no\n")
             .append("#   loaded PlayerMob is cancelled with an error, instead of falling back to the nearest\n")
             .append("#   PlayerMob. Turn it on when orders are issued by automation (chat bots, command\n")
@@ -1085,6 +1145,8 @@ public final class PlayerMobConfig {
             .append(KEY_EXTINGUISH_WITH_BUCKET).append("=").append(DEFAULT_EXTINGUISH_WITH_BUCKET).append("\n")
             .append(KEY_DOUSE_FIRES).append("=").append(DEFAULT_DOUSE_FIRES).append("\n")
             .append(KEY_HUNT_FOR_FOOD).append("=").append(DEFAULT_HUNT_FOR_FOOD).append("\n")
+            .append(KEY_ACTIVITY_ANIMATIONS).append("=").append(DEFAULT_ACTIVITY_ANIMATIONS).append("\n")
+            .append(KEY_IDLE_INVENTORY_SECONDS).append("=").append(DEFAULT_IDLE_INVENTORY_SECONDS).append("\n")
             .append(KEY_EXACT_NAMES).append("=").append(DEFAULT_EXACT_NAMES).append("\n")
             .append(KEY_ORDER_FAILURE_MESSAGES).append("=")
             .append(DEFAULT_ORDER_FAILURE_MESSAGES).append("\n")

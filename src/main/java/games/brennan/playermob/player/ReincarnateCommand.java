@@ -102,6 +102,11 @@ import java.util.Collection;
  *   <li>{@code /playermob huntforfood [on|off]} — toggle (or report) animal-hunting for this session:
  *       when {@code on}, a hungry PlayerMob hunts a nearby adult food animal (cow/pig/chicken/sheep/rabbit)
  *       for meat; {@code off} leaves animals alone entirely. A session override of the config flag.</li>
+ *   <li>{@code /playermob activityanimations [on|off]} — toggle (or report) the activity visuals for
+ *       this session: the reaching pose and floating panel a PlayerMob shows while in a container or
+ *       going through its gear. A session override of the config flag.</li>
+ *   <li>{@code /playermob idleinventory [seconds]} — set (or report) the average gap between a resting
+ *       PlayerMob's idle bag-checks for this session; {@code 0} turns them off.</li>
  *   <li>{@code /playermob naturalspawn [on|off]} — toggle (or report) the natural-spawn master
  *       switch for this session.</li>
  *   <li>{@code /playermob naturalspawn <mob> on|off|<chance>} — set a mob's companion chance
@@ -216,6 +221,15 @@ public final class ReincarnateCommand {
                     .executes(ReincarnateCommand::queryHuntForFood)
                     .then(Commands.literal("on").executes(ctx -> setHuntForFood(ctx, true)))
                     .then(Commands.literal("off").executes(ctx -> setHuntForFood(ctx, false))))
+                .then(Commands.literal("activityanimations")
+                    .executes(ReincarnateCommand::queryActivityAnimations)
+                    .then(Commands.literal("on").executes(ctx -> setActivityAnimations(ctx, true)))
+                    .then(Commands.literal("off").executes(ctx -> setActivityAnimations(ctx, false))))
+                .then(Commands.literal("idleinventory")
+                    .executes(ReincarnateCommand::queryIdleInventory)
+                    .then(Commands.argument("seconds",
+                            IntegerArgumentType.integer(0, PlayerMobConfig.MAX_IDLE_INVENTORY_SECONDS))
+                        .executes(ReincarnateCommand::setIdleInventory)))
                 .then(Commands.literal("naturalspawn")
                     .executes(ReincarnateCommand::reportNaturalSpawn)
                     .then(Commands.literal("on").executes(ctx -> setNaturalSpawnMaster(ctx, true)))
@@ -1240,6 +1254,42 @@ public final class ReincarnateCommand {
         PlayerMobConfig.setHuntForFood(enabled);
         ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob animal-hunting "
             + (enabled ? "enabled" : "disabled") + " for this session."), false);
+        return 1;
+    }
+
+    /** {@code /playermob activityanimations} — report whether PlayerMobs show what they're up to. */
+    private static int queryActivityAnimations(CommandContext<CommandSourceStack> ctx) {
+        boolean on = PlayerMobConfig.activityAnimations();
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob activity animations are "
+            + (on ? "ON — mobs show when they're in a container or going through their gear"
+                  : "OFF") + "."), false);
+        return 1;
+    }
+
+    /** {@code /playermob activityanimations on|off} — flip the activity visuals for this session. */
+    private static int setActivityAnimations(CommandContext<CommandSourceStack> ctx, boolean enabled) {
+        PlayerMobConfig.setActivityAnimations(enabled);
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob activity animations "
+            + (enabled ? "enabled" : "disabled") + " for this session."), false);
+        return 1;
+    }
+
+    /** {@code /playermob idleinventory} — report the idle bag-check interval. */
+    private static int queryIdleInventory(CommandContext<CommandSourceStack> ctx) {
+        int seconds = PlayerMobConfig.idleInventorySeconds();
+        ctx.getSource().sendSuccess(() -> Component.literal(seconds > 0
+            ? "A resting PlayerMob checks its bag about every " + seconds + " s."
+            : "Idle bag-checks are OFF."), false);
+        return 1;
+    }
+
+    /** {@code /playermob idleinventory <seconds>} — set the idle bag-check interval for this session. */
+    private static int setIdleInventory(CommandContext<CommandSourceStack> ctx) {
+        int seconds = IntegerArgumentType.getInteger(ctx, "seconds");
+        PlayerMobConfig.setIdleInventorySeconds(seconds);
+        ctx.getSource().sendSuccess(() -> Component.literal(seconds > 0
+            ? "Idle bag-check interval set to about " + seconds + " s for this session."
+            : "Idle bag-checks disabled for this session."), false);
         return 1;
     }
 
