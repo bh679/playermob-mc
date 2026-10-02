@@ -382,6 +382,42 @@ class PlayerMobConfigTest {
     }
 
     @Test
+    void activityAnimationsDefaultOnAndToggleAtRuntime() {
+        assertTrue(PlayerMobConfig.DEFAULT_ACTIVITY_ANIMATIONS, "activity visuals are on by default");
+        assertTrue(PlayerMobConfig.parse(new Properties()).activityAnimations(), "missing key → default true");
+        assertFalse(PlayerMobConfig.parse(props("activityAnimations", "false")).activityAnimations());
+        try {
+            PlayerMobConfig.setActivityAnimations(false);
+            assertFalse(PlayerMobConfig.activityAnimations());
+            PlayerMobConfig.setActivityAnimations(true);
+            assertTrue(PlayerMobConfig.activityAnimations());
+        } finally {
+            PlayerMobConfig.setActivityAnimations(PlayerMobConfig.DEFAULT_ACTIVITY_ANIMATIONS); // don't leak
+        }
+    }
+
+    @Test
+    void idleInventorySecondsDefaultsParsesAndClamps() {
+        assertEquals(45, PlayerMobConfig.DEFAULT_IDLE_INVENTORY_SECONDS);
+        assertEquals(45, PlayerMobConfig.parse(new Properties()).idleInventorySeconds(), "missing key → default");
+        assertEquals(10, PlayerMobConfig.parse(props("idleInventorySeconds", "10")).idleInventorySeconds());
+        assertEquals(0, PlayerMobConfig.parse(props("idleInventorySeconds", "0")).idleInventorySeconds(), "0 = never");
+        assertEquals(0, PlayerMobConfig.parse(props("idleInventorySeconds", "-5")).idleInventorySeconds());
+        assertEquals(PlayerMobConfig.MAX_IDLE_INVENTORY_SECONDS,
+            PlayerMobConfig.parse(props("idleInventorySeconds", "999999")).idleInventorySeconds());
+        assertEquals(45, PlayerMobConfig.parse(props("idleInventorySeconds", "soon")).idleInventorySeconds(),
+            "garbage → default");
+        try {
+            PlayerMobConfig.setIdleInventorySeconds(5);
+            assertEquals(5, PlayerMobConfig.idleInventorySeconds());
+            PlayerMobConfig.setIdleInventorySeconds(-1);
+            assertEquals(0, PlayerMobConfig.idleInventorySeconds());
+        } finally {
+            PlayerMobConfig.setIdleInventorySeconds(PlayerMobConfig.DEFAULT_IDLE_INVENTORY_SECONDS); // don't leak
+        }
+    }
+
+    @Test
     void exactNamesDefaultsOffAndTogglesAtRuntime() {
         assertFalse(PlayerMobConfig.DEFAULT_EXACT_NAMES, "exact names is off by default");
         assertFalse(PlayerMobConfig.parse(new Properties()).exactNames(), "missing key → default false");
