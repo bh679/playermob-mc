@@ -37,6 +37,10 @@ class MixinTargetsTest {
     private static final String ACCESSOR_DESC = "Lorg/spongepowered/asm/mixin/gen/Accessor;";
     private static final String INVOKER_DESC = "Lorg/spongepowered/asm/mixin/gen/Invoker;";
     private static final List<String> CONFIG_LISTS = List.of("mixins", "client", "server");
+    /** Byte offset of the big-endian major version in a class file (after magic + minor). */
+    private static final int MAJOR_VERSION_OFFSET = 6;
+    /** Java 17 — the lowest level any node targets, so every node's ASM reads it. */
+    private static final int READABLE_MAJOR_VERSION = 61;
 
     @Test
     void everyMixinMemberResolvesOnItsTarget() throws IOException {
@@ -164,9 +168,28 @@ class MixinTargetsTest {
     private static ClassNode readClass(String internalName) throws IOException {
         try (InputStream in = resource(internalName + ".class")) {
             ClassNode node = new ClassNode();
-            new ClassReader(in).accept(node, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG);
+            new ClassReader(readableBy(in.readAllBytes()))
+                .accept(node, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG);
             return node;
         }
+    }
+
+    /**
+     * The ASM on the test classpath can be older than this node's class files (26.x compiles to
+     * Java 25) and refuses a major version it doesn't know. Only names, descriptors and
+     * annotations are read here, and their layout hasn't changed, so present a newer class as
+     * the oldest version every node's ASM accepts.
+     */
+    private static byte[] readableBy(byte[] classFile) {
+        int major = ((classFile[MAJOR_VERSION_OFFSET] & 0xFF) << 8)
+            | (classFile[MAJOR_VERSION_OFFSET + 1] & 0xFF);
+        if (major <= READABLE_MAJOR_VERSION) {
+            return classFile;
+        }
+        byte[] copy = classFile.clone();
+        copy[MAJOR_VERSION_OFFSET] = (byte) (READABLE_MAJOR_VERSION >> 8);
+        copy[MAJOR_VERSION_OFFSET + 1] = (byte) READABLE_MAJOR_VERSION;
+        return copy;
     }
 
     private static InputStream resource(String path) throws IOException {
