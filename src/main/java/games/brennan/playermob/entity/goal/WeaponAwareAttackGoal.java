@@ -49,8 +49,8 @@ public final class WeaponAwareAttackGoal extends Goal implements DescribableGoal
 
     /**
      * @param mob the entity this goal drives
-     * @param meleeSpeed pathfinder gait for chasing a target into melee ({@code PlayerSpeeds.SPRINT})
-     * @param rangedSpeed pathfinder gait for closing to firing range ({@code PlayerSpeeds.WALK})
+     * @param meleeSpeed pathfinder gait for chasing a target into melee ({@code PlayerSpeeds.URGENT})
+     * @param rangedSpeed pathfinder gait for closing to firing range ({@code PlayerSpeeds.URGENT})
      * @param rangedAttackRange max attack range in blocks for the ranged delegates
      *                          (the bow/crossbow firing distance, not the
      *                          targeting distance)

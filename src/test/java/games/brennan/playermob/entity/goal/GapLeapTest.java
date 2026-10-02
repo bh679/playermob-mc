@@ -2,6 +2,7 @@ package games.brennan.playermob.entity.goal;
 
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.PlayerSpeeds;
+import games.brennan.playermob.entity.PlayerSpeeds.Style;
 import net.minecraft.world.phys.Vec3;
 import org.junit.jupiter.api.Test;
 
@@ -63,9 +64,9 @@ class GapLeapTest {
     private static final double SPRINT = PlayerSpeeds.sprintBlocksPerTick(ATTR);
     private static final double SPRINT_JUMP = PlayerSpeeds.sprintJumpBlocksPerTick(ATTR);
 
-    private static final double[] WALKER = PlayerSpeeds.crossingSpeeds(1, false, false, ATTR);
-    private static final double[] SPRINTER = PlayerSpeeds.crossingSpeeds(3, false, false, ATTR);
-    private static final double[] SPRINT_JUMPER = PlayerSpeeds.crossingSpeeds(8, false, true, ATTR);
+    private static final double[] WALKER = PlayerSpeeds.crossingSpeeds(Style.WALK, ATTR);
+    private static final double[] SPRINTER = PlayerSpeeds.crossingSpeeds(Style.SPRINT, ATTR);
+    private static final double[] SPRINT_JUMPER = PlayerSpeeds.crossingSpeeds(Style.SPRINT_JUMP, ATTR);
 
     /** Blocks travelled by a planned hop: speed x airtime. */
     private static double travel(GapLeap.Hop hop) {
@@ -83,20 +84,28 @@ class GapLeapTest {
     }
 
     @Test
-    void crossingSpeedFollowsReactionSpeedAndUrgency() {
-        // 0–1 never sprint: walk, even when fleeing.
-        assertEquals(WALK, PlayerSpeeds.crossingSpeeds(0, false, false, ATTR)[0], EPS);
-        assertEquals(WALK, PlayerSpeeds.crossingSpeeds(1, true, false, ATTR)[0], EPS);
-        // 2 sprints only when urgent.
-        assertEquals(WALK, PlayerSpeeds.crossingSpeeds(2, false, false, ATTR)[0], EPS);
-        assertEquals(SPRINT, PlayerSpeeds.crossingSpeeds(2, true, false, ATTR)[0], EPS);
-        // 3–4 sprint; they don't sprint-jump.
-        assertEquals(SPRINT, PlayerSpeeds.crossingSpeeds(3, false, false, ATTR)[0], EPS);
-        assertEquals(SPRINT, PlayerSpeeds.crossingSpeeds(4, true, false, ATTR)[0], EPS);
-        // 5 goes either way with its coin flip; 6+ always sprint-jump.
-        assertEquals(SPRINT, PlayerSpeeds.crossingSpeeds(5, false, false, ATTR)[0], EPS);
-        assertEquals(SPRINT_JUMP, PlayerSpeeds.crossingSpeeds(5, false, true, ATTR)[0], EPS);
-        assertEquals(SPRINT_JUMP, PlayerSpeeds.crossingSpeeds(10, false, true, ATTR)[0], EPS);
+    void crossingSpeedFollowsTheMovementStyle() {
+        assertEquals(WALK, PlayerSpeeds.crossingSpeeds(Style.WALK, ATTR)[0], EPS);
+        assertEquals(SPRINT, PlayerSpeeds.crossingSpeeds(Style.SPRINT, ATTR)[0], EPS);
+        assertEquals(SPRINT_JUMP, PlayerSpeeds.crossingSpeeds(Style.SPRINT_JUMP, ATTR)[0], EPS);
+        // Boost is a ceiling trick; over a gap it is just a sprint-jump.
+        assertEquals(SPRINT_JUMP, PlayerSpeeds.crossingSpeeds(Style.BOOST, ATTR)[0], EPS);
+    }
+
+    @Test
+    void crossingSpeedByReactionTier() {
+        // Exploring (casual) vs escaping (urgent), through the same table as ordinary movement.
+        assertEquals(WALK, crossing(1, true, 0.0), EPS);       // 0–1 always walk
+        assertEquals(WALK, crossing(3, false, 0.0), EPS);      // 2–4 walk casually
+        assertEquals(SPRINT, crossing(3, true, 0.0), EPS);     // ...and may sprint when fleeing
+        assertEquals(WALK, crossing(3, true, 0.9), EPS);
+        assertEquals(SPRINT, crossing(7, false, 0.9), EPS);    // 6–7 sprint casually
+        assertEquals(SPRINT_JUMP, crossing(7, true, 0.9), EPS);
+        assertEquals(SPRINT_JUMP, crossing(9, false, 0.9), EPS);
+    }
+
+    private static double crossing(int reaction, boolean urgent, double roll) {
+        return PlayerSpeeds.crossingSpeeds(PlayerSpeeds.styleFor(reaction, urgent, roll), ATTR)[0];
     }
 
     @Test

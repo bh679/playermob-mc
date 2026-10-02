@@ -1,6 +1,6 @@
 package games.brennan.playermob.entity;
 
-import games.brennan.playermob.entity.PlayerSpeeds.Gait;
+import games.brennan.playermob.entity.PlayerSpeeds.Style;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -25,56 +25,97 @@ class PlayerSpeedsTest {
     private static final double SPRINT_JUMP_BOOST = 0.2;
     private static final int JUMP_PERIOD_TICKS = 12;           // flat-ground jump, takeoff to landing
 
+    // ---- The reaction-speed table ----
+
+    private static final double NEVER = 0.999;   // a roll that only passes a 100% chance
+    private static final double ALWAYS = 0.0;    // a roll that passes any non-zero chance
+
     @Test
-    void everyLegacyMultiplierMapsToOneOfTwoGaits() {
-        // The seven multipliers the goals used before the player-speed model.
-        assertEquals(Gait.WALK, PlayerSpeeds.gaitFor(0.5));
-        assertEquals(Gait.WALK, PlayerSpeeds.gaitFor(0.6));
-        assertEquals(Gait.WALK, PlayerSpeeds.gaitFor(0.9));
-        assertEquals(Gait.WALK, PlayerSpeeds.gaitFor(1.0));
-        assertEquals(Gait.SPRINT, PlayerSpeeds.gaitFor(1.3));
-        assertEquals(Gait.SPRINT, PlayerSpeeds.gaitFor(1.4));
-        assertEquals(Gait.SPRINT, PlayerSpeeds.gaitFor(4.0));
+    void goalsOnlyMarkMovementCasualOrUrgent() {
+        assertFalse(PlayerSpeeds.isUrgent(PlayerSpeeds.CASUAL));
+        assertTrue(PlayerSpeeds.isUrgent(PlayerSpeeds.URGENT));
+        // Vanilla's strafe modifier is never urgent.
+        assertFalse(PlayerSpeeds.isUrgent(0.25));
     }
 
     @Test
-    void gaitBoundarySitsBetweenWalkAndSprint() {
-        assertEquals(Gait.WALK, PlayerSpeeds.gaitFor(PlayerSpeeds.WALK));
-        assertEquals(Gait.SPRINT, PlayerSpeeds.gaitFor(PlayerSpeeds.SPRINT));
-        assertEquals(Gait.WALK, PlayerSpeeds.gaitFor(1.19));
-        assertEquals(Gait.SPRINT, PlayerSpeeds.gaitFor(1.2));
-        // Vanilla's strafe modifier — strafing is always a walk.
-        assertEquals(Gait.WALK, PlayerSpeeds.gaitFor(0.25));
-    }
-
-    @Test
-    void urgentSprintIsStillTheSprintGait() {
-        assertEquals(Gait.SPRINT, PlayerSpeeds.gaitFor(PlayerSpeeds.URGENT_SPRINT));
-        assertTrue(PlayerSpeeds.isUrgent(PlayerSpeeds.URGENT_SPRINT));
-        assertFalse(PlayerSpeeds.isUrgent(PlayerSpeeds.SPRINT));
-        assertFalse(PlayerSpeeds.isUrgent(PlayerSpeeds.WALK));
-    }
-
-    @Test
-    void slowestReactorsNeverSprint() {
+    void slowestReactorsAlwaysWalk() {
         for (int reaction = 0; reaction <= 1; reaction++) {
-            assertFalse(PlayerSpeeds.allowsSprint(reaction, false), "reaction " + reaction);
-            assertFalse(PlayerSpeeds.allowsSprint(reaction, true), "reaction " + reaction + ", urgent");
+            assertEquals(Style.WALK, PlayerSpeeds.styleFor(reaction, false, ALWAYS), "reaction " + reaction);
+            assertEquals(Style.WALK, PlayerSpeeds.styleFor(reaction, true, ALWAYS), "reaction " + reaction + ", urgent");
         }
     }
 
     @Test
-    void slowReactorSprintsOnlyWhenUrgent() {
-        assertFalse(PlayerSpeeds.allowsSprint(2, false));
-        assertTrue(PlayerSpeeds.allowsSprint(2, true));
+    void slowReactorsWalkCasuallyAndSometimesSprintInCombat() {
+        for (int reaction = 2; reaction <= 4; reaction++) {
+            assertEquals(Style.WALK, PlayerSpeeds.styleFor(reaction, false, ALWAYS), "reaction " + reaction);
+        }
+        assertEquals(0.25, PlayerSpeeds.sprintChance(2, true), 1.0e-9);
+        assertEquals(0.50, PlayerSpeeds.sprintChance(3, true), 1.0e-9);
+        assertEquals(0.75, PlayerSpeeds.sprintChance(4, true), 1.0e-9);
+        // The roll decides: under the chance sprints, at or over it walks.
+        assertEquals(Style.SPRINT, PlayerSpeeds.styleFor(2, true, 0.24));
+        assertEquals(Style.WALK, PlayerSpeeds.styleFor(2, true, 0.25));
+        assertEquals(Style.SPRINT, PlayerSpeeds.styleFor(4, true, 0.74));
+        assertEquals(Style.WALK, PlayerSpeeds.styleFor(4, true, 0.75));
     }
 
     @Test
-    void everyoneElseSprintsWhenAsked() {
-        for (int reaction = 3; reaction <= 10; reaction++) {
-            assertTrue(PlayerSpeeds.allowsSprint(reaction, false), "reaction " + reaction);
-            assertTrue(PlayerSpeeds.allowsSprint(reaction, true), "reaction " + reaction + ", urgent");
+    void neutralReactorMixesWalkAndSprintCasuallyAndSprintsInCombat() {
+        assertEquals(Style.SPRINT, PlayerSpeeds.styleFor(5, false, 0.49));
+        assertEquals(Style.WALK, PlayerSpeeds.styleFor(5, false, 0.50));
+        assertEquals(Style.SPRINT, PlayerSpeeds.styleFor(5, true, NEVER));
+    }
+
+    @Test
+    void quickReactorsSprintCasuallyAndSprintJumpInCombat() {
+        for (int reaction = 6; reaction <= 7; reaction++) {
+            assertEquals(Style.SPRINT, PlayerSpeeds.styleFor(reaction, false, NEVER), "reaction " + reaction);
+            assertEquals(Style.SPRINT_JUMP, PlayerSpeeds.styleFor(reaction, true, NEVER), "reaction " + reaction + ", urgent");
         }
+    }
+
+    @Test
+    void sharpReactorsSprintJumpCasuallyAndBoostInCombat() {
+        for (int reaction = 8; reaction <= 9; reaction++) {
+            assertEquals(Style.SPRINT_JUMP, PlayerSpeeds.styleFor(reaction, false, NEVER), "reaction " + reaction);
+            assertEquals(Style.BOOST, PlayerSpeeds.styleFor(reaction, true, NEVER), "reaction " + reaction + ", urgent");
+        }
+    }
+
+    @Test
+    void theSharpestBoostEverywhere() {
+        assertEquals(Style.BOOST, PlayerSpeeds.styleFor(10, false, NEVER));
+        assertEquals(Style.BOOST, PlayerSpeeds.styleFor(10, true, NEVER));
+    }
+
+    @Test
+    void urgencyNeverMakesAMobSlower() {
+        for (int reaction = 0; reaction <= 10; reaction++) {
+            for (double roll : new double[] {0.0, 0.3, 0.6, 0.9}) {
+                assertTrue(PlayerSpeeds.styleFor(reaction, true, roll).ordinal()
+                        >= PlayerSpeeds.styleFor(reaction, false, roll).ordinal(), "reaction " + reaction);
+            }
+        }
+    }
+
+    @Test
+    void eachStyleIncludesTheOnesBelowIt() {
+        assertFalse(Style.WALK.sprints());
+        assertTrue(Style.SPRINT.sprints());
+        assertFalse(Style.SPRINT.sprintJumps());
+        assertTrue(Style.SPRINT_JUMP.sprints());
+        assertTrue(Style.SPRINT_JUMP.sprintJumps());
+        assertFalse(Style.SPRINT_JUMP.boosts());
+        assertTrue(Style.BOOST.sprintJumps());
+        assertTrue(Style.BOOST.boosts());
+    }
+
+    @Test
+    void outOfRangeReactionSpeedsAreClamped() {
+        assertEquals(Style.WALK, PlayerSpeeds.styleFor(-3, true, ALWAYS));
+        assertEquals(Style.BOOST, PlayerSpeeds.styleFor(99, false, NEVER));
     }
 
     @Test

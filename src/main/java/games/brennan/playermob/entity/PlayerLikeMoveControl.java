@@ -16,10 +16,11 @@ import net.minecraft.world.entity.ai.control.MoveControl;
  *       speed itself comes from {@link PlayerMobEntity#getSpeed()} (the attribute, as for a player).</li>
  *   <li><b>Use-item slow.</b> Input drops to 20% while drawing a bow, charging a crossbow, blocking
  *       or eating, and there is no sprinting.</li>
- *   <li><b>Sprint.</b> This control owns the sprint flag — on while a goal asked for
- *       {@link PlayerSpeeds#SPRINT}, the mob's reaction speed allows it
- *       ({@link PlayerSpeeds#allowsSprint}) and it is actually driving forward; off otherwise.
- *       Vanilla never clears it for a mob, so goals must not set it themselves.</li>
+ *   <li><b>Sprint.</b> This control owns the sprint flag. Goals only say whether the movement is
+ *       {@link PlayerSpeeds#CASUAL} or {@link PlayerSpeeds#URGENT}; the mob's reaction speed turns
+ *       that into a {@link PlayerSpeeds.Style} ({@link PlayerSpeeds#styleFor}), and the flag is on
+ *       while that style sprints and the mob is actually driving forward. Vanilla never clears it
+ *       for a mob, so goals must not set it themselves.</li>
  *   <li><b>Swimming.</b> Sprinting in water is a player's sprint-swim (drag 0.9 instead of 0.8);
  *       the swim pose is set here because only {@code Player} ever assigns it.</li>
  * </ul>
@@ -45,8 +46,21 @@ public class PlayerLikeMoveControl extends MoveControl {
     private static final float FULL_STICK = 1.0F;
     //?}
 
+    /**
+     * Ticks without a kind of movement before the next one counts as a new stretch and re-rolls its
+     * style. A chase drops to idle for a tick or two every time it re-paths; without this a mob that
+     * sprints "some of the time" would re-flip its coin on each of those.
+     */
+    private static final int STRETCH_GAP_TICKS = 40;
+
     private final PlayerMobEntity playerMob;
     private final SprintJumpDriver sprintJump;
+
+    // One roll per stretch of casual movement and one per combat/fleeing interaction.
+    private double casualRoll;
+    private double urgentRoll;
+    private int casualRestTicks = STRETCH_GAP_TICKS + 1;
+    private int urgentRestTicks = STRETCH_GAP_TICKS + 1;
 
     public PlayerLikeMoveControl(PlayerMobEntity mob) {
         super(mob);
@@ -61,14 +75,14 @@ public class PlayerLikeMoveControl extends MoveControl {
         super.tick();
 
         boolean usingItem = playerMob.isUseItemSlowed();
+        boolean driving = (requested == Operation.MOVE_TO || requested == Operation.JUMPING) && playerMob.zza != 0.0F;
+        PlayerSpeeds.Style style = currentStyle(driving);
         boolean sprinting = false;
-        if ((requested == Operation.MOVE_TO || requested == Operation.JUMPING) && playerMob.zza != 0.0F) {
+        if (driving) {
             float[] input = PlayerSpeeds.stickInput(1.0F, 0.0F, FULL_STICK, usingItem);
             playerMob.setZza(input[0]);
             playerMob.setXxa(0.0F);
-            sprinting = !usingItem
-                && PlayerSpeeds.gaitFor(this.speedModifier) == PlayerSpeeds.Gait.SPRINT
-                && PlayerSpeeds.allowsSprint(playerMob.reactionSpeed(), PlayerSpeeds.isUrgent(this.speedModifier));
+            sprinting = !usingItem && style.sprints();
         } else if (requested == Operation.STRAFE) {
             float[] input = PlayerSpeeds.stickInput(playerMob.zza, playerMob.xxa, FULL_STICK, usingItem);
             playerMob.setZza(input[0]);
@@ -78,7 +92,26 @@ public class PlayerLikeMoveControl extends MoveControl {
         }
 
         applySprint(sprinting);
-        sprintJump.tick(sprinting);
+        sprintJump.tick(sprinting, style);
+    }
+
+    /**
+     * The style for this tick's movement, rolling a fresh chance whenever a new stretch of casual
+     * or combat/fleeing movement begins.
+     */
+    private PlayerSpeeds.Style currentStyle(boolean driving) {
+        boolean urgent = PlayerSpeeds.isUrgent(this.speedModifier);
+        boolean casualNow = driving && !urgent;
+        boolean urgentNow = driving && urgent;
+        if (casualNow && casualRestTicks > STRETCH_GAP_TICKS) {
+            casualRoll = playerMob.getRandom().nextDouble();
+        }
+        if (urgentNow && urgentRestTicks > STRETCH_GAP_TICKS) {
+            urgentRoll = playerMob.getRandom().nextDouble();
+        }
+        casualRestTicks = casualNow ? 0 : Math.min(casualRestTicks + 1, STRETCH_GAP_TICKS + 1);
+        urgentRestTicks = urgentNow ? 0 : Math.min(urgentRestTicks + 1, STRETCH_GAP_TICKS + 1);
+        return PlayerSpeeds.styleFor(playerMob.reactionSpeed(), urgent, urgent ? urgentRoll : casualRoll);
     }
 
     /**

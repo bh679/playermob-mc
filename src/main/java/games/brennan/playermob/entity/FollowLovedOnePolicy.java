@@ -48,7 +48,7 @@ public final class FollowLovedOnePolicy {
     public static final double SCAN_RANGE = 64.0;
 
     /** Catch-up pathfinder speed multiplier; following only ever happens when far, so always a sprint. */
-    public static final double CATCH_UP_SPEED = PlayerSpeeds.SPRINT;
+    public static final double CATCH_UP_SPEED = PlayerSpeeds.URGENT;
 
     /** On a train: begin following once the carriage gap exceeds {@link #FOLLOW_CARRIAGES}. */
     public static boolean followByCarriages(int carriagesApart) {

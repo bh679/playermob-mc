@@ -80,7 +80,9 @@ public final class AdvanceCarriageGoal extends Goal implements DescribableGoal {
 
     @Override
     public boolean canUse() {
-        if (scanCooldown > 0) {
+        // Just landed a gap leap: skip the cooldown (still the long boundary one from waiting at the
+        // edge) so the mob keeps marching instead of standing on the far deck until it runs out.
+        if (scanCooldown > 0 && !mob.justCrossedGap()) {
             scanCooldown--;
             return false;
         }

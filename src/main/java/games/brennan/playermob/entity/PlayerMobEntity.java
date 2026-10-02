@@ -467,6 +467,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      */
     private int lastOnTrainTick = -100_000;
 
+    /** Tick this mob last landed a carriage-group gap leap; see {@link #justCrossedGap}. */
+    private int lastGapCrossTick = -100_000;
+
     /** True only inside vanilla's stuck check, so {@link #getSpeed} can answer it in the old scale. */
     private boolean stuckDetectionView;
     /** Mid-bite (see {@link #setEating}) — slows movement like a player eating. */
@@ -841,6 +844,23 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         this.eating = eating;
     }
 
+    /** How long after landing a gap leap the march goal may skip its rescan cooldown. */
+    private static final int GAP_HANDOVER_TICKS = 10;
+
+    /** Called by {@code CrossGroupGapGoal} the tick its leap lands on the far group. */
+    public void markGapCrossed() {
+        this.lastGapCrossTick = this.tickCount;
+    }
+
+    /**
+     * True for a few ticks after landing a gap leap. {@code AdvanceCarriageGoal} reads it to take
+     * over at once: it idles on a long cooldown while the mob waits at a group boundary, and
+     * without this the mob would stand on the far deck until that ran out.
+     */
+    public boolean justCrossedGap() {
+        return this.tickCount - this.lastGapCrossTick <= GAP_HANDOVER_TICKS;
+    }
+
     /**
      * Whether the mob has the stamina to sprint-jump. Stand-in for "hunger bar full": the mod's
      * existing not-hungry test (health at or above {@link EatFoodGoal#HUNGER_THRESHOLD}). The real
@@ -913,25 +933,25 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // water, or never starting at all — by any other priority-1 goal already holding
         // MOVE/LOOK. Priority 0 guarantees it always wins that slot the instant it's on fire.
         // No-op unless on fire. See FireBucketGoal.
-        this.goalSelector.addGoal(0, new FireBucketGoal(this, PlayerSpeeds.URGENT_SPRINT)); // sprint to water — it's on fire
+        this.goalSelector.addGoal(0, new FireBucketGoal(this, PlayerSpeeds.URGENT)); // sprint to water — it's on fire
         // An explicit player order (/playermob order ...) overrides autonomous behaviour.
         // Added before the other priority-1 goals so it wins the MOVE/LOOK slot while it runs;
         // no-op (canUse false) whenever there's no pending order, so normal AI is unaffected.
-        this.goalSelector.addGoal(1, new CommandedActionGoal(this, PlayerSpeeds.WALK));
+        this.goalSelector.addGoal(1, new CommandedActionGoal(this, PlayerSpeeds.CASUAL));
         // Fell off a Dungeon Train carriage? Getting back on preempts everything
         // but swimming — added before the other priority-1 goals so its canUse is
         // evaluated first. No-op without a train mod (nearestCarriage → null).
-        this.goalSelector.addGoal(1, new TrainRecoveryGoal(this, PlayerSpeeds.WALK));
+        this.goalSelector.addGoal(1, new TrainRecoveryGoal(this, PlayerSpeeds.CASUAL));
         // Social goals (flee / watch / greet) — priority 1 so they preempt
         // raiding/strolling when their reaction applies. Each self-gates on the
         // live reaction; Skeptical/Friendly also gate on "no target" so they yield to combat.
         // Flee range 10 → detectRange 16 (range + DETECT_RANGE_BONUS) covers the
         // widest fight/flight bubble (fr0 hated ≈ MAX_RANGE); the mob still only
         // flees ~10 blocks before hiding.
-        this.goalSelector.addGoal(1, new FleeFromCategoryGoal(this, /* range */ 10.0F, PlayerSpeeds.WALK, PlayerSpeeds.URGENT_SPRINT));
+        this.goalSelector.addGoal(1, new FleeFromCategoryGoal(this, /* range */ 10.0F, PlayerSpeeds.CASUAL, PlayerSpeeds.URGENT));
         // Watch scan = MAX_RANGE so fr0's ~15-block skeptical ring is visible.
         this.goalSelector.addGoal(1, new SkepticalWatchGoal(this, /* watchRange */ DispositionResolver.MAX_RANGE, /* closeRange */ 4.0));
-        this.goalSelector.addGoal(1, new FriendlyGreetGoal(this, /* range */ 10.0, PlayerSpeeds.WALK));
+        this.goalSelector.addGoal(1, new FriendlyGreetGoal(this, /* range */ 10.0, PlayerSpeeds.CASUAL));
         // Open (and, for "tidy" mobs, close) wooden doors on the path. Declares
         // no flags, so it runs alongside whatever movement goal owns the walk — it
         // only *triggers* the deliberate operation below.
@@ -968,25 +988,25 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // config on, mobGriefing on, flint and steel on hand, a trigger reached, under the 5-per-10s rate
         // cap — so the normal fight goals own combat the rest of the time. Gated on mobGriefing (it places
         // a real fire block). See FlintAndSteelIgniteGoal.
-        this.goalSelector.addGoal(1, new FlintAndSteelIgniteGoal(this, PlayerSpeeds.WALK));
+        this.goalSelector.addGoal(1, new FlintAndSteelIgniteGoal(this, PlayerSpeeds.URGENT));
         // Carrying TNT + a way to light it? Bomb the enemy instead of trading bow/melee blows — registered
         // BEFORE the seek/attack goals at the same priority so its canUse() (config on, mobGriefing on, TNT +
         // an igniter on hand) wins the MOVE slot while armed. When it runs out of TNT/igniters its canUse()
         // goes false and the normal fight goals take back over. Gated on mobGriefing (it places + primes TNT).
-        this.goalSelector.addGoal(2, new TntCombatGoal(this, PlayerSpeeds.WALK));
+        this.goalSelector.addGoal(2, new TntCombatGoal(this, PlayerSpeeds.URGENT));
         // Carrying end crystals + obsidian + solid cover blocks? Bomb the enemy with crystals instead — same
         // priority-2 slot, registered right after TntCombatGoal so TNT keeps first dibs if a mob somehow holds both
         // kits. It builds a little bunker (obsidian base + crystal, a 2-tall cover between mob and crystal), crouches
         // behind the cover with a shield up, and punches the crystal to set it off; when it runs out of the kit its
         // canUse() goes false and the normal fight goals take back over. Gated on mobGriefing (places blocks + explodes).
-        this.goalSelector.addGoal(2, new EndCrystalCombatGoal(this, PlayerSpeeds.WALK));
+        this.goalSelector.addGoal(2, new EndCrystalCombatGoal(this, PlayerSpeeds.URGENT));
         // Out of ammo mid-fight? Fetch a nearby dropped round before fighting — registered BEFORE the attack
         // goal at the same priority so its narrow canUse() (ranged weapon owned, no ammo, enemy not too close,
         // a round within reach) wins the MOVE slot; otherwise the attack goal runs. After a restock its
         // canUse() goes false and the attack goal re-draws ranged. Ammo is weapon-aware (arrows for bows,
         // arrows or fireworks for crossbows). No-op when seekArrowsWhenEmpty/requireArrows is off (mob melees).
-        this.goalSelector.addGoal(2, new SeekAmmoGoal(this, PlayerSpeeds.WALK, /* scanRadius */ 10.0));
-        this.goalSelector.addGoal(2, new WeaponAwareAttackGoal(this, /* melee chase */ PlayerSpeeds.SPRINT, /* ranged approach */ PlayerSpeeds.WALK, 8.0f));
+        this.goalSelector.addGoal(2, new SeekAmmoGoal(this, PlayerSpeeds.URGENT, /* scanRadius */ 10.0));
+        this.goalSelector.addGoal(2, new WeaponAwareAttackGoal(this, /* melee chase */ PlayerSpeeds.URGENT, /* ranged approach */ PlayerSpeeds.URGENT, 8.0f));
         // Follow the one it loves (a player or another PlayerMob): priority 2 so it
         // deprioritises every own-task (raid 3, harvest 6, train-advance 7, stroll 8) to tag
         // along, yet still yields to combat — registered after the attack goal and self-gated
@@ -1003,25 +1023,25 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // its canUse() is evaluated first — a low-HP mob with food prefers
         // eating over walking to the next chest.
         this.goalSelector.addGoal(3, new EatFoodGoal(this));
-        this.goalSelector.addGoal(3, new RaidContainersGoal(this, PlayerSpeeds.WALK, /* radius */ 12));
-        this.goalSelector.addGoal(3, new RaidArmorStandsGoal(this, PlayerSpeeds.WALK, /* radius */ 12.0));
-        this.goalSelector.addGoal(3, new CollectFloorItemsGoal(this, PlayerSpeeds.WALK, /* radius */ 8.0));
+        this.goalSelector.addGoal(3, new RaidContainersGoal(this, PlayerSpeeds.CASUAL, /* radius */ 12));
+        this.goalSelector.addGoal(3, new RaidArmorStandsGoal(this, PlayerSpeeds.CASUAL, /* radius */ 12.0));
+        this.goalSelector.addGoal(3, new CollectFloorItemsGoal(this, PlayerSpeeds.CASUAL, /* radius */ 8.0));
         // Low-priority idle forage drive: only farms ripe crops when there's
         // nothing more urgent (combat 2, raid/eat/collect 3) to do. Hunting is
         // NOT here — it runs as a target goal so the priority-2 attack goal does
         // the killing (see below).
-        this.goalSelector.addGoal(6, new HarvestCropsGoal(this, PlayerSpeeds.WALK, /* radius */ 8));
+        this.goalSelector.addGoal(6, new HarvestCropsGoal(this, PlayerSpeeds.CASUAL, /* radius */ 8));
         // On a Dungeon Train, once the current carriage room is clear (combat 2,
         // raid/collect 3, harvest 6 all preempt this), march to the next room.
         // No-op off a train (the seam reports "not confined"). Below harvest so
         // "fully explore" includes farming; above idle stroll.
-        this.goalSelector.addGoal(7, new AdvanceCarriageGoal(this, PlayerSpeeds.WALK));
+        this.goalSelector.addGoal(7, new AdvanceCarriageGoal(this, PlayerSpeeds.CASUAL));
         // When the next room is across a group gap (AdvanceCarriageGoal stops), leap the
         // gap to the adjacent group and keep marching. Same priority/flags as the advance
         // goal; mutually exclusive because it only fires when the within-group target is
         // null. No-op off a train.
-        this.goalSelector.addGoal(7, new CrossGroupGapGoal(this, PlayerSpeeds.WALK));
-        this.goalSelector.addGoal(8, new WaterAvoidingRandomStrollGoal(this, PlayerSpeeds.WALK));
+        this.goalSelector.addGoal(7, new CrossGroupGapGoal(this, PlayerSpeeds.CASUAL));
+        this.goalSelector.addGoal(8, new WaterAvoidingRandomStrollGoal(this, PlayerSpeeds.CASUAL));
         this.goalSelector.addGoal(9, new LookAtPlayerGoal(this, LivingEntity.class, 8.0F));
         this.goalSelector.addGoal(10, new RandomLookAroundGoal(this));
 

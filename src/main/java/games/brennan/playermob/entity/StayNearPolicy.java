@@ -36,7 +36,7 @@ public final class StayNearPolicy {
     public static final double KEEP_FRACTION = 0.75;
 
     /** Return-walk pathfinder speed multiplier — a calm walk home, not an emergency sprint. */
-    public static final double RETURN_SPEED = PlayerSpeeds.WALK;
+    public static final double RETURN_SPEED = PlayerSpeeds.CASUAL;
 
     /** Begin walking back once the mob is farther than {@code radius} blocks from the anchor. */
     public static boolean beyond(double distance, int radius) {

@@ -6,15 +6,8 @@ package games.brennan.playermob.entity;
  * so it unit-tests without a game bootstrap; {@link SprintJumpDriver} gathers the block facts and
  * acts on the verdict.
  *
- * <p><b>Reaction speed decides who does it.</b> Sprint-jumping is a skill, so it follows the
- * {@code reactionSpeed} trait:</p>
- * <ul>
- *   <li>0–4 — never.</li>
- *   <li>5 — sometimes: a coin flip per sprint ({@link #rollsRun}).</li>
- *   <li>6–8 — on a long, clear straight ({@link #CAUTIOUS_RUN} cells).</li>
- *   <li>9–10 — on any straight long enough to land on ({@link #MIN_OPEN_RUN} cells), and
- *       <em>head-bumping</em> through a 2-block-tall gap.</li>
- * </ul>
+ * <p>Who sprint-jumps at all, and who may head-bump, is decided by the mob's
+ * {@link PlayerSpeeds.Style}; this class only answers whether the ground ahead allows it.</p>
  *
  * <p><b>Head-bump only in a 2-block-tall gap.</b> Jumping under a ceiling that sits directly on the
  * mob's head cuts each hop short, so the 0.2 sprint-jump boost lands several times a second. It is
@@ -36,40 +29,18 @@ public final class SprintJumpPolicy {
         HEAD_BUMP
     }
 
-    /** Below this reaction speed a mob never sprint-jumps. */
-    static final int MIN_REACTION = DispositionTraits.DEFAULT;
-    /** From this reaction speed up a mob jumps shorter runs and head-bumps. */
-    static final int EXPERT_REACTION = 9;
-    /** Chance a reaction-{@value #MIN_REACTION} mob sprint-jumps on any given sprint. */
-    static final double SOMETIMES_CHANCE = 0.5;
-
     /**
      * Shortest straight an open sprint-jump may start on: one leap carries about 4.3 blocks, so the
      * landing has to be inside the stretch that was checked.
      */
     static final int MIN_OPEN_RUN = 5;
-    /** Straight a reaction 5–8 mob wants before it commits — it only jumps where it is obviously clear. */
-    static final int CAUTIOUS_RUN = 7;
     /** Straight needed to head-bump: each clipped hop only carries about a block and a half. */
     static final int HEAD_BUMP_RUN = 3;
     /** How far ahead the driver needs to look to answer every case above. */
-    public static final int LOOKAHEAD = CAUTIOUS_RUN;
+    public static final int LOOKAHEAD = MIN_OPEN_RUN;
 
     /** Yaw error (degrees) from the run direction within which a takeoff's boost is still on line. */
     static final float YAW_TOLERANCE = 15.0F;
-
-    /**
-     * Whether this mob sprint-jumps at all on the sprint it is starting. Rolled once per sprint, so
-     * a "sometimes" mob either jumps the whole run or none of it rather than stuttering.
-     *
-     * @param roll a uniform random number in {@code [0, 1)}
-     */
-    public static boolean rollsRun(int reactionSpeed, double roll) {
-        if (reactionSpeed < MIN_REACTION) {
-            return false;
-        }
-        return reactionSpeed > MIN_REACTION || roll < SOMETIMES_CHANCE;
-    }
 
     /**
      * Number of leading path cells that continue in one straight, level line: all at {@code feetY},
@@ -108,28 +79,23 @@ public final class SprintJumpPolicy {
     /**
      * How to jump the run ahead, or {@link Mode#NONE}.
      *
-     * @param reactionSpeed the mob's reaction speed, {@code [0, 10]}
-     * @param runLength     cells of straight, level path ahead (see {@link #straightRunLength})
-     * @param safe          per cell: clear to stand in, solid underfoot, and solid under both side
-     *                      neighbours (nothing to fall off)
-     * @param lowCeiling    per cell: a solid block directly above the mob's head, i.e. the cell is
-     *                      exactly two blocks tall
+     * @param runLength  cells of straight, level path ahead (see {@link #straightRunLength})
+     * @param safe       per cell: clear to stand in, ground underfoot, and a wall or ground on both
+     *                   sides (nothing to fall off)
+     * @param lowCeiling per cell: a solid block directly above the mob's head, i.e. the cell is
+     *                   exactly two blocks tall
+     * @param mayBoost   whether this mob head-bumps ({@link PlayerSpeeds.Style#boosts})
      */
-    public static Mode classify(int reactionSpeed, int runLength, boolean[] safe, boolean[] lowCeiling) {
-        if (reactionSpeed < MIN_REACTION) {
-            return Mode.NONE;
-        }
+    public static Mode classify(int runLength, boolean[] safe, boolean[] lowCeiling, boolean mayBoost) {
         int usable = Math.min(runLength, Math.min(safe.length, lowCeiling.length));
         int safeCells = 0;
         while (safeCells < usable && safe[safeCells]) {
             safeCells++;
         }
-        boolean expert = reactionSpeed >= EXPERT_REACTION;
         if (safeCells >= HEAD_BUMP_RUN && allEqual(lowCeiling, HEAD_BUMP_RUN, true)) {
-            return expert ? Mode.HEAD_BUMP : Mode.NONE;
+            return mayBoost ? Mode.HEAD_BUMP : Mode.NONE;
         }
-        int needed = expert ? MIN_OPEN_RUN : CAUTIOUS_RUN;
-        if (safeCells >= needed && allEqual(lowCeiling, needed, false)) {
+        if (safeCells >= MIN_OPEN_RUN && allEqual(lowCeiling, MIN_OPEN_RUN, false)) {
             return Mode.OPEN;
         }
         return Mode.NONE;

@@ -63,7 +63,7 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
     private static final int FLEE_REPATH_INTERVAL = 10;  // re-pick a retreat point every 0.5s
     private static final int RETREAT_RADIUS = 16;
     private static final int RETREAT_VERTICAL = 7;
-    private static final double FLEE_SPEED = PlayerSpeeds.URGENT_SPRINT;   // sprint away
+    private static final double FLEE_SPEED = PlayerSpeeds.URGENT;   // sprint away
 
     private enum Phase { PATH, ACT, FLEE, DONE }
 

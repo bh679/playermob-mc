@@ -5,13 +5,27 @@ package games.brennan.playermob.entity;
  * only (no Minecraft types), so it unit-tests without a game bootstrap, exactly like
  * {@link StayNearPolicy} / {@link FollowLovedOnePolicy}.
  *
- * <p><b>Goals pick a gait, never a speed.</b> Every navigation call passes {@link #WALK} or
- * {@link #SPRINT} as its "speed modifier". That number is only a label: {@link #gaitFor} turns it
- * back into a {@link Gait} and {@link PlayerLikeMoveControl} feeds the physics a player's inputs
- * (full stick, the vanilla sprint modifier), so the magnitude of the modifier never reaches
+ * <p><b>Goals never pick a speed — or even a gait.</b> Every navigation call passes
+ * {@link #CASUAL} or {@link #URGENT} as its "speed modifier". That number is only a label saying
+ * what kind of movement this is; the mob's <em>reaction speed</em> then decides how it moves
+ * ({@link #styleFor}), and {@link PlayerLikeMoveControl} feeds the physics a player's inputs (full
+ * stick, the vanilla sprint modifier, a held jump), so the magnitude of the modifier never reaches
  * {@code travel}. A vanilla mob's ground acceleration is {@code (modifier x attribute)^2}, which is
  * how the old per-goal multipliers (0.5 … 1.4 on a 0.30 base) produced seven land speeds, none of
  * them a player's.</p>
+ *
+ * <p><b>The table.</b> Moving well is a skill, so it follows the {@code reactionSpeed} trait:</p>
+ * <pre>
+ * reaction   casual                 combat / fleeing
+ *   0–1      walk                   walk
+ *   2–4      walk                   sprint, 25% / 50% / 75% of the time
+ *   5        walk or sprint, 50:50  sprint
+ *   6–7      sprint                 sprint-jump
+ *   8–9      sprint-jump            sprint-jump + boost
+ *   10       sprint-jump + boost    sprint-jump + boost
+ * </pre>
+ * <p>"Boost" is head-bumping through a 2-block-tall gap (see {@link SprintJumpPolicy}). The
+ * chances are rolled once per stretch of movement, not per tick.</p>
  *
  * <p>Potion effects are untouched: they modify the {@code MOVEMENT_SPEED} attribute, which is what
  * {@link PlayerMobEntity#getSpeed()} reports, exactly as for a player.</p>
@@ -20,31 +34,39 @@ public final class PlayerSpeeds {
 
     private PlayerSpeeds() {}
 
-    /** The two land gaits. Sprint-jumping is sprint plus a held jump (see {@link SprintJumpPolicy}). */
-    public enum Gait { WALK, SPRINT }
+    /** How a mob moves, fastest last. Each style includes the abilities of the ones before it. */
+    public enum Style {
+        /** Player walk, 4.317 m/s. */
+        WALK,
+        /** Player sprint, 5.612 m/s. */
+        SPRINT,
+        /** Sprint with jump held wherever there is a safe straight run, ~7.1 m/s. */
+        SPRINT_JUMP,
+        /** Sprint-jump, plus head-bumping through 2-block-tall gaps. */
+        BOOST;
 
-    /** Navigation speed modifier meaning "walk" — player walk, 4.317 m/s. */
-    public static final double WALK = 1.0;
-    /** Navigation speed modifier meaning "sprint" — player sprint, 5.612 m/s. */
-    public static final double SPRINT = 1.3;
-    /**
-     * Navigation speed modifier meaning "sprint, and it matters" — running from a threat, a lit
-     * fuse or its own burning clothes. Same speed as {@link #SPRINT}; the difference is who is
-     * allowed to do it (see {@link #allowsSprint}).
-     */
-    public static final double URGENT_SPRINT = 1.4;
-    /**
-     * Modifiers at or above this select {@link Gait#SPRINT}. Midway between {@link #WALK} and
-     * {@link #SPRINT} so float noise or a vanilla goal's own constant can't flip the gait.
-     */
-    static final double SPRINT_THRESHOLD = 1.2;
-    /** Modifiers at or above this are urgent. Midway between {@link #SPRINT} and {@link #URGENT_SPRINT}. */
-    static final double URGENT_THRESHOLD = 1.35;
+        public boolean sprints() {
+            return this != WALK;
+        }
 
-    /** Reaction speeds at or below this never sprint, however urgent. */
-    static final int NEVER_SPRINT_MAX_REACTION = 1;
-    /** Reaction speeds below this sprint only when it is urgent. */
-    static final int FREE_SPRINT_MIN_REACTION = 3;
+        public boolean sprintJumps() {
+            return this == SPRINT_JUMP || this == BOOST;
+        }
+
+        public boolean boosts() {
+            return this == BOOST;
+        }
+    }
+
+    /** Navigation speed modifier for ordinary movement: strolling, looting, marching, following an order. */
+    public static final double CASUAL = 1.0;
+    /** Navigation speed modifier for combat and fleeing: closing on a target, running from a threat or a fire. */
+    public static final double URGENT = 1.3;
+    /**
+     * Modifiers at or above this are {@link #URGENT}. Midway between the two so float noise or a
+     * vanilla goal's own constant (strafing uses 0.25) can't flip it.
+     */
+    static final double URGENT_THRESHOLD = 1.15;
 
     /** A player's base {@code MOVEMENT_SPEED} attribute. */
     public static final double PLAYER_BASE_SPEED = 0.10;
@@ -100,48 +122,63 @@ public final class PlayerSpeeds {
     }
 
     /**
-     * The speeds (blocks/tick) a mob may cross a gap at, slowest first: its own speed, then each
-     * faster player speed as a fallback for a gap its own can't clear. A mob that may not sprint
-     * ({@link #allowsSprint}) starts at a walk; one that sprints but doesn't sprint-jump starts at
-     * a sprint; a sprint-jumper has only the one.
+     * The speeds (blocks/tick) a mob may cross a gap at, slowest first: the speed of its own
+     * {@code style}, then each faster player speed as a fallback for a gap its own can't clear.
      *
-     * @param sprintJumps    whether this mob sprint-jumps this time ({@link SprintJumpPolicy#rollsRun})
      * @param speedAttribute the mob's movement-speed attribute <em>without</em> the sprint modifier
      */
-    public static double[] crossingSpeeds(int reactionSpeed, boolean urgent, boolean sprintJumps,
-                                          double speedAttribute) {
+    public static double[] crossingSpeeds(Style style, double speedAttribute) {
         double walk = walkBlocksPerTick(speedAttribute);
         double sprint = sprintBlocksPerTick(speedAttribute);
         double sprintJump = sprintJumpBlocksPerTick(speedAttribute);
-        if (!allowsSprint(reactionSpeed, urgent)) {
+        if (!style.sprints()) {
             return new double[] {walk, sprint, sprintJump};
         }
-        if (!sprintJumps) {
+        if (!style.sprintJumps()) {
             return new double[] {sprint, sprintJump};
         }
         return new double[] {sprintJump};
     }
 
-    /** Which gait a navigation speed modifier asks for. */
-    public static Gait gaitFor(double navModifier) {
-        return navModifier >= SPRINT_THRESHOLD ? Gait.SPRINT : Gait.WALK;
-    }
-
-    /** Whether a navigation speed modifier marks the movement as urgent (see {@link #URGENT_SPRINT}). */
+    /** Whether a navigation speed modifier marks the movement as combat/fleeing (see {@link #URGENT}). */
     public static boolean isUrgent(double navModifier) {
         return navModifier >= URGENT_THRESHOLD;
     }
 
     /**
-     * Whether a mob of this reaction speed sprints when a goal asks for the sprint gait. Sprinting
-     * is something a sluggish mob doesn't think to do: reaction 0–1 never sprints, reaction 2 only
-     * when it is {@code urgent}, and 3 and up whenever asked. A mob that may not sprint walks.
+     * Chance that a mob which is not yet a habitual sprinter sprints for a stretch of movement.
+     * Combat/fleeing ramps up from never at reaction 1 to always at 5 (25% / 50% / 75% between);
+     * casual movement is never below 5, half the time at 5, always above.
      */
-    public static boolean allowsSprint(int reactionSpeed, boolean urgent) {
-        if (reactionSpeed <= NEVER_SPRINT_MAX_REACTION) {
-            return false;
+    public static double sprintChance(int reactionSpeed, boolean urgent) {
+        int reaction = DispositionTraits.clamp(reactionSpeed);
+        if (urgent) {
+            return Math.max(0.0, Math.min(1.0, (reaction - 1) / 4.0));
         }
-        return urgent || reactionSpeed >= FREE_SPRINT_MIN_REACTION;
+        if (reaction < DispositionTraits.DEFAULT) {
+            return 0.0;
+        }
+        return reaction == DispositionTraits.DEFAULT ? 0.5 : 1.0;
+    }
+
+    /**
+     * How a mob of this reaction speed moves — the table in the class comment.
+     *
+     * @param urgent whether the movement is combat/fleeing ({@link #URGENT}) rather than casual
+     * @param roll   a uniform random number in {@code [0, 1)}, held for the whole stretch of
+     *               movement; decides the tiers that sprint only some of the time
+     */
+    public static Style styleFor(int reactionSpeed, boolean urgent, double roll) {
+        int reaction = DispositionTraits.clamp(reactionSpeed);
+        int boostFrom = urgent ? 8 : 10;
+        int sprintJumpFrom = urgent ? 6 : 8;
+        if (reaction >= boostFrom) {
+            return Style.BOOST;
+        }
+        if (reaction >= sprintJumpFrom) {
+            return Style.SPRINT_JUMP;
+        }
+        return roll < sprintChance(reaction, urgent) ? Style.SPRINT : Style.WALK;
     }
 
     /**

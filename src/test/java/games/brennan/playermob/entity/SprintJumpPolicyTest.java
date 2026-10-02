@@ -10,38 +10,13 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Pure-logic oracle for {@link SprintJumpPolicy} — who sprint-jumps (reaction-speed tiers), what
- * counts as a straight run, and when a run is an open jump, a head-bump, or neither. Primitives
+ * Pure-logic oracle for {@link SprintJumpPolicy} — what counts as a straight run, and when a run
+ * is an open jump, a head-bump, or neither (who may do either is {@link PlayerSpeedsTest}'s table). Primitives
  * only, so no Minecraft bootstrap is needed (mirrors {@link StayNearPolicyTest}).
  */
 class SprintJumpPolicyTest {
 
     private static final int Y = 64;
-
-    // ---- Who does it ----
-
-    @Test
-    void slowReactorsNeverSprintJump() {
-        for (int reaction = 0; reaction <= 4; reaction++) {
-            assertFalse(SprintJumpPolicy.rollsRun(reaction, 0.0), "reaction " + reaction);
-            assertEquals(Mode.NONE, SprintJumpPolicy.classify(reaction, 7, flags(7, true), flags(7, false)));
-        }
-    }
-
-    @Test
-    void neutralReactorSprintJumpsSometimes() {
-        assertTrue(SprintJumpPolicy.rollsRun(5, 0.0));
-        assertTrue(SprintJumpPolicy.rollsRun(5, 0.49));
-        assertFalse(SprintJumpPolicy.rollsRun(5, 0.5));
-        assertFalse(SprintJumpPolicy.rollsRun(5, 0.99));
-    }
-
-    @Test
-    void quickReactorsAlwaysRollIn() {
-        for (int reaction = 6; reaction <= 10; reaction++) {
-            assertTrue(SprintJumpPolicy.rollsRun(reaction, 0.99), "reaction " + reaction);
-        }
-    }
 
     // ---- Straight runs ----
 
@@ -80,73 +55,61 @@ class SprintJumpPolicyTest {
     // ---- Open jumps ----
 
     @Test
-    void cautiousReactorsNeedALongClearStraight() {
-        for (int reaction = 5; reaction <= 8; reaction++) {
-            assertEquals(Mode.OPEN, SprintJumpPolicy.classify(reaction, 7, flags(7, true), flags(7, false)));
-            assertEquals(Mode.NONE, SprintJumpPolicy.classify(reaction, 6, flags(6, true), flags(6, false)));
-        }
-    }
-
-    @Test
-    void expertReactorsJumpAnyStraightLongEnoughToLandOn() {
-        for (int reaction = 9; reaction <= 10; reaction++) {
-            assertEquals(Mode.OPEN, SprintJumpPolicy.classify(reaction, 5, flags(5, true), flags(5, false)));
-            assertEquals(Mode.NONE, SprintJumpPolicy.classify(reaction, 4, flags(4, true), flags(4, false)));
-        }
+    void openJumpNeedsAStraightLongEnoughToLandOn() {
+        assertEquals(Mode.OPEN, SprintJumpPolicy.classify(5, flags(5, true), flags(5, false), false));
+        assertEquals(Mode.OPEN, SprintJumpPolicy.classify(5, flags(5, true), flags(5, false), true));
+        assertEquals(Mode.NONE, SprintJumpPolicy.classify(4, flags(4, true), flags(4, false), true));
     }
 
     @Test
     void anUnsafeCellEndsTheUsableRun() {
-        // A drop, a wall or water at the fourth cell: only three usable cells — too short for anyone.
-        boolean[] safe = flags(7, true);
+        // A drop, a wall or water at the fourth cell: only three usable cells — too short to leap.
+        boolean[] safe = flags(5, true);
         safe[3] = false;
-        assertEquals(Mode.NONE, SprintJumpPolicy.classify(7, 7, safe, flags(7, false)));
-        assertEquals(Mode.NONE, SprintJumpPolicy.classify(10, 7, safe, flags(7, false)));
-        // At the sixth cell an expert still has its five; a cautious mob does not have its seven.
-        boolean[] later = flags(7, true);
-        later[5] = false;
-        assertEquals(Mode.OPEN, SprintJumpPolicy.classify(10, 7, later, flags(7, false)));
-        assertEquals(Mode.NONE, SprintJumpPolicy.classify(7, 7, later, flags(7, false)));
+        assertEquals(Mode.NONE, SprintJumpPolicy.classify(5, safe, flags(5, false), true));
+        // At the fifth cell: four usable, still one short of the landing stretch.
+        boolean[] later = flags(5, true);
+        later[4] = false;
+        assertEquals(Mode.NONE, SprintJumpPolicy.classify(5, later, flags(5, false), true));
+        assertEquals(Mode.OPEN, SprintJumpPolicy.classify(5, flags(5, true), flags(5, false), true));
     }
 
     // ---- Head-bump: only in a 2-block-tall gap ----
 
     @Test
-    void expertsHeadBumpThroughATwoTallGap() {
-        assertEquals(Mode.HEAD_BUMP, SprintJumpPolicy.classify(9, 3, flags(3, true), flags(3, true)));
-        assertEquals(Mode.HEAD_BUMP, SprintJumpPolicy.classify(10, 7, flags(7, true), flags(7, true)));
+    void boostersHeadBumpThroughATwoTallGap() {
+        assertEquals(Mode.HEAD_BUMP, SprintJumpPolicy.classify(3, flags(3, true), flags(3, true), true));
+        assertEquals(Mode.HEAD_BUMP, SprintJumpPolicy.classify(5, flags(5, true), flags(5, true), true));
     }
 
     @Test
-    void nonExpertsJustSprintThroughATwoTallGap() {
-        for (int reaction = 5; reaction <= 8; reaction++) {
-            assertEquals(Mode.NONE, SprintJumpPolicy.classify(reaction, 7, flags(7, true), flags(7, true)));
-        }
+    void othersJustSprintThroughATwoTallGap() {
+        assertEquals(Mode.NONE, SprintJumpPolicy.classify(5, flags(5, true), flags(5, true), false));
     }
 
     @Test
     void aTallerCeilingIsNeverAHeadBump() {
         // lowCeiling is false for a ceiling three or more blocks up — that's an ordinary open jump.
-        assertEquals(Mode.OPEN, SprintJumpPolicy.classify(10, 7, flags(7, true), flags(7, false)));
+        assertEquals(Mode.OPEN, SprintJumpPolicy.classify(5, flags(5, true), flags(5, false), true));
     }
 
     @Test
     void headBumpNeedsAShortRunOfItsOwn() {
-        assertEquals(Mode.NONE, SprintJumpPolicy.classify(10, 2, flags(2, true), flags(2, true)));
+        assertEquals(Mode.NONE, SprintJumpPolicy.classify(2, flags(2, true), flags(2, true), true));
     }
 
     @Test
     void mixedCeilingIsNeitherStyle() {
         // Open for two cells, then the ceiling drops: can't leap (would hit it), can't head-bump yet.
-        boolean[] dropping = {false, false, true, true, true, true, true};
-        assertEquals(Mode.NONE, SprintJumpPolicy.classify(10, 7, flags(7, true), dropping));
-        assertEquals(Mode.NONE, SprintJumpPolicy.classify(7, 7, flags(7, true), dropping));
-        // In a 2-tall gap that opens out after the hop distance, an expert still head-bumps...
-        boolean[] opening = {true, true, true, false, false, false, false};
-        assertEquals(Mode.HEAD_BUMP, SprintJumpPolicy.classify(10, 7, flags(7, true), opening));
+        boolean[] dropping = {false, false, true, true, true};
+        assertEquals(Mode.NONE, SprintJumpPolicy.classify(5, flags(5, true), dropping, true));
+        assertEquals(Mode.NONE, SprintJumpPolicy.classify(5, flags(5, true), dropping, false));
+        // In a 2-tall gap that opens out after the hop distance, a booster still head-bumps...
+        boolean[] opening = {true, true, true, false, false};
+        assertEquals(Mode.HEAD_BUMP, SprintJumpPolicy.classify(5, flags(5, true), opening, true));
         // ...but one that opens out sooner is neither.
-        boolean[] openingSoon = {true, true, false, false, false, false, false};
-        assertEquals(Mode.NONE, SprintJumpPolicy.classify(10, 7, flags(7, true), openingSoon));
+        boolean[] openingSoon = {true, true, false, false, false};
+        assertEquals(Mode.NONE, SprintJumpPolicy.classify(5, flags(5, true), openingSoon, true));
     }
 
     // ---- Heading ----

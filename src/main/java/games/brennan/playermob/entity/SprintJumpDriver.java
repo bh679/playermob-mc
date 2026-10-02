@@ -24,19 +24,10 @@ final class SprintJumpDriver {
 
     /** Ticks a latched takeoff may stay grounded before it is abandoned (covers the vanilla jump delay). */
     private static final int TAKEOFF_GRACE_TICKS = 12;
-    /**
-     * Ticks of not sprinting before the next sprint counts as a new run and re-rolls
-     * {@link SprintJumpPolicy#rollsRun}. A chase drops the sprint flag for a tick or two every time
-     * it re-paths; without this a "sometimes" mob would re-flip its coin on each of those.
-     */
-    private static final int RUN_GAP_TICKS = 40;
-
     private final PlayerMobEntity mob;
 
-    private boolean wasSprinting;
-    private int restTicks;
-    /** Rolled once per sprint — whether this mob jumps on this run at all. */
-    private boolean jumpsThisRun;
+    /** Whether the current movement style head-bumps; read at takeoff. */
+    private boolean mayBoost;
 
     private SprintJumpPolicy.Mode latched = SprintJumpPolicy.Mode.NONE;
     private int stepX;
@@ -48,23 +39,12 @@ final class SprintJumpDriver {
         this.mob = mob;
     }
 
-    void tick(boolean sprinting) {
-        if (!sprinting) {
-            if (++restTicks > RUN_GAP_TICKS) {
-                wasSprinting = false;
-            }
+    void tick(boolean sprinting, PlayerSpeeds.Style style) {
+        if (!sprinting || !style.sprintJumps() || !mob.canSprintJump()) {
             latched = SprintJumpPolicy.Mode.NONE;
             return;
         }
-        restTicks = 0;
-        if (!wasSprinting) {
-            wasSprinting = true;
-            jumpsThisRun = SprintJumpPolicy.rollsRun(mob.reactionSpeed(), mob.getRandom().nextDouble());
-        }
-        if (!jumpsThisRun || !mob.canSprintJump()) {
-            latched = SprintJumpPolicy.Mode.NONE;
-            return;
-        }
+        mayBoost = style.boosts();
         if (latched != SprintJumpPolicy.Mode.NONE && continueLatched()) {
             return;
         }
@@ -143,7 +123,7 @@ final class SprintJumpDriver {
             safe[i] = isSafeCell(level, cell, dx, dz);
             lowCeiling[i] = !isClear(level, cell.above(2));
         }
-        SprintJumpPolicy.Mode mode = SprintJumpPolicy.classify(mob.reactionSpeed(), runLength, safe, lowCeiling);
+        SprintJumpPolicy.Mode mode = SprintJumpPolicy.classify(runLength, safe, lowCeiling, mayBoost);
         if (mode == SprintJumpPolicy.Mode.NONE) {
             return;
         }

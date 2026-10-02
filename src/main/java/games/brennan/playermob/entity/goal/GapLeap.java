@@ -3,7 +3,6 @@ package games.brennan.playermob.entity.goal;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.entity.PlayerSpeeds;
-import games.brennan.playermob.entity.SprintJumpPolicy;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.phys.Vec3;
 
@@ -25,7 +24,7 @@ import net.minecraft.world.phys.Vec3;
  *
  * <p><b>At a player's speed.</b> The leap's horizontal speed is always one of a player's three —
  * walk, sprint or sprint-jump — chosen the way the mob's ordinary movement is: by reaction speed
- * and urgency ({@link PlayerSpeeds#crossingSpeeds}). A sluggish mob steps across at a walk; a
+ * and urgency ({@link PlayerSpeeds#styleFor}). A sluggish mob steps across at a walk; a
  * sharp one sprint-jumps it.</p>
  *
  * <p><b>Sized to the gap.</b> The seam width ({@link TrainConfinement#groupGapWidth}, read once
@@ -124,7 +123,7 @@ final class GapLeap {
      * mob as crossing so the leap can't be preempted mid-air.
      *
      * <p>The speed comes from the mob's reaction speed and whether the crossing is {@code urgent}
-     * (an escape) — see {@link PlayerSpeeds#crossingSpeeds}. The height is then sized to
+     * (an escape) — see {@link PlayerSpeeds#styleFor}. The height is then sized to
      * {@code gapWidth} (blocks, from {@link TrainConfinement#groupGapWidth}) by {@link #plan}.
      * The gap is read once, here — like the carry it is frozen for the flight, never re-queried
      * mid-air.</p>
@@ -206,15 +205,14 @@ final class GapLeap {
 
     /** The player speeds this mob may cross at, slowest first (its own, then faster fallbacks). */
     private static double[] crossingSpeeds(PlayerMobEntity mob, boolean urgent) {
-        int reaction = mob.reactionSpeed();
-        boolean sprintJumps = SprintJumpPolicy.rollsRun(reaction, mob.getRandom().nextDouble());
+        PlayerSpeeds.Style style = PlayerSpeeds.styleFor(mob.reactionSpeed(), urgent, mob.getRandom().nextDouble());
         // The attribute carries the +30% sprint modifier while the sprint flag is still up from the
         // run-up; the speed helpers apply that themselves.
         double attribute = mob.getAttributeValue(Attributes.MOVEMENT_SPEED);
         if (mob.isSprinting()) {
             attribute /= 1.3;
         }
-        return PlayerSpeeds.crossingSpeeds(reaction, urgent, sprintJumps, attribute);
+        return PlayerSpeeds.crossingSpeeds(style, attribute);
     }
 
     /** One leap's launch values: the vertical impulse and the sustained horizontal speed. */

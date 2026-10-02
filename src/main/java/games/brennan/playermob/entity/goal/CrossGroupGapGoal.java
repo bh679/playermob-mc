@@ -52,6 +52,8 @@ public final class CrossGroupGapGoal extends Goal implements DescribableGoal {
     private int settleTicks = 0;
     private int repathCooldown = 0;
     private Vec3 target;
+    /** The leap has landed on the far group; the goal is finished and hands back to the march. */
+    private boolean landed = false;
 
     public CrossGroupGapGoal(PlayerMobEntity mob, double moveSpeed) {
         this.mob = mob;
@@ -103,7 +105,7 @@ public final class CrossGroupGapGoal extends Goal implements DescribableGoal {
 
     @Override
     public boolean canContinueToUse() {
-        if (!mob.isAlive() || mob.isDeadOrDying()) {
+        if (!mob.isAlive() || mob.isDeadOrDying() || landed) {
             return false;
         }
         if (!leap.isLaunched()) {
@@ -122,6 +124,7 @@ public final class CrossGroupGapGoal extends Goal implements DescribableGoal {
         phaseTicks = 0;
         settleTicks = 0;
         repathCooldown = 0;
+        landed = false;
         leap.reset();
         mob.setMarchingCarriages(true); // the door reflex may assume the train axis while we walk
         issueMove();
@@ -129,7 +132,11 @@ public final class CrossGroupGapGoal extends Goal implements DescribableGoal {
 
     @Override
     public void stop() {
-        mob.getNavigation().stop();
+        // After a landing the walk to the next room is already under way (see onLanded) — leave it
+        // running so the march goal picks it up without the mob ever coming to a halt.
+        if (!landed) {
+            mob.getNavigation().stop();
+        }
         mob.setCrossingGap(false);
         mob.setMarchingCarriages(false);
         leap.reset();
@@ -137,7 +144,10 @@ public final class CrossGroupGapGoal extends Goal implements DescribableGoal {
         phaseTicks = 0;
         settleTicks = 0;
         repathCooldown = 0;
-        scanCooldown = mob.reactTicks(POST_VISIT_COOLDOWN);
+        // No rescan delay after a landing either: if the far group has no further room, the next
+        // gap is this goal's job again straight away.
+        scanCooldown = landed ? 0 : mob.reactTicks(POST_VISIT_COOLDOWN);
+        landed = false;
     }
 
     @Override
@@ -147,12 +157,32 @@ public final class CrossGroupGapGoal extends Goal implements DescribableGoal {
 
     @Override
     public void tick() {
+        if (landed) {
+            return; // finished; the selector stops us on its next pass
+        }
         if (leap.isLaunched()) {
             if (leap.tickFlight(mob)) {
-                stop();
+                onLanded();
             }
         } else {
             tickApproach();
+        }
+    }
+
+    /**
+     * Down on the far group: keep moving. Start the walk to the next room at once and flag the
+     * crossing so {@link AdvanceCarriageGoal} takes over on the selector's next pass, rather than
+     * the mob standing still while that goal's boundary cooldown runs out.
+     */
+    private void onLanded() {
+        landed = true;
+        mob.setCrossingGap(false);
+        mob.markGapCrossed();
+        leap.reset();
+        int dir = mob.effectiveTrainMarchDir();
+        Vec3 next = dir == 0 ? null : TrainConfinement.nextCarriageTarget(mob, dir);
+        if (next != null) {
+            mob.getNavigation().moveTo(next.x, next.y, next.z, moveSpeed);
         }
     }
 
