@@ -94,13 +94,14 @@ public final class PlayerMobRegistry {
      * The shared {@link EntityType.Builder} every loader uses. Centralised so
      * size, mob category, and tracking range stay consistent across loaders.
      *
-     * <p>Hitbox 0.6 × 1.95 matches the vanilla player hitbox so the
-     * player-shaped renderer fits cleanly inside the entity bounds.</p>
+     * <p>Hitbox 0.6 × 1.8 is the vanilla player hitbox, so the player-shaped
+     * renderer fits cleanly inside the entity bounds and the mob fits — and
+     * sprint-jumps under a ceiling — exactly where a player does.</p>
      */
     public static EntityType.Builder<PlayerMobEntity> entityTypeBuilder() {
         return EntityType.Builder
             .<PlayerMobEntity>of(PlayerMobEntity::new, MobCategory.MONSTER)
-            .sized(0.6F, 1.95F)
+            .sized(0.6F, 1.8F)
             .clientTrackingRange(8);
     }
 
