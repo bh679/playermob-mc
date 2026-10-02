@@ -86,7 +86,8 @@ public class PlayerLikeMoveControl extends MoveControl {
         if (playerMob.isSprinting() != sprinting) {
             playerMob.setSprinting(sprinting);
         }
-        boolean swimming = sprinting && playerMob.isInWater();
+        // Afloat, not wading: a player sprinting through a puddle stays upright.
+        boolean swimming = sprinting && playerMob.isInWater() && !playerMob.onGround();
         if (swimming && !playerMob.hasPose(Pose.SWIMMING)) {
             playerMob.setPose(Pose.SWIMMING);
         } else if (!swimming && playerMob.hasPose(Pose.SWIMMING)) {

@@ -1,7 +1,6 @@
 package games.brennan.playermob.entity;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.pathfinder.Path;
@@ -25,10 +24,17 @@ final class SprintJumpDriver {
 
     /** Ticks a latched takeoff may stay grounded before it is abandoned (covers the vanilla jump delay). */
     private static final int TAKEOFF_GRACE_TICKS = 12;
+    /**
+     * Ticks of not sprinting before the next sprint counts as a new run and re-rolls
+     * {@link SprintJumpPolicy#rollsRun}. A chase drops the sprint flag for a tick or two every time
+     * it re-paths; without this a "sometimes" mob would re-flip its coin on each of those.
+     */
+    private static final int RUN_GAP_TICKS = 40;
 
     private final PlayerMobEntity mob;
 
     private boolean wasSprinting;
+    private int restTicks;
     /** Rolled once per sprint — whether this mob jumps on this run at all. */
     private boolean jumpsThisRun;
 
@@ -44,10 +50,13 @@ final class SprintJumpDriver {
 
     void tick(boolean sprinting) {
         if (!sprinting) {
-            wasSprinting = false;
+            if (++restTicks > RUN_GAP_TICKS) {
+                wasSprinting = false;
+            }
             latched = SprintJumpPolicy.Mode.NONE;
             return;
         }
+        restTicks = 0;
         if (!wasSprinting) {
             wasSprinting = true;
             jumpsThisRun = SprintJumpPolicy.rollsRun(mob.reactionSpeed(), mob.getRandom().nextDouble());
@@ -97,7 +106,9 @@ final class SprintJumpDriver {
         if (path == null || path.isDone()) {
             return;
         }
-        BlockPos feet = mob.blockPosition();
+        // Round the height as vanilla navigation does, so a mob on a path block or farmland (a
+        // sixteenth short of the node above it) still reads as standing on its path.
+        BlockPos feet = BlockPos.containing(mob.getX(), mob.getY() + 0.5, mob.getZ());
         int from = path.getNextNodeIndex();
         while (from < path.getNodeCount() && sameColumn(path.getNodePos(from), feet)) {
             from++;
@@ -168,11 +179,11 @@ final class SprintJumpDriver {
     }
 
     /**
-     * A run cell the mob can land in and not fall off: two clear blocks, solid underfoot, and on each
-     * side either a wall or solid ground.
+     * A run cell the mob can land in and not fall off: two clear blocks, ground underfoot, and on each
+     * side either a wall or ground.
      */
     private static boolean isSafeCell(Level level, BlockPos cell, int dx, int dz) {
-        if (!isClear(level, cell) || !isClear(level, cell.above()) || !isSolidTop(level, cell.below())) {
+        if (!isClear(level, cell) || !isClear(level, cell.above()) || !isGround(level, cell.below())) {
             return false;
         }
         // Perpendicular to the run: (dx, dz) rotated a quarter turn each way.
@@ -180,7 +191,7 @@ final class SprintJumpDriver {
     }
 
     private static boolean isGuarded(Level level, BlockPos side) {
-        return !isClear(level, side) || isSolidTop(level, side.below());
+        return !isClear(level, side) || isGround(level, side.below());
     }
 
     private static boolean isClear(Level level, BlockPos pos) {
@@ -188,7 +199,8 @@ final class SprintJumpDriver {
         return state.getCollisionShape(level, pos).isEmpty() && state.getFluidState().isEmpty();
     }
 
-    private static boolean isSolidTop(Level level, BlockPos pos) {
-        return level.getBlockState(pos).isFaceSturdy(level, pos, Direction.UP);
+    /** Something to stand on — any collision, so path blocks, farmland and slabs count. */
+    private static boolean isGround(Level level, BlockPos pos) {
+        return !level.getBlockState(pos).getCollisionShape(level, pos).isEmpty();
     }
 }
