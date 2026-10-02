@@ -10,6 +10,7 @@ import games.brennan.playermob.entity.EquipmentEvaluator;
 import games.brennan.playermob.entity.ItemPickupPolicy;
 import games.brennan.playermob.entity.MiningMath;
 import games.brennan.playermob.entity.PlayerMobEntity;
+import games.brennan.playermob.entity.PlayerSpeeds;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
@@ -17,7 +18,6 @@ import net.minecraft.sounds.SoundSource;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
-import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
@@ -315,24 +315,13 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
     /** Cells of clear, water-free air a standing spot needs above its footing (the mob is 2 tall). */
     private static final int SHORE_HEADROOM = 2;
     /**
-     * Navigation speed multiplier while swimming. <b>This is the other half of "swims too slowly",
-     * and it is the bigger half</b> — sprinting alone only doubled 0.03 to 0.06 blocks/tick when a
-     * player does 0.20.
-     *
-     * <p>In water {@code LivingEntity.travel} accelerates by a FLAT {@code 0.02 * inputVector} — the
-     * movement-speed attribute is bypassed entirely (it only re-enters via WATER_MOVEMENT_EFFICIENCY,
-     * which is 0 here). What differs is the input magnitude: a player holds full stick, so its
-     * {@code zza} is <b>1.0</b>, while {@code Mob.setSpeed} sets {@code zza} to
-     * {@code speedModifier x MOVEMENT_SPEED} = <b>0.30</b>. Same drag, same accel constant, but the
-     * mob feeds a third of the input — hence roughly a third of the speed.
-     *
-     * <p>4.0 x 0.30 = 1.2, and {@code Entity.getInputVector} normalises anything over length 1, so
-     * this clamps to exactly the player's 1.0 rather than overshooting. It is applied ONLY to the
-     * swim navigation calls: on land the same multiplier would be a real 4x sprint, since the ground
-     * branch of {@code travel} does scale by the speed attribute. {@link #enterApproach()} stops
-     * navigation on the way out so the boosted modifier can't outlive the water.</p>
+     * Gait for the swim to shore: a player's sprint-swim. In water {@code LivingEntity.travel}
+     * accelerates by a flat {@code 0.02 x input} against a drag of 0.8 — or 0.9 while sprinting,
+     * which exactly doubles the terminal speed (0.10 → 0.20 blocks/tick). PlayerLikeMoveControl
+     * supplies the full-stick input, the sprint flag and the swim pose for any goal that asks for
+     * the sprint gait in water, so this goal only has to ask.
      */
-    private static final double SWIM_NAV_BOOST = 4.0;
+    private static final double SWIM_SPEED = PlayerSpeeds.SPRINT;
     /**
      * Small surcharge for a bank whose Z sits INSIDE the carriage's Z-span — climbing out there puts
      * the mob on the track bed, and {@code tickGetOffTracks} then has to sidestep it off before it can
@@ -669,7 +658,6 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         pillarColumn = null;
         shorePoint = null;
         climbRoute = null;
-        clearSwimPosture();   // vanilla never clears these for a Mob — see applySwimPosture
         swimStopTick = mob.tickCount;   // links a quick restart to this attempt's re-entry budget
         phase = Phase.IDLE;
         phaseTicks = 0;
@@ -781,10 +769,8 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
 
     /** Enter (or re-enter) APPROACH, resetting the approach progress trackers. */
     private void enterApproach() {
-        clearSwimPosture();        // out of the water — stop sprinting / swimming-posed on land
-        // Drop the swim path too: MoveControl keeps the last speedModifier until the next moveTo, and
-        // SWIM_NAV_BOOST is only harmless underwater — on land the ground branch of travel() DOES
-        // scale by it, so a leftover boosted path would sprint the mob across the bank at 4x.
+        // Drop the swim path: it asked for the sprint gait, and a leftover one would sprint the mob
+        // across the bank. Stopping also lets PlayerLikeMoveControl clear the sprint flag and swim pose.
         mob.getNavigation().stop();
         phase = Phase.APPROACH;
         phaseTicks = 0;
@@ -809,7 +795,6 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      */
     private void tickSwimToShore() {
         AABB box = target.worldBox();
-        applySwimPosture();
         trackFooting();
         // Cadence, not per-tick: this is a few hundred block lookups on a requiresUpdateEveryTick
         // goal. Rescan on entry, then once a second as the mob drifts and the train slides on.
@@ -835,7 +820,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
             double towardX = Mth.clamp(mob.getX(), box.minX, box.maxX);
             double towardZ = Mth.clamp(mob.getZ(), box.minZ, box.maxZ);
             if (phaseTicks % pathReissueTicks() == 0 || mob.getNavigation().isDone()) {
-                mob.getNavigation().moveTo(towardX, mob.getY(), towardZ, moveSpeed * SWIM_NAV_BOOST);
+                mob.getNavigation().moveTo(towardX, mob.getY(), towardZ, SWIM_SPEED);
             }
             mob.getLookControl().setLookAt(towardX, mob.getY(), towardZ);
             // Still no markProgress(): with nothing dry in 48 blocks this is the hopeless case
@@ -844,63 +829,18 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         }
         double tx = shorePoint.getX() + 0.5, ty = shorePoint.getY() + 1.0, tz = shorePoint.getZ() + 0.5;
         if (phaseTicks % pathReissueTicks() == 0 || mob.getNavigation().isDone()) {
-            mob.getNavigation().moveTo(tx, ty, tz, moveSpeed * SWIM_NAV_BOOST);
+            mob.getNavigation().moveTo(tx, ty, tz, SWIM_SPEED);
         }
         mob.getLookControl().setLookAt(tx, ty, tz);
-        // Progress = a new BEST distance to the bank, not "closer than last tick". Swimming is slow
-        // (well under 0.05 blocks/tick horizontally for a land mob), so the tick-over-tick test the
-        // APPROACH phases use would report a stall on every single tick of a perfectly good swim and
-        // STALL_ABANDON_TICKS would kill it 30s in. A monotonic watermark trips as soon as the mob
+        // Progress = a new BEST distance to the bank, not "closer than last tick". Swimming against
+        // a current or around an obstacle can gain less than the tick-over-tick test the APPROACH
+        // phases use would accept, which would report a stall on a perfectly good swim and let
+        // STALL_ABANDON_TICKS kill it 30s in. A monotonic watermark trips as soon as the mob
         // has genuinely gained 0.05 blocks, however many ticks that took.
         double dist = Math.hypot(mob.getX() - tx, mob.getZ() - tz);
         if (dist < lastShoreDist - 0.05) {
             lastShoreDist = dist;
             markProgress();
-        }
-    }
-
-    /**
-     * Make the mob swim like a <em>player</em> rather than paddling upright at a walk. Two separate
-     * vanilla mechanisms, both of which a {@link net.minecraft.world.entity.Mob} misses entirely:
-     *
-     * <p><b>Speed.</b> {@code LivingEntity.travel} picks its horizontal water drag as
-     * {@code isSprinting() ? 0.9F : getWaterSlowDown()} (0.8F), against a flat 0.02 accel — so
-     * terminal speed is {@code 0.02/(1-drag)}: <b>0.10 blocks/tick not sprinting, 0.20 sprinting,
-     * exactly double</b>. Nothing ever sets sprinting on a swimming mob, which is the whole of the
-     * "swims SUPER slowly" report.</p>
-     *
-     * <p><b>Animation.</b> {@code isVisuallySwimming()} is {@code hasPose(Pose.SWIMMING)}, and that
-     * pose is assigned in exactly ONE place in the entity hierarchy — {@code Player.updatePlayerPose}.
-     * A Mob can never reach it on its own, so {@code swimAmount} decays to 0 and the model never
-     * leans into the stroke. Setting the pose directly is what drives the vanilla {@code PlayerModel}
-     * the renderer already uses, so the animation comes for free.</p>
-     *
-     * <p>Deliberately NOT chasing {@code Entity.updateSwimming}'s swim <em>flag</em>: entering it
-     * requires {@code isUnderWater()} (eyes submerged), which a surface swimmer held up by
-     * {@code FloatGoal} never is. The pose is the lever that works at the surface. Equally
-     * deliberately not touching {@code WATER_MOVEMENT_EFFICIENCY} — at 1.0 it yields ~0.58
-     * blocks/tick (~11.6 b/s), which is absurd.</p>
-     *
-     * <p>{@link #clearSwimPosture()} MUST undo both on the way out — nothing else resets sprinting
-     * on a Mob, so a mob that reached the bank would otherwise sprint around on land forever.</p>
-     */
-    private void applySwimPosture() {
-        mob.setSprinting(true);
-        if (!mob.hasPose(Pose.SWIMMING)) {
-            mob.setPose(Pose.SWIMMING);
-        }
-    }
-
-    /**
-     * Undo {@link #applySwimPosture()}. Called on every exit from the swim — reaching the bank
-     * ({@link #enterApproach()}) and the goal ending ({@link #stop()}) — because vanilla will not
-     * clear either flag for a Mob. The entity declares no per-pose dimensions (see
-     * {@code PlayerMobEntity}'s crouch handling), so the pose swap never resizes the hitbox.
-     */
-    private void clearSwimPosture() {
-        mob.setSprinting(false);
-        if (mob.hasPose(Pose.SWIMMING)) {
-            mob.setPose(Pose.STANDING);
         }
     }
 

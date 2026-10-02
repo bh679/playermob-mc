@@ -96,6 +96,7 @@ import net.minecraft.world.entity.MobSpawnType;
 import net.minecraft.world.entity.PathfinderMob;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.SpawnGroupData;
+import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.ai.goal.FloatGoal;
@@ -105,6 +106,7 @@ import net.minecraft.world.entity.ai.goal.WaterAvoidingRandomStrollGoal;
 import net.minecraft.world.entity.ai.goal.target.HurtByTargetGoal;
 import net.minecraft.world.entity.ai.goal.target.NearestAttackableTargetGoal;
 import net.minecraft.world.entity.ai.navigation.GroundPathNavigation;
+import net.minecraft.world.entity.ai.navigation.PathNavigation;
 import net.minecraft.world.entity.monster.CrossbowAttackMob;
 import net.minecraft.world.food.FoodProperties;
 import net.minecraft.world.entity.monster.Enemy;
@@ -324,6 +326,8 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private static final String TAG_STAY_NEAR = "StayNear";
     /** The draft-book shelf (see {@link #draftShelf}) — additive; omitted when empty. */
     private static final String TAG_DRAFTS = "Drafts";
+    /** Marks a save written under the player-speed model, so its base speed is never re-migrated. */
+    private static final String TAG_PLAYER_SPEEDS = "PlayerSpeeds";
     /** The death-log record the shelf was filled from ({@link GlobalLifeStore.DeathRecord#id}); 0 = none. */
     private static final String TAG_DRAFTS_RECORD = "DraftsRecord";
 
@@ -462,6 +466,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * it rides again.
      */
     private int lastOnTrainTick = -100_000;
+
+    /** True only inside vanilla's stuck check, so {@link #getSpeed} can answer it in the old scale. */
+    private boolean stuckDetectionView;
+    /** Mid-bite (see {@link #setEating}) — slows movement like a player eating. */
+    private boolean eating;
 
     /**
      * True only while {@link TrainRecoveryGoal} is actively climbing this mob back
@@ -779,10 +788,66 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (this.getNavigation() instanceof GroundPathNavigation groundNav) {
             groundNav.setCanOpenDoors(true);
         }
+        // Every movement input goes through this control, which is what holds the mob to a
+        // player's speeds (walk / sprint / use-item slow / swim) — see PlayerSpeeds.
+        this.moveControl = new PlayerLikeMoveControl(this);
         // Let the path cross water (float on the surface) instead of treating it as a
         // wall — so a mob recovering back onto a train can swim toward it / to the
         // nearest shore. FloatGoal (priority 0) keeps it from sinking.
         this.getNavigation().setCanFloat(true);
+    }
+
+    @Override
+    protected PathNavigation createNavigation(Level level) {
+        return new PlayerMobNavigation(this, level);
+    }
+
+    // ---- Player-speed movement (see PlayerSpeeds / PlayerLikeMoveControl) ----
+
+    /**
+     * The movement-speed attribute itself, as {@code Player.getSpeed} — not the
+     * {@code modifier x attribute} a vanilla mob stores. Includes the sprint modifier and any
+     * Speed/Slowness effect the moment they apply.
+     */
+    @Override
+    public float getSpeed() {
+        if (stuckDetectionView) {
+            return PlayerSpeeds.STUCK_DETECTION_SPEED;
+        }
+        return (float) getAttributeValue(Attributes.MOVEMENT_SPEED);
+    }
+
+    /** Airborne acceleration as {@code Player.getFlyingSpeed}: higher while sprinting, which is what a sprint-jump needs. */
+    @Override
+    protected float getFlyingSpeed() {
+        return isSprinting() ? PlayerSpeeds.SPRINT_FLYING_SPEED : super.getFlyingSpeed();
+    }
+
+    /** {@link PlayerMobNavigation} flips this around vanilla's stuck check — see {@link PlayerSpeeds#STUCK_DETECTION_SPEED}. */
+    void setStuckDetectionView(boolean stuckDetectionView) {
+        this.stuckDetectionView = stuckDetectionView;
+    }
+
+    /**
+     * True while the mob is doing something that slows a player to 20% input: using an item
+     * (drawing a bow, charging a crossbow, holding a shield up) or eating.
+     */
+    public boolean isUseItemSlowed() {
+        return isUsingItem() || eating;
+    }
+
+    /** Set by {@link EatFoodGoal} for the length of a bite — it holds the food rather than "using" it. */
+    public void setEating(boolean eating) {
+        this.eating = eating;
+    }
+
+    /**
+     * Whether the mob has the stamina to sprint-jump. Stand-in for "hunger bar full": the mod's
+     * existing not-hungry test (health at or above {@link EatFoodGoal#HUNGER_THRESHOLD}). The real
+     * hunger bar (bh679/playermob-mc#212) replaces this body with a food-level check.
+     */
+    public boolean canSprintJump() {
+        return getHealth() >= getMaxHealth() * EatFoodGoal.HUNGER_THRESHOLD;
     }
 
     /**
@@ -793,7 +858,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     public static AttributeSupplier.Builder createAttributes() {
         return PathfinderMob.createMobAttributes()
             .add(Attributes.MAX_HEALTH, 20.0)
-            .add(Attributes.MOVEMENT_SPEED, 0.30)
+            .add(Attributes.MOVEMENT_SPEED, PlayerSpeeds.PLAYER_BASE_SPEED)
             .add(Attributes.ATTACK_DAMAGE, 3.0)
             .add(Attributes.FOLLOW_RANGE, 32.0);
     }
@@ -848,25 +913,25 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // water, or never starting at all — by any other priority-1 goal already holding
         // MOVE/LOOK. Priority 0 guarantees it always wins that slot the instant it's on fire.
         // No-op unless on fire. See FireBucketGoal.
-        this.goalSelector.addGoal(0, new FireBucketGoal(this, /* speed */ 1.4)); // sprint to water — it's on fire
+        this.goalSelector.addGoal(0, new FireBucketGoal(this, PlayerSpeeds.SPRINT)); // sprint to water — it's on fire
         // An explicit player order (/playermob order ...) overrides autonomous behaviour.
         // Added before the other priority-1 goals so it wins the MOVE/LOOK slot while it runs;
         // no-op (canUse false) whenever there's no pending order, so normal AI is unaffected.
-        this.goalSelector.addGoal(1, new CommandedActionGoal(this, /* speed */ 1.0));
+        this.goalSelector.addGoal(1, new CommandedActionGoal(this, PlayerSpeeds.WALK));
         // Fell off a Dungeon Train carriage? Getting back on preempts everything
         // but swimming — added before the other priority-1 goals so its canUse is
         // evaluated first. No-op without a train mod (nearestCarriage → null).
-        this.goalSelector.addGoal(1, new TrainRecoveryGoal(this, /* speed */ 1.0));
+        this.goalSelector.addGoal(1, new TrainRecoveryGoal(this, PlayerSpeeds.WALK));
         // Social goals (flee / watch / greet) — priority 1 so they preempt
         // raiding/strolling when their reaction applies. Each self-gates on the
         // live reaction; Skeptical/Friendly also gate on "no target" so they yield to combat.
         // Flee range 10 → detectRange 16 (range + DETECT_RANGE_BONUS) covers the
         // widest fight/flight bubble (fr0 hated ≈ MAX_RANGE); the mob still only
         // flees ~10 blocks before hiding.
-        this.goalSelector.addGoal(1, new FleeFromCategoryGoal(this, /* range */ 10.0F, /* walk */ 1.0, /* sprint */ 1.3));
+        this.goalSelector.addGoal(1, new FleeFromCategoryGoal(this, /* range */ 10.0F, PlayerSpeeds.WALK, PlayerSpeeds.SPRINT));
         // Watch scan = MAX_RANGE so fr0's ~15-block skeptical ring is visible.
         this.goalSelector.addGoal(1, new SkepticalWatchGoal(this, /* watchRange */ DispositionResolver.MAX_RANGE, /* closeRange */ 4.0));
-        this.goalSelector.addGoal(1, new FriendlyGreetGoal(this, /* range */ 10.0, /* approachSpeed */ 0.9));
+        this.goalSelector.addGoal(1, new FriendlyGreetGoal(this, /* range */ 10.0, PlayerSpeeds.WALK));
         // Open (and, for "tidy" mobs, close) wooden doors on the path. Declares
         // no flags, so it runs alongside whatever movement goal owns the walk — it
         // only *triggers* the deliberate operation below.
@@ -903,25 +968,25 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // config on, mobGriefing on, flint and steel on hand, a trigger reached, under the 5-per-10s rate
         // cap — so the normal fight goals own combat the rest of the time. Gated on mobGriefing (it places
         // a real fire block). See FlintAndSteelIgniteGoal.
-        this.goalSelector.addGoal(1, new FlintAndSteelIgniteGoal(this, /* speed */ 1.0));
+        this.goalSelector.addGoal(1, new FlintAndSteelIgniteGoal(this, PlayerSpeeds.WALK));
         // Carrying TNT + a way to light it? Bomb the enemy instead of trading bow/melee blows — registered
         // BEFORE the seek/attack goals at the same priority so its canUse() (config on, mobGriefing on, TNT +
         // an igniter on hand) wins the MOVE slot while armed. When it runs out of TNT/igniters its canUse()
         // goes false and the normal fight goals take back over. Gated on mobGriefing (it places + primes TNT).
-        this.goalSelector.addGoal(2, new TntCombatGoal(this, /* speed */ 1.0));
+        this.goalSelector.addGoal(2, new TntCombatGoal(this, PlayerSpeeds.WALK));
         // Carrying end crystals + obsidian + solid cover blocks? Bomb the enemy with crystals instead — same
         // priority-2 slot, registered right after TntCombatGoal so TNT keeps first dibs if a mob somehow holds both
         // kits. It builds a little bunker (obsidian base + crystal, a 2-tall cover between mob and crystal), crouches
         // behind the cover with a shield up, and punches the crystal to set it off; when it runs out of the kit its
         // canUse() goes false and the normal fight goals take back over. Gated on mobGriefing (places blocks + explodes).
-        this.goalSelector.addGoal(2, new EndCrystalCombatGoal(this, /* speed */ 1.0));
+        this.goalSelector.addGoal(2, new EndCrystalCombatGoal(this, PlayerSpeeds.WALK));
         // Out of ammo mid-fight? Fetch a nearby dropped round before fighting — registered BEFORE the attack
         // goal at the same priority so its narrow canUse() (ranged weapon owned, no ammo, enemy not too close,
         // a round within reach) wins the MOVE slot; otherwise the attack goal runs. After a restock its
         // canUse() goes false and the attack goal re-draws ranged. Ammo is weapon-aware (arrows for bows,
         // arrows or fireworks for crossbows). No-op when seekArrowsWhenEmpty/requireArrows is off (mob melees).
-        this.goalSelector.addGoal(2, new SeekAmmoGoal(this, /* speed */ 1.0, /* scanRadius */ 10.0));
-        this.goalSelector.addGoal(2, new WeaponAwareAttackGoal(this, 1.0, 8.0f));
+        this.goalSelector.addGoal(2, new SeekAmmoGoal(this, PlayerSpeeds.WALK, /* scanRadius */ 10.0));
+        this.goalSelector.addGoal(2, new WeaponAwareAttackGoal(this, /* melee chase */ PlayerSpeeds.SPRINT, /* ranged approach */ PlayerSpeeds.WALK, 8.0f));
         // Follow the one it loves (a player or another PlayerMob): priority 2 so it
         // deprioritises every own-task (raid 3, harvest 6, train-advance 7, stroll 8) to tag
         // along, yet still yields to combat — registered after the attack goal and self-gated
@@ -938,25 +1003,25 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // its canUse() is evaluated first — a low-HP mob with food prefers
         // eating over walking to the next chest.
         this.goalSelector.addGoal(3, new EatFoodGoal(this));
-        this.goalSelector.addGoal(3, new RaidContainersGoal(this, /* speed */ 0.9, /* radius */ 12));
-        this.goalSelector.addGoal(3, new RaidArmorStandsGoal(this, /* speed */ 0.9, /* radius */ 12.0));
-        this.goalSelector.addGoal(3, new CollectFloorItemsGoal(this, /* speed */ 0.9, /* radius */ 8.0));
+        this.goalSelector.addGoal(3, new RaidContainersGoal(this, PlayerSpeeds.WALK, /* radius */ 12));
+        this.goalSelector.addGoal(3, new RaidArmorStandsGoal(this, PlayerSpeeds.WALK, /* radius */ 12.0));
+        this.goalSelector.addGoal(3, new CollectFloorItemsGoal(this, PlayerSpeeds.WALK, /* radius */ 8.0));
         // Low-priority idle forage drive: only farms ripe crops when there's
         // nothing more urgent (combat 2, raid/eat/collect 3) to do. Hunting is
         // NOT here — it runs as a target goal so the priority-2 attack goal does
         // the killing (see below).
-        this.goalSelector.addGoal(6, new HarvestCropsGoal(this, /* speed */ 0.9, /* radius */ 8));
+        this.goalSelector.addGoal(6, new HarvestCropsGoal(this, PlayerSpeeds.WALK, /* radius */ 8));
         // On a Dungeon Train, once the current carriage room is clear (combat 2,
         // raid/collect 3, harvest 6 all preempt this), march to the next room.
         // No-op off a train (the seam reports "not confined"). Below harvest so
         // "fully explore" includes farming; above idle stroll.
-        this.goalSelector.addGoal(7, new AdvanceCarriageGoal(this, /* speed */ 0.9));
+        this.goalSelector.addGoal(7, new AdvanceCarriageGoal(this, PlayerSpeeds.WALK));
         // When the next room is across a group gap (AdvanceCarriageGoal stops), leap the
         // gap to the adjacent group and keep marching. Same priority/flags as the advance
         // goal; mutually exclusive because it only fires when the within-group target is
         // null. No-op off a train.
-        this.goalSelector.addGoal(7, new CrossGroupGapGoal(this, /* speed */ 0.9));
-        this.goalSelector.addGoal(8, new WaterAvoidingRandomStrollGoal(this, 0.6));
+        this.goalSelector.addGoal(7, new CrossGroupGapGoal(this, PlayerSpeeds.WALK));
+        this.goalSelector.addGoal(8, new WaterAvoidingRandomStrollGoal(this, PlayerSpeeds.WALK));
         this.goalSelector.addGoal(9, new LookAtPlayerGoal(this, LivingEntity.class, 8.0F));
         this.goalSelector.addGoal(10, new RandomLookAroundGoal(this));
 
@@ -3989,6 +4054,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         tag.putBoolean(TAG_SKIN_SLIM, isSkinSlim());
         tag.putBoolean(TAG_CLOSES_DOORS, this.closesDoors);
         tag.putBoolean(TAG_NATURAL_ORIGIN, this.naturalOrigin);
+        tag.putBoolean(TAG_PLAYER_SPEEDS, true);
         // Per-mob order defaults (timeout / interruptibility) applied when a /playermob order command
         // omits the flags. Additive — a save without these keys reads back the 2-min / interruptible
         // defaults. The live pending order itself is transient and never persisted.
@@ -4049,11 +4115,28 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         }
     }
 
+    /**
+     * Attribute bases persist per entity, so a mob saved before the player-speed model loads with the
+     * old 0.30 base — three times a player's, which under full-stick input would be about 13 m/s.
+     * Runs after {@code super.readAdditionalSaveData} has restored the attributes.
+     */
+    private void migrateLegacyBaseSpeed(boolean alreadyMigrated) {
+        AttributeInstance speed = getAttribute(Attributes.MOVEMENT_SPEED);
+        if (speed == null) {
+            return;
+        }
+        double migrated = PlayerSpeeds.migratedBaseSpeed(speed.getBaseValue(), alreadyMigrated);
+        if (migrated != speed.getBaseValue()) {
+            speed.setBaseValue(migrated);
+        }
+    }
+
     /** Read every PlayerMob custom field from {@code tag}. Version-agnostic (CompoundTag + NbtCompat). */
     private void readCustomTag(CompoundTag tag) {
         // Traits + feelings; missing keys keep defaults. Legacy *Personality keys ignored.
         traits.load(tag);
         feelings.load(tag);
+        migrateLegacyBaseSpeed(NbtCompat.getBooleanOr(tag, TAG_PLAYER_SPEEDS, false));
         // Draft shelf — missing key (every pre-draft save, every non-echo) ⇒ empty shelf. Replaces
         // rather than appends so applyCustomData on a reused mob can't double up.
         draftShelf.clear();

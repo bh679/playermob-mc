@@ -4,6 +4,7 @@ import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.compat.GameRuleCompat;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.PlayerMobEntity;
+import games.brennan.playermob.entity.PlayerSpeeds;
 import games.brennan.playermob.entity.TntCombatPolicy;
 import games.brennan.playermob.entity.TntCombatPolicy.IgnitionStrategy;
 import net.minecraft.core.BlockPos;
@@ -63,7 +64,7 @@ public final class TntCombatGoal extends Goal implements DescribableGoal {
     private static final double APPROACH_REACH_SQR = 12.25;
     private static final int WALK_TIMEOUT_TICKS = 200;       // 10s to reach the target before giving up
     private static final int FLEE_TICKS = 90;                // safety cap: give up backing off after ~4.5s if boxed in
-    private static final double FLEE_SPEED = 1.4;            // sprint clear — the blast is lethal
+    private static final double FLEE_SPEED = PlayerSpeeds.SPRINT;   // sprint clear — the blast is lethal
     private static final int FLEE_REPATH_INTERVAL = 8;       // re-pick a retreat point every 0.4s
     private static final int RETREAT_RADIUS = 10;
     private static final int RETREAT_VERTICAL = 6;

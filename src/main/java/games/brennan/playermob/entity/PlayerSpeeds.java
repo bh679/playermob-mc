@@ -1,0 +1,94 @@
+package games.brennan.playermob.entity;
+
+/**
+ * The only speeds a {@link PlayerMobEntity} may move at: the ones a real player has. Primitives
+ * only (no Minecraft types), so it unit-tests without a game bootstrap, exactly like
+ * {@link StayNearPolicy} / {@link FollowLovedOnePolicy}.
+ *
+ * <p><b>Goals pick a gait, never a speed.</b> Every navigation call passes {@link #WALK} or
+ * {@link #SPRINT} as its "speed modifier". That number is only a label: {@link #gaitFor} turns it
+ * back into a {@link Gait} and {@link PlayerLikeMoveControl} feeds the physics a player's inputs
+ * (full stick, the vanilla sprint modifier), so the magnitude of the modifier never reaches
+ * {@code travel}. A vanilla mob's ground acceleration is {@code (modifier x attribute)^2}, which is
+ * how the old per-goal multipliers (0.5 … 1.4 on a 0.30 base) produced seven land speeds, none of
+ * them a player's.</p>
+ *
+ * <p>Potion effects are untouched: they modify the {@code MOVEMENT_SPEED} attribute, which is what
+ * {@link PlayerMobEntity#getSpeed()} reports, exactly as for a player.</p>
+ */
+public final class PlayerSpeeds {
+
+    private PlayerSpeeds() {}
+
+    /** The two land gaits. Sprint-jumping is sprint plus a held jump (see {@link SprintJumpPolicy}). */
+    public enum Gait { WALK, SPRINT }
+
+    /** Navigation speed modifier meaning "walk" — player walk, 4.317 m/s. */
+    public static final double WALK = 1.0;
+    /** Navigation speed modifier meaning "sprint" — player sprint, 5.612 m/s. */
+    public static final double SPRINT = 1.3;
+    /**
+     * Modifiers at or above this select {@link Gait#SPRINT}. Midway between {@link #WALK} and
+     * {@link #SPRINT} so float noise or a vanilla goal's own constant can't flip the gait.
+     */
+    static final double SPRINT_THRESHOLD = 1.2;
+
+    /** A player's base {@code MOVEMENT_SPEED} attribute. */
+    public static final double PLAYER_BASE_SPEED = 0.10;
+    /**
+     * The base {@code MOVEMENT_SPEED} PlayerMobs had before the player-speed model. Attribute bases
+     * persist per entity, so a mob saved under the old model still carries it — see
+     * {@link #migratedBaseSpeed}.
+     */
+    public static final double LEGACY_BASE_SPEED = 0.30;
+
+    /** Movement input multiplier while using an item (drawing a bow, blocking, eating), as for a player. */
+    public static final float USE_ITEM_INPUT = 0.2F;
+
+    /** Airborne acceleration, as {@code Player.getFlyingSpeed}: a mob's default is the walking value always. */
+    public static final float FLYING_SPEED = 0.02F;
+    /** Airborne acceleration while sprinting — what makes a sprint-jump average 7.127 m/s rather than 6.25. */
+    public static final float SPRINT_FLYING_SPEED = 0.025999999F;
+
+    /**
+     * {@code speed} the vanilla navigator's stuck detection is shown (see {@code PlayerMobNavigation}).
+     * Its thresholds scale with {@code getSpeed()^2}, so at a player's 0.10 they would be nine times
+     * laxer than the ones this mod's goals were tuned around; this keeps them where they were.
+     */
+    public static final float STUCK_DETECTION_SPEED = (float) LEGACY_BASE_SPEED;
+
+    /** Which gait a navigation speed modifier asks for. */
+    public static Gait gaitFor(double navModifier) {
+        return navModifier >= SPRINT_THRESHOLD ? Gait.SPRINT : Gait.WALK;
+    }
+
+    /**
+     * Scale a raw {@code (forward, strafe)} input pair to a player's stick: unit length times
+     * {@code full}, or {@link #USE_ITEM_INPUT} of that while using an item. A zero input stays zero.
+     *
+     * @param full the full-stick magnitude for this game version (the 0.98 input damping is applied
+     *             before the AI step on newer versions, so the control writes it itself there)
+     * @return {@code {forward, strafe}}
+     */
+    public static float[] stickInput(float forward, float strafe, float full, boolean usingItem) {
+        double length = Math.sqrt((double) forward * forward + (double) strafe * strafe);
+        if (length < 1.0e-4) {
+            return new float[] {0.0F, 0.0F};
+        }
+        double scale = (usingItem ? full * USE_ITEM_INPUT : full) / length;
+        return new float[] {(float) (forward * scale), (float) (strafe * scale)};
+    }
+
+    /**
+     * The base speed a loaded mob should have. A save from before the player-speed model
+     * ({@code alreadyMigrated} false) that still carries exactly {@link #LEGACY_BASE_SPEED} drops to
+     * {@link #PLAYER_BASE_SPEED}; anything else — a migrated save, or a base someone set on purpose
+     * with {@code /attribute} — is left alone.
+     */
+    public static double migratedBaseSpeed(double savedBase, boolean alreadyMigrated) {
+        if (!alreadyMigrated && Math.abs(savedBase - LEGACY_BASE_SPEED) < 1.0e-6) {
+            return PLAYER_BASE_SPEED;
+        }
+        return savedBase;
+    }
+}

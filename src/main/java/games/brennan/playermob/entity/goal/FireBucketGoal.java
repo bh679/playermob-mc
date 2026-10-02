@@ -117,7 +117,6 @@ public final class FireBucketGoal extends Goal implements DescribableGoal {
     @Override
     public void stop() {
         mob.getNavigation().stop();
-        mob.setSprinting(false);
         phase = Phase.DONE;
         waterPos = null;
     }
@@ -147,7 +146,6 @@ public final class FireBucketGoal extends Goal implements DescribableGoal {
         }
         if (mob.isInWater()) {           // made it in — done
             mob.getNavigation().stop();
-            mob.setSprinting(false);
             phase = Phase.DONE;
             return;
         }
@@ -214,7 +212,6 @@ public final class FireBucketGoal extends Goal implements DescribableGoal {
         // In the water (doused) or the fire's out — either way, go pick the water back up.
         if (mob.isInWater() || !mob.isOnFire()) {
             mob.getNavigation().stop();
-            mob.setSprinting(false);
             phase = Phase.PICKUP;
             waitTicks = randomTicks(5, 30);
             return;
@@ -233,14 +230,13 @@ public final class FireBucketGoal extends Goal implements DescribableGoal {
         phase = Phase.DONE;
     }
 
-    /** Sprint toward {@code pos}, looking at it and hopping if grounded. */
+    /**
+     * Sprint toward {@code pos}, looking at it. The sprint flag and any sprint-jumping are
+     * PlayerLikeMoveControl's job — the goal only asks for the sprint gait.
+     */
     private void runToward(BlockPos pos) {
-        mob.setSprinting(true);
         mob.getLookControl().setLookAt(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
         mob.getNavigation().moveTo(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5, speed);
-        if (mob.onGround()) {
-            mob.getJumpControl().jump();
-        }
     }
 
     /**

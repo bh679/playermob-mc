@@ -49,21 +49,22 @@ public final class WeaponAwareAttackGoal extends Goal implements DescribableGoal
 
     /**
      * @param mob the entity this goal drives
-     * @param speed pathfinder movement multiplier (typical: 1.0)
+     * @param meleeSpeed pathfinder gait for chasing a target into melee ({@code PlayerSpeeds.SPRINT})
+     * @param rangedSpeed pathfinder gait for closing to firing range ({@code PlayerSpeeds.WALK})
      * @param rangedAttackRange max attack range in blocks for the ranged delegates
      *                          (the bow/crossbow firing distance, not the
      *                          targeting distance)
      */
-    public WeaponAwareAttackGoal(PlayerMobEntity mob, double speed, float rangedAttackRange) {
+    public WeaponAwareAttackGoal(PlayerMobEntity mob, double meleeSpeed, double rangedSpeed, float rangedAttackRange) {
         this.mob = mob;
         // Both ranged goals self-manage their inter-shot cadence: the weapon's own
         // draw/charge time floors the firerate, and fightFlight adds the extra beat
         // (see DispositionResolver.rangedAttackExtraDelayTicks), so neither takes an
         // interval arg.
-        this.crossbow = new PlayerMobCrossbowAttackGoal(mob, speed, rangedAttackRange);
-        this.bow = new PlayerMobBowAttackGoal(mob, speed, rangedAttackRange);
-        this.moddedRanged = new ModdedRangedAttackGoal(mob, speed, rangedAttackRange);
-        this.melee = new MeleeAttackGoal(mob, speed, true);
+        this.crossbow = new PlayerMobCrossbowAttackGoal(mob, rangedSpeed, rangedAttackRange);
+        this.bow = new PlayerMobBowAttackGoal(mob, rangedSpeed, rangedAttackRange);
+        this.moddedRanged = new ModdedRangedAttackGoal(mob, rangedSpeed, rangedAttackRange);
+        this.melee = new MeleeAttackGoal(mob, meleeSpeed, true);
         // We claim every flag any delegate might need so the selector reserves
         // them for us. Inner-goal flags are irrelevant — they're not selector-managed.
         setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK, Flag.JUMP));

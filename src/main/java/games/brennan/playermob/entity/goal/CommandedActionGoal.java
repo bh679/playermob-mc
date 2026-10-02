@@ -1,6 +1,7 @@
 package games.brennan.playermob.entity.goal;
 
 import games.brennan.playermob.entity.PlayerMobEntity;
+import games.brennan.playermob.entity.PlayerSpeeds;
 import games.brennan.playermob.entity.Reaction;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.InteractionHand;
@@ -62,7 +63,7 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
     private static final int FLEE_REPATH_INTERVAL = 10;  // re-pick a retreat point every 0.5s
     private static final int RETREAT_RADIUS = 16;
     private static final int RETREAT_VERTICAL = 7;
-    private static final double FLEE_SPEED = 1.3;        // sprint away
+    private static final double FLEE_SPEED = PlayerSpeeds.SPRINT;   // sprint away
 
     private enum Phase { PATH, ACT, FLEE, DONE }
 

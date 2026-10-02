@@ -106,6 +106,7 @@ public final class EatFoodGoal extends Goal implements DescribableGoal {
 
         eatTicks = 0;
         eating = true;
+        mob.setEating(true);   // a player eating moves at 20% — see PlayerLikeMoveControl
     }
 
     @Override
@@ -156,6 +157,7 @@ public final class EatFoodGoal extends Goal implements DescribableGoal {
 
         previousOffhand = ItemStack.EMPTY;
         eating = false;
+        mob.setEating(false);
         eatTicks = 0;
     }
 
@@ -176,6 +178,7 @@ public final class EatFoodGoal extends Goal implements DescribableGoal {
         }
         previousOffhand = ItemStack.EMPTY;
         eating = false;
+        mob.setEating(false);
         eatTicks = 0;
     }
 }

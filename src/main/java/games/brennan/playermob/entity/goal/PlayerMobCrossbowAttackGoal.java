@@ -118,8 +118,9 @@ public final class PlayerMobCrossbowAttackGoal extends Goal {
         if (shouldClose) {
             --this.updatePathDelay;
             if (this.updatePathDelay <= 0) {
-                this.mob.getNavigation().moveTo(target,
-                    this.canRun() ? this.speedModifier : this.speedModifier * 0.5);
+                // No half-speed while charging: the charge is an item use, and PlayerLikeMoveControl
+                // already slows that to a player's 20%.
+                this.mob.getNavigation().moveTo(target, this.speedModifier);
                 this.updatePathDelay = this.mob.reactTicks(
                     PATHFINDING_DELAY_RANGE.sample(this.mob.getRandom()));
             }
@@ -176,10 +177,6 @@ public final class PlayerMobCrossbowAttackGoal extends Goal {
             CrossbowCompat.clearCharged(fired);
             this.crossbowState = CrossbowState.UNCHARGED;
         }
-    }
-
-    private boolean canRun() {
-        return this.crossbowState == CrossbowState.UNCHARGED;
     }
 
     private enum CrossbowState {
