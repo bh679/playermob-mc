@@ -263,7 +263,7 @@ public final class FleeFromCategoryGoal extends Goal implements DescribableGoal 
         if (mob.getNavigation().isDone()) {
             // As close to the gap as vanilla can walk (and the carry reading is clean) → hop.
             if (++leapSettleTicks >= mob.reactTicks(LEAP_SETTLE_TICKS)) {
-                leap.launch(mob, target, TrainConfinement.groupGapWidth(mob, leapDir));
+                leap.launch(mob, target, TrainConfinement.groupGapWidth(mob, leapDir), /* urgent */ true);
             }
             return;
         }

@@ -70,6 +70,58 @@ public final class PlayerSpeeds {
      */
     public static final float STUCK_DETECTION_SPEED = (float) LEGACY_BASE_SPEED;
 
+    // ---- Steady-state speeds, in blocks/tick, for code that sets velocity directly (the gap leap) ----
+
+    /** Vanilla's 0.98 input damping, applied to a full stick. */
+    private static final double INPUT_DAMPING = 0.98;
+    /** Per-tick ground drag on default blocks: slipperiness 0.6 x air drag 0.91. */
+    private static final double GROUND_DRAG = 0.6 * 0.91;
+    /** The vanilla sprint attribute modifier: +30%, multiplied on the total. */
+    private static final double SPRINT_MODIFIER = 1.3;
+    /**
+     * Average horizontal speed of a player holding sprint and jump on flat ground at the base speed
+     * attribute — 7.127 m/s. Faster than a plain sprint because every takeoff adds a 0.2 boost.
+     */
+    static final double SPRINT_JUMP_BLOCKS_PER_TICK = 0.35635;
+
+    /** Walking speed (blocks/tick) for a movement-speed attribute value: 0.2159 at a player's 0.10. */
+    public static double walkBlocksPerTick(double speedAttribute) {
+        return speedAttribute * INPUT_DAMPING / (1.0 - GROUND_DRAG);
+    }
+
+    /** Sprinting speed (blocks/tick): 0.2806 at a player's 0.10. */
+    public static double sprintBlocksPerTick(double speedAttribute) {
+        return walkBlocksPerTick(speedAttribute * SPRINT_MODIFIER);
+    }
+
+    /** Sprint-jumping speed (blocks/tick), scaled with the attribute so Speed and Slowness carry over. */
+    public static double sprintJumpBlocksPerTick(double speedAttribute) {
+        return SPRINT_JUMP_BLOCKS_PER_TICK * speedAttribute / PLAYER_BASE_SPEED;
+    }
+
+    /**
+     * The speeds (blocks/tick) a mob may cross a gap at, slowest first: its own speed, then each
+     * faster player speed as a fallback for a gap its own can't clear. A mob that may not sprint
+     * ({@link #allowsSprint}) starts at a walk; one that sprints but doesn't sprint-jump starts at
+     * a sprint; a sprint-jumper has only the one.
+     *
+     * @param sprintJumps    whether this mob sprint-jumps this time ({@link SprintJumpPolicy#rollsRun})
+     * @param speedAttribute the mob's movement-speed attribute <em>without</em> the sprint modifier
+     */
+    public static double[] crossingSpeeds(int reactionSpeed, boolean urgent, boolean sprintJumps,
+                                          double speedAttribute) {
+        double walk = walkBlocksPerTick(speedAttribute);
+        double sprint = sprintBlocksPerTick(speedAttribute);
+        double sprintJump = sprintJumpBlocksPerTick(speedAttribute);
+        if (!allowsSprint(reactionSpeed, urgent)) {
+            return new double[] {walk, sprint, sprintJump};
+        }
+        if (!sprintJumps) {
+            return new double[] {sprint, sprintJump};
+        }
+        return new double[] {sprintJump};
+    }
+
     /** Which gait a navigation speed modifier asks for. */
     public static Gait gaitFor(double navModifier) {
         return navModifier >= SPRINT_THRESHOLD ? Gait.SPRINT : Gait.WALK;

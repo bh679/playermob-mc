@@ -2,6 +2,9 @@ package games.brennan.playermob.entity.goal;
 
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.PlayerMobEntity;
+import games.brennan.playermob.entity.PlayerSpeeds;
+import games.brennan.playermob.entity.SprintJumpPolicy;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -20,11 +23,17 @@ import net.minecraft.world.phys.Vec3;
  * (a real arc, not a floor-skim) matters: Sable only sticks a riding mob to a carriage while it is
  * grounded, so a low skim re-grounds on the origin and gets re-grabbed mid-leap.</p>
  *
- * <p><b>Sized to the gap.</b> The arc scales to the measured seam width
- * ({@link TrainConfinement#groupGapWidth}, read once at {@link #launch}), because Dungeon Train
- * v0.471.0 tightened inter-group gaps to ~0.4 blocks and a fixed ~3.8-block sprint leap across a
- * hand's-width seam looked absurd. A wide or unmeasurable gap keeps the original sprint-jump
- * values, so this is a no-op wherever the seam isn't measurably tight.</p>
+ * <p><b>At a player's speed.</b> The leap's horizontal speed is always one of a player's three —
+ * walk, sprint or sprint-jump — chosen the way the mob's ordinary movement is: by reaction speed
+ * and urgency ({@link PlayerSpeeds#crossingSpeeds}). A sluggish mob steps across at a walk; a
+ * sharp one sprint-jumps it.</p>
+ *
+ * <p><b>Sized to the gap.</b> The seam width ({@link TrainConfinement#groupGapWidth}, read once
+ * at {@link #launch}) then picks the <em>height</em>: the small hop if that speed carries the mob
+ * across in a hop's airtime, the full jump if it needs longer. Dungeon Train v0.471.0 tightened
+ * inter-group gaps to ~0.4 blocks, and a full leap across a hand's-width seam looked absurd.
+ * A gap the mob's own speed can't clear even with a full jump borrows the next player speed up
+ * rather than dropping it in the gap.</p>
  *
  * <p><b>Lifecycle</b> — single leap at a time, owned by one goal instance:</p>
  * <ol>
@@ -46,24 +55,15 @@ final class GapLeap {
     /** Airborne backstop (6s). The owning goal enforces it via {@link #flightTicks()}. */
     static final int FLIGHT_TIMEOUT_TICKS = 120;
 
-    // Sprint-jump tuning. The leap is a ballistic arc, like a player: a vanilla jump straight up
-    // plus a sustained sprint toward the target (air control), then gravity brings it down onto the
-    // far group. The sprint is added on top of the train carry, so it tracks a moving train; it must
-    // clear a normal carriage-group gap the way a sprinting player does. Confirmed via in-game
-    // trajectory diagnostics (#54): the earlier "gentle floor-skim" re-grounded on the origin and
-    // stalled, and a held-altitude hover floated too high and too far.
-    static final double SPRINT_SPEED = 0.38; // horizontal sprint toward the target, on top of carry
+    // The leap is a ballistic arc, like a player's: a jump straight up plus a sustained horizontal
+    // speed toward the target (air control), then gravity brings it down onto the far group. The
+    // horizontal speed is added on top of the train carry, so it tracks a moving train. Confirmed via
+    // in-game trajectory diagnostics (#54): the earlier "gentle floor-skim" re-grounded on the origin
+    // and stalled, and a held-altitude hover floated too high and too far.
     static final double LAUNCH_UP = 0.42;    // vanilla jump impulse; gravity arcs the rest
 
-    // Gap-proportionate hop. Dungeon Train v0.471.0 tightened inter-group seams from ~1.0 blocks
-    // to ~0.4 (min 0.3, max 0.5), which made the sprint jump above read as comically oversized: it
-    // always travelled SPRINT_SPEED * airtime ~= 3.8 blocks regardless of the gap, because
-    // launchVelocity normalises to a fixed speed and the target only sets *direction*, never
-    // magnitude. For a measurably tight gap we scale both the impulse and the sustained speed to
-    // the gap; a wide or unmeasurable gap keeps the exact values above, so the flee escape and any
-    // older/wider spacing behave bit-identically to before.
-    /** Gaps at or below this (blocks) get the small step-over hop. Covers DT's 0.3-0.5 plus AABB
-     *  jitter, while leaving wider spacing on the proven sprint jump. */
+    /** Gaps at or below this (blocks) may take the small step-over hop. Covers DT's 0.3-0.5 plus
+     *  AABB jitter. Wider (or unmeasurable) spacing always gets the full jump. */
     static final double SMALL_GAP_THRESHOLD = 1.5;
     /** Step-over impulse: ~7.5 ticks airborne, peak ~0.56 blocks. Deliberately kept well above
      *  skim height — per #54 a low skim re-grounds on the origin and gets re-grabbed mid-leap. */
@@ -72,8 +72,6 @@ final class GapLeap {
      *  the true edge, and the mob must land on deck rather than on the lip. Erring long means a
      *  slight overshoot onto the far deck rather than falling short into the gap. */
     static final double LANDING_MARGIN = 1.5;
-    /** Speed floor, so a near-zero gap can't produce a hop so slow the train carry dominates. */
-    static final double MIN_HOP_SPEED = 0.10;
     /** Vanilla gravity, for the airtime estimate. */
     static final double GRAVITY_PER_TICK = 0.08;
     /** Grace before the grounded-landing check, so the launch tick isn't read as a landing. */
@@ -82,8 +80,8 @@ final class GapLeap {
     private boolean launched = false;
     private boolean leftOrigin = false;
     private int flightTicks = 0;
-    /** Sustained horizontal speed for the current hop, sized to the gap at {@link #launch}. */
-    private double hopSpeed = SPRINT_SPEED;
+    /** Sustained horizontal speed for the current hop — a player speed, chosen at {@link #launch}. */
+    private double hopSpeed = 0.0;
     private Vec3 target;
 
     // Train carry tracking: the mob's world displacement per tick while riding == the
@@ -121,23 +119,25 @@ final class GapLeap {
     }
 
     /**
-     * Takeoff toward {@code target}: a sprint toward it plus the frozen train carry, with a jump
-     * up. From here gravity does the arc (see {@link #tickFlight}) — a normal player sprint jump.
-     * Marks the mob as crossing so the leap can't be preempted mid-air.
+     * Takeoff toward {@code target}: the mob's crossing speed toward it plus the frozen train
+     * carry, with a jump up. From here gravity does the arc (see {@link #tickFlight}). Marks the
+     * mob as crossing so the leap can't be preempted mid-air.
      *
-     * <p>The arc is sized to {@code gapWidth} (blocks, from
-     * {@link TrainConfinement#groupGapWidth}): a tight Dungeon-Train seam gets a small step-over,
-     * a wide or {@link TrainConfinement#UNKNOWN_GAP} one the full sprint jump. The gap is read
-     * once, here — like the carry it is frozen for the flight, never re-queried mid-air.</p>
+     * <p>The speed comes from the mob's reaction speed and whether the crossing is {@code urgent}
+     * (an escape) — see {@link PlayerSpeeds#crossingSpeeds}. The height is then sized to
+     * {@code gapWidth} (blocks, from {@link TrainConfinement#groupGapWidth}) by {@link #plan}.
+     * The gap is read once, here — like the carry it is frozen for the flight, never re-queried
+     * mid-air.</p>
      */
-    void launch(PlayerMobEntity mob, Vec3 target, double gapWidth) {
+    void launch(PlayerMobEntity mob, Vec3 target, double gapWidth, boolean urgent) {
         this.launched = true;
         this.leftOrigin = false;
         this.flightTicks = 0;
         this.target = target;
         this.launchCarry = measuredCarry; // freeze the train's carry velocity for the airborne phase
-        double rise = hopRise(gapWidth);
-        this.hopSpeed = hopSpeed(gapWidth, rise);
+        Hop hop = plan(gapWidth, crossingSpeeds(mob, urgent));
+        double rise = hop.rise();
+        this.hopSpeed = hop.speed();
         mob.setCrossingGap(true);
         mob.getNavigation().stop();
         Vec3 fwd = launchVelocity(mob.position(), target, hopSpeed, 0.0);
@@ -201,38 +201,59 @@ final class GapLeap {
         havePrevPos = false;
         measuredCarry = Vec3.ZERO;
         launchCarry = Vec3.ZERO;
-        hopSpeed = SPRINT_SPEED;
+        hopSpeed = 0.0;
+    }
+
+    /** The player speeds this mob may cross at, slowest first (its own, then faster fallbacks). */
+    private static double[] crossingSpeeds(PlayerMobEntity mob, boolean urgent) {
+        int reaction = mob.reactionSpeed();
+        boolean sprintJumps = SprintJumpPolicy.rollsRun(reaction, mob.getRandom().nextDouble());
+        // The attribute carries the +30% sprint modifier while the sprint flag is still up from the
+        // run-up; the speed helpers apply that themselves.
+        double attribute = mob.getAttributeValue(Attributes.MOVEMENT_SPEED);
+        if (mob.isSprinting()) {
+            attribute /= 1.3;
+        }
+        return PlayerSpeeds.crossingSpeeds(reaction, urgent, sprintJumps, attribute);
+    }
+
+    /** One leap's launch values: the vertical impulse and the sustained horizontal speed. */
+    record Hop(double rise, double speed) {}
+
+    /** Ticks airborne for a vertical impulse {@code vy}: up and back down to launch height. */
+    static double airTicks(double vy) {
+        return 2.0 * vy / GRAVITY_PER_TICK;
     }
 
     /**
-     * Vertical launch impulse for a gap of {@code gapWidth} blocks: a small step-over rise for a
-     * measurably tight seam, the full sprint-jump impulse for a wide gap or an unmeasurable one
-     * ({@link TrainConfinement#UNKNOWN_GAP}, i.e. off-train or without Dungeon Train).
+     * Choose the jump for a gap of {@code gapWidth} blocks from the speeds a mob may cross at
+     * ({@code speeds}, slowest first — its own, then faster fallbacks).
      *
-     * <p>Pure function of its input, so the trajectory tuning stays unit-testable — the same
+     * <p>The mob must travel {@code gapWidth + LANDING_MARGIN}. Taking the speeds in order, the
+     * first that covers it wins: with the small {@link #HOP_UP} hop if that is enough airtime,
+     * else with the full {@link #LAUNCH_UP} jump. So the mob's own speed is used whenever it can
+     * make the crossing at all, and a faster one is borrowed only to avoid falling short. A gap
+     * nothing covers, a wide gap and an unmeasurable one ({@link TrainConfinement#UNKNOWN_GAP},
+     * i.e. off-train or without Dungeon Train) all get the full jump.</p>
+     *
+     * <p>Pure function of its inputs, so the trajectory tuning stays unit-testable — the same
      * reason {@link #launchVelocity} is static.</p>
      */
-    static double hopRise(double gapWidth) {
-        return isSmallGap(gapWidth) ? HOP_UP : LAUNCH_UP;
-    }
-
-    /**
-     * Horizontal speed that carries the mob {@code gapWidth + LANDING_MARGIN} blocks during the
-     * airtime of a {@code vy} impulse under vanilla gravity, clamped to
-     * {@code [MIN_HOP_SPEED, SPRINT_SPEED]}. A wide or unmeasurable gap yields the full sprint
-     * speed unchanged.
-     *
-     * <p>Airtime for an impulse {@code vy} is {@code 2 * vy / GRAVITY_PER_TICK} ticks (up and back
-     * down to launch height), so distance is {@code speed * airtime} — invert that for the speed
-     * that just covers the gap plus the landing margin.</p>
-     */
-    static double hopSpeed(double gapWidth, double vy) {
-        if (!isSmallGap(gapWidth)) {
-            return SPRINT_SPEED;
+    static Hop plan(double gapWidth, double[] speeds) {
+        double fastest = speeds[speeds.length - 1];
+        if (gapWidth < 0.0) {
+            return new Hop(LAUNCH_UP, fastest);   // can't measure it — take no chances
         }
-        double airTicks = 2.0 * vy / GRAVITY_PER_TICK;
         double needed = gapWidth + LANDING_MARGIN;
-        return Math.min(SPRINT_SPEED, Math.max(MIN_HOP_SPEED, needed / airTicks));
+        for (double speed : speeds) {
+            if (isSmallGap(gapWidth) && speed * airTicks(HOP_UP) >= needed) {
+                return new Hop(HOP_UP, speed);
+            }
+            if (speed * airTicks(LAUNCH_UP) >= needed) {
+                return new Hop(LAUNCH_UP, speed);
+            }
+        }
+        return new Hop(LAUNCH_UP, fastest);
     }
 
     /** A gap small enough to step over: measurable (non-negative) and within the threshold. */

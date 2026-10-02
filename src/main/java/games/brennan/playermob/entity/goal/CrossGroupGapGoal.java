@@ -175,7 +175,7 @@ public final class CrossGroupGapGoal extends Goal implements DescribableGoal {
         // walk (and the carry reading is clean) — hop from here.
         if (mob.getNavigation().isDone()) {
             if (++settleTicks >= SETTLE_TICKS) {
-                leap.launch(mob, target, TrainConfinement.groupGapWidth(mob, dir));
+                leap.launch(mob, target, TrainConfinement.groupGapWidth(mob, dir), /* urgent */ false);
             }
             return;
         }

@@ -1,6 +1,7 @@
 package games.brennan.playermob.entity.goal;
 
 import games.brennan.playermob.compat.TrainConfinement;
+import games.brennan.playermob.entity.PlayerSpeeds;
 import net.minecraft.world.phys.Vec3;
 import org.junit.jupiter.api.Test;
 
@@ -52,39 +53,91 @@ class GapLeapTest {
         assertEquals(0.5, v.y, EPS);
     }
 
-    // ---- Gap-proportionate hop sizing ------------------------------------------------
-    // Dungeon Train v0.471.0 tightened inter-group seams to ~0.4 blocks; these cover the
-    // scaling of the arc to the measured gap, and the fallbacks that keep the original
-    // sprint jump wherever the gap isn't measurably tight.
+    // ---- Crossing at a player's speed, sized to the gap ------------------------------
+    // The speed is one of a player's three (PlayerSpeeds.crossingSpeeds, by reaction speed and
+    // urgency); the gap then picks the jump height. Dungeon Train v0.471.0 tightened inter-group
+    // seams to ~0.4 blocks.
 
-    /** Blocks travelled by a hop of {@code vy} impulse at {@code speed}: speed × airtime,
-     *  where airtime is {@code 2 * vy / gravity} ticks (up and back down to launch height). */
-    private static double travel(double gapWidth) {
-        double vy = GapLeap.hopRise(gapWidth);
-        return GapLeap.hopSpeed(gapWidth, vy) * (2.0 * vy / GapLeap.GRAVITY_PER_TICK);
+    private static final double ATTR = PlayerSpeeds.PLAYER_BASE_SPEED;
+    private static final double WALK = PlayerSpeeds.walkBlocksPerTick(ATTR);
+    private static final double SPRINT = PlayerSpeeds.sprintBlocksPerTick(ATTR);
+    private static final double SPRINT_JUMP = PlayerSpeeds.sprintJumpBlocksPerTick(ATTR);
+
+    private static final double[] WALKER = PlayerSpeeds.crossingSpeeds(1, false, false, ATTR);
+    private static final double[] SPRINTER = PlayerSpeeds.crossingSpeeds(3, false, false, ATTR);
+    private static final double[] SPRINT_JUMPER = PlayerSpeeds.crossingSpeeds(8, false, true, ATTR);
+
+    /** Blocks travelled by a planned hop: speed x airtime. */
+    private static double travel(GapLeap.Hop hop) {
+        return hop.speed() * GapLeap.airTicks(hop.rise());
     }
 
     @Test
-    void wideGapKeepsTheFullSprintJump() {
-        assertEquals(GapLeap.LAUNCH_UP, GapLeap.hopRise(3.0), EPS);
-        assertEquals(GapLeap.SPRINT_SPEED, GapLeap.hopSpeed(3.0, GapLeap.LAUNCH_UP), EPS);
+    void playerSpeedsInBlocksPerTick() {
+        assertEquals(4.317, WALK * 20.0, 0.001);
+        assertEquals(5.612, SPRINT * 20.0, 0.001);
+        assertEquals(7.127, SPRINT_JUMP * 20.0, 0.001);
+        // Speed II (+40%) scales all three.
+        assertEquals(WALK * 1.4, PlayerSpeeds.walkBlocksPerTick(ATTR * 1.4), EPS);
+        assertEquals(SPRINT_JUMP * 1.4, PlayerSpeeds.sprintJumpBlocksPerTick(ATTR * 1.4), EPS);
     }
 
     @Test
-    void unknownGapKeepsTheFullSprintJump() {
-        // Guards the ABSENT / no-Dungeon-Train path: an unmeasurable gap must behave exactly
-        // as it did before hops became gap-proportionate.
-        double unknown = TrainConfinement.UNKNOWN_GAP;
-        assertEquals(GapLeap.LAUNCH_UP, GapLeap.hopRise(unknown), EPS);
-        assertEquals(GapLeap.SPRINT_SPEED, GapLeap.hopSpeed(unknown, GapLeap.LAUNCH_UP), EPS);
+    void crossingSpeedFollowsReactionSpeedAndUrgency() {
+        // 0–1 never sprint: walk, even when fleeing.
+        assertEquals(WALK, PlayerSpeeds.crossingSpeeds(0, false, false, ATTR)[0], EPS);
+        assertEquals(WALK, PlayerSpeeds.crossingSpeeds(1, true, false, ATTR)[0], EPS);
+        // 2 sprints only when urgent.
+        assertEquals(WALK, PlayerSpeeds.crossingSpeeds(2, false, false, ATTR)[0], EPS);
+        assertEquals(SPRINT, PlayerSpeeds.crossingSpeeds(2, true, false, ATTR)[0], EPS);
+        // 3–4 sprint; they don't sprint-jump.
+        assertEquals(SPRINT, PlayerSpeeds.crossingSpeeds(3, false, false, ATTR)[0], EPS);
+        assertEquals(SPRINT, PlayerSpeeds.crossingSpeeds(4, true, false, ATTR)[0], EPS);
+        // 5 goes either way with its coin flip; 6+ always sprint-jump.
+        assertEquals(SPRINT, PlayerSpeeds.crossingSpeeds(5, false, false, ATTR)[0], EPS);
+        assertEquals(SPRINT_JUMP, PlayerSpeeds.crossingSpeeds(5, false, true, ATTR)[0], EPS);
+        assertEquals(SPRINT_JUMP, PlayerSpeeds.crossingSpeeds(10, false, true, ATTR)[0], EPS);
     }
 
     @Test
-    void tightGapUsesTheSmallerStepOver() {
-        assertEquals(GapLeap.HOP_UP, GapLeap.hopRise(0.4), EPS);
-        assertTrue(GapLeap.hopRise(0.4) < GapLeap.LAUNCH_UP, "step-over rises less than a sprint jump");
-        assertTrue(GapLeap.hopSpeed(0.4, GapLeap.HOP_UP) < GapLeap.SPRINT_SPEED * 0.75,
-                "and moves substantially slower, so the hop reads as a step rather than a leap");
+    void fallbackSpeedsOnlyEverGetFaster() {
+        for (double[] speeds : new double[][] {WALKER, SPRINTER, SPRINT_JUMPER}) {
+            for (int i = 1; i < speeds.length; i++) {
+                assertTrue(speeds[i] > speeds[i - 1]);
+            }
+            assertEquals(SPRINT_JUMP, speeds[speeds.length - 1], EPS, "sprint-jump is always the last resort");
+        }
+    }
+
+    @Test
+    void tightSeamIsCrossedAtTheMobsOwnSpeed() {
+        // Across Dungeon Train's configured range (min 0.3, target 0.4, max 0.5) nobody needs to
+        // borrow a faster speed.
+        for (double gap : new double[] {0.3, 0.4, 0.5}) {
+            assertEquals(WALK, GapLeap.plan(gap, WALKER).speed(), EPS);
+            assertEquals(SPRINT, GapLeap.plan(gap, SPRINTER).speed(), EPS);
+            assertEquals(SPRINT_JUMP, GapLeap.plan(gap, SPRINT_JUMPER).speed(), EPS);
+        }
+    }
+
+    @Test
+    void walkersJumpHigherToMakeUpForTheirSpeed() {
+        // A walk doesn't cover the seam plus landing margin in a hop's airtime, so it takes the full jump.
+        assertEquals(GapLeap.LAUNCH_UP, GapLeap.plan(0.4, WALKER).rise(), EPS);
+        assertEquals(GapLeap.HOP_UP, GapLeap.plan(0.4, SPRINTER).rise(), EPS);
+        assertEquals(GapLeap.HOP_UP, GapLeap.plan(0.4, SPRINT_JUMPER).rise(), EPS);
+    }
+
+    @Test
+    void everyTierCoversTheFullLandingMarginAcrossDungeonTrainSpacing() {
+        // The load-bearing property: whatever the sizing does, the mob must land past the far edge.
+        for (double[] speeds : new double[][] {WALKER, SPRINTER, SPRINT_JUMPER}) {
+            for (double gap : new double[] {0.0, 0.3, 0.4, 0.5}) {
+                GapLeap.Hop hop = GapLeap.plan(gap, speeds);
+                assertTrue(travel(hop) >= gap + GapLeap.LANDING_MARGIN - EPS,
+                        "gap " + gap + " at " + hop.speed() + " → travelled " + travel(hop));
+            }
+        }
     }
 
     @Test
@@ -92,47 +145,48 @@ class GapLeapTest {
         // Encodes the issue #54 constraint as an assertion: Sable only sticks a riding mob while
         // grounded, so a low skim re-grounds on the origin and stalls. A future tuner lowering
         // HOP_UP toward skim height must fail here rather than silently reintroduce that bug.
-        assertTrue(GapLeap.hopRise(0.4) > 0.2, "hop must stay genuinely airborne, not skim the floor");
+        assertTrue(GapLeap.plan(0.4, SPRINT_JUMPER).rise() > 0.2, "hop must stay genuinely airborne, not skim the floor");
     }
 
     @Test
-    void hopAlwaysClearsTheGapWithRoomToSpare() {
-        // The load-bearing property: whatever the sizing maths does, the mob must actually land
-        // past the far edge. Checked across the whole small-gap range, including the threshold
-        // itself. Note the SPRINT_SPEED clamp bites above ~1.35 blocks, so the realised buffer
-        // shrinks from LANDING_MARGIN toward ~1.35 there — still a comfortable overshoot onto
-        // the far deck, which is the safe failure direction.
-        for (double gap : new double[] {0.0, 0.3, 0.4, 0.5, 1.0, GapLeap.SMALL_GAP_THRESHOLD}) {
-            assertTrue(travel(gap) >= gap + 1.0,
-                    "gap " + gap + " → travelled " + travel(gap) + ", needs to clear the gap plus a landing buffer");
+    void aGapTooWideForAWalkBorrowsTheNextSpeedUp() {
+        // A walk-jump reaches ~2.27 blocks. A 1.0-block gap needs 2.5: the walker sprints it instead
+        // of dropping into the gap; the sprinter still manages on its own.
+        GapLeap.Hop walker = GapLeap.plan(1.0, WALKER);
+        assertEquals(SPRINT, walker.speed(), EPS);
+        assertTrue(travel(walker) >= 1.0 + GapLeap.LANDING_MARGIN - EPS);
+        assertEquals(SPRINT, GapLeap.plan(1.0, SPRINTER).speed(), EPS);
+        // Wider still (needs 3.5): only a sprint-jump covers it, so everyone takes one.
+        assertEquals(SPRINT_JUMP, GapLeap.plan(2.0, WALKER).speed(), EPS);
+        assertEquals(SPRINT_JUMP, GapLeap.plan(2.0, SPRINTER).speed(), EPS);
+        assertEquals(GapLeap.LAUNCH_UP, GapLeap.plan(2.0, WALKER).rise(), EPS);
+    }
+
+    @Test
+    void wideGapAlwaysTakesTheFullJump() {
+        // Past the small-gap threshold there is no step-over, however fast the mob.
+        assertEquals(GapLeap.LAUNCH_UP, GapLeap.plan(1.6, SPRINT_JUMPER).rise(), EPS);
+    }
+
+    @Test
+    void unknownGapTakesTheFullSprintJump() {
+        // Guards the ABSENT / no-Dungeon-Train path: with nothing to measure, even a walker gets
+        // the longest leap a player can make rather than risk falling short.
+        double unknown = TrainConfinement.UNKNOWN_GAP;
+        for (double[] speeds : new double[][] {WALKER, SPRINTER, SPRINT_JUMPER}) {
+            GapLeap.Hop hop = GapLeap.plan(unknown, speeds);
+            assertEquals(GapLeap.LAUNCH_UP, hop.rise(), EPS);
+            assertEquals(SPRINT_JUMP, hop.speed(), EPS);
         }
     }
 
     @Test
-    void hopCoversTheFullLandingMarginAcrossDungeonTrainSpacing() {
-        // Over Dungeon Train's actual configured range (min 0.3, target 0.4, max 0.5) the sizing
-        // is unclamped, so the full landing margin is realised.
-        for (double gap : new double[] {0.3, 0.4, 0.5}) {
-            assertTrue(travel(gap) >= gap + GapLeap.LANDING_MARGIN - EPS,
-                    "gap " + gap + " → travelled " + travel(gap));
+    void theLeapIsAlwaysExactlyAPlayerSpeed() {
+        for (double[] speeds : new double[][] {WALKER, SPRINTER, SPRINT_JUMPER}) {
+            for (double gap = 0.0; gap <= 4.0; gap += 0.1) {
+                double speed = GapLeap.plan(gap, speeds).speed();
+                assertTrue(speed == WALK || speed == SPRINT || speed == SPRINT_JUMP, "gap " + gap + " → " + speed);
+            }
         }
-    }
-
-    @Test
-    void hopSpeedIsMonotonicInGapWidth() {
-        // A wider gap must never produce a slower hop.
-        double prev = 0.0;
-        for (double gap = 0.0; gap <= GapLeap.SMALL_GAP_THRESHOLD; gap += 0.1) {
-            double speed = GapLeap.hopSpeed(gap, GapLeap.HOP_UP);
-            assertTrue(speed >= prev - EPS, "speed dropped at gap " + gap);
-            prev = speed;
-        }
-    }
-
-    @Test
-    void aNearZeroGapStillMovesTheMob() {
-        // Floor: without it a touching-carriage seam could produce a hop so slow the train's
-        // carry dominates and the mob lands behind where it started.
-        assertTrue(GapLeap.hopSpeed(0.0, GapLeap.HOP_UP) >= GapLeap.MIN_HOP_SPEED);
     }
 }
