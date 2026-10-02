@@ -1024,6 +1024,19 @@
       "released": false,
       "released_in": null,
       "released_at": null
+    },
+    {
+      "id": "activity-animations",
+      "version": "0.103.0",
+      "type": "feat",
+      "title": "PlayerMobs look busy",
+      "summary": "PlayerMobs now look busy when they're going through a chest or their own gear.",
+      "highlights": [],
+      "pr": 210,
+      "date": "2026-10-02",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
