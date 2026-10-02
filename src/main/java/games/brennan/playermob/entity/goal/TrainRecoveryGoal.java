@@ -566,6 +566,9 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         // the loose ride margin, so a mob that fell off and is *beside* the carriage (which
         // the margin counts as "on") still recovers.
         if (isAboard(t.worldBox())) return false;
+        // Nor is a mob that is merely stepping over the seam between two groups: it is outside
+        // both footprints for a moment, but it has not fallen anywhere.
+        if (ridingSeam(t.worldBox())) return false;
         this.target = t;
         return true;
     }
@@ -2378,6 +2381,25 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         return mob.getX() >= box.minX && mob.getX() <= box.maxX
             && mob.getZ() >= box.minZ && mob.getZ() <= box.maxZ
             && mob.getY() >= box.minY - 0.5;
+    }
+
+    /** How far above the carriage box's underside a mob's feet must be to count as up on the deck. */
+    private static final double SEAM_DECK_MIN_RISE = 0.75;
+
+    /**
+     * True while the mob is standing at deck height on the train's line, within the ride margin of
+     * a carriage group but outside its strict footprint — which is exactly what stepping over the
+     * fraction-of-a-block seam between two groups looks like. {@link #isAboard} alone called that
+     * "fell off", and recovery then walked the mob sideways off the pad it was crossing.
+     *
+     * <p>Narrow on purpose: a mob on the track bed is below deck height, and one towering up
+     * beside the train is outside its Z-span, so both still recover.</p>
+     */
+    private boolean ridingSeam(AABB box) {
+        return mob.onGround()
+            && TrainConfinement.isConfined(mob)
+            && mob.getZ() >= box.minZ && mob.getZ() <= box.maxZ
+            && mob.getY() >= box.minY + SEAM_DECK_MIN_RISE;
     }
 
     /**

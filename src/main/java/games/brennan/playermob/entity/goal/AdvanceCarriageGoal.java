@@ -162,6 +162,10 @@ public final class AdvanceCarriageGoal extends Goal implements DescribableGoal {
             stop();
             return;
         }
+        // Still on the pad it came in over: walk it straight (see PadWalk), then path once inside.
+        if (PadWalk.drive(mob, target, moveSpeed)) {
+            return;
+        }
         if (--repathCooldown <= 0 || mob.getNavigation().isDone()) {
             repathCooldown = mob.reactTicks(REPATH_INTERVAL);
             issueMove();

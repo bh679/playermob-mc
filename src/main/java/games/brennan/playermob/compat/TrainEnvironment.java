@@ -156,6 +156,32 @@ public interface TrainEnvironment {
     default double groupGapWidth(Entity self, int dir) { return UNKNOWN_GAP; }
 
     /**
+     * A seam at or under this many blocks is simply walked across. A mob is 0.6 wide, so it cannot
+     * drop into a gap narrower than that; Dungeon Train holds its seams at 0.3–0.5.
+     */
+    double WALKABLE_GAP = 0.6;
+
+    /**
+     * Which end pad of its carriage group {@code self} is standing on: {@code -1} the low-X pad,
+     * {@code +1} the high-X pad, {@code 0} when it is inside the rooms, the group has no pads, or
+     * it is not on a train. A pad is the narrow walkway outside a group's end door; see
+     * {@link GroupLayout}.
+     *
+     * <p>A no-op default of {@code 0}, so {@link #ABSENT} and every non-Dungeon-Train environment
+     * behave exactly as before pads were modelled.</p>
+     */
+    default int padSide(Entity self) { return 0; }
+
+    /**
+     * A current world-space point in the middle of {@code self}'s own group's end pad in march
+     * direction {@code dir}, on the train's centre line — where to walk to before stepping over the
+     * seam — or {@code null} if the group has no such pad or {@code self} is not on a train. Unlike
+     * {@link #nextGroupTarget} this point is on the mob's own carriage group, so ordinary
+     * navigation can reach it. Valid only for the tick it was queried.
+     */
+    default Vec3 endPadTarget(Entity self, int dir) { return null; }
+
+    /**
      * If {@code self} is on a train and standing against a closed door, open it —
      * wooden doors directly, power-operated (iron/copper) doors by operating their
      * adjacent control. A no-op default (off-train environments do nothing); the

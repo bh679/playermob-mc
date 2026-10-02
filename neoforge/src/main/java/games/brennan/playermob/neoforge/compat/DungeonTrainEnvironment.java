@@ -34,6 +34,8 @@ import games.brennan.dungeontrain.ship.ManagedShip;
 import games.brennan.dungeontrain.ship.Shipyards;
 import games.brennan.dungeontrain.train.Trains;
 import games.brennan.playermob.PlayerMobConfig;
+import games.brennan.playermob.compat.GroupLayout;
+import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.compat.TrainEnvironment;
 import games.brennan.playermob.entity.BlockSourcePolicy;
 import games.brennan.playermob.entity.DoorObstruction;
@@ -452,18 +454,50 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         if (bb == null) {
             return null;
         }
-        int low = c.provider().getPIdx();
-        int high = c.provider().getGroupHighestPIdx();
-        int target = roomPidx(c, self.getX()) + dir;
-        if (target < low || target > high) {
-            return null; // next room is in another group — physical gap, behaviour #2
-        }
-        double roomLen = (bb.maxX() - bb.minX()) / (high - low + 1);
         // Centre of the target room in the carriage's *current* world position;
         // recomputed each tick by the caller, so it tracks the moving carriage.
-        double targetX = bb.minX() + (target - low + 0.5) * roomLen;
+        double targetX = layout(c, bb).nextRoomCentreX(self.getX(), dir);
+        if (Double.isNaN(targetX)) {
+            return null; // next room is in another group — a seam to cross, behaviour #2
+        }
         double centerZ = (bb.minZ() + bb.maxZ()) / 2.0;
         return new Vec3(targetX, self.getY(), centerZ);
+    }
+
+    @Override
+    public int padSide(Entity self) {
+        Trains.Carriage c = carriageAt(self);
+        if (c == null) {
+            return 0;
+        }
+        AABBdc bb = c.ship().worldAABB();
+        return bb == null ? 0 : layout(c, bb).padSide(self.getX());
+    }
+
+    @Override
+    public Vec3 endPadTarget(Entity self, int dir) {
+        Trains.Carriage c = carriageAt(self);
+        if (c == null) {
+            return null;
+        }
+        AABBdc bb = c.ship().worldAABB();
+        if (bb == null) {
+            return null;
+        }
+        double padX = layout(c, bb).endPadCentreX(dir);
+        if (Double.isNaN(padX)) {
+            return null;
+        }
+        return new Vec3(padX, self.getY(), (bb.minZ() + bb.maxZ()) / 2.0);
+    }
+
+    /**
+     * Where {@code c}'s rooms and end pads sit along world X right now. A multi-carriage group is
+     * {@code [pad][room]…[room][pad]}, not wall-to-wall rooms — see {@link GroupLayout}.
+     */
+    private static GroupLayout layout(Trains.Carriage c, AABBdc bb) {
+        return GroupLayout.of(bb.minX(), bb.maxX(),
+            c.provider().getPIdx(), c.provider().getGroupHighestPIdx(), c.provider().dims().length());
     }
 
     /**
@@ -549,15 +583,13 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         }
         int bLow = best.provider().getPIdx();
         int bHigh = best.provider().getGroupHighestPIdx();
-        int rooms = bHigh - bLow + 1;
-        if (rooms <= 0) {
+        if (bHigh < bLow) {
             return null;
         }
         // The room facing the gap: the high-pIdx (max-X) room when we approach from
         // above (dir < 0), the low-pIdx (min-X) room when we approach from below.
         int room = dir < 0 ? bHigh : bLow;
-        double roomLen = (bb.maxX() - bb.minX()) / rooms;
-        double targetX = bb.minX() + (room - bLow + 0.5) * roomLen;
+        double targetX = layout(best, bb).roomCentreX(room);
         double centerZ = (bb.minZ() + bb.maxZ()) / 2.0;
         return new Vec3(targetX, self.getY(), centerZ);
     }
@@ -587,7 +619,10 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         // group boundary the only door ahead opens onto the inter-group gap — the mob is waiting
         // to leap (CrossGroupGapGoal), not wedged — so the probe is withheld there. Handled (or
         // deliberately silent) ⇒ done for this tick.
-        boolean atBoundary = atForwardBoundary(self);
+        // With a walkable seam there is no gap to wait at: the end door opens onto a pad the mob
+        // walks, so it gets the same door help as any inner door.
+        boolean atBoundary = atForwardBoundary(self)
+            && !TrainConfinement.isWalkableGap(groupGapWidth(self, playerMob.getTrainExploreDir()));
         if (TrainDoorReflex.tick(playerMob, level,
                 new Vec3(sub.x, sub.y, sub.z), new Vec3(subEye.x, subEye.y, subEye.z), !atBoundary)) {
             return;
@@ -938,15 +973,26 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         return carriageAtPos(level, self.getX(), self.getY(), self.getZ());
     }
 
-    /** The carriage whose current world box contains {@code (x,y,z)} (inflated by {@link #RIDE_MARGIN}). */
+    /**
+     * The carriage whose current world box contains {@code (x,y,z)} (inflated by {@link #RIDE_MARGIN}).
+     * On a seam two groups' margins overlap; the nearer box wins, so which group a mob belongs to
+     * flips at the middle of the seam rather than depending on iteration order.
+     */
     private static Trains.Carriage carriageAtPos(ServerLevel level, double x, double y, double z) {
+        Trains.Carriage best = null;
+        double bestDistSq = Double.MAX_VALUE;
         for (Trains.Carriage c : Trains.allCarriages(level)) {
             AABBdc bb = c.ship().worldAABB();
-            if (bb != null && contains(bb, x, y, z)) {
-                return c;
+            if (bb == null || !contains(bb, x, y, z)) {
+                continue;
+            }
+            double distSq = distanceSqToBox(x, y, z, bb);
+            if (distSq < bestDistSq) {
+                bestDistSq = distSq;
+                best = c;
             }
         }
-        return null;
+        return best;
     }
 
     private static boolean contains(AABBdc bb, double x, double y, double z) {
@@ -964,24 +1010,12 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
     }
 
     /**
-     * The mob's signed carriage index: map its world-X across the group's world AABB
-     * onto the group's pIdx range, clamped into {@code [low, high]} (the mob is inside
-     * this group's box, so its index must lie within the range).
+     * The mob's signed carriage index: the room its world-X falls in, by the group's real room
+     * boundaries (a position on an end pad counts as the room beside it).
      */
     private static int roomPidx(Trains.Carriage c, double worldX) {
-        int low = c.provider().getPIdx();
-        int high = c.provider().getGroupHighestPIdx();
         AABBdc bb = c.ship().worldAABB();
-        int rooms = high - low + 1;
-        if (bb == null || rooms <= 0) {
-            return low;
-        }
-        double roomLen = (bb.maxX() - bb.minX()) / rooms;
-        if (roomLen <= 0) {
-            return low;
-        }
-        int p = low + (int) Math.round((worldX - bb.minX()) / roomLen - 0.5);
-        return Math.max(low, Math.min(high, p));
+        return bb == null ? c.provider().getPIdx() : layout(c, bb).roomPidx(worldX);
     }
 }
 //?}

@@ -140,6 +140,35 @@ public final class TrainConfinement {
         return environment.groupGapWidth(self, dir);
     }
 
+    /** True for a measured gap small enough to walk across — see {@link TrainEnvironment#WALKABLE_GAP}. */
+    public static boolean isWalkableGap(double gapWidth) {
+        return gapWidth >= 0.0 && gapWidth <= TrainEnvironment.WALKABLE_GAP;
+    }
+
+    /**
+     * True if the seam to the adjacent group in march direction {@code dir} can simply be walked
+     * across. Always {@code false} without a train mod (the gap is {@link #UNKNOWN_GAP}).
+     */
+    public static boolean seamWalkable(Entity self, int dir) {
+        return isWalkableGap(environment.groupGapWidth(self, dir));
+    }
+
+    /**
+     * Which end pad of its group {@code self} is on ({@code -1} low-X, {@code +1} high-X), or
+     * {@code 0}. Always {@code 0} without a train mod — see {@link TrainEnvironment#padSide}.
+     */
+    public static int padSide(Entity self) {
+        return environment.padSide(self);
+    }
+
+    /**
+     * A point in the middle of {@code self}'s own group's end pad in direction {@code dir}, or
+     * {@code null}. Always {@code null} without a train mod — see {@link TrainEnvironment#endPadTarget}.
+     */
+    public static Vec3 endPadTarget(Entity self, int dir) {
+        return environment.endPadTarget(self, dir);
+    }
+
     /**
      * Open a closed door {@code self} is standing against on a train (wooden
      * directly, iron/copper via its control). No-op off a train / without a train

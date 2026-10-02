@@ -253,6 +253,11 @@ public final class FleeFromCategoryGoal extends Goal implements DescribableGoal 
             endLeap(); // couldn't reach the edge in time — fall back to normal fleeing
             return;
         }
+        // A room ahead that way again means we are across, on the far group — resume fleeing there.
+        if (TrainConfinement.nextCarriageTarget(mob, leapDir) != null) {
+            endLeap();
+            return;
+        }
         Vec3 target = TrainConfinement.nextGroupTarget(mob, leapDir);
         if (target == null) {
             endLeap(); // lost the adjacent group — flee the normal way
@@ -260,6 +265,18 @@ public final class FleeFromCategoryGoal extends Goal implements DescribableGoal 
         }
         leap.trackCarry(mob);
         mob.getLookControl().setLookAt(target.x, target.y, target.z);
+        if (TrainConfinement.seamWalkable(mob, leapDir)) {
+            // A seam narrow enough to walk is run across, not leapt: straight down the pad's centre
+            // line (see PadWalk), or a path to our own pad while still inside the end room.
+            if (!PadWalk.drive(mob, target, sprintSpeed)
+                    && (--leapRepathCooldown <= 0 || mob.getNavigation().isDone())) {
+                leapRepathCooldown = mob.reactTicks(LEAP_REPATH_INTERVAL);
+                Vec3 pad = TrainConfinement.endPadTarget(mob, leapDir);
+                Vec3 runTo = pad != null ? pad : target;
+                mob.getNavigation().moveTo(runTo.x, runTo.y, runTo.z, sprintSpeed);
+            }
+            return;
+        }
         if (mob.getNavigation().isDone()) {
             // As close to the gap as vanilla can walk (and the carry reading is clean) → hop.
             if (++leapSettleTicks >= mob.reactTicks(LEAP_SETTLE_TICKS)) {

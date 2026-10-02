@@ -1,8 +1,11 @@
 package games.brennan.playermob.entity.goal;
 
+import com.mojang.logging.LogUtils;
+import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
+import net.minecraft.world.level.pathfinder.Path;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.EnumSet;
@@ -170,7 +173,7 @@ public final class CrossGroupGapGoal extends Goal implements DescribableGoal {
     }
 
     /**
-     * Down on the far group: keep moving. Start the walk to the next room at once and flag the
+     * Across, on the far group (walked or leapt): keep moving. Start the walk to the next room at once and flag the
      * crossing so {@link AdvanceCarriageGoal} takes over on the selector's next pass, rather than
      * the mob standing still while that goal's boundary cooldown runs out.
      */
@@ -181,17 +184,28 @@ public final class CrossGroupGapGoal extends Goal implements DescribableGoal {
         leap.reset();
         int dir = mob.effectiveTrainMarchDir();
         Vec3 next = dir == 0 ? null : TrainConfinement.nextCarriageTarget(mob, dir);
-        if (next != null) {
+        if (next != null && !PadWalk.drive(mob, next, moveSpeed)) {
             mob.getNavigation().moveTo(next.x, next.y, next.z, moveSpeed);
         }
     }
 
-    /** Walk to the gap edge, tracking the train's carry velocity, then hop once settled. */
+    /**
+     * Get across to the next group. A seam narrow enough to walk ({@link TrainConfinement#seamWalkable},
+     * which is every seam on a current Dungeon Train) is walked: out of the end door, along the pad,
+     * over the seam and along the far pad, at the mob's own gait. Only a gap too wide to walk is
+     * leapt — walk to its edge, track the train's carry velocity, then hop once settled.
+     */
     private void tickApproach() {
         phaseTicks++;
         leap.trackCarry(mob);
 
         int dir = mob.effectiveTrainMarchDir();
+        // A room ahead in this group again means we are across (we now stand on the far group) —
+        // or were shoved back into our own. Either way the march goal takes it from here.
+        if (dir != 0 && TrainConfinement.nextCarriageTarget(mob, dir) != null) {
+            onLanded();
+            return;
+        }
         Vec3 next = dir == 0 ? null : TrainConfinement.nextGroupTarget(mob, dir);
         if (next == null) {
             stop(); // lost the adjacent group (or a loved player now shares our carriage)
@@ -199,6 +213,20 @@ public final class CrossGroupGapGoal extends Goal implements DescribableGoal {
         }
         target = next;
         mob.getLookControl().setLookAt(target.x, target.y, target.z);
+
+        if (TrainConfinement.seamWalkable(mob, dir)) {
+            // On the pad: straight down the centre line and over the seam. Not there yet: path to
+            // our own pad (reachable — it is on our group), opening the end door on the way.
+            if (!PadWalk.drive(mob, target, moveSpeed)
+                    && (--repathCooldown <= 0 || mob.getNavigation().isDone())) {
+                repathCooldown = mob.reactTicks(REPATH_INTERVAL);
+                Vec3 pad = TrainConfinement.endPadTarget(mob, dir);
+                Vec3 walkTo = pad != null ? pad : target;
+                boolean ok = mob.getNavigation().moveTo(walkTo.x, walkTo.y, walkTo.z, moveSpeed);
+                tracePath(walkTo, pad != null, ok);
+            }
+            return;
+        }
 
         // Vanilla navigation can't path over the gap, so it stops at the near edge and
         // reports done. A few ticks of "done at the edge" means we're as close as we can
@@ -214,6 +242,23 @@ public final class CrossGroupGapGoal extends Goal implements DescribableGoal {
             repathCooldown = mob.reactTicks(REPATH_INTERVAL);
             issueMove();
         }
+    }
+
+    /** Seam-walk diagnostics, gated on {@code debugSpawnLog} like the other Dungeon-Train traces. */
+    private void tracePath(Vec3 walkTo, boolean toPad, boolean ok) {
+        if (!PlayerMobConfig.debugSpawnLog()) {
+            return;
+        }
+        Path path = mob.getNavigation().getPath();
+        String desc = path == null ? "null"
+            : "nodes=" + path.getNodeCount() + " next=" + path.getNextNodeIndex()
+                + " end=" + (path.getEndNode() == null ? "?" : path.getEndNode().asBlockPos().toShortString())
+                + " reach=" + path.canReach();
+        LogUtils.getLogger().info(
+            "[CrossGap] mob={} pos=({}, {}, {}) walkTo=({}, {}, {}) toPad={} ok={} path[{}] padSide={}",
+            mob.getId(), String.format("%.2f", mob.getX()), String.format("%.2f", mob.getY()), String.format("%.2f", mob.getZ()),
+            String.format("%.2f", walkTo.x), String.format("%.2f", walkTo.y), String.format("%.2f", walkTo.z),
+            toPad, ok, desc, TrainConfinement.padSide(mob));
     }
 
     private void issueMove() {
