@@ -4,6 +4,8 @@ import games.brennan.playermob.entity.PlayerSpeeds.Gait;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Pure-logic oracle for {@link PlayerSpeeds} — gait selection, the player-stick input, the legacy
@@ -43,6 +45,36 @@ class PlayerSpeedsTest {
         assertEquals(Gait.SPRINT, PlayerSpeeds.gaitFor(1.2));
         // Vanilla's strafe modifier — strafing is always a walk.
         assertEquals(Gait.WALK, PlayerSpeeds.gaitFor(0.25));
+    }
+
+    @Test
+    void urgentSprintIsStillTheSprintGait() {
+        assertEquals(Gait.SPRINT, PlayerSpeeds.gaitFor(PlayerSpeeds.URGENT_SPRINT));
+        assertTrue(PlayerSpeeds.isUrgent(PlayerSpeeds.URGENT_SPRINT));
+        assertFalse(PlayerSpeeds.isUrgent(PlayerSpeeds.SPRINT));
+        assertFalse(PlayerSpeeds.isUrgent(PlayerSpeeds.WALK));
+    }
+
+    @Test
+    void slowestReactorsNeverSprint() {
+        for (int reaction = 0; reaction <= 1; reaction++) {
+            assertFalse(PlayerSpeeds.allowsSprint(reaction, false), "reaction " + reaction);
+            assertFalse(PlayerSpeeds.allowsSprint(reaction, true), "reaction " + reaction + ", urgent");
+        }
+    }
+
+    @Test
+    void slowReactorSprintsOnlyWhenUrgent() {
+        assertFalse(PlayerSpeeds.allowsSprint(2, false));
+        assertTrue(PlayerSpeeds.allowsSprint(2, true));
+    }
+
+    @Test
+    void everyoneElseSprintsWhenAsked() {
+        for (int reaction = 3; reaction <= 10; reaction++) {
+            assertTrue(PlayerSpeeds.allowsSprint(reaction, false), "reaction " + reaction);
+            assertTrue(PlayerSpeeds.allowsSprint(reaction, true), "reaction " + reaction + ", urgent");
+        }
     }
 
     @Test

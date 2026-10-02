@@ -17,8 +17,9 @@ import net.minecraft.world.entity.ai.control.MoveControl;
  *   <li><b>Use-item slow.</b> Input drops to 20% while drawing a bow, charging a crossbow, blocking
  *       or eating, and there is no sprinting.</li>
  *   <li><b>Sprint.</b> This control owns the sprint flag — on while a goal asked for
- *       {@link PlayerSpeeds#SPRINT} and the mob is actually driving forward, off otherwise. Vanilla
- *       never clears it for a mob, so goals must not set it themselves.</li>
+ *       {@link PlayerSpeeds#SPRINT}, the mob's reaction speed allows it
+ *       ({@link PlayerSpeeds#allowsSprint}) and it is actually driving forward; off otherwise.
+ *       Vanilla never clears it for a mob, so goals must not set it themselves.</li>
  *   <li><b>Swimming.</b> Sprinting in water is a player's sprint-swim (drag 0.9 instead of 0.8);
  *       the swim pose is set here because only {@code Player} ever assigns it.</li>
  * </ul>
@@ -65,7 +66,9 @@ public class PlayerLikeMoveControl extends MoveControl {
             float[] input = PlayerSpeeds.stickInput(1.0F, 0.0F, FULL_STICK, usingItem);
             playerMob.setZza(input[0]);
             playerMob.setXxa(0.0F);
-            sprinting = !usingItem && PlayerSpeeds.gaitFor(this.speedModifier) == PlayerSpeeds.Gait.SPRINT;
+            sprinting = !usingItem
+                && PlayerSpeeds.gaitFor(this.speedModifier) == PlayerSpeeds.Gait.SPRINT
+                && PlayerSpeeds.allowsSprint(playerMob.reactionSpeed(), PlayerSpeeds.isUrgent(this.speedModifier));
         } else if (requested == Operation.STRAFE) {
             float[] input = PlayerSpeeds.stickInput(playerMob.zza, playerMob.xxa, FULL_STICK, usingItem);
             playerMob.setZza(input[0]);

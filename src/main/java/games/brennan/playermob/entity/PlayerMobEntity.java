@@ -913,7 +913,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // water, or never starting at all — by any other priority-1 goal already holding
         // MOVE/LOOK. Priority 0 guarantees it always wins that slot the instant it's on fire.
         // No-op unless on fire. See FireBucketGoal.
-        this.goalSelector.addGoal(0, new FireBucketGoal(this, PlayerSpeeds.SPRINT)); // sprint to water — it's on fire
+        this.goalSelector.addGoal(0, new FireBucketGoal(this, PlayerSpeeds.URGENT_SPRINT)); // sprint to water — it's on fire
         // An explicit player order (/playermob order ...) overrides autonomous behaviour.
         // Added before the other priority-1 goals so it wins the MOVE/LOOK slot while it runs;
         // no-op (canUse false) whenever there's no pending order, so normal AI is unaffected.
@@ -928,7 +928,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // Flee range 10 → detectRange 16 (range + DETECT_RANGE_BONUS) covers the
         // widest fight/flight bubble (fr0 hated ≈ MAX_RANGE); the mob still only
         // flees ~10 blocks before hiding.
-        this.goalSelector.addGoal(1, new FleeFromCategoryGoal(this, /* range */ 10.0F, PlayerSpeeds.WALK, PlayerSpeeds.SPRINT));
+        this.goalSelector.addGoal(1, new FleeFromCategoryGoal(this, /* range */ 10.0F, PlayerSpeeds.WALK, PlayerSpeeds.URGENT_SPRINT));
         // Watch scan = MAX_RANGE so fr0's ~15-block skeptical ring is visible.
         this.goalSelector.addGoal(1, new SkepticalWatchGoal(this, /* watchRange */ DispositionResolver.MAX_RANGE, /* closeRange */ 4.0));
         this.goalSelector.addGoal(1, new FriendlyGreetGoal(this, /* range */ 10.0, PlayerSpeeds.WALK));

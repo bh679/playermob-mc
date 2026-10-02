@@ -321,7 +321,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      * supplies the full-stick input, the sprint flag and the swim pose for any goal that asks for
      * the sprint gait in water, so this goal only has to ask.
      */
-    private static final double SWIM_SPEED = PlayerSpeeds.SPRINT;
+    private static final double SWIM_SPEED = PlayerSpeeds.URGENT_SPRINT;
     /**
      * Small surcharge for a bank whose Z sits INSIDE the carriage's Z-span — climbing out there puts
      * the mob on the track bed, and {@code tickGetOffTracks} then has to sidestep it off before it can

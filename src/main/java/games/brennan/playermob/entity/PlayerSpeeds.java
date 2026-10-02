@@ -28,10 +28,23 @@ public final class PlayerSpeeds {
     /** Navigation speed modifier meaning "sprint" — player sprint, 5.612 m/s. */
     public static final double SPRINT = 1.3;
     /**
+     * Navigation speed modifier meaning "sprint, and it matters" — running from a threat, a lit
+     * fuse or its own burning clothes. Same speed as {@link #SPRINT}; the difference is who is
+     * allowed to do it (see {@link #allowsSprint}).
+     */
+    public static final double URGENT_SPRINT = 1.4;
+    /**
      * Modifiers at or above this select {@link Gait#SPRINT}. Midway between {@link #WALK} and
      * {@link #SPRINT} so float noise or a vanilla goal's own constant can't flip the gait.
      */
     static final double SPRINT_THRESHOLD = 1.2;
+    /** Modifiers at or above this are urgent. Midway between {@link #SPRINT} and {@link #URGENT_SPRINT}. */
+    static final double URGENT_THRESHOLD = 1.35;
+
+    /** Reaction speeds at or below this never sprint, however urgent. */
+    static final int NEVER_SPRINT_MAX_REACTION = 1;
+    /** Reaction speeds below this sprint only when it is urgent. */
+    static final int FREE_SPRINT_MIN_REACTION = 3;
 
     /** A player's base {@code MOVEMENT_SPEED} attribute. */
     public static final double PLAYER_BASE_SPEED = 0.10;
@@ -60,6 +73,23 @@ public final class PlayerSpeeds {
     /** Which gait a navigation speed modifier asks for. */
     public static Gait gaitFor(double navModifier) {
         return navModifier >= SPRINT_THRESHOLD ? Gait.SPRINT : Gait.WALK;
+    }
+
+    /** Whether a navigation speed modifier marks the movement as urgent (see {@link #URGENT_SPRINT}). */
+    public static boolean isUrgent(double navModifier) {
+        return navModifier >= URGENT_THRESHOLD;
+    }
+
+    /**
+     * Whether a mob of this reaction speed sprints when a goal asks for the sprint gait. Sprinting
+     * is something a sluggish mob doesn't think to do: reaction 0–1 never sprints, reaction 2 only
+     * when it is {@code urgent}, and 3 and up whenever asked. A mob that may not sprint walks.
+     */
+    public static boolean allowsSprint(int reactionSpeed, boolean urgent) {
+        if (reactionSpeed <= NEVER_SPRINT_MAX_REACTION) {
+            return false;
+        }
+        return urgent || reactionSpeed >= FREE_SPRINT_MIN_REACTION;
     }
 
     /**
