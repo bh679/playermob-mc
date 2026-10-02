@@ -5,6 +5,7 @@ import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.entity.DoorHeading;
 import games.brennan.playermob.entity.DoorObstruction;
 import games.brennan.playermob.entity.DoorStuckMonitor;
+import games.brennan.playermob.entity.LipHopPolicy;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.entity.StuckDoorPolicy;
 import net.minecraft.core.BlockPos;
@@ -94,6 +95,14 @@ final class TrainDoorReflex {
         int pinTicks;                                  // reflex may not touch probeDoor
         double probeX;
         double probeZ;
+        boolean havePrev;                              // lip-hop headway tracking (sub-level frame)
+        double prevX;
+        double prevZ;
+        int stallTicks;
+        int hopCooldown;
+        int fruitlessHops;                             // hops since the mob last got anywhere
+        double hopX;
+        double hopZ;
     }
 
     private static final Map<Entity, State> STATE = new WeakHashMap<>();
@@ -136,13 +145,19 @@ final class TrainDoorReflex {
             mob.reactTicks(DoorStuckMonitor.STUCK_TICKS), mob.reactTicks(cooldown));
 
         Scan scan = scanHandDoors(level, mob, sub);
+        boolean doorInTheWay = doorObstructsHeading(st, scan);
+        if (hopIfBlocked(mob, st, sub, tryingToMove, doorInTheWay)) {
+            return true;
+        }
         if (wedged) {
             trace("[DoorStuck] mob={} sub=({}, {}, {}) w={} heading={} marching={} navDone={} mayProbe={} doors={} around={}",
                 mob.getId(), fmt(sub.x), fmt(sub.y), fmt(sub.z), fmt(mob.getBbWidth()), st.axis,
                 mob.isMarchingCarriages(), mob.getNavigation().isDone(), mayProbe, describe(scan),
                 describeAround(level, BlockPos.containing(sub.x, sub.y, sub.z)));
         }
-        if (wedged && mayProbe && probe(mob, level, st, sub, subEye, scan)) {
+        // Wedged with no door in the way: toggling one can only shut it on the mob. Leave the doors
+        // alone and let the hop above deal with whatever it is.
+        if (wedged && mayProbe && doorInTheWay && probe(mob, level, st, sub, subEye, scan)) {
             return true;
         }
         settleProbe(mob, st, sub);
@@ -150,6 +165,56 @@ final class TrainDoorReflex {
             return true;
         }
         return reflex(mob, level, st, subEye, scan);
+    }
+
+    /**
+     * Whether any nearby hand door blocks the mob's heading as it stands. With no heading known the
+     * train's own axis is assumed — that is the way a riding mob is nearly always going.
+     */
+    private static boolean doorObstructsHeading(State st, Scan scan) {
+        Direction.Axis axis = toAxis(st.axis);
+        if (axis == null) {
+            axis = Direction.Axis.X;
+        }
+        for (DoorObstruction.Obstruction door : scan.doors()) {
+            if (DoorObstruction.obstructs(door.state(), axis)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Hop when the mob is making no headway although no door is in its way — see {@link LipHopPolicy}.
+     * Headway is measured in the carriage's frame, so the train's own motion doesn't count.
+     */
+    private static boolean hopIfBlocked(PlayerMobEntity mob, State st, Vec3 sub,
+                                        boolean tryingToMove, boolean doorInTheWay) {
+        if (st.hopCooldown > 0) {
+            st.hopCooldown--;
+        }
+        boolean stalled = st.havePrev && LipHopPolicy.stalled(sub.x - st.prevX, sub.z - st.prevZ);
+        st.prevX = sub.x;
+        st.prevZ = sub.z;
+        st.havePrev = true;
+        st.stallTicks = tryingToMove && stalled ? st.stallTicks + 1 : 0;
+        if (st.fruitlessHops > 0 && LipHopPolicy.gotSomewhere(sub.x - st.hopX, sub.z - st.hopZ)) {
+            st.fruitlessHops = 0;
+        }
+        if (!LipHopPolicy.mayStillTry(st.fruitlessHops)) {
+            return false;
+        }
+        if (!LipHopPolicy.shouldHop(tryingToMove, mob.onGround(), st.stallTicks, st.hopCooldown, doorInTheWay)) {
+            return false;
+        }
+        mob.getJumpControl().jump();
+        st.stallTicks = 0;
+        st.hopCooldown = LipHopPolicy.COOLDOWN_TICKS;
+        st.fruitlessHops++;
+        st.hopX = sub.x;
+        st.hopZ = sub.z;
+        trace("[LipHop] mob={} sub=({}, {}, {}) heading={}", mob.getId(), fmt(sub.x), fmt(sub.y), fmt(sub.z), st.axis);
+        return true;
     }
 
     /** The mob's current travel axis as the reflex sees it, or {@code null} if none is known. */
