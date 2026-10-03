@@ -19,9 +19,11 @@ import games.brennan.playermob.entity.DispositionResolver;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.SimpleContainer;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.player.Inventory;
@@ -33,7 +35,10 @@ import org.slf4j.Logger;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -80,9 +85,9 @@ public final class PlayerReincarnation {
     private static final int FRIEND_SNAPSHOT_CAP = 4;
 
     /**
-     * Radius, in blocks, scanned around a dying player for the animals they had tamed (see
-     * {@link #capturePetSnapshots}). The same reach as {@link #FRIEND_SCAN_RADIUS}: a pet left a
-     * carriage back is still yours.
+     * Radius, in blocks, scanned around a dying player for loaded animals they had tamed that the
+     * life's {@link PetLedger} does not already hold (see {@link #capturePetSnapshots}) — pets tamed
+     * before lives kept a ledger. The same reach as {@link #FRIEND_SCAN_RADIUS}.
      */
     private static final double PET_SCAN_RADIUS = FRIEND_SCAN_RADIUS;
 
@@ -445,40 +450,83 @@ public final class PlayerReincarnation {
     // ---- pet capture (tamed animals replayed beside an echo) --------------
 
     /**
-     * Snapshot the animals {@code player} had tamed at death — those within {@link #PET_SCAN_RADIUS}
-     * whose owner is this player — keeping at most {@link #PET_SNAPSHOT_CAP}, named pets first and
-     * then nearest.
+     * Snapshot the animals {@code player}'s life had tamed — keeping at most {@link #PET_SNAPSHOT_CAP},
+     * named pets first, then the living before the dead, then the most recently seen, then nearest.
+     *
+     * <p>The pool is every pet in the life's {@link PetLedger} — wherever it is now, and whether or not
+     * it outlived the player (a pet that died returns too, ranked behind the living) — plus any pet
+     * of theirs loaded within {@link #PET_SCAN_RADIUS}, which covers animals tamed before lives kept a
+     * ledger. A ledger pet still loaded somewhere is captured fresh; one that isn't returns as it was
+     * last seen. A pet given away since is skipped.</p>
      *
      * <p><b>Unnamed mounts are skipped.</b> A horse you rode and never named is transport, not a
      * companion, and bringing every stabled mount back with an echo would crowd the train; naming
      * one is the player saying otherwise, so a named horse returns like any other pet.</p>
-     *
-     * <p>Only loaded animals are visible — a pet penned up elsewhere simply isn't logged this
-     * death, exactly as with loved ones.</p>
      */
     private static List<CompoundTag> capturePetSnapshots(ServerLevel level, ServerPlayer player) {
-        List<Mob> pets = new ArrayList<>();
+        UUID owner = player.getUUID();
+        Map<UUID, PetLedger.Entry> pool = new LinkedHashMap<>();
+        Map<UUID, Double> distanceSqr = new HashMap<>();
+        for (PetLedger.Entry remembered : PlayerLifeStore.get(level).pets(owner).entries()) {
+            Entity live = findLoaded(level.getServer(), remembered.pet());
+            if (live == null) {
+                pool.put(remembered.pet(), remembered);
+                continue;
+            }
+            if (!owner.equals(PetSnapshots.ownerUuid(live))) {
+                continue; // given away since — no longer this life's
+            }
+            pool.put(remembered.pet(), PlayerLifeStore.entryOf(live, live.isAlive()));
+            if (live.level() == level) {
+                distanceSqr.put(remembered.pet(), live.distanceToSqr(player));
+            }
+        }
         for (Mob mob : level.getEntitiesOfClass(
                 Mob.class, player.getBoundingBox().inflate(PET_SCAN_RADIUS))) {
-            if (player.getUUID().equals(PetSnapshots.ownerUuid(mob))
-                    && returnsWithEcho(PetSnapshots.isMount(mob), mob.hasCustomName())) {
-                pets.add(mob);
+            if (owner.equals(PetSnapshots.ownerUuid(mob)) && !pool.containsKey(mob.getUUID())) {
+                pool.put(mob.getUUID(), PlayerLifeStore.entryOf(mob, mob.isAlive()));
+                distanceSqr.put(mob.getUUID(), mob.distanceToSqr(player));
+            }
+        }
+        List<PetLedger.Entry> pets = new ArrayList<>();
+        for (PetLedger.Entry e : pool.values()) {
+            if (returnsWithEcho(e.mount(), e.named())) {
+                pets.add(e);
             }
         }
         if (pets.isEmpty()) {
             return List.of();
         }
-        boolean[] named = new boolean[pets.size()];
-        double[] distanceSqr = new double[pets.size()];
-        for (int i = 0; i < pets.size(); i++) {
-            named[i] = pets.get(i).hasCustomName();
-            distanceSqr[i] = pets.get(i).distanceToSqr(player);
+        int n = pets.size();
+        boolean[] named = new boolean[n];
+        boolean[] alive = new boolean[n];
+        long[] lastSeen = new long[n];
+        double[] distance = new double[n];
+        for (int i = 0; i < n; i++) {
+            PetLedger.Entry e = pets.get(i);
+            named[i] = e.named();
+            alive[i] = e.alive();
+            lastSeen[i] = e.lastSeen();
+            distance[i] = distanceSqr.getOrDefault(e.pet(), Double.MAX_VALUE);
         }
         List<CompoundTag> out = new ArrayList<>();
-        for (int idx : petOrder(named, distanceSqr, PET_SNAPSHOT_CAP)) {
-            out.add(PetSnapshots.capture(pets.get(idx)));
+        for (int idx : petOrder(named, alive, lastSeen, distance, PET_SNAPSHOT_CAP)) {
+            out.add(pets.get(idx).snapshot().copy());
         }
+        LOGGER.info("[playermob] {} remembered {} pet(s) this life; {} will return with an echo",
+            profileName(player), n, out.size());
         return out;
+    }
+
+    /** The entity with {@code id} loaded in any of the server's levels, or {@code null}. */
+    private static Entity findLoaded(MinecraftServer server, UUID id) {
+        for (ServerLevel l : server.getAllLevels()) {
+            Entity e = l.getEntity(id);
+            if (e != null) {
+                return e;
+            }
+        }
+        return null;
     }
 
     /**
@@ -491,16 +539,20 @@ public final class PlayerReincarnation {
 
     /**
      * Indices of the (up to) {@code cap} pets an echo returns with: named ones first — a name is the
-     * player saying this one mattered — then nearest, ties keeping ascending index order. Pure (no
-     * world) so the selection is unit-tested directly, like {@link #topIndices}.
+     * player saying this one mattered — then the living before the dead, then the most recently
+     * seen, then the nearest, ties keeping ascending index order. Pure (no world) so the selection
+     * is unit-tested directly, like {@link #topIndices}.
      */
-    static int[] petOrder(boolean[] named, double[] distanceSqr, int cap) {
+    static int[] petOrder(boolean[] named, boolean[] alive, long[] lastSeen, double[] distanceSqr,
+                          int cap) {
         Integer[] order = new Integer[named.length];
         for (int i = 0; i < order.length; i++) {
             order[i] = i;
         }
         Arrays.sort(order, Comparator.comparing((Integer i) -> !named[i])
-            .thenComparingDouble(i -> distanceSqr[i])); // named first, then nearest; stable on ties
+            .thenComparing(i -> !alive[i])
+            .thenComparingLong(i -> -lastSeen[i])
+            .thenComparingDouble(i -> distanceSqr[i])); // stable on ties
         int k = Math.min(cap, named.length);
         int[] out = new int[k];
         for (int i = 0; i < k; i++) {

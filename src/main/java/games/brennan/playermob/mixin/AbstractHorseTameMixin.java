@@ -32,6 +32,8 @@ public abstract class AbstractHorseTameMixin {
     private void playermob$creditTame(Player player, CallbackInfoReturnable<Boolean> cir) {
         if (player instanceof ServerPlayer serverPlayer) {
             PlayerLifeStore.record(serverPlayer, PlayerLifeRecord.Signal.TAME, 0);
+            // Remember the animal itself, so an echo of this life can return with it wherever it is.
+            PlayerLifeStore.recordPet(serverPlayer, (AbstractHorse) (Object) this);
         }
     }
 }

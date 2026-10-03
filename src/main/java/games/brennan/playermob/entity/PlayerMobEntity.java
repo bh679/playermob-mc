@@ -1978,10 +1978,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * never see {@code finalizeSpawn}. Non-echo spawns and echoes from a source that logs no pets
      * (a remote life off the relay) simply have nothing to replay.</p>
      *
-     * <p>They are pets, not bodyguards: on 1.21.x a tamed animal resolves its owner only through
-     * the player list, so an animal owned by a PlayerMob will not follow or defend it. What the
-     * re-tame buys is that they are unmistakably <em>his</em> — tamed, non-hostile, and never
-     * re-tameable by whoever walks up next.</p>
+     * <p>Re-tamed to this mob, they follow it, teleport to it and defend it as they would a player
+     * ({@code OwnableEntityOwnerMixin} resolves a PlayerMob owner), and can never be re-tamed by
+     * whoever walks up next.</p>
      *
      * @return how many pets actually returned
      */

@@ -12,6 +12,7 @@
     "AnimalFeedMixin",
     "AbstractHorseFeedMixin",
     "OwnableEntityOwnerMixin",
+    "EntityRemovalPetLedgerMixin",
     "RaiderTargetsPlayerMobMixin",
     "LivingHurtWitnessMixin",
     "WorldGenRegionMixin"
