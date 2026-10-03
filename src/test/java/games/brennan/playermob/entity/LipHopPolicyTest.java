@@ -12,32 +12,32 @@ class LipHopPolicyTest {
 
     @Test
     void hopsWhenBlockedWithTheWayOpen() {
-        assertTrue(LipHopPolicy.shouldHop(true, true, STALLED, 0, false));
+        assertTrue(LipHopPolicy.shouldHop(true, true, STALLED, 0, false, 0));
     }
 
     @Test
     void waitsOutABriefHesitation() {
-        assertFalse(LipHopPolicy.shouldHop(true, true, STALLED - 1, 0, false));
+        assertFalse(LipHopPolicy.shouldHop(true, true, STALLED - 1, 0, false, 0));
     }
 
     @Test
     void aClosedDoorInTheWayIsTheDoorReflexesJob() {
-        assertFalse(LipHopPolicy.shouldHop(true, true, STALLED * 10, 0, true));
+        assertFalse(LipHopPolicy.shouldHop(true, true, STALLED * 10, 0, true, 0));
     }
 
     @Test
     void doesNotHopWhenStandingStillOnPurpose() {
-        assertFalse(LipHopPolicy.shouldHop(false, true, STALLED * 10, 0, false));
+        assertFalse(LipHopPolicy.shouldHop(false, true, STALLED * 10, 0, false, 0));
     }
 
     @Test
     void needsFootingToJumpFrom() {
-        assertFalse(LipHopPolicy.shouldHop(true, false, STALLED, 0, false));
+        assertFalse(LipHopPolicy.shouldHop(true, false, STALLED, 0, false, 0));
     }
 
     @Test
     void doesNotBounceOnTheSpot() {
-        assertFalse(LipHopPolicy.shouldHop(true, true, STALLED, 1, false));
+        assertFalse(LipHopPolicy.shouldHop(true, true, STALLED, 1, false, 0));
     }
 
     @Test
@@ -52,6 +52,12 @@ class LipHopPolicyTest {
         assertFalse(LipHopPolicy.gotSomewhere(0.5, 0.0));
         assertTrue(LipHopPolicy.gotSomewhere(1.0, 0.0));
         assertTrue(LipHopPolicy.gotSomewhere(0.8, 0.8));
+    }
+
+    @Test
+    void doesNotHopRightAfterOperatingADoor() {
+        assertFalse(LipHopPolicy.shouldHop(true, true, STALLED * 10, 0, false, 1));
+        assertTrue(LipHopPolicy.shouldHop(true, true, STALLED * 10, 0, false, 0));
     }
 
     @Test

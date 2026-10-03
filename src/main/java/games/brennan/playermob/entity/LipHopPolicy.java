@@ -14,7 +14,14 @@ public final class LipHopPolicy {
     private LipHopPolicy() {}
 
     /** Ticks without headway before a hop — about a third of a second, long enough not to hop at every hesitation. */
-    public static final int STALL_TICKS = 7;
+    public static final int STALL_TICKS = 10;
+    /**
+     * Ticks after a door operation during which the mob does not hop. Operating a door stops the
+     * mob for a moment and it is stationary again for a few ticks while its path resumes; that is
+     * not a lip, and a hop at every door looked like a mob vaulting the frame.
+     */
+    public static final int DOOR_GRACE_TICKS = 30;
+
     /** Ticks between hops, so a mob that is genuinely walled in doesn't bounce on the spot. */
     public static final int COOLDOWN_TICKS = 20;
     /**
@@ -53,10 +60,11 @@ public final class LipHopPolicy {
      * @param cooldownTicks  ticks left since the last hop
      * @param doorObstructs  a nearby door is in the way of the mob's heading — then the door is the
      *                       problem and the door reflex's to solve, not a hop's
+     * @param doorGraceTicks ticks left of the pause after a door operation ({@link #DOOR_GRACE_TICKS})
      */
     public static boolean shouldHop(boolean tryingToMove, boolean onGround, int stallTicks,
-                                    int cooldownTicks, boolean doorObstructs) {
-        return tryingToMove && onGround && !doorObstructs
+                                    int cooldownTicks, boolean doorObstructs, int doorGraceTicks) {
+        return tryingToMove && onGround && !doorObstructs && doorGraceTicks <= 0
             && cooldownTicks <= 0 && stallTicks >= STALL_TICKS;
     }
 }

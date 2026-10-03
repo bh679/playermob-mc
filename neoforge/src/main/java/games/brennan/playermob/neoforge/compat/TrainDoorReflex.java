@@ -100,6 +100,7 @@ final class TrainDoorReflex {
         double prevZ;
         int stallTicks;
         int hopCooldown;
+        int doorGraceTicks;                            // no hops for a moment after a door operation
         int fruitlessHops;                             // hops since the mob last got anywhere
         double hopX;
         double hopZ;
@@ -193,6 +194,11 @@ final class TrainDoorReflex {
         if (st.hopCooldown > 0) {
             st.hopCooldown--;
         }
+        if (mob.isOperatingDoor()) {
+            st.doorGraceTicks = LipHopPolicy.DOOR_GRACE_TICKS;
+        } else if (st.doorGraceTicks > 0) {
+            st.doorGraceTicks--;
+        }
         boolean stalled = st.havePrev && LipHopPolicy.stalled(sub.x - st.prevX, sub.z - st.prevZ);
         st.prevX = sub.x;
         st.prevZ = sub.z;
@@ -204,7 +210,7 @@ final class TrainDoorReflex {
         if (!LipHopPolicy.mayStillTry(st.fruitlessHops)) {
             return false;
         }
-        if (!LipHopPolicy.shouldHop(tryingToMove, mob.onGround(), st.stallTicks, st.hopCooldown, doorInTheWay)) {
+        if (!LipHopPolicy.shouldHop(tryingToMove, mob.onGround(), st.stallTicks, st.hopCooldown, doorInTheWay, st.doorGraceTicks)) {
             return false;
         }
         mob.getJumpControl().jump();
