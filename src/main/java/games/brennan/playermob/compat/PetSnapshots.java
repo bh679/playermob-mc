@@ -39,9 +39,11 @@ public final class PetSnapshots {
      * Keys dropped from a captured snapshot. The identity and placement of the <em>original</em>
      * animal must not ride along: the original is usually still alive when the snapshot is taken,
      * so keeping its UUID would spawn a duplicate the level refuses to hold, and keeping its
-     * position would drop the replay wherever the player last died.
+     * position would drop the replay wherever the player last died. Its health and hurt state are
+     * dropped too: a pet remembered as it died (or wounded) returns whole, at full health.
      */
-    private static final String[] STRIPPED = {"UUID", "Pos", "Motion", "Passengers", "leash"};
+    private static final String[] STRIPPED = {"UUID", "Pos", "Motion", "Passengers", "leash",
+        "Health", "DeathTime", "HurtTime", "HurtByTimestamp", "Fire"};
 
     private PetSnapshots() {}
 

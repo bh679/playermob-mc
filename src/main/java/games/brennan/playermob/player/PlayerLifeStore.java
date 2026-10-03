@@ -1,6 +1,8 @@
 package games.brennan.playermob.player;
 
+import com.mojang.logging.LogUtils;
 import games.brennan.playermob.compat.NbtCompat;
+import games.brennan.playermob.compat.PetSnapshots;
 //? if <26 {
 import net.minecraft.core.HolderLookup;
 //?}
@@ -9,6 +11,7 @@ import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.saveddata.SavedData;
 //? if >=26 {
 /*import net.minecraft.world.level.saveddata.SavedDataType;
@@ -20,6 +23,8 @@ import net.minecraft.world.level.storage.DimensionDataStorage;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+
+import org.slf4j.Logger;
 
 /**
  * World-level persistence for the player-reincarnation feature, keyed by player
@@ -44,6 +49,8 @@ import java.util.UUID;
  */
 public final class PlayerLifeStore extends SavedData {
 
+    private static final Logger LOGGER = LogUtils.getLogger();
+
     private static final String DATA_NAME = "playermob_lives";
 
     private static final String TAG_CURRENT = "Current";
@@ -51,8 +58,12 @@ public final class PlayerLifeStore extends SavedData {
     private static final String TAG_UUID = "UUID";
     private static final String TAG_NAME = "Name";
     private static final String TAG_SNAPSHOT = "Snapshot";
+    private static final String TAG_PETS = "Pets";
+    private static final String TAG_LEDGER = "Ledger";
 
     private final Map<UUID, PlayerLifeRecord> current = new HashMap<>();
+    // Every animal each player's current life has tamed — see PetLedger. Reset with the life.
+    private final Map<UUID, PetLedger> pets = new HashMap<>();
     // Legacy per-world last-life snapshots from builds before GlobalLifeStore existed.
     // Retained only until the global store imports them via drainLegacyLastLives().
     private final Map<UUID, CompoundTag> legacyLastLife = new HashMap<>();
@@ -100,6 +111,11 @@ public final class PlayerLifeStore extends SavedData {
         return current.getOrDefault(id, PlayerLifeRecord.EMPTY);
     }
 
+    /** Every animal the player's current life has tamed, or {@link PetLedger#EMPTY}. */
+    public PetLedger pets(UUID id) {
+        return pets.getOrDefault(id, PetLedger.EMPTY);
+    }
+
     // ---- writes -----------------------------------------------------------
 
     /**
@@ -140,9 +156,74 @@ public final class PlayerLifeStore extends SavedData {
      * completed snapshot itself is stored in {@link GlobalLifeStore}, not here.
      */
     public void resetCurrent(UUID id) {
-        if (current.remove(id) != null) {
+        boolean changed = current.remove(id) != null;
+        changed |= pets.remove(id) != null; // a new life starts with no pets of its own
+        if (changed) {
             setDirty();
         }
+    }
+
+    // ---- pet ledger -------------------------------------------------------
+
+    /**
+     * Remember {@code pet} as one of {@code owner}'s current life's animals — called from the tame
+     * mixins the moment the taming lands. Never throws into the tame flow.
+     */
+    public static void recordPet(ServerPlayer owner, Entity pet) {
+        try {
+            //? if >=26 {
+            /*ServerLevel level = owner.level();
+            *///?} else {
+            ServerLevel level = owner.serverLevel();
+            //?}
+            get(level).rememberPet(owner.getUUID(), entryOf(pet, true));
+        } catch (RuntimeException e) {
+            LOGGER.warn("[playermob] Failed to remember a tamed pet", e);
+        }
+    }
+
+    /**
+     * Refresh {@code pet}'s entry as it leaves the world — unloaded, changed dimension, or died —
+     * so the snapshot an echo returns with is the animal as it was last seen (named, grown, armoured).
+     * A pet that now belongs to someone else is forgotten by every life that no longer owns it.
+     * Called for ownable entities only (see {@code EntityRemovalPetLedgerMixin}); never throws.
+     */
+    public static void onPetRemoved(ServerLevel level, Entity pet, boolean died) {
+        try {
+            get(level).refreshPet(pet, died);
+        } catch (RuntimeException e) {
+            LOGGER.warn("[playermob] Failed to refresh a remembered pet", e);
+        }
+    }
+
+    private void refreshPet(Entity pet, boolean died) {
+        if (pets.isEmpty()) {
+            return;
+        }
+        UUID petId = pet.getUUID();
+        UUID owner = PetSnapshots.ownerUuid(pet);
+        for (Map.Entry<UUID, PetLedger> e : pets.entrySet()) {
+            if (e.getValue().get(petId) == null) {
+                continue;
+            }
+            if (!e.getKey().equals(owner)) {
+                e.setValue(e.getValue().without(petId)); // given away or untamed — no longer theirs
+            } else {
+                e.setValue(e.getValue().with(entryOf(pet, !died)));
+            }
+            setDirty();
+        }
+    }
+
+    void rememberPet(UUID owner, PetLedger.Entry entry) {
+        pets.put(owner, pets(owner).with(entry));
+        setDirty();
+    }
+
+    /** A ledger entry for {@code pet} as it is right now. */
+    static PetLedger.Entry entryOf(Entity pet, boolean alive) {
+        return new PetLedger.Entry(pet.getUUID(), PetSnapshots.capture(pet), pet.hasCustomName(),
+            PetSnapshots.isMount(pet), alive, pet.level().getGameTime());
     }
 
     /**
@@ -191,6 +272,18 @@ public final class PlayerLifeStore extends SavedData {
         }
         tag.put(TAG_CURRENT, currentList);
 
+        ListTag petList = new ListTag();
+        for (Map.Entry<UUID, PetLedger> e : pets.entrySet()) {
+            if (e.getValue().isEmpty()) {
+                continue;
+            }
+            CompoundTag entry = new CompoundTag();
+            NbtCompat.putUUID(entry, TAG_UUID, e.getKey());
+            entry.put(TAG_LEDGER, e.getValue().save());
+            petList.add(entry);
+        }
+        tag.put(TAG_PETS, petList);
+
         // Retain un-migrated legacy snapshots so a pre-update world keeps them until the
         // global store imports them; drops away once drainLegacyLastLives() has run.
         if (!legacyLastLife.isEmpty()) {
@@ -230,6 +323,16 @@ public final class PlayerLifeStore extends SavedData {
             CompoundTag entry = NbtCompat.compoundAt(currentList, i);
             if (NbtCompat.hasUUID(entry, TAG_UUID)) {
                 store.current.put(NbtCompat.getUUID(entry, TAG_UUID), PlayerLifeRecord.load(entry));
+            }
+        }
+
+        // Missing on saves from before lives remembered their pets ⇒ every ledger starts empty.
+        ListTag petList = NbtCompat.getListOfType(tag, TAG_PETS, Tag.TAG_COMPOUND);
+        for (int i = 0; i < petList.size(); i++) {
+            CompoundTag entry = NbtCompat.compoundAt(petList, i);
+            if (NbtCompat.hasUUID(entry, TAG_UUID)) {
+                store.pets.put(NbtCompat.getUUID(entry, TAG_UUID),
+                    PetLedger.load(NbtCompat.getListOfType(entry, TAG_LEDGER, Tag.TAG_COMPOUND)));
             }
         }
 

@@ -48,16 +48,36 @@ class PlayerReincarnationTest {
     @Test
     void petOrderPrefersNamedThenNearest() {
         boolean[] named = {false, true, false, true};
+        boolean[] alive = {true, true, true, true};
+        long[] lastSeen = {100, 100, 100, 100};
         double[] distanceSqr = {1.0, 90.0, 4.0, 25.0};
         // named first (idx 3 at 25 beats idx 1 at 90), then the nearest unnamed (idx 0).
-        assertArrayEquals(new int[] {3, 1, 0}, PlayerReincarnation.petOrder(named, distanceSqr, 3));
+        assertArrayEquals(new int[] {3, 1, 0},
+            PlayerReincarnation.petOrder(named, alive, lastSeen, distanceSqr, 3));
+    }
+
+    @Test
+    void petOrderRanksNamedOverLivingOverRecent() {
+        // 0: unnamed, alive, seen now      1: named, dead, seen long ago
+        // 2: unnamed, dead, seen now       3: unnamed, alive, seen long ago (left at base)
+        boolean[] named = {false, true, false, false};
+        boolean[] alive = {true, false, false, true};
+        long[] lastSeen = {500, 10, 500, 10};
+        double[] distanceSqr = {4.0, Double.MAX_VALUE, Double.MAX_VALUE, Double.MAX_VALUE};
+        // a named pet beats everything, even dead; then the living — most recently seen first.
+        assertArrayEquals(new int[] {1, 0, 3},
+            PlayerReincarnation.petOrder(named, alive, lastSeen, distanceSqr, 3));
     }
 
     @Test
     void petOrderCapsAndBreaksTiesByAscendingIndex() {
         boolean[] named = {false, false, false};
+        boolean[] alive = {true, true, true};
+        long[] lastSeen = {7, 7, 7};
         double[] distanceSqr = {5.0, 5.0, 5.0};
-        assertArrayEquals(new int[] {0, 1}, PlayerReincarnation.petOrder(named, distanceSqr, 2));
-        assertEquals(0, PlayerReincarnation.petOrder(new boolean[] {}, new double[] {}, 3).length);
+        assertArrayEquals(new int[] {0, 1},
+            PlayerReincarnation.petOrder(named, alive, lastSeen, distanceSqr, 2));
+        assertEquals(0, PlayerReincarnation.petOrder(
+            new boolean[] {}, new boolean[] {}, new long[] {}, new double[] {}, 3).length);
     }
 }

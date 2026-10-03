@@ -1050,6 +1050,23 @@
       "released": false,
       "released_in": null,
       "released_at": null
+    },
+    {
+      "id": "echo-remembers-every-pet",
+      "version": "0.105.0",
+      "type": "feat",
+      "title": "Your echo remembers every pet you had",
+      "summary": "An echo used to come back only with the pets standing near you when you died. Now it remembers every animal you tamed in that life: the wolf you left at home, the cat you lost along the way, the horse you named. Up to three return with it, and the ones you named always come first, then the ones still alive. A pet that died before you comes back whole.",
+      "highlights": [
+        "An echo chooses from every pet tamed during that life, not just the ones nearby at death.",
+        "Named pets return first, then living ones, then the most recently seen.",
+        "Pets that died earlier in the life can return too, at full health.",
+        "Unnamed mounts still stay behind, and the cap is still three."
+      ],
+      "date": "2026-10-03",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
