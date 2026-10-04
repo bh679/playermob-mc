@@ -1083,6 +1083,19 @@
       "released": true,
       "released_in": "v0.106.0",
       "released_at": "2026-10-04T08:48:21Z"
+    },
+    {
+      "id": "floor-gift-pickup-seam",
+      "version": "0.107.0",
+      "type": "feat",
+      "title": "Mods can make Player Mobs want an item only from the player who threw it",
+      "summary": "A new integration hook lets other mods decide that a Player Mob should pick up an item only when a particular player threw it, based on how the mob feels about that player right now. Player Mobs now only walk over to items they will actually take. Dungeon Train uses this so a Player Mob picks up a camera only when it means to photograph you.",
+      "highlights": [],
+      "pr": 221,
+      "date": "2026-10-04",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }

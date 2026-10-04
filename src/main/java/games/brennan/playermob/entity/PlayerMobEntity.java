@@ -3493,6 +3493,28 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     }
 
     /**
+     * Want-filter for a specific item on the floor — {@link #wantsToPickUp} plus the
+     * {@link PlayerMobPickupHooks#wantsFloorGift floor-gift} want, which needs the entity to know who
+     * threw it. {@link CollectFloorItemsGoal}'s scan uses this so a mob walks only to items it will
+     * actually take.
+     */
+    public boolean wantsFloorItem(ItemEntity itemEntity) {
+        ItemStack stack = itemEntity.getItem();
+        //? if >=26 {
+        /*boolean wanted = level() instanceof ServerLevel sl && wantsToPickUp(sl, stack);
+        *///?} else {
+        boolean wanted = wantsToPickUp(stack);
+        //?}
+        return wanted || wantsAsFloorGift(itemEntity, stack);
+    }
+
+    /** True if a consumer wants {@code stack} because of the player who threw it (see {@link PlayerMobPickupHooks}). */
+    private boolean wantsAsFloorGift(ItemEntity itemEntity, ItemStack stack) {
+        return giftSource(itemEntity) instanceof ServerPlayer thrower
+            && PlayerMobPickupHooks.wantsFloorGift(this, thrower, stack);
+    }
+
+    /**
      * True while the mob is occupied with something more urgent than socialising: it has a combat
      * target, is fleeing, or is working its way back onto a train. Consumers of the gift seams use it
      * to defer a reaction (Dungeon Train's camera shot) rather than re-deriving the state.
@@ -3574,7 +3596,18 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (ItemPickupPolicy.isBuildingBlock(stack)) {
             return finishPickup(itemEntity, stack, pickUpBlockCapped(stack));
         }
+        if (wantsAsFloorGift(itemEntity, stack)) {
+            // Wanted only as this thrower's gift, so InventoryCarrier's own wantsToPickUp check would
+            // refuse it: hoard it into the backpack directly.
+            return finishPickup(itemEntity, stack, hoardIntoBackpack(stack));
+        }
         return false;
+    }
+
+    /** Copy as much of {@code stack} as fits into the backpack; returns how many moved (the caller shrinks). */
+    private int hoardIntoBackpack(ItemStack stack) {
+        ItemStack leftover = this.inventory.addItem(stack.copy());
+        return stack.getCount() - leftover.getCount();
     }
 
     /**

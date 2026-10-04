@@ -142,16 +142,9 @@ public final class CollectFloorItemsGoal extends Goal implements DescribableGoal
         AABB box = mob.getBoundingBox().inflate(scanRadius);
         List<ItemEntity> nearby = mob.level().getEntitiesOfClass(
             ItemEntity.class, box,
-            //? if >=26 {
-            /*// 26.x added a leading ServerLevel arg to Mob.wantsToPickUp; the scan runs server-side.
-            e -> e.isAlive() && !e.hasPickUpDelay()
-                && mob.level() instanceof net.minecraft.server.level.ServerLevel sl
-                && mob.wantsToPickUp(sl, e.getItem())
+            // wantsFloorItem, not wantsToPickUp: some items are wanted only from the player who threw them.
+            e -> e.isAlive() && !e.hasPickUpDelay() && mob.wantsFloorItem(e)
                 && TrainConfinement.allowsTarget(mob, e));
-            *///?} else {
-            e -> e.isAlive() && !e.hasPickUpDelay() && mob.wantsToPickUp(e.getItem())
-                && TrainConfinement.allowsTarget(mob, e));
-            //?}
         ItemEntity closest = null;
         double closestDistSq = Double.MAX_VALUE;
         for (ItemEntity e : nearby) {
