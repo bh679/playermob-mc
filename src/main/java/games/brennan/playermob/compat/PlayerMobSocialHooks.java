@@ -34,9 +34,10 @@ public final class PlayerMobSocialHooks {
 
         /**
          * {@code giver} gave {@code gift} to {@code mob} — the same event as
-         * {@link #onPlayerGift(ServerPlayer, UUID)}, fired straight after it, with the live mob and
-         * a copy of the taken stack for consumers that react to <em>what</em> was given (Dungeon
-         * Train's camera shot). The mob's feeling toward the giver has already been credited.
+         * {@link #onPlayerGift(ServerPlayer, UUID)}, fired just <em>before</em> the gift is credited,
+         * with the live mob and a copy of the taken stack for consumers that react to <em>what</em>
+         * was given (Dungeon Train's camera shot). {@code mob.feelingToward(giver)} still reads the
+         * feeling as it stood when the gift was made; the UUID form follows once it is credited.
          */
         default void onPlayerGift(ServerPlayer giver, PlayerMobEntity mob, ItemStack gift) {}
     }
@@ -64,7 +65,7 @@ public final class PlayerMobSocialHooks {
         observer.onPlayerGift(giver, mobId);
     }
 
-    /** Announce that {@code giver} gave {@code gift} to {@code mob}. Fired right after the UUID form. */
+    /** Announce that {@code giver} gave {@code gift} to {@code mob}. Fired just before the gift is credited. */
     public static void onPlayerGift(ServerPlayer giver, PlayerMobEntity mob, ItemStack gift) {
         observer.onPlayerGift(giver, mob, gift);
     }

@@ -3598,6 +3598,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         double giftScore = EquipmentEvaluator.score(gift);
         double currentScore = EquipmentEvaluator.score(getItemBySlot(getEquipmentSlotForItem(gift)));
         float delta = FeelingRecord.giftDelta(giftScore, currentScore);
+        // Announce the gift with its stack BEFORE crediting it, so a consumer reacting to what was
+        // given (Dungeon Train's camera shot) reads the feeling as it stood when the gift was made.
+        if (gifter instanceof ServerPlayer giver) {
+            PlayerMobSocialHooks.onPlayerGift(giver, this, gift);
+        }
         // Friendlier mobs are moved more by the same gift (DispositionResolver.kindnessScale).
         feelings.adjust(gifter.getUUID(), delta * DispositionResolver.kindnessScale(friendliness()));
         // Credit the real player's lifetime kindness by the gift's worth — unscaled, since the
@@ -3608,7 +3613,6 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             // advancement) can credit it by subscribing to PlayerMobSocialHooks — no mixin
             // into the pickup path required. No-op when nothing is installed.
             PlayerMobSocialHooks.onPlayerGift(sp, getUUID());
-            PlayerMobSocialHooks.onPlayerGift(sp, this, gift);
         }
         pushDispositionToClient();
     }
