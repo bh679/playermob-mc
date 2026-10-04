@@ -4,6 +4,7 @@ import com.mojang.logging.LogUtils;
 import games.brennan.playermob.PlayerMobConfig;
 import org.slf4j.Logger;
 import games.brennan.playermob.PlayerMobRegistry;
+import games.brennan.playermob.compat.PlayerMobPickupHooks;
 import games.brennan.playermob.compat.PlayerMobSocialHooks;
 import games.brennan.playermob.compat.PlayerMobSpawnHooks;
 import games.brennan.playermob.compat.ReincarnationRecord;
@@ -3488,7 +3489,16 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * built-in gear/ammo/valuable/consumable categories. Empty by default. See {@link WantedItemList}.
      */
     private boolean isExtraWanted(ItemStack stack) {
-        return PlayerMobConfig.extraPickups().matches(stack);
+        return PlayerMobConfig.extraPickups().matches(stack) || PlayerMobPickupHooks.wants(stack);
+    }
+
+    /**
+     * True while the mob is occupied with something more urgent than socialising: it has a combat
+     * target, is fleeing, or is working its way back onto a train. Consumers of the gift seams use it
+     * to defer a reaction (Dungeon Train's camera shot) rather than re-deriving the state.
+     */
+    public boolean isInCombat() {
+        return getTarget() != null || isFleeing() || isRecovering();
     }
 
     /**
@@ -3588,6 +3598,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         double giftScore = EquipmentEvaluator.score(gift);
         double currentScore = EquipmentEvaluator.score(getItemBySlot(getEquipmentSlotForItem(gift)));
         float delta = FeelingRecord.giftDelta(giftScore, currentScore);
+        // Announce the gift with its stack BEFORE crediting it, so a consumer reacting to what was
+        // given (Dungeon Train's camera shot) reads the feeling as it stood when the gift was made.
+        if (gifter instanceof ServerPlayer giver) {
+            PlayerMobSocialHooks.onPlayerGift(giver, this, gift);
+        }
         // Friendlier mobs are moved more by the same gift (DispositionResolver.kindnessScale).
         feelings.adjust(gifter.getUUID(), delta * DispositionResolver.kindnessScale(friendliness()));
         // Credit the real player's lifetime kindness by the gift's worth — unscaled, since the
