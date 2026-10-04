@@ -4,6 +4,7 @@ import com.mojang.logging.LogUtils;
 import games.brennan.playermob.PlayerMobConfig;
 import org.slf4j.Logger;
 import games.brennan.playermob.PlayerMobRegistry;
+import games.brennan.playermob.compat.PlayerMobPickupHooks;
 import games.brennan.playermob.compat.PlayerMobSocialHooks;
 import games.brennan.playermob.compat.PlayerMobSpawnHooks;
 import games.brennan.playermob.compat.ReincarnationRecord;
@@ -3488,7 +3489,16 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * built-in gear/ammo/valuable/consumable categories. Empty by default. See {@link WantedItemList}.
      */
     private boolean isExtraWanted(ItemStack stack) {
-        return PlayerMobConfig.extraPickups().matches(stack);
+        return PlayerMobConfig.extraPickups().matches(stack) || PlayerMobPickupHooks.wants(stack);
+    }
+
+    /**
+     * True while the mob is occupied with something more urgent than socialising: it has a combat
+     * target, is fleeing, or is working its way back onto a train. Consumers of the gift seams use it
+     * to defer a reaction (Dungeon Train's camera shot) rather than re-deriving the state.
+     */
+    public boolean isInCombat() {
+        return getTarget() != null || isFleeing() || isRecovering();
     }
 
     /**
@@ -3598,6 +3608,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             // advancement) can credit it by subscribing to PlayerMobSocialHooks — no mixin
             // into the pickup path required. No-op when nothing is installed.
             PlayerMobSocialHooks.onPlayerGift(sp, getUUID());
+            PlayerMobSocialHooks.onPlayerGift(sp, this, gift);
         }
         pushDispositionToClient();
     }

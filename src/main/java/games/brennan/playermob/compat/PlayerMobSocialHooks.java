@@ -1,6 +1,8 @@
 package games.brennan.playermob.compat;
 
+import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.ItemStack;
 
 import java.util.UUID;
 
@@ -29,6 +31,14 @@ public final class PlayerMobSocialHooks {
 
         /** {@code giver} gave a gift to a PlayerMob ({@code mobId}). */
         default void onPlayerGift(ServerPlayer giver, UUID mobId) {}
+
+        /**
+         * {@code giver} gave {@code gift} to {@code mob} — the same event as
+         * {@link #onPlayerGift(ServerPlayer, UUID)}, fired straight after it, with the live mob and
+         * a copy of the taken stack for consumers that react to <em>what</em> was given (Dungeon
+         * Train's camera shot). The mob's feeling toward the giver has already been credited.
+         */
+        default void onPlayerGift(ServerPlayer giver, PlayerMobEntity mob, ItemStack gift) {}
     }
 
     private static volatile GiftObserver observer = new GiftObserver() {};
@@ -52,5 +62,10 @@ public final class PlayerMobSocialHooks {
     /** Announce that {@code giver} gave a gift to {@code mobId}. Fired when a PlayerMob accepts a player's tossed item. */
     public static void onPlayerGift(ServerPlayer giver, UUID mobId) {
         observer.onPlayerGift(giver, mobId);
+    }
+
+    /** Announce that {@code giver} gave {@code gift} to {@code mob}. Fired right after the UUID form. */
+    public static void onPlayerGift(ServerPlayer giver, PlayerMobEntity mob, ItemStack gift) {
+        observer.onPlayerGift(giver, mob, gift);
     }
 }
