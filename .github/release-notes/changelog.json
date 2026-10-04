@@ -1021,9 +1021,9 @@
       ],
       "pr": 208,
       "date": "2026-09-30",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.106.0",
+      "released_at": "2026-10-04T08:48:21Z"
     },
     {
       "id": "activity-animations",
@@ -1034,9 +1034,9 @@
       "highlights": [],
       "pr": 210,
       "date": "2026-10-02",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.106.0",
+      "released_at": "2026-10-04T08:48:21Z"
     },
     {
       "id": "fix-26-2-startup-crash",
@@ -1047,9 +1047,9 @@
       "highlights": [],
       "pr": 213,
       "date": "2026-10-02",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.106.0",
+      "released_at": "2026-10-04T08:48:21Z"
     },
     {
       "id": "echo-remembers-every-pet",
@@ -1064,9 +1064,9 @@
         "Unnamed mounts still stay behind, and the cap is still three."
       ],
       "date": "2026-10-03",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.106.0",
+      "released_at": "2026-10-04T08:48:21Z"
     },
     {
       "id": "camera-pickup-seams",
@@ -1080,9 +1080,9 @@
         "PlayerMobEntity.isInCombat(): target, fleeing or recovering onto the train"
       ],
       "date": "2026-10-04",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.106.0",
+      "released_at": "2026-10-04T08:48:21Z"
     }
   ]
 }
