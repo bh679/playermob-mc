@@ -6,10 +6,17 @@ import games.brennan.playermob.player.GlobalLifeStore.DeathRecord;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Deque;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.Executor;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -297,5 +304,126 @@ class GlobalLifeStoreTest {
         assertEquals("second", NbtCompat.getStringOr(store.mostRecentForPlayer(uuid(1)), "Marker", ""));
         assertTrue(store.hasAnyForPlayer(uuid(1)));
         assertNull(store.mostRecentForPlayer(uuid(42)));
+    }
+
+    // ---- persistence hand-off: O(1) snapshot on the server thread, NBT built on the IO thread ----
+
+    /** Queues tasks instead of running them; the test decides when the "IO thread" runs. */
+    private static final class FakeExecutor implements Executor {
+        final Deque<Runnable> queue = new ArrayDeque<>();
+
+        @Override
+        public void execute(Runnable task) {
+            queue.add(task);
+        }
+
+        void runAll() {
+            while (!queue.isEmpty()) {
+                queue.poll().run();
+            }
+        }
+    }
+
+    private static CompoundTag book(String marker) {
+        CompoundTag tag = new CompoundTag();
+        tag.putString("id", "minecraft:writable_book");
+        tag.putString("marker", marker);
+        return tag;
+    }
+
+    @Test
+    void savesReachDiskOnlyThroughTheIoSinkAndReloadIdentically(@TempDir Path dir) {
+        Path file = dir.resolve("playermob").resolve("lives.dat");
+        FakeExecutor io = new FakeExecutor();
+        GlobalLifeStore store = new GlobalLifeStore(file, new CoalescingWriter<>(io, GlobalLifeStore::writeAtomically));
+        store.append(uuid(1), "A", 4, "hard", snap("a"), List.of(snap("friend")), List.of(snap("pet")),
+            List.of(book("d")));
+        store.append(uuid(2), "B", NONE, snap("b"));
+
+        assertFalse(Files.exists(file), "nothing is written on the appending (server) thread");
+        io.runAll();
+        assertTrue(Files.exists(file));
+        assertFalse(Files.exists(dir.resolve("playermob").resolve("lives.dat.tmp")), "temp file renamed away");
+
+        GlobalLifeStore reloaded = new GlobalLifeStore(file, new CoalescingWriter<>(new FakeExecutor(), s -> { }))
+            .loadForTest();
+        assertEquals(store.allRecords(), reloaded.allRecords());
+        reloaded.append(uuid(3), "C", 0, snap("c"));
+        assertEquals(3L, reloaded.allRecords().get(2).id(), "nextId survives the round-trip");
+    }
+
+    @Test
+    void aQueuedSnapshotIsUnaffectedByLaterAppendsAndDraftClaims() {
+        FakeExecutor io = new FakeExecutor();
+        List<GlobalLifeStore.PendingSave> taken = new ArrayList<>();
+        GlobalLifeStore store = new GlobalLifeStore(Path.of("unused", "lives.dat"),
+            new CoalescingWriter<>(io, taken::add));
+        CompoundTag a = book("a");
+        CompoundTag b = book("b");
+        store.append(uuid(1), "A", 0, "normal", snap("w"), List.of(), List.of(), List.of(a, b));
+        io.runAll();
+        GlobalLifeStore.PendingSave first = taken.get(0);
+
+        long id = store.allRecords().get(0).id();
+        assertTrue(store.claimDraft(id, a));
+        store.append(uuid(2), "B", 0, snap("later"));
+
+        assertEquals(1, first.records().size(), "later appends are invisible to the queued snapshot");
+        assertEquals(List.of(a, b), first.records().get(0).drafts(), "claimDraft is copy-on-write");
+        assertEquals(2L, first.nextId());
+
+        io.runAll(); // the claim + append coalesce into one newer save
+        GlobalLifeStore.PendingSave latest = taken.get(taken.size() - 1);
+        assertEquals(2, latest.records().size());
+        assertEquals(List.of(b), latest.records().get(0).drafts());
+        assertEquals(3L, latest.nextId());
+    }
+
+    /**
+     * Benchmark-style guard for the per-death server-thread cost: with the IO executor never run (no
+     * disk), the median {@code append} on a 60,000-life store must be within a small factor of the same
+     * append on a 100-life store. Before the O(1) snapshot, every append rebuilt and deep-copied the whole
+     * log's NBT, so the large store was hundreds of times slower.
+     */
+    @Test
+    void appendCostDoesNotScaleWithHistorySize() {
+        long small = medianAppendNanos(100);
+        long large = medianAppendNanos(60_000);
+        System.out.printf("[GlobalLifeStore append] median %.1f us @ 100 lives, %.1f us @ 60,000 lives%n",
+            small / 1_000.0, large / 1_000.0);
+        assertTrue(large < 5 * small + 500_000,
+            "append at 60k lives took " + large + " ns vs " + small + " ns at 100 lives");
+    }
+
+    private static long medianAppendNanos(int historySize) {
+        GlobalLifeStore store = new GlobalLifeStore(Path.of("unused", "lives.dat"),
+            new CoalescingWriter<>(new FakeExecutor(), s -> { })); // IO never runs
+        CompoundTag snapshot = benchSnapshot();
+        for (int i = 0; i < historySize; i++) {
+            store.append(uuid(i % 50), "P", i % 200, "normal", snapshot, List.of());
+        }
+        for (int i = 0; i < 300; i++) { // warm-up
+            store.append(uuid(1), "P", 0, "normal", snapshot, List.of());
+        }
+        long[] samples = new long[201];
+        for (int i = 0; i < samples.length; i++) {
+            long t0 = System.nanoTime();
+            store.append(uuid(1), "P", 0, "normal", snapshot, List.of());
+            samples[i] = System.nanoTime() - t0;
+        }
+        Arrays.sort(samples);
+        return samples[samples.length / 2];
+    }
+
+    /** A modest stand-in for a real reincarnation snapshot (~a dozen fields + a nested compound). */
+    private static CompoundTag benchSnapshot() {
+        CompoundTag tag = snap("bench");
+        for (int i = 0; i < 10; i++) {
+            tag.putString("Field" + i, "value-" + i);
+        }
+        CompoundTag nested = new CompoundTag();
+        nested.putInt("Health", 20);
+        tag.put("Attributes", nested);
+        return tag;
     }
 }

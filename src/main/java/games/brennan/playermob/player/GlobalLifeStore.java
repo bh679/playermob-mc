@@ -92,6 +92,9 @@ public final class GlobalLifeStore {
      * before it was captured. A consumer that isolates its echoes by difficulty (Dungeon Train does)
      * only draws lives from the matching partition; read it through {@link #partitionOf} so the
      * untagged history keeps a home.</p>
+     *
+     * <p><b>Read-only.</b> Records handed out by the store are shared with the background save thread,
+     * which serializes them; copy a tag before mutating it (every caller already does).</p>
      */
     public record DeathRecord(long id, UUID uuid, String name, int carriage, String difficulty,
                               CompoundTag snapshot, List<CompoundTag> friendSnapshots,
@@ -129,8 +132,12 @@ public final class GlobalLifeStore {
 
     private static final String TMP_SUFFIX = ".tmp";
 
-    /** A fully built, owned tag bound for {@code path} — handed to the IO thread and never touched again here. */
-    private record PendingSave(Path path, CompoundTag tag) {}
+    /**
+     * An immutable snapshot of the log bound for {@code path} — handed to the IO thread, which builds the
+     * NBT from it. Taking it is O(1) (see {@link SnapshotLog}); records and their tags are never mutated
+     * once stored, so the worker can read them while the server thread keeps appending.
+     */
+    record PendingSave(Path path, List<DeathRecord> records, long nextId) {}
 
     /** One daemon IO thread for every store save; bursts of deaths coalesce into one write of the latest log. */
     private static final CoalescingWriter<PendingSave> WRITER = new CoalescingWriter<>(
@@ -145,16 +152,29 @@ public final class GlobalLifeStore {
     private static GlobalLifeStore cached;
 
     private final Path path;
-    private final List<DeathRecord> history = new ArrayList<>(); // oldest -> newest
+    private final CoalescingWriter<PendingSave> writer;
+    private final SnapshotLog<DeathRecord> history = new SnapshotLog<>(); // oldest -> newest
     private long nextId = 1L;
 
     private GlobalLifeStore(Path path) {
+        this(path, WRITER);
+    }
+
+    /** Test seam: a store at {@code path} whose saves go through {@code writer} (e.g. a hand-run executor). */
+    GlobalLifeStore(Path path, CoalescingWriter<PendingSave> writer) {
         this.path = path;
+        this.writer = writer;
     }
 
     /** Test seam: an in-memory store with no backing file (load/save are no-ops). */
     GlobalLifeStore() {
         this(null);
+    }
+
+    /** Test seam: load {@code path} into this store, as {@link #get(MinecraftServer)} does. */
+    GlobalLifeStore loadForTest() {
+        load();
+        return this;
     }
 
     public static GlobalLifeStore get(MinecraftServer server) {
@@ -200,7 +220,7 @@ public final class GlobalLifeStore {
     }
 
     public boolean hasAnyForPlayer(UUID id) {
-        for (DeathRecord r : history) {
+        for (DeathRecord r : history.snapshot()) {
             if (r.uuid().equals(id)) {
                 return true;
             }
@@ -262,7 +282,7 @@ public final class GlobalLifeStore {
      */
     public void append(UUID id, String name, int carriage, String difficulty, CompoundTag snapshot,
                        List<CompoundTag> friends, List<CompoundTag> pets, List<CompoundTag> drafts) {
-        history.add(new DeathRecord(nextId++, id, name, carriage, difficulty == null ? "" : difficulty,
+        history.append(new DeathRecord(nextId++, id, name, carriage, difficulty == null ? "" : difficulty,
             snapshot.copy(), copyAll(friends), copyAll(pets), copyAll(drafts)));
         save();
     }
@@ -328,13 +348,13 @@ public final class GlobalLifeStore {
         if (carriage == NO_CARRIAGE) {
             return List.of();
         }
-        return eligible(history, carriage, CARRIAGE_RADIUS, difficulty);
+        return eligible(history.snapshot(), carriage, CARRIAGE_RADIUS, difficulty);
     }
 
     /** Every death belonging to {@code id}, oldest→newest (a fresh list; records are shared). */
     public List<DeathRecord> recordsForPlayer(UUID id) {
         List<DeathRecord> out = new ArrayList<>();
-        for (DeathRecord r : history) {
+        for (DeathRecord r : history.snapshot()) {
             if (r.uuid().equals(id)) {
                 out.add(r);
             }
@@ -344,7 +364,7 @@ public final class GlobalLifeStore {
 
     /** Every recorded death, oldest→newest (a fresh list; records are shared). */
     public List<DeathRecord> allRecords() {
-        return new ArrayList<>(history);
+        return new ArrayList<>(history.snapshot());
     }
 
     /** The newest {@code limit} deaths, newest first (a fresh list; records are shared). */
@@ -486,7 +506,7 @@ public final class GlobalLifeStore {
         for (int i = 0; i < list.size(); i++) {
             out.add(NbtCompat.compoundAt(list, i));
         }
-        return out;
+        return List.copyOf(out);
     }
 
     private void load() {
@@ -500,7 +520,9 @@ public final class GlobalLifeStore {
             /*CompoundTag tag = NbtIo.readCompressed(path.toFile());*/
             //?}
             if (tag != null) {
-                nextId = read(tag, history);
+                List<DeathRecord> loaded = new ArrayList<>();
+                nextId = read(tag, loaded);
+                loaded.forEach(history::append);
             }
         } catch (IOException | RuntimeException e) {
             LOGGER.error("[playermob] failed to load global lives from {}", path, e);
@@ -508,22 +530,17 @@ public final class GlobalLifeStore {
     }
 
     /**
-     * Snapshot the log and queue it for the IO thread. Only the tag build runs here; gzip + disk IO —
-     * which grows with the history and stalled the server thread for seconds on a big log — runs on
-     * {@link #WRITER}. {@link #write} deep-copies every stored tag, so the queued tag is owned outright
-     * by the worker and the live {@code history} is never read off-thread.
+     * Queue an O(1) snapshot of the log for the IO thread. Everything that grows with the history — the
+     * NBT build ({@link #write}), gzip and disk IO — runs on the worker, so a death costs the server
+     * thread the same on a 60,000-life log as on an empty one. The snapshot never changes after this
+     * (see {@link SnapshotLog}) and stored records are never mutated, so the worker can read it while the
+     * server thread keeps appending.
      */
     private void save() {
         if (path == null) {
             return;
         }
-        try {
-            CompoundTag tag = new CompoundTag();
-            write(tag, history, nextId);
-            WRITER.submit(new PendingSave(path, tag));
-        } catch (RuntimeException e) {
-            LOGGER.error("[playermob] failed to snapshot global lives for {}", path, e);
-        }
+        writer.submit(new PendingSave(path, history.snapshot(), nextId));
     }
 
     /**
@@ -534,16 +551,21 @@ public final class GlobalLifeStore {
         WRITER.flush();
     }
 
-    /** IO-thread sink: write to a sibling temp file, then rename over the store so a crash mid-write can't corrupt it. */
-    private static void writeAtomically(PendingSave save) {
+    /**
+     * IO-thread sink: build the NBT from the snapshot, write it to a sibling temp file, then rename over
+     * the store so a crash mid-write can't corrupt it.
+     */
+    static void writeAtomically(PendingSave save) {
         Path target = save.path();
         Path tmp = target.resolveSibling(target.getFileName() + TMP_SUFFIX);
         try {
+            CompoundTag tag = new CompoundTag();
+            write(tag, save.records(), save.nextId());
             Files.createDirectories(target.getParent());
             //? if >=1.21.1 {
-            NbtIo.writeCompressed(save.tag(), tmp);
+            NbtIo.writeCompressed(tag, tmp);
             //?} else {
-            /*NbtIo.writeCompressed(save.tag(), tmp.toFile());*/
+            /*NbtIo.writeCompressed(tag, tmp.toFile());*/
             //?}
             try {
                 Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
@@ -572,7 +594,7 @@ public final class GlobalLifeStore {
             return;
         }
         for (Map.Entry<UUID, CompoundTag> e : legacyLife.entrySet()) {
-            history.add(new DeathRecord(nextId++, e.getKey(), legacyName.get(e.getKey()), NO_CARRIAGE, e.getValue()));
+            history.append(new DeathRecord(nextId++, e.getKey(), legacyName.get(e.getKey()), NO_CARRIAGE, e.getValue()));
         }
         save();
         LOGGER.info("[playermob] imported {} legacy past life/lives into the global death log", legacyLife.size());
