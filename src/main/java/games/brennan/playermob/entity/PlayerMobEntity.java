@@ -2710,7 +2710,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     /**
      * Choose a gift for {@code recipient} from <em>what the mob is actually
      * carrying</em>, its value scaled by how loved they are ({@link GiftPolicy}).
-     * Tries the richest rung the feeling+friendliness allows and cascades down
+     * A player-shaped recipient loved past {@link GiftPolicy#totemsKept} is handed a
+     * Totem of Undying first — a spare above 9, even the last one at 10. Otherwise
+     * tries the richest rung the feeling+friendliness allows and cascades down
      * ({@link GiftPolicy#cascadeFrom}):
      * <ul>
      *   <li><b>UPGRADE</b> — a backpack gear piece that upgrades the recipient
@@ -2732,8 +2734,15 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
                 return draft;
             }
         }
-        GiftPolicy.GiftTier top = GiftPolicy.tierFor(feelingToward(recipient), friendliness());
+        float feeling = feelingToward(recipient);
         boolean playerShaped = recipient instanceof Player || recipient instanceof PlayerMobEntity;
+        if (playerShaped) {
+            ItemStack totem = takeTotem(GiftPolicy.totemsKept(feeling));
+            if (!totem.isEmpty()) {
+                return totem;
+            }
+        }
+        GiftPolicy.GiftTier top = GiftPolicy.tierFor(feeling, friendliness());
         for (GiftPolicy.GiftTier rung : GiftPolicy.cascadeFrom(top)) {
             ItemStack gift = switch (rung) {
                 case UPGRADE -> playerShaped ? takeBestGearUpgradeFor(recipient) : ItemStack.EMPTY;
@@ -2892,6 +2901,23 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         }
         int blockSlot = ItemPickupPolicy.smallestBuildingBlockSlot(inventory);
         return blockSlot < 0 ? ItemStack.EMPTY : inventory.removeItemNoUpdate(blockSlot);
+    }
+
+    /**
+     * One Totem of Undying from the backpack, but only while more than {@code kept}
+     * are carried (see {@link GiftPolicy#totemsKept}); {@link ItemStack#EMPTY} otherwise.
+     */
+    private ItemStack takeTotem(int kept) {
+        int total = 0;
+        int slot = -1;
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            ItemStack stack = inventory.getItem(i);
+            if (stack.is(Items.TOTEM_OF_UNDYING)) {
+                total += stack.getCount();
+                slot = i;
+            }
+        }
+        return slot >= 0 && total > kept ? inventory.removeItem(slot, 1) : ItemStack.EMPTY;
     }
 
     /** Total food items carried (count, not nutrition) — drives the surplus-food gift. */

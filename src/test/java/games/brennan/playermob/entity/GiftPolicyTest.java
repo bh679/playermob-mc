@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import static games.brennan.playermob.entity.GiftPolicy.GiftTier;
 import static games.brennan.playermob.entity.GiftPolicy.cascadeFrom;
 import static games.brennan.playermob.entity.GiftPolicy.tierFor;
+import static games.brennan.playermob.entity.GiftPolicy.totemsKept;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -38,6 +39,25 @@ class GiftPolicyTest {
         assertEquals(GiftTier.UPGRADE, tierFor(10.0F, 10));
         assertEquals(GiftTier.SPARE, tierFor(10.0F, 7));    // friendliness one short → not upgrade
         assertEquals(GiftTier.SPARE, tierFor(8.9F, 10));    // feeling one short → not upgrade
+    }
+
+    @Test
+    void noTotemAtOrBelowNine() {
+        assertEquals(GiftPolicy.NO_TOTEM, totemsKept(0.0F));
+        assertEquals(GiftPolicy.NO_TOTEM, totemsKept(7.0F));
+        assertEquals(GiftPolicy.NO_TOTEM, totemsKept(9.0F));   // exactly 9 is not "above 9"
+    }
+
+    @Test
+    void spareTotemAboveNine() {
+        assertEquals(1, totemsKept(9.1F));
+        assertEquals(1, totemsKept(9.99F));
+    }
+
+    @Test
+    void lastTotemOnlyAtFullLove() {
+        assertEquals(0, totemsKept(FeelingRecord.MAX));
+        assertEquals(0, totemsKept(10.0F));
     }
 
     @Test
