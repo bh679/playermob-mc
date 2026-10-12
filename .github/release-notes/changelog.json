@@ -1113,6 +1113,22 @@
       "released": true,
       "released_in": "v0.108.0",
       "released_at": "2026-10-12T05:20:53Z"
+    },
+    {
+      "id": "forge-1211-load-fix",
+      "version": "0.109.0",
+      "type": "fix",
+      "title": "PlayerMob loads on Forge 1.21.1 again",
+      "summary": "The Forge 1.21.1 version of PlayerMob crashed during startup, so the mod never loaded on Forge 1.21.1 servers or clients. It now loads normally, and spawn eggs (including the personality eggs) register correctly.",
+      "highlights": [
+        "Fixed the Forge 1.21.1 startup crash (NoSuchMethodException: PlayerMobForge.<init>())",
+        "Fixed a spawn-egg registration crash on Forge 1.21.1 that surfaced after the startup fix"
+      ],
+      "pr": 227,
+      "date": "2026-10-12",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
