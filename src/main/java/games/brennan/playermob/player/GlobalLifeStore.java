@@ -13,13 +13,16 @@ import net.minecraft.server.level.ServerLevel;
 import org.slf4j.Logger;
 
 import java.io.IOException;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Executors;
 
 /**
  * Global, cross-world log of <em>every</em> completed player life — the
@@ -37,7 +40,9 @@ import java.util.UUID;
  *
  * <p><b>Lifecycle.</b> Lazy-load on first {@link #get(MinecraftServer)}, single-slot
  * cache keyed by the running server (a new world/restart reloads the same file).
- * Mutations write through to disk. The per-player "used this life" sessions are
+ * Mutations update memory immediately and queue a coalesced, atomic (temp + rename) write
+ * on a background IO thread; {@link #flushPendingWrites()} forces it out on every server
+ * world save and shutdown (see {@code MinecraftServerSaveMixin}). The per-player "used this life" sessions are
  * transient (held on the per-server instance) so a new world resets them; a death
  * also clears that player's session. Server-thread only.</p>
  */
@@ -122,6 +127,20 @@ public final class GlobalLifeStore {
         return d == null || d.isEmpty() ? LEGACY_DIFFICULTY : d;
     }
 
+    private static final String TMP_SUFFIX = ".tmp";
+
+    /** A fully built, owned tag bound for {@code path} — handed to the IO thread and never touched again here. */
+    private record PendingSave(Path path, CompoundTag tag) {}
+
+    /** One daemon IO thread for every store save; bursts of deaths coalesce into one write of the latest log. */
+    private static final CoalescingWriter<PendingSave> WRITER = new CoalescingWriter<>(
+        Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "PlayerMob-life-store-io");
+            t.setDaemon(true);
+            return t;
+        }),
+        GlobalLifeStore::writeAtomically);
+
     private static MinecraftServer cachedServer;
     private static GlobalLifeStore cached;
 
@@ -142,6 +161,8 @@ public final class GlobalLifeStore {
         if (cached != null && cachedServer == server) {
             return cached;
         }
+        // The previous server's last save may still be queued — land it before re-reading the file.
+        flushPendingWrites();
         //? if >=1.21.1 {
         GlobalLifeStore store = new GlobalLifeStore(server.getServerDirectory().resolve(DIR).resolve(FILE));
         //?} else {
@@ -486,21 +507,51 @@ public final class GlobalLifeStore {
         }
     }
 
+    /**
+     * Snapshot the log and queue it for the IO thread. Only the tag build runs here; gzip + disk IO —
+     * which grows with the history and stalled the server thread for seconds on a big log — runs on
+     * {@link #WRITER}. {@link #write} deep-copies every stored tag, so the queued tag is owned outright
+     * by the worker and the live {@code history} is never read off-thread.
+     */
     private void save() {
         if (path == null) {
             return;
         }
         try {
-            Files.createDirectories(path.getParent());
             CompoundTag tag = new CompoundTag();
             write(tag, history, nextId);
+            WRITER.submit(new PendingSave(path, tag));
+        } catch (RuntimeException e) {
+            LOGGER.error("[playermob] failed to snapshot global lives for {}", path, e);
+        }
+    }
+
+    /**
+     * Block until every queued save has reached disk. Called when the server saves its worlds (autosave,
+     * {@code /save-all}, shutdown) so a quit or crash after that point loses nothing.
+     */
+    public static void flushPendingWrites() {
+        WRITER.flush();
+    }
+
+    /** IO-thread sink: write to a sibling temp file, then rename over the store so a crash mid-write can't corrupt it. */
+    private static void writeAtomically(PendingSave save) {
+        Path target = save.path();
+        Path tmp = target.resolveSibling(target.getFileName() + TMP_SUFFIX);
+        try {
+            Files.createDirectories(target.getParent());
             //? if >=1.21.1 {
-            NbtIo.writeCompressed(tag, path);
+            NbtIo.writeCompressed(save.tag(), tmp);
             //?} else {
-            /*NbtIo.writeCompressed(tag, path.toFile());*/
+            /*NbtIo.writeCompressed(save.tag(), tmp.toFile());*/
             //?}
+            try {
+                Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+            }
         } catch (IOException | RuntimeException e) {
-            LOGGER.error("[playermob] failed to save global lives to {}", path, e);
+            LOGGER.error("[playermob] failed to save global lives to {}", target, e);
         }
     }
 
