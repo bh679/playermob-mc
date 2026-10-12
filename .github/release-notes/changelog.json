@@ -1129,6 +1129,22 @@
       "released": true,
       "released_in": "v0.109.0",
       "released_at": "2026-10-12T05:44:29Z"
+    },
+    {
+      "id": "life-store-o1-death-save",
+      "version": "0.110.0",
+      "type": "perf",
+      "title": "No more server stutter on death with a long life history",
+      "summary": "Every death records your life for future echoes. With a large history of past lives, saving that record still briefly froze the server on each death (around a fifth of a second with tens of thousands of lives). Deaths now cost the same tiny amount no matter how many lives are on record; all of the saving work happens in the background.",
+      "highlights": [
+        "Per-death server-thread cost no longer grows with the size of the global life log (lives.dat)",
+        "Save file format unchanged; existing life histories load as before"
+      ],
+      "pr": 229,
+      "date": "2026-10-12",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
