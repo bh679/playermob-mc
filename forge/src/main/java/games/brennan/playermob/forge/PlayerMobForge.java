@@ -74,8 +74,11 @@ public final class PlayerMobForge {
                 PlayerMobMenu.fromEntityId(windowId, inv, buf.readVarInt())));
 
     //? if >=1.21.1 {
-    public PlayerMobForge(IEventBus modBus) {
-        wire(modBus);
+    // Forge 52.x (1.21.1) constructs @Mod classes via a (FMLJavaModLoadingContext) or no-arg
+    // constructor — never an IEventBus one (that's NeoForge-style injection). Without this,
+    // FMLModContainer.constructMod throws NoSuchMethodException: PlayerMobForge.<init>().
+    public PlayerMobForge(net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext context) {
+        wire(context.getModEventBus());
     }
     //?} else {
     /*// Forge 47.x (1.20.1) constructs @Mod classes via the no-arg constructor and
@@ -106,32 +109,31 @@ public final class PlayerMobForge {
     }
 
     /**
-     * Builds the random spawn egg. On Forge 52.x (1.21.1) the entity type is already
-     * registered when the ITEM {@code RegisterEvent} fires, so the resolved type goes
-     * straight to the shared factory. On Forge 47.x (1.20.1) the ITEM event fires
-     * <em>before</em> ENTITY_TYPE, so {@code PLAYER_MOB.get()} would NPE during item
-     * registration — instead the egg is a {@code ForgeSpawnEggItem} backed by the
-     * {@code PLAYER_MOB} supplier, which resolves the type lazily at spawn time (issue #106).
+     * Builds the random spawn egg. On Forge — both 47.x (1.20.1) and 52.x (1.21.1) — the
+     * ITEM {@code RegisterEvent} fires <em>before</em> ENTITY_TYPE, so {@code PLAYER_MOB.get()}
+     * would NPE during item registration. The egg is a {@code ForgeSpawnEggItem} backed by
+     * the {@code PLAYER_MOB} supplier instead, which resolves the type lazily at spawn time
+     * (issue #106).
      */
     private static SpawnEggItem randomSpawnEgg() {
-        //? if >=1.21.1 {
-        return PlayerMobRegistry.createRandomSpawnEgg(PLAYER_MOB.get());
-        //?} else {
-        /*return new net.minecraftforge.common.ForgeSpawnEggItem(PLAYER_MOB,
+        return new net.minecraftforge.common.ForgeSpawnEggItem(PLAYER_MOB,
             PlayerMobRegistry.SPAWN_EGG_PRIMARY, PlayerMobRegistry.SPAWN_EGG_SECONDARY,
-            new Item.Properties());*/
-        //?}
+            new Item.Properties());
     }
 
     /**
      * Builds an archetype spawn egg, pinning its two trait values via {@code entity_data}.
-     * Same 47.x-vs-52.x split as {@link #randomSpawnEgg()}: on 1.20.1 the lazy
-     * {@code ForgeSpawnEggItem} stamps the trait NBT under the vanilla {@code "EntityTag"}
-     * key in {@code getDefaultInstance}, mirroring the 1.20.1 path in {@code RegistryCompat}.
+     * Lazy {@code ForgeSpawnEggItem} for the same reason as {@link #randomSpawnEgg()}. On
+     * 1.21.1 the traits ride the {@code ENTITY_DATA} component (as in {@code RegistryCompat});
+     * on 1.20.1 they're stamped under the vanilla {@code "EntityTag"} key in
+     * {@code getDefaultInstance}, mirroring the 1.20.1 path in {@code RegistryCompat}.
      */
     private static SpawnEggItem archetypeSpawnEgg(Archetype archetype) {
         //? if >=1.21.1 {
-        return PlayerMobRegistry.createArchetypeSpawnEgg(PLAYER_MOB.get(), archetype);
+        return new net.minecraftforge.common.ForgeSpawnEggItem(PLAYER_MOB,
+            PlayerMobRegistry.SPAWN_EGG_PRIMARY, archetype.eggColor,
+            new Item.Properties().component(net.minecraft.core.component.DataComponents.ENTITY_DATA,
+                net.minecraft.world.item.component.CustomData.of(PlayerMobRegistry.archetypeEggData(archetype))));
         //?} else {
         /*net.minecraft.nbt.CompoundTag entityData = PlayerMobRegistry.archetypeEggData(archetype);
         return new net.minecraftforge.common.ForgeSpawnEggItem(PLAYER_MOB,
