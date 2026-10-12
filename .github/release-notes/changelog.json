@@ -1145,6 +1145,19 @@
       "released": true,
       "released_in": "v0.110.0",
       "released_at": "2026-10-12T07:16:22Z"
+    },
+    {
+      "id": "totem-gifts-loved-ones",
+      "version": "0.111.0",
+      "type": "feat",
+      "title": "Loved friends may share a Totem of Undying",
+      "summary": "A PlayerMob that adores you might now part with a Totem of Undying.",
+      "highlights": [],
+      "pr": 231,
+      "date": "2026-10-12",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
