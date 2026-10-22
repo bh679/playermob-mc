@@ -114,25 +114,78 @@ class ReincarnationSourcesTest {
     // ---- per-band cap (only the newest few are ever eligible) ----
 
     @Test
-    void pickFromConsidersOnlyTheNewestFewPerSource() {
-        // 8 lives oldest->newest; only the newest MAX_CANDIDATES_PER_BAND should ever be picked.
-        ReincarnationRecord[] lives = new ReincarnationRecord[8];
-        for (int i = 0; i < lives.length; i++) {
+    void bandCapIsTwenty() {
+        // Pinned: DiscordPresence fetches this many remote lives per band, and a cap of 5 let quiet
+        // bands run dry once a player had met their newest few lives.
+        assertEquals(20, ReincarnationSources.MAX_CANDIDATES_PER_BAND);
+    }
+
+    /** {@code count} lives oldest->newest, keyed by their index. */
+    private static ReincarnationRecord[] lives(int count) {
+        ReincarnationRecord[] lives = new ReincarnationRecord[count];
+        for (int i = 0; i < count; i++) {
             lives[i] = rec("dp", Integer.toString(i), 0);
         }
+        return lives;
+    }
+
+    @Test
+    void pickFromConsidersOnlyTheNewestFewPerSource() {
+        // Five more lives than the cap, oldest->newest; only the newest MAX_CANDIDATES_PER_BAND should ever be picked.
+        int kept = ReincarnationSources.MAX_CANDIDATES_PER_BAND;
+        ReincarnationRecord[] lives = lives(kept + 5);
         ReincarnationSource s = source(lives);
         ReincarnationQuery q = ReincarnationQuery.byCarriage(0, null);
 
+        // One shared RNG: the first draw of sequentially seeded RNGs is too correlated to cover the range.
+        RandomSource rng = RandomSource.create(42);
         Set<String> picked = new HashSet<>();
-        for (int seed = 0; seed < 400; seed++) {
+        for (int draw = 0; draw < 2000; draw++) {
             picked.add(ReincarnationSources.pickFrom(
-                List.of(s), NO_SERVER, q, Set.of(), null, RandomSource.create(seed)).key());
+                List.of(s), NO_SERVER, q, Set.of(), null, rng).key());
         }
-        int kept = ReincarnationSources.MAX_CANDIDATES_PER_BAND;
-        for (int i = 0; i < lives.length - kept; i++) { // oldest (8 - 5 = 3) must never surface
+        for (int i = 0; i < lives.length - kept; i++) { // the oldest 5 must never surface
             assertTrue(!picked.contains(Integer.toString(i)), "older-than-newest-" + kept + " life " + i + " leaked in");
         }
         assertTrue(picked.contains(Integer.toString(lives.length - 1)), "the newest life should still surface");
+    }
+
+    @Test
+    void capIsAppliedAfterTheMetFilterSoAUsedBandStillOffersOlderLives() {
+        // The newest `cap` lives have all been met this life: the band must fall back to the older ones,
+        // not come up empty (the exhaustion that thinned remote echoes when few fresh deaths arrived).
+        int kept = ReincarnationSources.MAX_CANDIDATES_PER_BAND;
+        ReincarnationRecord[] lives = lives(kept + 5);
+        Set<String> seen = new HashSet<>();
+        for (int i = 5; i < lives.length; i++) {
+            seen.add(lives[i].id());
+        }
+        ReincarnationRecord pick = ReincarnationSources.pickFrom(List.of(source(lives)), NO_SERVER,
+            ReincarnationQuery.byCarriage(0, null), seen, null, RandomSource.create(7));
+        assertTrue(pick != null && Integer.parseInt(pick.key()) < 5, "an unmet older life should be picked");
+    }
+
+    @Test
+    void aFullBandStillLeansOnItsNewestLives() {
+        // Widening the band must not let older lives swamp the pick: the newest quarter wins most draws.
+        int kept = ReincarnationSources.MAX_CANDIDATES_PER_BAND;
+        ReincarnationSource s = source(lives(kept));
+        ReincarnationQuery q = ReincarnationQuery.byCarriage(0, null);
+        int newestQuarter = 0;
+        int oldestQuarter = 0;
+        int draws = 4000;
+        RandomSource rng = RandomSource.create(42);
+        for (int draw = 0; draw < draws; draw++) {
+            int i = Integer.parseInt(ReincarnationSources.pickFrom(
+                List.of(s), NO_SERVER, q, Set.of(), null, rng).key());
+            if (i >= kept - kept / 4) {
+                newestQuarter++;
+            } else if (i < kept / 4) {
+                oldestQuarter++;
+            }
+        }
+        assertTrue(newestQuarter > draws / 2, "newest quarter should win most picks, got " + newestQuarter);
+        assertTrue(oldestQuarter < draws / 50, "oldest quarter should be rare, got " + oldestQuarter);
     }
 
     // ---- resilience ----

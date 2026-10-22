@@ -1158,6 +1158,18 @@
       "released": true,
       "released_in": "v0.111.0",
       "released_at": "2026-10-12T10:31:36Z"
+    },
+    {
+      "id": "wider-echo-band",
+      "version": "0.112.0",
+      "type": "fix",
+      "title": "Echoes stay varied",
+      "summary": "Echoes from other worlds no longer run dry when few new deaths arrive nearby: each stretch of track now draws on a wider set of past lives, still favouring the most recent.",
+      "highlights": [],
+      "date": "2026-10-22",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }

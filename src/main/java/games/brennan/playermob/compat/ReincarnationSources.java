@@ -40,12 +40,15 @@ public final class ReincarnationSources {
     private static final Logger LOGGER = LogUtils.getLogger();
 
     /**
-     * Most candidates a single source contributes per query (the newest are kept). A ±band rarely
-     * sees more than a handful of echoes before the player moves on, and the recency weighting makes
-     * anything past the newest few negligible anyway — so this bounds per-spawn work, and lets a
-     * network-backed source cache/fetch only this many lives per band rather than the whole log.
+     * Most candidates a single source contributes per query (the newest are kept). The cap is applied
+     * <em>after</em> the met / Free Play / difficulty filters, so a band the player has partly used up
+     * still offers its newest <em>eligible</em> lives rather than running dry. It bounds per-spawn work
+     * and tells a network-backed source how many lives per band are worth fetching. Wide enough that a
+     * quiet band (few fresh deaths) isn't exhausted by one session; {@link ReincarnationWeighting}'s
+     * positional recency curve still keeps the pick on the newer lives (at 20, the newest quarter
+     * carries about two thirds of the weight and the oldest a few hundredths of a percent).
      */
-    static final int MAX_CANDIDATES_PER_BAND = 5;
+    static final int MAX_CANDIDATES_PER_BAND = 20;
 
     private static volatile List<ReincarnationSource> sources = List.of();
 
