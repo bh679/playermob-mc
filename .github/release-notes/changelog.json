@@ -1167,9 +1167,9 @@
       "summary": "Echoes from other worlds no longer run dry when few new deaths arrive nearby: each stretch of track now draws on a wider set of past lives, still favouring the most recent.",
       "highlights": [],
       "date": "2026-10-22",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.112.0",
+      "released_at": "2026-10-24T03:01:29Z"
     }
   ]
 }
