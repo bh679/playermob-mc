@@ -4353,7 +4353,8 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     *///?}
         for (int i = 0; i < this.inventory.getContainerSize(); i++) {
             ItemStack stack = this.inventory.getItem(i);
-            if (stack.isEmpty()) {
+            // Curse of Vanishing destroys the item, as it does a player's pack and this mob's gear.
+            if (stack.isEmpty() || ItemDataCompat.hasVanishingCurse(stack)) {
                 continue;
             }
             this.dropAtLocation(stack);
@@ -4504,7 +4505,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * gate, always pass the random roll, and skip the durability-damage step.
      * Curse of Vanishing items are still destroyed (vanilla's
      * {@code PREVENT_EQUIPMENT_DROP} check upstream) — also exactly like a
-     * player.</p>
+     * player. The backpack half of the death drop skips them the same way.</p>
      *
      * <p>Surgical by design: only the drop-chance <em>method</em> is
      * overridden. The backing {@code handDropChances}/{@code armorDropChances}

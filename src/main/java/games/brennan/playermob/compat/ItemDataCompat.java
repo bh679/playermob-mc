@@ -294,6 +294,24 @@ public final class ItemDataCompat {
         //?}
     }
 
+    /**
+     * True if the stack carries Curse of Vanishing, i.e. it is destroyed instead of dropped when its
+     * holder dies. 1.21.1 asks the {@code PREVENT_EQUIPMENT_DROP} enchantment effect (the same test
+     * vanilla's {@code Mob.dropCustomDeathLoot} and {@code Player.destroyVanishingCursedItems} use);
+     * 1.20.1 reads the legacy curse check.
+     */
+    public static boolean hasVanishingCurse(ItemStack stack) {
+        if (stack.isEmpty()) {
+            return false;
+        }
+        //? if >=1.21.1 {
+        return net.minecraft.world.item.enchantment.EnchantmentHelper.has(stack,
+            net.minecraft.world.item.enchantment.EnchantmentEffectComponents.PREVENT_EQUIPMENT_DROP);
+        //?} else {
+        /*return net.minecraft.world.item.enchantment.EnchantmentHelper.hasVanishingCurse(stack);*/
+        //?}
+    }
+
     // ---- STACK IDENTITY ---------------------------------------------------
 
     /**
