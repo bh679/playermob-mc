@@ -5,13 +5,17 @@ import net.minecraft.core.Direction;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.util.Mth;
 import net.minecraft.world.Container;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.EntityBlock;
 import net.minecraft.world.level.block.FallingBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.AABB;
 
 import java.util.Map;
@@ -33,7 +37,7 @@ import java.util.Set;
  * <ol>
  *   <li><b>Backpack</b> — {@link #firstPlaceableSlot} returns a placeable
  *       {@link net.minecraft.world.item.BlockItem} stack the mob already carries
- *       (reuses {@link ItemPickupPolicy#isBuildingBlock}).</li>
+ *       ({@link #isBridgeBlock}: a full-cube, single-part block with no block entity).</li>
  *   <li><b>Harvest nearby</b> — {@link #isEasyBlock} marks cheap, placeable
  *       blocks worth breaking for materials: hand-breakable dirt/sand/gravel/clay
  *       and {@link BlockTags#LOGS}, plus stone-class blocks <em>only</em> when the
@@ -49,19 +53,46 @@ public final class BlockSourcePolicy {
 
     // ---- Backpack placeable blocks ---------------------------------------
 
-    /** True if the backpack holds any placeable building block. */
+    /**
+     * True if {@code stack} is a block the mob may put down as a bridge/stair step: a
+     * {@link ItemPickupPolicy#isBuildingBlock building block} whose default state is a full-cube
+     * collision shape, that is a single block (not one half of a bed/door/tall plant), carries no
+     * block entity, and isn't TNT.
+     *
+     * <p>Recovery places {@code defaultBlockState()} straight into the world, so anything else
+     * goes wrong: a bed lands as a lone foot half, a door as a bottom half, a chest/furnace as an
+     * empty shell, and torches, slabs, carpets or panes give no footing to climb. Those stay
+     * pick-up-able ({@link ItemPickupPolicy#isBuildingBlock} still hoards them); they just never
+     * become steps. Same context-free full-cube test as {@link EndCrystalCombatPolicy#isCoverBlock}.</p>
+     */
+    public static boolean isBridgeBlock(ItemStack stack) {
+        if (stack == null || stack.isEmpty() || !ItemPickupPolicy.isBuildingBlock(stack)) {
+            return false;
+        }
+        Block block = ((BlockItem) stack.getItem()).getBlock();
+        if (block instanceof EntityBlock || block == Blocks.TNT) {
+            return false;
+        }
+        BlockState state = block.defaultBlockState();
+        if (state.hasProperty(BlockStateProperties.BED_PART)
+                || state.hasProperty(BlockStateProperties.DOUBLE_BLOCK_HALF)) {
+            return false;
+        }
+        return state.isCollisionShapeFullBlock(EmptyBlockGetter.INSTANCE, BlockPos.ZERO);
+    }
+
+    /** True if the backpack holds any placeable bridge block. */
     public static boolean hasPlaceableBlock(Container backpack) {
         return firstPlaceableSlot(backpack) >= 0;
     }
 
     /**
-     * Slot index of the first placeable building block in {@code backpack}, or
-     * {@code -1} if it holds none. "Placeable" reuses
-     * {@link ItemPickupPolicy#isBuildingBlock} (backed by a {@code BlockItem}).
+     * Slot index of the first placeable bridge block in {@code backpack}, or
+     * {@code -1} if it holds none (see {@link #isBridgeBlock}).
      */
     public static int firstPlaceableSlot(Container backpack) {
         for (int i = 0; i < backpack.getContainerSize(); i++) {
-            if (ItemPickupPolicy.isBuildingBlock(backpack.getItem(i))) {
+            if (isBridgeBlock(backpack.getItem(i))) {
                 return i;
             }
         }
@@ -70,7 +101,7 @@ public final class BlockSourcePolicy {
 
     /**
      * Effective number of bridge blocks {@code backpack} can supply: each placeable
-     * building block counts once, and each craftable log counts as 4 (it crafts into
+     * bridge block counts once, and each craftable log counts as 4 (it crafts into
      * 4 planks). Lets recovery work out whether it has gathered enough to climb back
      * on before it stops collecting.
      */
@@ -80,7 +111,7 @@ public final class BlockSourcePolicy {
             ItemStack stack = backpack.getItem(i);
             if (isCraftableLog(stack)) {
                 total += stack.getCount() * 4;
-            } else if (ItemPickupPolicy.isBuildingBlock(stack)) {
+            } else if (isBridgeBlock(stack)) {
                 total += stack.getCount();
             }
         }
