@@ -1186,6 +1186,21 @@
       "released": true,
       "released_in": "v0.113.0",
       "released_at": "2026-10-24T05:29:18Z"
+    },
+    {
+      "id": "recovery-no-chunk-load",
+      "version": "0.114.0",
+      "type": "fix",
+      "title": "No more freezes when a PlayerMob swims for shore",
+      "summary": "A PlayerMob that fell into deep water could freeze the whole server for up to a minute while it looked for a bank to climb out on. It now only searches ground the world already has loaded, so the game keeps running and the mob still finds its way back.",
+      "highlights": [
+        "Fixed long server freezes while a PlayerMob swims back to the train"
+      ],
+      "pr": 237,
+      "date": "2026-10-24",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }

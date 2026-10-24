@@ -11,6 +11,7 @@ import games.brennan.playermob.entity.MiningMath;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.SectionPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.tags.BlockTags;
@@ -23,7 +24,9 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.pathfinder.Node;
 import net.minecraft.world.level.pathfinder.Path;
 import net.minecraft.world.phys.AABB;
@@ -996,7 +999,8 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         BlockPos.MutableBlockPos c = new BlockPos.MutableBlockPos();
         for (int i = 0; i <= SHORE_SURFACE_SCAN; i++) {
             c.set(feet.getX(), feet.getY() + i, feet.getZ());
-            if (level.getBlockState(c).getFluidState().isEmpty()) {
+            BlockState s = loadedState(level, c);
+            if (s == null || s.getFluidState().isEmpty()) {
                 return feet.getY() + i;
             }
         }
@@ -1595,7 +1599,8 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
                 // There must be something to STAND on up there. hasDryHeadroom only proves the cells
                 // above are clear, which thin air satisfies perfectly — so without this a point ten
                 // blocks up in the air beside an elevated track counted as a landing.
-                if (level.getBlockState(top.below()).getCollisionShape(level, top.below()).isEmpty()) continue;
+                BlockState under = loadedState(level, top.below());
+                if (under == null || under.getCollisionShape(level, top.below()).isEmpty()) continue;
                 if (!hasDryHeadroom(level, top.below())) continue;   // and room to stand in
                 probes++;
                 Path path = mob.getNavigation().createPath(top, 0);
@@ -1636,7 +1641,8 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         // waitForOpening a block and a half BELOW the deck, too low to board from.
         for (int y = mob.blockPosition().getY() - 2; y <= deckY + 1; y++) {
             c.set(x, y, z);
-            if (level.getBlockState(c).is(BlockTags.CLIMBABLE)) {
+            BlockState s = loadedState(level, c);
+            if (s != null && s.is(BlockTags.CLIMBABLE)) {
                 if (run == 0) runStart = y;
                 run++;
                 if (run >= CLIMB_MIN_LADDER && y >= deckY - 1) {
@@ -1810,7 +1816,8 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      */
     private boolean isStandableStep(BlockPos pos) {
         if (!(mob.level() instanceof ServerLevel level)) return false;
-        BlockState s = level.getBlockState(pos);
+        BlockState s = loadedState(level, pos);
+        if (s == null) return false;
         // Step-up feasibility is a HEIGHT question, not a block-type one. The old test here was
         // isCollisionShapeFullBlock, which is true only of a 1x1x1 cube — so every slab and every
         // stairs block failed it, and DT's slab/stairs spiral staircases were invisible as steps.
@@ -1985,8 +1992,8 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
             foot.relative(dir),             // step toward carriage, foot height
         };
         for (BlockPos p : cells) {
-            BlockState s = level.getBlockState(p);
-            if (s.isAir() || BlockSourcePolicy.isProtectedTrackBlock(s)) continue;
+            BlockState s = loadedState(level, p);
+            if (s == null || s.isAir() || BlockSourcePolicy.isProtectedTrackBlock(s)) continue;
             if (box.intersects(new AABB(p))) continue;                  // never the carriage itself
             if (!BlockSourcePolicy.isClearableObstruction(s)) continue;
             level.destroyBlock(p, /* dropBlock */ true, mob);           // clear the path (drops + FX)
@@ -2191,7 +2198,8 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
                     cursor.set(origin.getX() + dx, origin.getY() + dy, origin.getZ() + dz);
                     if (cursor.equals(feetBelow)) continue;        // never mine our own footing
                     if (cursor.getY() < minGatherY) continue;      // don't dig down away from the deck
-                    BlockState state = level.getBlockState(cursor);
+                    BlockState state = loadedState(level, cursor);
+                    if (state == null) continue;
                     // Hand-breakable (dirt/sand/gravel/logs), or stone-class when the mob
                     // holds a correct tool — both yield placeable bridge blocks.
                     boolean gatherable = BlockSourcePolicy.isHandBreakable(state)
@@ -2215,7 +2223,8 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         BlockPos.MutableBlockPos n = new BlockPos.MutableBlockPos();
         for (net.minecraft.core.Direction d : net.minecraft.core.Direction.values()) {
             n.set(pos.getX() + d.getStepX(), pos.getY() + d.getStepY(), pos.getZ() + d.getStepZ());
-            if (!level.getBlockState(n).isCollisionShapeFullBlock(level, n)) return true;
+            BlockState s = loadedState(level, n);
+            if (s != null && !s.isCollisionShapeFullBlock(level, n)) return true;
         }
         return false;
     }
@@ -2394,13 +2403,30 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         BlockPos.MutableBlockPos c = new BlockPos.MutableBlockPos();
         for (int y = topY; y >= bottomY; y--) {
             c.set(x, y, z);
-            BlockState s = level.getBlockState(c);
+            BlockState s = loadedState(level, c);
+            if (s == null) return null;                       // chunk not loaded — never load it here
             if (!s.getFluidState().isEmpty()) return null;   // column goes under water/lava — not dry
             if (!s.getCollisionShape(level, c).isEmpty()) {
                 return c.immutable();           // stand on top of the first standable block
             }
         }
         return null;
+    }
+
+    /**
+     * The block at {@code pos}, or {@code null} if its chunk isn't already fully loaded. Every scan
+     * in this goal reads through here instead of {@code Level.getBlockState}, which loads (and if
+     * need be GENERATES) a missing chunk synchronously on the server thread. The shore search
+     * reaches {@link #SHORE_RING_MAX} blocks out, past the loaded border, and one such read once
+     * froze a Dungeon Train server for ~57 s while the chunk queued behind worldgen. Callers treat
+     * {@code null} as "nothing usable here", the same as a water column, so the mob only ever
+     * picks targets inside terrain the server already has.
+     */
+    private static BlockState loadedState(Level level, BlockPos pos) {
+        if (level.isOutsideBuildHeight(pos)) return Blocks.VOID_AIR.defaultBlockState();
+        LevelChunk chunk = level.getChunkSource().getChunkNow(
+            SectionPos.blockToSectionCoord(pos.getX()), SectionPos.blockToSectionCoord(pos.getZ()));
+        return chunk == null ? null : chunk.getBlockState(pos);
     }
 
     /**
@@ -2412,7 +2438,8 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
     private boolean hasDryHeadroom(ServerLevel level, BlockPos footing) {
         for (int i = 1; i <= SHORE_HEADROOM; i++) {
             BlockPos a = footing.above(i);
-            BlockState s = level.getBlockState(a);
+            BlockState s = loadedState(level, a);
+            if (s == null) return false;
             if (!s.getCollisionShape(level, a).isEmpty()) return false;
             if (!s.getFluidState().isEmpty()) return false;
         }
