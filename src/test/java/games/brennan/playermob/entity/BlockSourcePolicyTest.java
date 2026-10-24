@@ -198,4 +198,59 @@ class BlockSourcePolicyTest {
         assertEquals(Direction.SOUTH,
             BlockSourcePolicy.horizontalDirToward(new BlockPos(4, 63, 8), carriage), "nearer the +Z face");
     }
+
+    // MC 26.x folds the 16 dyed variants into a ColorCollection (Items.BED.orange()).
+    private static net.minecraft.world.item.Item orangeBed() {
+        //? if >=26 {
+        /*return Items.BED.orange();
+        *///?} else {
+        return Items.ORANGE_BED;
+        //?}
+    }
+
+    private static net.minecraft.world.item.Item whiteCarpet() {
+        //? if >=26 {
+        /*return Items.CARPET.white();
+        *///?} else {
+        return Items.WHITE_CARPET;
+        //?}
+    }
+
+    @Test
+    void bridgeBlocksAreFullSingleCubes() {
+        assertTrue(BlockSourcePolicy.isBridgeBlock(new ItemStack(Items.COBBLESTONE)), "cobblestone");
+        assertTrue(BlockSourcePolicy.isBridgeBlock(new ItemStack(Items.OAK_PLANKS)), "planks");
+        assertTrue(BlockSourcePolicy.isBridgeBlock(new ItemStack(Items.DIRT)), "dirt");
+        assertTrue(BlockSourcePolicy.isBridgeBlock(new ItemStack(Items.SAND)), "sand (gravity, jump-stacked)");
+        assertTrue(BlockSourcePolicy.isBridgeBlock(new ItemStack(Items.OAK_LOG)), "log");
+        assertTrue(BlockSourcePolicy.isBridgeBlock(new ItemStack(Items.CRAFTING_TABLE)), "crafting table");
+    }
+
+    @Test
+    void bedsDoorsAndOtherNonStepsAreNotBridgeBlocks() {
+        assertFalse(BlockSourcePolicy.isBridgeBlock(new ItemStack(orangeBed())), "bed (half placed)");
+        assertFalse(BlockSourcePolicy.isBridgeBlock(new ItemStack(Items.OAK_DOOR)), "door (half placed)");
+        assertFalse(BlockSourcePolicy.isBridgeBlock(new ItemStack(Items.SUNFLOWER)), "tall flower");
+        assertFalse(BlockSourcePolicy.isBridgeBlock(new ItemStack(Items.TORCH)), "torch");
+        assertFalse(BlockSourcePolicy.isBridgeBlock(new ItemStack(Items.CHEST)), "chest (block entity)");
+        assertFalse(BlockSourcePolicy.isBridgeBlock(new ItemStack(Items.FURNACE)), "furnace (block entity)");
+        assertFalse(BlockSourcePolicy.isBridgeBlock(new ItemStack(Items.OAK_SLAB)), "slab");
+        assertFalse(BlockSourcePolicy.isBridgeBlock(new ItemStack(Items.GLASS_PANE)), "pane");
+        assertFalse(BlockSourcePolicy.isBridgeBlock(new ItemStack(whiteCarpet())), "carpet");
+        assertFalse(BlockSourcePolicy.isBridgeBlock(new ItemStack(Items.SHULKER_BOX)), "shulker box");
+        assertFalse(BlockSourcePolicy.isBridgeBlock(new ItemStack(Items.TNT)), "tnt");
+        assertFalse(BlockSourcePolicy.isBridgeBlock(new ItemStack(Items.DIAMOND)), "not a block");
+    }
+
+    @Test
+    void bedsAddNothingToBridgeCountOrSlot() {
+        SimpleContainer pack = new SimpleContainer(4);
+        pack.setItem(0, new ItemStack(orangeBed(), 1));
+        pack.setItem(1, new ItemStack(Items.OAK_DOOR, 3));
+        assertEquals(0, BlockSourcePolicy.bridgeBlockCount(pack), "no bridge blocks");
+        assertEquals(-1, BlockSourcePolicy.firstPlaceableSlot(pack), "no placeable slot");
+        pack.setItem(2, new ItemStack(Items.COBBLESTONE, 5));
+        assertEquals(5, BlockSourcePolicy.bridgeBlockCount(pack), "only the cobble counts");
+        assertEquals(2, BlockSourcePolicy.firstPlaceableSlot(pack), "skips bed and door");
+    }
 }

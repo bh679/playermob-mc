@@ -7,7 +7,6 @@ import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.compat.TrainEnvironment;
 import games.brennan.playermob.entity.BlockSourcePolicy;
 import games.brennan.playermob.entity.EquipmentEvaluator;
-import games.brennan.playermob.entity.ItemPickupPolicy;
 import games.brennan.playermob.entity.MiningMath;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.core.BlockPos;
@@ -2006,7 +2005,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         int gravitySlot = -1;
         for (int i = 0; i < inv.getContainerSize(); i++) {
             ItemStack s = inv.getItem(i);
-            if (!ItemPickupPolicy.isBuildingBlock(s) || BlockSourcePolicy.isCraftableLog(s)) continue;
+            if (!BlockSourcePolicy.isBridgeBlock(s) || BlockSourcePolicy.isCraftableLog(s)) continue;
             BlockState bs = ((BlockItem) s.getItem()).getBlock().defaultBlockState();
             if (BlockSourcePolicy.isGravityBlock(bs)) {
                 if (gravitySlot < 0) gravitySlot = i;
@@ -2027,6 +2026,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         if (!mobGriefingOn()) { trace("place REJECT mobGriefing-off @{}", pos); return false; }
         ItemStack stack = mob.getInventory().getItem(slot);
         if (!(stack.getItem() instanceof BlockItem blockItem)) { trace("place REJECT slot-not-block @{} slot={}", pos, slot); return false; }
+        if (!BlockSourcePolicy.isBridgeBlock(stack)) { trace("place REJECT not-bridge-block @{} item={}", pos, stack.getItem()); return false; }
 
         BlockState existing = level.getBlockState(pos);
         if (!existing.canBeReplaced()) { trace("place REJECT not-replaceable @{} existing={}", pos, existing.getBlock()); return false; }

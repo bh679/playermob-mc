@@ -1170,6 +1170,22 @@
       "released": true,
       "released_in": "v0.112.0",
       "released_at": "2026-10-24T03:01:29Z"
+    },
+    {
+      "id": "bridge-blocks-full-cubes",
+      "version": "0.113.0",
+      "type": "fix",
+      "title": "Player Mobs build with proper blocks",
+      "summary": "Player Mobs climbing back onto the train no longer build their steps out of beds, doors, torches, slabs or chests. They now only use solid full blocks, and still carry anything else they pick up.",
+      "highlights": [
+        "No more half beds or half doors left beside the track",
+        "Mobs with no suitable blocks gather some or craft planks instead"
+      ],
+      "pr": 235,
+      "date": "2026-10-24",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
