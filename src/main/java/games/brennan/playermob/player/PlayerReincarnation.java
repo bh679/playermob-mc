@@ -341,13 +341,15 @@ public final class PlayerReincarnation {
      * offhand into the matching slots, then the rest of their pack into the mob's
      * backpack until it's full. Food goes in first (so the mob can eat); the rest
      * follows in inventory order — hotbar first, which naturally favours the tools
-     * a player keeps to hand over deep-storage clutter.
+     * a player keeps to hand over deep-storage clutter. Curse of Vanishing items are
+     * left behind: vanilla destroys them on the player's death, so the echo must not
+     * carry a copy forward.
      */
     private static void applyGear(PlayerMobEntity ghost, ServerPlayer player) {
         for (EquipmentSlot slot : WORN_SLOTS) {
             ItemStack worn = player.getItemBySlot(slot);
             // A draft in hand rides the shelf (captureDrafts), not the echo's hand — never both.
-            if (!worn.isEmpty() && !isShelvedDraft(worn)) {
+            if (!worn.isEmpty() && !isShelvedDraft(worn) && !ItemDataCompat.hasVanishingCurse(worn)) {
                 ghost.setItemSlot(slot, worn.copy());
             }
         }
@@ -371,6 +373,9 @@ public final class PlayerReincarnation {
             ItemStack stack = items.get(i);
             if (stack.isEmpty() || isShelvedDraft(stack)) {
                 continue; // drafts ride the shelf, not the backpack (see captureDrafts)
+            }
+            if (ItemDataCompat.hasVanishingCurse(stack)) {
+                continue; // vanished with the player's death, so the echo never inherits it
             }
             (ItemDataCompat.isFood(stack) ? foods : other).add(stack.copy());
         }
