@@ -1201,6 +1201,21 @@
       "released": false,
       "released_in": null,
       "released_at": null
+    },
+    {
+      "id": "vanishing-curse-playermobs",
+      "version": "0.115.0",
+      "type": "fix",
+      "title": "Curse of Vanishing now works on PlayerMobs",
+      "summary": "Items with Curse of Vanishing in a PlayerMob's backpack now vanish when it dies, the same as a player's, instead of dropping. A player's cursed items also vanish with them on death, so an echo of that player no longer comes back carrying them.",
+      "highlights": [
+        "Cursed items in a PlayerMob's backpack vanish on death",
+        "Echoes no longer inherit the cursed items their player died with"
+      ],
+      "date": "2026-10-24",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
