@@ -1198,9 +1198,9 @@
       ],
       "pr": 237,
       "date": "2026-10-24",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.115.0",
+      "released_at": "2026-10-24T11:16:50Z"
     },
     {
       "id": "enchantment-fix",
@@ -1210,9 +1210,9 @@
       "summary": "Fixed an enchantment not behaving the same on PlayerMobs as it does on players.",
       "highlights": [],
       "date": "2026-10-24",
-      "released": false,
-      "released_in": null,
-      "released_at": null,
+      "released": true,
+      "released_in": "v0.115.0",
+      "released_at": "2026-10-24T11:16:50Z",
       "pr": 239
     }
   ]
