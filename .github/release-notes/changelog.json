@@ -1214,6 +1214,19 @@
       "released_in": "v0.115.0",
       "released_at": "2026-10-24T11:16:50Z",
       "pr": 239
+    },
+    {
+      "id": "piglin-traders-left-in-peace",
+      "version": "0.116.0",
+      "type": "fix",
+      "title": "PlayerMobs are calmer around traders",
+      "summary": "PlayerMobs no longer pick fights with piglin traders. Only the most aggressive PlayerMobs will still attack one, and the most timid just keep a wary eye on it instead of running away. A trader that attacks first still gets a fight.",
+      "highlights": [],
+      "pr": 241,
+      "date": "2026-10-25",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
