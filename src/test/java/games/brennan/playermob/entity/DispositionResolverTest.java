@@ -84,6 +84,18 @@ class DispositionResolverTest {
         assertEquals(Reaction.IGNORE, resolve(10, 4, 0, TargetCategory.VILLAGERS, 1));
     }
 
+    // ---- trader mobs: only a very aggressive mob attacks; else villager rule, never fled ----
+
+    @Test
+    void traderMobsFoughtOnlyWhenVeryAggressive() {
+        assertEquals(Reaction.FIGHT, resolve(9, 0, 5, TargetCategory.TRADER_MOBS, 2));
+        assertEquals(Reaction.FIGHT, resolve(10, 9, 5, TargetCategory.TRADER_MOBS, 2));
+        assertEquals(Reaction.IGNORE, resolve(8, 0, 5, TargetCategory.TRADER_MOBS, 1));   // aggressive, not very
+        assertEquals(Reaction.IGNORE, resolve(5, 4, 5, TargetCategory.TRADER_MOBS, 1));
+        assertEquals(Reaction.GREET, resolve(8, 5, 5, TargetCategory.TRADER_MOBS, 2));
+        assertEquals(Reaction.IGNORE, resolve(0, 0, 5, TargetCategory.TRADER_MOBS, 1));   // timid: no flee
+    }
+
     // ---- players: low-friendliness two-ring ----
 
     @Test

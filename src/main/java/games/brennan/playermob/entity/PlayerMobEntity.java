@@ -2141,7 +2141,8 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // (it's now targeting us). Only then is it engaged proactively — as a hostile
         // — so a brave mob fights the aggroed piglin and a timid one flees it. Being
         // hit without a prior target is still covered by the hurt/retaliation path.
-        if (category == TargetCategory.NEUTRAL_MOBS
+        // A trader mob that turns on this mob is treated the same way.
+        if ((category == TargetCategory.NEUTRAL_MOBS || category == TargetCategory.TRADER_MOBS)
                 && entity instanceof Mob mob && mob.getTarget() == this) {
             category = TargetCategory.HOSTILE_MOBS;
         }

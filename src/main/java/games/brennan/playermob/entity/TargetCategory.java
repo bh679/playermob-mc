@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity;
 
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.NeutralMob;
 import net.minecraft.world.entity.animal.Animal;
@@ -10,6 +11,8 @@ import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.npc.AbstractVillager;
 //?}
 import net.minecraft.world.entity.player.Player;
+
+import java.util.Set;
 
 /**
  * The groups of entities a {@link PlayerMobEntity} reacts to. The mob's numeric
@@ -38,11 +41,29 @@ public enum TargetCategory {
      */
     NEUTRAL_MOBS,
 
+    /**
+     * Traders whose class is a hostile mob ({@link #TRADER_MOB_IDS} — Piglin Proliferation's
+     * Piglin Traveler): they never attack unless hit, so only a very aggressive mob picks a fight
+     * with one; the rest treat it like a villager. See {@link DispositionResolver#resolve}.
+     */
+    TRADER_MOBS,
+
     /** Passive farm/wild animals ({@link Animal}). */
     ANIMALS,
 
     /** Villagers + wandering traders ({@link AbstractVillager}). */
     VILLAGERS;
+
+    /**
+     * Entity ids of {@link #TRADER_MOBS}. Matched by registry id, so the owning mod is not a
+     * dependency — an id that isn't installed simply never matches.
+     */
+    public static final Set<String> TRADER_MOB_IDS = Set.of("piglinproliferation:piglin_traveler");
+
+    /** Whether {@code entity} is one of the {@link #TRADER_MOB_IDS}. */
+    public static boolean isTraderMob(LivingEntity entity) {
+        return TRADER_MOB_IDS.contains(BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString());
+    }
 
     /**
      * Classify a candidate entity into a category, or {@code null} if it belongs
@@ -57,7 +78,8 @@ public enum TargetCategory {
      * mobs like wolves/bees, which are {@code Animal}, stay {@link #ANIMALS}) and
      * before the {@code Enemy} check (so a neutral {@code Enemy} like a zombified
      * piglin classifies as {@link #NEUTRAL_MOBS}, not {@link #HOSTILE_MOBS}); the
-     * hostile check last so a future hostile animal still classifies as an animal.
+     * hostile check last so a future hostile animal still classifies as an animal. Trader mobs
+     * are checked ahead of the neutral/hostile checks, since their class is a hostile one.
      */
     public static TargetCategory classify(LivingEntity entity) {
         if (entity instanceof PlayerMobEntity) return PLAYERS; // own kind — never creative/spectator
@@ -68,6 +90,7 @@ public enum TargetCategory {
         }
         if (entity instanceof AbstractVillager) return VILLAGERS;
         if (entity instanceof Animal) return ANIMALS;
+        if (isTraderMob(entity)) return TRADER_MOBS;
         if (entity instanceof NeutralMob) return NEUTRAL_MOBS;
         if (entity instanceof Enemy) return HOSTILE_MOBS;
         return null;
