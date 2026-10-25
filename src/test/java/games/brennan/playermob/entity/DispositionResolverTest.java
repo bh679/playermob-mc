@@ -84,6 +84,20 @@ class DispositionResolverTest {
         assertEquals(Reaction.IGNORE, resolve(10, 4, 0, TargetCategory.VILLAGERS, 1));
     }
 
+    // ---- trader mobs: only the extremes react — fight at 10, wary at 0; else villager rule ----
+
+    @Test
+    void traderMobsOnlyExtremesReact() {
+        assertEquals(Reaction.FIGHT, resolve(10, 0, 5, TargetCategory.TRADER_MOBS, 2));
+        assertEquals(Reaction.FIGHT, resolve(10, 9, 5, TargetCategory.TRADER_MOBS, 2));   // even if friendly
+        assertEquals(Reaction.IGNORE, resolve(9, 0, 5, TargetCategory.TRADER_MOBS, 1));
+        assertEquals(Reaction.IGNORE, resolve(8, 4, 5, TargetCategory.TRADER_MOBS, 1));
+        assertEquals(Reaction.GREET, resolve(5, 5, 5, TargetCategory.TRADER_MOBS, 2));
+        assertEquals(Reaction.IGNORE, resolve(1, 0, 5, TargetCategory.TRADER_MOBS, 1));
+        assertEquals(Reaction.WATCH, resolve(0, 0, 5, TargetCategory.TRADER_MOBS, 1));    // wary, never flees
+        assertEquals(Reaction.WATCH, resolve(0, 9, 5, TargetCategory.TRADER_MOBS, 1));    // even if friendly
+    }
+
     // ---- players: low-friendliness two-ring ----
 
     @Test
