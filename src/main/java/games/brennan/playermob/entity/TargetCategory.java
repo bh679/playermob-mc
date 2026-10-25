@@ -44,7 +44,7 @@ public enum TargetCategory {
     /**
      * Traders whose class is a hostile mob ({@link #TRADER_MOB_IDS} — Piglin Proliferation's
      * Piglin Traveler): they never attack unless hit, so only the most aggressive mob picks a
-     * fight with one and only the most timid flees it; the rest treat it like a villager. See
+     * fight with one and only the most timid watches it warily; the rest treat it like a villager. See
      * {@link DispositionResolver#resolve}.
      */
     TRADER_MOBS,

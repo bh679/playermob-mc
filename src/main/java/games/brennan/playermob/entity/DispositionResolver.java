@@ -14,8 +14,8 @@ package games.brennan.playermob.entity;
  *       entity re-treats one as hostile only once it actually turns on the mob; being
  *       hit is handled by the retaliation path, not here.</li>
  *   <li><b>Trader mobs</b> (hostile-class traders like the Piglin Traveler) → only the extremes
- *       react on their own: fight at fight/flight {@link #FF_TRADER_FIGHT}, flee at
- *       {@link #FF_TRADER_FLEE}; everyone between is treated like a villager.</li>
+ *       react on their own: fight at fight/flight {@link #FF_TRADER_FIGHT}, watch it warily
+ *       (never flee) at {@link #FF_TRADER_WARY}; everyone between is treated like a villager.</li>
  *   <li><b>Animals / villagers</b> → greet if friendly, else ignore (never proactively
  *       attacked; hunger-hunting is a separate goal).</li>
  *   <li><b>Players / PlayerMobs</b>:
@@ -43,8 +43,8 @@ public final class DispositionResolver {
     static final int FF_FIGHT = 5;
     /** Fight/flight ≥ this (the maximum) is the only one that proactively attacks a trader mob. */
     static final int FF_TRADER_FIGHT = DispositionTraits.MAX;
-    /** Fight/flight ≤ this (the minimum) is the only one that proactively flees a trader mob. */
-    static final int FF_TRADER_FLEE = DispositionTraits.MIN;
+    /** Fight/flight ≤ this (the minimum) is the only one wary of a trader mob — it watches, never flees. */
+    static final int FF_TRADER_WARY = DispositionTraits.MIN;
     /** Friendliness ≥ this is "friendly" (greets); below it is territorial. */
     static final int FRIEND_GREET = 5;
     /** Feeling ≤ this is "hate" — overrides friendliness into fight/flight. */
@@ -130,13 +130,13 @@ public final class DispositionResolver {
                 return Reaction.IGNORE;
             case TRADER_MOBS:
                 // A trader never starts a fight, so only the most aggressive mob attacks one
-                // and only the most timid runs from it; the rest treat it like a villager. One
-                // that turns on the mob is reclassified to HOSTILE_MOBS by the entity first.
+                // and only the most timid is wary of it (watches, never flees); the rest treat it
+                // like a villager. One that turns on the mob is reclassified to HOSTILE_MOBS first.
                 if (fightFlight >= FF_TRADER_FIGHT) {
                     return Reaction.FIGHT;
                 }
-                if (fightFlight <= FF_TRADER_FLEE) {
-                    return Reaction.FLEE;
+                if (fightFlight <= FF_TRADER_WARY) {
+                    return Reaction.WATCH;
                 }
                 return friendliness >= FRIEND_GREET ? Reaction.GREET : Reaction.IGNORE;
             case ANIMALS:
