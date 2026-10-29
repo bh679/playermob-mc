@@ -1229,15 +1229,12 @@
       "released_at": "2026-10-25T03:39:24Z"
     },
     {
-      "id": "crystal-rig-finishes-and-rides",
+      "id": "crystal-fix",
       "version": "0.117.0",
-      "type": "feat",
-      "title": "End Crystal bombers finish what they start",
-      "summary": "A PlayerMob setting up an End Crystal now always finishes the job. It no longer gets distracted halfway through and walks off, leaving a live crystal behind. Mods with moving platforms, like Dungeon Train's carriages, can now have the whole setup built on the platform so it travels with it.",
-      "highlights": [
-        "PlayerMobs no longer abandon a half-built End Crystal setup",
-        "End Crystal setups can be built on moving platforms"
-      ],
+      "type": "fix",
+      "title": "Crystal fix",
+      "summary": "Fixed an issue with End Crystals.",
+      "highlights": [],
       "pr": 243,
       "date": "2026-10-29",
       "released": false,
