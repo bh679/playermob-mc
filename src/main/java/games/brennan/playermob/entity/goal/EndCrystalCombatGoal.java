@@ -3,12 +3,13 @@ package games.brennan.playermob.entity.goal;
 import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.compat.EndCrystalCompat;
 import games.brennan.playermob.compat.GameRuleCompat;
+import games.brennan.playermob.compat.RigSurfaces;
+import games.brennan.playermob.compat.RigSurfaces.RigSurface;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.EndCrystalCombatPolicy;
 import games.brennan.playermob.entity.EndCrystalCombatPolicy.Layout;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.EquipmentSlot;
@@ -19,9 +20,9 @@ import net.minecraft.world.entity.boss.enderdragon.EndCrystal;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.EnumSet;
 
@@ -77,6 +78,11 @@ public final class EndCrystalCombatGoal extends Goal implements DescribableGoal 
     /** Staged-build cursor: 0=base, 1=crystal, 2=cover, 3=cover-top, {@code >=BUILD_STEPS}=done. */
     private int buildStep;
     private int buildDelay;
+    /**
+     * The grid the rig is built on, fixed when the build starts ({@link RigSurfaces}): the world, or the
+     * carriage the mob is riding. {@link #buildBase} and {@link #buildWall} are cells of it.
+     */
+    private RigSurface surface;
     private BlockPos buildBase;
     private BlockPos buildWall;
     private EndCrystal placedCrystal;
@@ -146,6 +152,7 @@ public final class EndCrystalCombatGoal extends Goal implements DescribableGoal 
         mob.getNavigation().stop();
         phase = Phase.DONE;
         placedCrystal = null;
+        surface = null; // don't keep a carriage alive between rigs
         // Hand the mob back a proper weapon; WeaponAwareAttackGoal re-selects ranged/melee on its next tick.
         mob.equipBestMeleeInHand();
     }
@@ -200,13 +207,14 @@ public final class EndCrystalCombatGoal extends Goal implements DescribableGoal 
         if (!EndCrystalCombatPolicy.hasKit(pack)) {
             return false;
         }
-        Level level = mob.level();
-        Layout site = firstBuildableSite(level, target);
+        RigSurface rigSurface = RigSurfaces.resolve(mob);
+        Layout site = firstBuildableSite(rigSurface, target);
         if (site == null) {
             return false; // no buildable bunker here in any facing — fall back to normal combat for a beat
         }
-        buildBase = site.base();
-        buildWall = site.wall();
+        surface = rigSurface;
+        buildBase = rigSurface.toLocal(site.base());
+        buildWall = rigSurface.toLocal(site.wall());
         buildStep = 0;
         buildDelay = 0;               // lay the first block on the next build tick
         placedCrystal = null;
@@ -220,10 +228,12 @@ public final class EndCrystalCombatGoal extends Goal implements DescribableGoal 
      * The first candidate rig site (best-aligned facing first) whose obsidian base is buildable and whose 2-tall cover
      * column is clear, or {@code null} if none of the mob's facings work here. Trying several facings — like the TNT
      * bomber's placement candidates — is what lets a kitted mob rig on real terrain instead of only open flats.
+     * Candidates are laid out in world cells around the mob and checked where they land on {@code rigSurface}.
      */
-    private Layout firstBuildableSite(Level level, LivingEntity target) {
+    private Layout firstBuildableSite(RigSurface rigSurface, LivingEntity target) {
         for (Layout candidate : EndCrystalCombatPolicy.placementCandidates(mob.blockPosition(), target.blockPosition())) {
-            if (canPlaceBase(level, candidate.base()) && canPlaceCover(level, candidate.wall())) {
+            if (canPlaceBase(rigSurface, rigSurface.toLocal(candidate.base()))
+                && canPlaceCover(rigSurface, rigSurface.toLocal(candidate.wall()))) {
                 return candidate;
             }
         }
@@ -237,7 +247,8 @@ public final class EndCrystalCombatGoal extends Goal implements DescribableGoal 
      * block is down it braces. {@link #canContinueToUse} keeps the goal alive so a started rig always finishes.
      */
     private void tickBuild() {
-        mob.getLookControl().setLookAt(buildBase.getX() + 0.5, buildBase.getY() + 1.0, buildBase.getZ() + 0.5);
+        Vec3 look = surface.toWorld(buildBase.getX() + 0.5, buildBase.getY() + 1.0, buildBase.getZ() + 0.5);
+        mob.getLookControl().setLookAt(look.x, look.y, look.z);
         if (buildDelay > 0) {
             buildDelay--;
             return;
@@ -252,55 +263,55 @@ public final class EndCrystalCombatGoal extends Goal implements DescribableGoal 
 
     /** Perform one placement of the staged build (see {@link #tickBuild()}), swinging as the mob sets each block. */
     private void performBuildStep(int step) {
-        Level level = mob.level();
         SimpleContainer pack = mob.getInventory();
         switch (step) {
             case 0 -> { // obsidian base
                 int obsidianSlot = EndCrystalCombatPolicy.firstObsidianSlot(pack);
                 if (obsidianSlot >= 0) {
-                    level.setBlock(buildBase, Blocks.OBSIDIAN.defaultBlockState(), 3);
+                    surface.setBlock(buildBase, Blocks.OBSIDIAN.defaultBlockState());
                     pack.removeItem(obsidianSlot, 1);
                 }
             }
             case 1 -> { // seat the crystal on the base
-                EndCrystal crystal = new EndCrystal(level,
-                    buildBase.getX() + 0.5, buildBase.getY() + 1, buildBase.getZ() + 0.5);
+                // Seated where the base is in the world right now; a surface that moves (a carriage) is the
+                // consuming mod's to carry the crystal along.
+                Vec3 seat = surface.toWorld(buildBase.getX() + 0.5, buildBase.getY() + 1, buildBase.getZ() + 0.5);
+                EndCrystal crystal = new EndCrystal(mob.level(), seat.x, seat.y, seat.z);
                 crystal.setShowBottom(false);
-                level.addFreshEntity(crystal);
+                mob.level().addFreshEntity(crystal);
                 placedCrystal = crystal;
             }
-            case 2 -> placeCover(level, pack, buildWall);          // ground-level cover
-            default -> placeCover(level, pack, buildWall.above()); // and one on top → a 2-tall wall
+            case 2 -> placeCover(pack, buildWall);          // ground-level cover
+            default -> placeCover(pack, buildWall.above()); // and one on top → a 2-tall wall
         }
         mob.swing(InteractionHand.MAIN_HAND);
     }
 
     /** A replaceable, floor-supported spot for the obsidian base with a clear block above it for the crystal to seat. */
-    private boolean canPlaceBase(Level level, BlockPos base) {
-        if (!level.getBlockState(base).canBeReplaced()) {
+    private static boolean canPlaceBase(RigSurface rigSurface, BlockPos base) {
+        if (!rigSurface.getBlockState(base).canBeReplaced()) {
             return false;
         }
-        BlockPos below = base.below();
-        if (!level.getBlockState(below).isFaceSturdy(level, below, Direction.UP)) {
+        if (!rigSurface.isSturdyFloor(base.below())) {
             return false;
         }
-        return level.getBlockState(base.above()).canBeReplaced(); // the crystal's own space
+        return rigSurface.getBlockState(base.above()).canBeReplaced(); // the crystal's own space
     }
 
     /** Both blocks of the 2-tall cover column must be replaceable (no support needed — they only occlude the blast). */
-    private boolean canPlaceCover(Level level, BlockPos wall) {
-        return level.getBlockState(wall).canBeReplaced()
-            && level.getBlockState(wall.above()).canBeReplaced();
+    private static boolean canPlaceCover(RigSurface rigSurface, BlockPos wall) {
+        return rigSurface.getBlockState(wall).canBeReplaced()
+            && rigSurface.getBlockState(wall.above()).canBeReplaced();
     }
 
     /** Place one cover block at {@code pos} from the best remaining cover slot (non-obsidian preferred), if any. */
-    private void placeCover(Level level, SimpleContainer pack, BlockPos pos) {
+    private void placeCover(SimpleContainer pack, BlockPos pos) {
         int slot = EndCrystalCombatPolicy.selectCoverSlot(pack);
         if (slot < 0) {
             return;
         }
         BlockState state = ((BlockItem) pack.getItem(slot).getItem()).getBlock().defaultBlockState();
-        level.setBlock(pos, state, 3);
+        surface.setBlock(pos, state);
         pack.removeItem(slot, 1);
     }
 
