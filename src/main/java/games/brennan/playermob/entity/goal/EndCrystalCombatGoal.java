@@ -157,6 +157,17 @@ public final class EndCrystalCombatGoal extends Goal implements DescribableGoal 
         mob.equipBestMeleeInHand();
     }
 
+    /**
+     * Not while rigging: a higher-priority goal taking MOVE mid-build or mid-brace would {@link #stop} this one and
+     * strand a live crystal with nobody left to punch it. On a train, Dungeon Train's dig goal does exactly that — it
+     * sees the mob stop closing on its target and starts digging through the mob's own cover. The rig is a few seconds
+     * at most; JUMP is not held, so {@code FloatGoal} still runs throughout.
+     */
+    @Override
+    public boolean isInterruptable() {
+        return phase != Phase.BUILD && phase != Phase.BRACE;
+    }
+
     @Override
     public boolean requiresUpdateEveryTick() {
         return true;
