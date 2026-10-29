@@ -1227,6 +1227,19 @@
       "released": true,
       "released_in": "v0.116.0",
       "released_at": "2026-10-25T03:39:24Z"
+    },
+    {
+      "id": "crystal-fix",
+      "version": "0.117.0",
+      "type": "fix",
+      "title": "Crystal fix",
+      "summary": "Fixed an issue with End Crystals.",
+      "highlights": [],
+      "pr": 243,
+      "date": "2026-10-29",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
