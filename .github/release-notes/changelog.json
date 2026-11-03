@@ -1254,6 +1254,7 @@
         "A quiver shows when it carries arrows",
         "Turn it off with /playermob carriedgear off or carriedGear=false in config/playermob.properties"
       ],
+      "pr": 245,
       "date": "2026-11-03",
       "released": false,
       "released_in": null,
