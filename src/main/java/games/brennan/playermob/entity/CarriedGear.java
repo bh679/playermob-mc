@@ -16,6 +16,7 @@ import net.minecraft.world.item.TridentItem;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Random;
 
 /**
  * Picks which of a PlayerMob's backpack items show on its body: up to two weapons crossed on the
@@ -73,17 +74,55 @@ public final class CarriedGear {
 
     private enum Kind { BACK_WEAPON, TOOL, SHIELD, BANNER, ARROWS, SPECTRAL_ARROWS, OTHER }
 
+    /** {@link #pick(List, int, long)} limit meaning "show every gear item". */
+    public static final int NO_LIMIT = -1;
+
     /**
      * Fills the body spots from {@code bag}, first come first served in slot order. Items past a
      * full spot are not shown; spectral arrows win the quiver over plain ones.
      */
     public static Loadout pick(List<ItemStack> bag) {
+        return pick(bag, NO_LIMIT, 0L);
+    }
+
+    /**
+     * As {@link #pick(List)}, but shows at most {@code limit} of the bag's gear items (each arrow
+     * stack counts as one), chosen by a shuffle seeded with {@code seed} — the same bag and seed
+     * always choose the same items. {@link #NO_LIMIT} shows them all; 0 shows nothing.
+     */
+    public static Loadout pick(List<ItemStack> bag, int limit, long seed) {
+        if (limit == 0) {
+            return NONE;
+        }
+        List<ItemStack> gear = new ArrayList<>();
+        for (ItemStack stack : bag) {
+            if (stack != null && !stack.isEmpty() && kindOf(stack) != Kind.OTHER) {
+                gear.add(stack);
+            }
+        }
+        if (limit > 0 && limit < gear.size()) {
+            // Choose which by position, then keep the chosen ones in bag order so spots still fill
+            // first come first served.
+            List<Integer> order = new ArrayList<>();
+            for (int i = 0; i < gear.size(); i++) {
+                order.add(i);
+            }
+            Collections.shuffle(order, new Random(seed));
+            List<Integer> chosen = new ArrayList<>(order.subList(0, limit));
+            Collections.sort(chosen);
+            List<ItemStack> kept = new ArrayList<>(limit);
+            for (int index : chosen) {
+                kept.add(gear.get(index));
+            }
+            gear = kept;
+        }
+        return fill(gear);
+    }
+
+    private static Loadout fill(List<ItemStack> gear) {
         List<ItemStack> spots = new ArrayList<>(NONE.spots());
         Quiver quiver = Quiver.NONE;
-        for (ItemStack stack : bag) {
-            if (stack == null || stack.isEmpty()) {
-                continue;
-            }
+        for (ItemStack stack : gear) {
             switch (kindOf(stack)) {
                 case BACK_WEAPON -> fillFirst(spots, stack, Spot.BACK_RIGHT, Spot.BACK_LEFT);
                 case TOOL -> fillFirst(spots, stack, Spot.HIP_RIGHT, Spot.HIP_LEFT);

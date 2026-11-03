@@ -342,6 +342,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private static final String TAG_SKIN_PLAYER_NAME = "SkinPlayerName";
     private static final String TAG_CLOSES_DOORS = "ClosesDoors";
     private static final String TAG_NATURAL_ORIGIN = "NaturalOrigin";
+    private static final String TAG_CARRIED_GEAR_LIMIT = "CarriedGearLimit";
     private static final String TAG_TRAIN_EXPLORE_DIR = "TrainExploreDir";
     private static final String TAG_ORDER_TIMEOUT = "OrderTimeout";
     private static final String TAG_ORDER_INTERRUPTIBLE = "OrderInterruptible";
@@ -445,6 +446,12 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * persistence rather than a synched DataTracker entry.</p>
      */
     private boolean closesDoors;
+
+    /**
+     * Most backpack gear items shown on the body — {@link CarriedGear#NO_LIMIT} (the default) shows
+     * them all. Set by a host mod or {@code /summon} NBT; which ones show is seeded by the UUID.
+     */
+    private int carriedGearLimit = CarriedGear.NO_LIMIT;
 
     /**
      * Whether this mob arrived in the world on its own (wild / chunk-generation / mob-spawner spawn, or a
@@ -1084,6 +1091,22 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     /** How often the server re-reads the backpack for the body display. */
     private static final int CARRIED_GEAR_REFRESH_TICKS = 10;
 
+    /**
+     * Most backpack gear items this mob shows on its body; {@link CarriedGear#NO_LIMIT} = all.
+     * Saved with the mob.
+     */
+    public int getCarriedGearLimit() {
+        return carriedGearLimit;
+    }
+
+    /**
+     * Server: cap how many backpack gear items show on the body ({@link CarriedGear#NO_LIMIT} for
+     * all, 0 for none). Which ones show is fixed per mob. Takes effect at the next refresh.
+     */
+    public void setCarriedGearLimit(int limit) {
+        this.carriedGearLimit = Math.max(CarriedGear.NO_LIMIT, limit);
+    }
+
     /** Client: the backpack items shown on the body, as last synced. */
     public CarriedGear.Loadout getCarriedGear() {
         List<ItemStack> spots = new ArrayList<>(DATA_CARRIED_SPOTS.size());
@@ -1101,7 +1124,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      */
     private void refreshCarriedGear() {
         CarriedGear.Loadout loadout = PlayerMobConfig.carriedGear()
-            ? CarriedGear.pick(backpackItems())
+            ? CarriedGear.pick(backpackItems(), this.carriedGearLimit, getUUID().getLeastSignificantBits())
             : CarriedGear.NONE;
         for (CarriedGear.Spot spot : CarriedGear.Spot.values()) {
             EntityDataAccessor<ItemStack> accessor = DATA_CARRIED_SPOTS.get(spot.ordinal());
@@ -4239,6 +4262,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         tag.putBoolean(TAG_SKIN_SLIM, isSkinSlim());
         tag.putBoolean(TAG_CLOSES_DOORS, this.closesDoors);
         tag.putBoolean(TAG_NATURAL_ORIGIN, this.naturalOrigin);
+        // Additive — only written once limited, so an unlimited mob round-trips no key.
+        if (this.carriedGearLimit != CarriedGear.NO_LIMIT) {
+            tag.putInt(TAG_CARRIED_GEAR_LIMIT, this.carriedGearLimit);
+        }
         // Per-mob order defaults (timeout / interruptibility) applied when a /playermob order command
         // omits the flags. Additive — a save without these keys reads back the 2-min / interruptible
         // defaults. The live pending order itself is transient and never persisted.
@@ -4324,6 +4351,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             setSkinSlim(NbtCompat.getBooleanOr(tag, TAG_SKIN_SLIM, false));
             skinExplicit = true;
         }
+        // Missing key ⇒ no limit ⇒ every carried gear item shows. Additive.
+        this.carriedGearLimit = Math.max(CarriedGear.NO_LIMIT,
+            NbtCompat.getIntOr(tag, TAG_CARRIED_GEAR_LIMIT, CarriedGear.NO_LIMIT));
         // Missing key (pre-door-feature saves) ⇒ false ⇒ leave-open. Additive.
         this.closesDoors = NbtCompat.getBooleanOr(tag, TAG_CLOSES_DOORS, false);
         // An explicit key always wins. Absent: keep what finalizeSpawn decided if it already ran (a spawn

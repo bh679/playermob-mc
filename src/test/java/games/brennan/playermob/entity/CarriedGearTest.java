@@ -113,6 +113,70 @@ class CarriedGearTest {
             () -> loadout.spots().set(0, ItemStack.EMPTY));
     }
 
+    private static int shownCount(CarriedGear.Loadout loadout) {
+        int count = loadout.quiver() == CarriedGear.Quiver.NONE ? 0 : 1;
+        for (CarriedGear.Spot spot : CarriedGear.Spot.values()) {
+            if (!loadout.at(spot).isEmpty()) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    // Six gear items that classify by class on every version, each with its own spot/quiver room:
+    // two back weapons, shield, banner, arrows — plus a third back weapon that can never show.
+    private static List<ItemStack> mixedBag() {
+        return bag(Items.BREAD, Items.BOW, Items.SHIELD, Items.COBBLESTONE, Items.TRIDENT,
+            whiteBanner(), Items.ARROW);
+    }
+
+    @Test
+    void limitZeroShowsNothing() {
+        assertEquals(CarriedGear.NONE, CarriedGear.pick(mixedBag(), 0, 42L));
+    }
+
+    @Test
+    void noLimitMatchesThePlainPick() {
+        List<ItemStack> bag = mixedBag();
+        CarriedGear.Loadout all = CarriedGear.pick(bag, CarriedGear.NO_LIMIT, 42L);
+        assertEquals(5, shownCount(all));
+        assertEquals(shownCount(CarriedGear.pick(bag)), shownCount(all));
+    }
+
+    @Test
+    void limitShowsExactlyThatManyGearItemsAndIgnoresJunk() {
+        List<ItemStack> bag = mixedBag();
+        for (long seed = 0; seed < 50; seed++) {
+            for (int limit = 1; limit <= 5; limit++) {
+                assertEquals(limit, shownCount(CarriedGear.pick(bag, limit, seed)),
+                    "limit " + limit + " seed " + seed);
+            }
+            assertEquals(5, shownCount(CarriedGear.pick(bag, 8, seed)), "limit above the gear count");
+        }
+    }
+
+    @Test
+    void sameSeedPicksTheSameItemsAndSeedsVary() {
+        List<ItemStack> bag = mixedBag();
+        CarriedGear.Loadout first = CarriedGear.pick(bag, 2, 7L);
+        CarriedGear.Loadout again = CarriedGear.pick(bag, 2, 7L);
+        for (CarriedGear.Spot spot : CarriedGear.Spot.values()) {
+            assertSame(first.at(spot).getItem(), again.at(spot).getItem(), spot.name());
+        }
+        assertEquals(first.quiver(), again.quiver());
+
+        java.util.Set<String> picks = new java.util.HashSet<>();
+        for (long seed = 0; seed < 64; seed++) {
+            CarriedGear.Loadout loadout = CarriedGear.pick(bag, 1, seed);
+            StringBuilder key = new StringBuilder(loadout.quiver().name());
+            for (CarriedGear.Spot spot : CarriedGear.Spot.values()) {
+                key.append(',').append(loadout.at(spot).getItem());
+            }
+            picks.add(key.toString());
+        }
+        assertTrue(picks.size() >= 4, "one-item picks should vary with the seed, got " + picks);
+    }
+
     @Test
     void quiverOrdinalRoundTripsAndRejectsJunk() {
         for (CarriedGear.Quiver quiver : CarriedGear.Quiver.values()) {
