@@ -1270,9 +1270,9 @@
         "Set CarriedGearLimit in /summon NBT: 0 hides the gear, 2 shows two random items, and leaving it out shows everything"
       ],
       "date": "2026-11-03",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.119.0",
+      "released_at": "2026-11-03T06:27:58Z"
     }
   ]
 }
