@@ -1259,6 +1259,20 @@
       "released": true,
       "released_in": "v0.118.0",
       "released_at": "2026-11-03T05:40:21Z"
+    },
+    {
+      "id": "carried-gear-limit",
+      "version": "0.119.0",
+      "type": "feat",
+      "title": "Choose how much gear a PlayerMob shows",
+      "summary": "Map makers and other mods can now limit how many of a PlayerMob's backpack items show on its body, from none to all. Which items show is picked at random once per mob and stays the same.",
+      "highlights": [
+        "Set CarriedGearLimit in /summon NBT: 0 hides the gear, 2 shows two random items, and leaving it out shows everything"
+      ],
+      "date": "2026-11-03",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
