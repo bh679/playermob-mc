@@ -193,6 +193,9 @@ public final class PlayerMobRenderer
 
         // Floating panel shown while the mob has a container open or is going through its gear.
         this.addLayer(new ActivityPanelLayer(this));
+
+        // Backpack weapons, tools, shield and banner worn on the body.
+        this.addLayer(new CarriedGearLayer(this));
     }
     *///?} else {
     public PlayerMobRenderer(EntityRendererProvider.Context ctx) {
@@ -221,6 +224,9 @@ public final class PlayerMobRenderer
 
         // Floating panel shown while the mob has a container open or is going through its gear.
         this.addLayer(new ActivityPanelLayer(this));
+
+        // Backpack weapons, tools, shield and banner worn on the body.
+        this.addLayer(new CarriedGearLayer(this, ctx.getItemInHandRenderer()));
     }
     //?}
 
@@ -268,6 +274,7 @@ public final class PlayerMobRenderer
         if (state instanceof PlayerMobModel.State mobState) {
             mobState.activityBlend = entity.getActivityBlend(partialTick);
             mobState.shownActivity = entity.getShownActivity();
+            extractCarriedGear(entity, mobState);
         }
         // Creative objective readout, stashed per-state (see the readouts map).
         Minecraft mc = Minecraft.getInstance();
@@ -280,6 +287,24 @@ public final class PlayerMobRenderer
             boolean focused = this.entityRenderDispatcher.crosshairPickEntity == entity;
             readouts.put(state, new ReadoutSnapshot(readout, focused));
         }
+    }
+
+    // Resolve the backpack gear's item models for CarriedGearLayer — 26.x layers draw from the
+    // state, not the entity.
+    private void extractCarriedGear(PlayerMobEntity entity, PlayerMobModel.State mobState) {
+        games.brennan.playermob.entity.CarriedGear.Loadout gear = entity.getCarriedGear();
+        for (games.brennan.playermob.entity.CarriedGear.Spot spot
+                : games.brennan.playermob.entity.CarriedGear.Spot.values()) {
+            this.itemModelResolver.updateForLiving(mobState.carriedItems[spot.ordinal()], gear.at(spot),
+                net.minecraft.world.item.ItemDisplayContext.FIXED, entity);
+        }
+        ItemStack arrow = switch (gear.quiver()) {
+            case ARROWS -> new ItemStack(net.minecraft.world.item.Items.ARROW);
+            case SPECTRAL -> new ItemStack(net.minecraft.world.item.Items.SPECTRAL_ARROW);
+            case NONE -> ItemStack.EMPTY;
+        };
+        this.itemModelResolver.updateForLiving(mobState.quiverArrow, arrow,
+            net.minecraft.world.item.ItemDisplayContext.FIXED, entity);
     }
 
     @Override

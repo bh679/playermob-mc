@@ -20,7 +20,7 @@ import net.minecraft.world.item.ItemStack;
  * components and the {@code minecraft:swords} / {@code minecraft:pickaxes} /
  * {@code minecraft:*_armor} item tags). {@code AxeItem}, {@code BowItem},
  * {@code CrossbowItem}, {@code ShieldItem}, and {@code TridentItem} all still
- * exist, so only the sword / pickaxe / armor tests move here.</p>
+ * exist, so only the sword / pickaxe / digging-tool / armor tests move here.</p>
  *
  * <p>On 1.20.1 / 1.21.1 these delegate to the original {@code instanceof}
  * checks — byte-identical to what shipped. On 26.x they read the vanilla item
@@ -48,6 +48,26 @@ public final class ItemKindCompat {
         /*return stack.getItem().builtInRegistryHolder().is(ItemTags.PICKAXES);
         *///?} else {
         return stack.getItem() instanceof net.minecraft.world.item.PickaxeItem;
+        //?}
+    }
+
+    /** True if the stack is a digging tool — pickaxe, axe, shovel or hoe (any material). */
+    public static boolean isDiggingTool(ItemStack stack) {
+        //? if >=26 {
+        /*var holder = stack.getItem().builtInRegistryHolder();
+        return holder.is(ItemTags.PICKAXES) || holder.is(ItemTags.AXES)
+            || holder.is(ItemTags.SHOVELS) || holder.is(ItemTags.HOES);
+        *///?} else {
+        return stack.getItem() instanceof net.minecraft.world.item.DiggerItem;
+        //?}
+    }
+
+    /** True if the stack is a spear — a 26.x weapon class; always false before it existed. */
+    public static boolean isSpear(ItemStack stack) {
+        //? if >=26 {
+        /*return stack.getItem().builtInRegistryHolder().is(ItemTags.SPEARS);
+        *///?} else {
+        return false;
         //?}
     }
 

@@ -225,6 +225,10 @@ public final class ReincarnateCommand {
                     .executes(ReincarnateCommand::queryActivityAnimations)
                     .then(Commands.literal("on").executes(ctx -> setActivityAnimations(ctx, true)))
                     .then(Commands.literal("off").executes(ctx -> setActivityAnimations(ctx, false))))
+                .then(Commands.literal("carriedgear")
+                    .executes(ReincarnateCommand::queryCarriedGear)
+                    .then(Commands.literal("on").executes(ctx -> setCarriedGear(ctx, true)))
+                    .then(Commands.literal("off").executes(ctx -> setCarriedGear(ctx, false))))
                 .then(Commands.literal("idleinventory")
                     .executes(ReincarnateCommand::queryIdleInventory)
                     .then(Commands.argument("seconds",
@@ -1271,6 +1275,23 @@ public final class ReincarnateCommand {
         PlayerMobConfig.setActivityAnimations(enabled);
         ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob activity animations "
             + (enabled ? "enabled" : "disabled") + " for this session."), false);
+        return 1;
+    }
+
+    /** {@code /playermob carriedgear} — report whether backpack gear shows on PlayerMobs' bodies. */
+    private static int queryCarriedGear(CommandContext<CommandSourceStack> ctx) {
+        boolean on = PlayerMobConfig.carriedGear();
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob carried gear is "
+            + (on ? "ON — weapons, tools, shields and banners in their backpacks show on their bodies"
+                  : "OFF") + "."), false);
+        return 1;
+    }
+
+    /** {@code /playermob carriedgear on|off} — show or hide backpack gear for this session. */
+    private static int setCarriedGear(CommandContext<CommandSourceStack> ctx, boolean enabled) {
+        PlayerMobConfig.setCarriedGear(enabled);
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob carried gear "
+            + (enabled ? "shown" : "hidden") + " for this session."), false);
         return 1;
     }
 
