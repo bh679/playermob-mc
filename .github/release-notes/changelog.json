@@ -1240,6 +1240,23 @@
       "released": true,
       "released_in": "v0.117.0",
       "released_at": "2026-10-29T07:32:43Z"
+    },
+    {
+      "id": "carried-gear-on-body",
+      "version": "0.118.0",
+      "type": "feat",
+      "title": "PlayerMobs wear the gear in their backpack",
+      "summary": "PlayerMobs now show what they carry. Weapons in a PlayerMob's backpack hang crossed on its back, a shield and banner ride over them, tools hang at its thighs and arrows stick up from a quiver at its shoulder, so you can size up a mob before you fight it.",
+      "highlights": [
+        "Swords, bows, crossbows, tridents and maces cross on the back",
+        "Shields and banners on the back, pickaxes, axes, shovels and hoes at the thighs",
+        "A quiver shows when it carries arrows",
+        "Turn it off with /playermob carriedgear off or carriedGear=false in config/playermob.properties"
+      ],
+      "date": "2026-11-03",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
