@@ -130,24 +130,24 @@ public final class CarriedGearLayer
     // FIXED-context items are half a block across; a back weapon wants to be about body length.
     private static final Placement[] PLACEMENTS = {
         // BACK_RIGHT: hilt over the right shoulder, blade down to the left hip.
-        new Placement(Part.BODY, 0.0F, 0.34F, 0.155F, 180.0F, 0.0F, 1.35F),
+        new Placement(Part.BODY, 0.0F, 0.36F, 0.155F, 180.0F, 0.0F, 1.05F),
         // BACK_LEFT: crossed over it, hilt over the left shoulder.
-        new Placement(Part.BODY, 0.0F, 0.34F, 0.175F, 90.0F, 0.0F, 1.35F),
+        new Placement(Part.BODY, 0.0F, 0.36F, 0.175F, 90.0F, 0.0F, 1.05F),
         // HIP_RIGHT: flat against the outside of the right thigh, head down.
-        new Placement(Part.RIGHT_LEG, -0.155F, 0.28F, 0.0F, 135.0F, 90.0F, 0.95F),
+        new Placement(Part.RIGHT_LEG, -0.15F, 0.16F, 0.0F, 135.0F, 90.0F, 0.8F),
         // HIP_LEFT: the mirror image on the left thigh.
-        new Placement(Part.LEFT_LEG, 0.155F, 0.28F, 0.0F, 135.0F, -90.0F, 0.95F),
+        new Placement(Part.LEFT_LEG, 0.15F, 0.16F, 0.0F, 135.0F, -90.0F, 0.8F),
         // SHIELD: flat on the back, over the slung weapons.
         new Placement(Part.BODY, 0.0F, 0.38F, 0.22F, 0.0F, 0.0F, 1.0F),
         // BANNER: standing up behind the shoulders, over the shield.
-        new Placement(Part.BODY, 0.0F, 0.05F, 0.27F, 0.0F, 0.0F, 1.1F),
+        new Placement(Part.BODY, 0.0F, 0.14F, 0.27F, 0.0F, 0.0F, 0.8F),
     };
 
     // Three arrows fanned up out of a quiver behind the left shoulder.
     private static final Placement[] QUIVER_ARROWS = {
-        new Placement(Part.BODY, 0.10F, 0.12F, 0.16F, 45.0F, 0.0F, 0.9F),
-        new Placement(Part.BODY, 0.13F, 0.12F, 0.165F, 35.0F, 0.0F, 0.9F),
-        new Placement(Part.BODY, 0.07F, 0.12F, 0.17F, 55.0F, 0.0F, 0.9F),
+        new Placement(Part.BODY, 0.07F, 0.12F, 0.16F, 45.0F, 0.0F, 0.75F),
+        new Placement(Part.BODY, 0.09F, 0.12F, 0.165F, 35.0F, 0.0F, 0.75F),
+        new Placement(Part.BODY, 0.05F, 0.12F, 0.17F, 55.0F, 0.0F, 0.75F),
     };
 
     //? if >=26 {
