@@ -1245,9 +1245,10 @@
       "id": "carried-gear-on-body",
       "version": "0.118.0",
       "type": "feat",
-      "title": "PlayerMobs wear the gear in their backpack",
-      "summary": "PlayerMobs now show what they carry. Weapons in a PlayerMob's backpack hang crossed on its back, a shield and banner ride over them, tools hang at its thighs and arrows stick up from a quiver at its shoulder, so you can size up a mob before you fight it.",
+      "title": "PlayerMobs wear the gear in their backpack, modded gear included",
+      "summary": "PlayerMobs now show what they carry. Weapons in a PlayerMob's backpack hang crossed on its back, a shield and banner ride over them, tools hang at its thighs and arrows stick up from a quiver at its shoulder. It works with gear from other mods too: modded swords, tools, bows, crossbows, tridents, shields, banners and arrows show up just like vanilla ones.",
       "highlights": [
+        "Modded weapons and tools are supported, as long as the mod builds them on Minecraft's own weapon and tool types",
         "Swords, bows, crossbows, tridents and maces cross on the back",
         "Shields and banners on the back, pickaxes, axes, shovels and hoes at the thighs",
         "A quiver shows when it carries arrows",
