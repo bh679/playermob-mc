@@ -397,6 +397,21 @@ class PlayerMobConfigTest {
     }
 
     @Test
+    void carriedGearDefaultOnAndToggleAtRuntime() {
+        assertTrue(PlayerMobConfig.DEFAULT_CARRIED_GEAR, "carried gear shows by default");
+        assertTrue(PlayerMobConfig.parse(new Properties()).carriedGear(), "missing key → default true");
+        assertFalse(PlayerMobConfig.parse(props("carriedGear", "false")).carriedGear());
+        try {
+            PlayerMobConfig.setCarriedGear(false);
+            assertFalse(PlayerMobConfig.carriedGear());
+            PlayerMobConfig.setCarriedGear(true);
+            assertTrue(PlayerMobConfig.carriedGear());
+        } finally {
+            PlayerMobConfig.setCarriedGear(PlayerMobConfig.DEFAULT_CARRIED_GEAR); // don't leak
+        }
+    }
+
+    @Test
     void idleInventorySecondsDefaultsParsesAndClamps() {
         assertEquals(45, PlayerMobConfig.DEFAULT_IDLE_INVENTORY_SECONDS);
         assertEquals(45, PlayerMobConfig.parse(new Properties()).idleInventorySeconds(), "missing key → default");

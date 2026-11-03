@@ -30,6 +30,21 @@ import net.minecraft.world.entity.LivingEntity;
     public static final class State extends AvatarRenderState {
         public float activityBlend;
         public MobActivity shownActivity = MobActivity.NONE;
+        // Backpack gear shown on the body, one per CarriedGear.Spot, plus the quiver's arrow —
+        // resolved in extractRenderState, drawn by CarriedGearLayer.
+        public final net.minecraft.client.renderer.item.ItemStackRenderState[] carriedItems =
+            newItemStates(games.brennan.playermob.entity.CarriedGear.Spot.values().length);
+        public final net.minecraft.client.renderer.item.ItemStackRenderState quiverArrow =
+            new net.minecraft.client.renderer.item.ItemStackRenderState();
+
+        private static net.minecraft.client.renderer.item.ItemStackRenderState[] newItemStates(int count) {
+            net.minecraft.client.renderer.item.ItemStackRenderState[] states =
+                new net.minecraft.client.renderer.item.ItemStackRenderState[count];
+            for (int i = 0; i < count; i++) {
+                states[i] = new net.minecraft.client.renderer.item.ItemStackRenderState();
+            }
+            return states;
+        }
     }
 
     public PlayerMobModel(ModelPart root, boolean slim) {

@@ -144,6 +144,7 @@ import net.minecraft.world.phys.Vec3;
 
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -255,6 +256,25 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      */
     private static final EntityDataAccessor<Byte> DATA_ACTIVITY =
         SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.BYTE);
+
+    /**
+     * Backpack items shown on the body, one per {@link CarriedGear.Spot} (in its order), picked
+     * server-side by {@link #refreshCarriedGear()} so the client can draw them — the client's own
+     * backpack is always empty. Network-only — never written to save NBT.
+     */
+    private static final List<EntityDataAccessor<ItemStack>> DATA_CARRIED_SPOTS = defineCarriedSpots();
+
+    /** {@link CarriedGear.Quiver} ordinal for the quiver on the back. Network-only. */
+    private static final EntityDataAccessor<Byte> DATA_CARRIED_QUIVER =
+        SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.BYTE);
+
+    private static List<EntityDataAccessor<ItemStack>> defineCarriedSpots() {
+        List<EntityDataAccessor<ItemStack>> accessors = new ArrayList<>();
+        for (int i = 0; i < CarriedGear.Spot.values().length; i++) {
+            accessors.add(SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.ITEM_STACK));
+        }
+        return List.copyOf(accessors);
+    }
 
     // ---- Constants --------------------------------------------------------
 
@@ -840,6 +860,8 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         builder.define(DATA_FEELINGS, "");
         builder.define(DATA_OBJECTIVES, "");
         builder.define(DATA_ACTIVITY, (byte) 0);
+        DATA_CARRIED_SPOTS.forEach(spot -> builder.define(spot, ItemStack.EMPTY));
+        builder.define(DATA_CARRIED_QUIVER, (byte) 0);
     }
     //?} else {
     /*@Override
@@ -855,6 +877,8 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         this.entityData.define(DATA_FEELINGS, "");
         this.entityData.define(DATA_OBJECTIVES, "");
         this.entityData.define(DATA_ACTIVITY, (byte) 0);
+        DATA_CARRIED_SPOTS.forEach(spot -> this.entityData.define(spot, ItemStack.EMPTY));
+        this.entityData.define(DATA_CARRIED_QUIVER, (byte) 0);
     }*///?}
 
     /**
@@ -1050,7 +1074,56 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         resolvePendingSkinPlayerName();
         if (level().isClientSide()) {
             tickActivityBlend();
+        } else if (tickCount % CARRIED_GEAR_REFRESH_TICKS == 0) {
+            refreshCarriedGear();
         }
+    }
+
+    // ---- Carried gear (backpack items shown on the body) -----------------
+
+    /** How often the server re-reads the backpack for the body display. */
+    private static final int CARRIED_GEAR_REFRESH_TICKS = 10;
+
+    /** Client: the backpack items shown on the body, as last synced. */
+    public CarriedGear.Loadout getCarriedGear() {
+        List<ItemStack> spots = new ArrayList<>(DATA_CARRIED_SPOTS.size());
+        for (EntityDataAccessor<ItemStack> spot : DATA_CARRIED_SPOTS) {
+            spots.add(this.entityData.get(spot));
+        }
+        return new CarriedGear.Loadout(List.copyOf(spots),
+            CarriedGear.Quiver.fromOrdinal(this.entityData.get(DATA_CARRIED_QUIVER)));
+    }
+
+    /**
+     * Server: re-pick the body display from the backpack and sync only what changed. Polled from
+     * {@link #tick()} rather than hooked to the container, because the AI edits backpack stacks in
+     * place without telling the container.
+     */
+    private void refreshCarriedGear() {
+        CarriedGear.Loadout loadout = PlayerMobConfig.carriedGear()
+            ? CarriedGear.pick(backpackItems())
+            : CarriedGear.NONE;
+        for (CarriedGear.Spot spot : CarriedGear.Spot.values()) {
+            EntityDataAccessor<ItemStack> accessor = DATA_CARRIED_SPOTS.get(spot.ordinal());
+            ItemStack next = loadout.at(spot);
+            // ItemStack has no equals(): compare by content, or every set would resync.
+            if (!ItemStack.matches(this.entityData.get(accessor), next)) {
+                this.entityData.set(accessor, next);
+            }
+        }
+        byte quiver = (byte) loadout.quiver().ordinal();
+        if (this.entityData.get(DATA_CARRIED_QUIVER) != quiver) {
+            this.entityData.set(DATA_CARRIED_QUIVER, quiver);
+        }
+    }
+
+    // SimpleContainer has no getItems() on 1.20.1 — read the slots one by one.
+    private List<ItemStack> backpackItems() {
+        List<ItemStack> items = new ArrayList<>(this.inventory.getContainerSize());
+        for (int i = 0; i < this.inventory.getContainerSize(); i++) {
+            items.add(this.inventory.getItem(i));
+        }
+        return items;
     }
 
     // ---- Activity (container / gear / idle bag-check visuals) ------------
