@@ -250,6 +250,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.STRING);
 
     /**
+     * Whether a Creative observer should see {@link #DATA_OBJECTIVES} as floating text under the
+     * name — the server's {@link PlayerMobConfig#objectiveLabels()} setting, synced so the toggle
+     * reaches clients of a dedicated server. Network-only — never written to save NBT.
+     */
+    private static final EntityDataAccessor<Boolean> DATA_SHOW_OBJECTIVES =
+        SynchedEntityData.defineId(PlayerMobEntity.class, EntityDataSerializers.BOOLEAN);
+
+    /**
      * {@link MobActivity} ordinal — what the mob is visibly "up to" (container open, going
      * through its gear). Resolved server-side by {@link #refreshActivity()} and synced so the
      * client can draw the pose and floating panel. Network-only — never written to save NBT.
@@ -866,6 +874,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         builder.define(DATA_REACTION_SPEED, DispositionTraits.DEFAULT);
         builder.define(DATA_FEELINGS, "");
         builder.define(DATA_OBJECTIVES, "");
+        builder.define(DATA_SHOW_OBJECTIVES, PlayerMobConfig.DEFAULT_OBJECTIVE_LABELS);
         builder.define(DATA_ACTIVITY, (byte) 0);
         DATA_CARRIED_SPOTS.forEach(spot -> builder.define(spot, ItemStack.EMPTY));
         builder.define(DATA_CARRIED_QUIVER, (byte) 0);
@@ -883,6 +892,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         this.entityData.define(DATA_REACTION_SPEED, DispositionTraits.DEFAULT);
         this.entityData.define(DATA_FEELINGS, "");
         this.entityData.define(DATA_OBJECTIVES, "");
+        this.entityData.define(DATA_SHOW_OBJECTIVES, PlayerMobConfig.DEFAULT_OBJECTIVE_LABELS);
         this.entityData.define(DATA_ACTIVITY, (byte) 0);
         DATA_CARRIED_SPOTS.forEach(spot -> this.entityData.define(spot, ItemStack.EMPTY));
         this.entityData.define(DATA_CARRIED_QUIVER, (byte) 0);
@@ -896,6 +906,15 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      */
     public String getObjectivesReadout() {
         return this.entityData.get(DATA_OBJECTIVES);
+    }
+
+    /**
+     * Whether the objective readout is drawn as floating text under the name for a Creative
+     * observer — the server's {@code objectiveLabels} setting, synced. The right-click menu shows
+     * the readout either way.
+     */
+    public boolean showsObjectiveLabel() {
+        return this.entityData.get(DATA_SHOW_OBJECTIVES);
     }
 
     @Override
@@ -1328,6 +1347,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // and written only on change, so it costs a tracking packet only when the
         // text actually changes.
         if (this.tickCount % 5 == 0) {
+            boolean showLabel = PlayerMobConfig.objectiveLabels();
+            if (showLabel != this.entityData.get(DATA_SHOW_OBJECTIVES)) {
+                this.entityData.set(DATA_SHOW_OBJECTIVES, showLabel);
+            }
             String readout = ObjectiveReadout.of(this.goalSelector, this.targetSelector);
             if (!readout.equals(this.entityData.get(DATA_OBJECTIVES))) {
                 this.entityData.set(DATA_OBJECTIVES, readout);

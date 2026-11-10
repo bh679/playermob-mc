@@ -397,6 +397,21 @@ class PlayerMobConfigTest {
     }
 
     @Test
+    void objectiveLabelsDefaultOnAndToggleAtRuntime() {
+        assertTrue(PlayerMobConfig.DEFAULT_OBJECTIVE_LABELS, "Creative objective labels are on by default");
+        assertTrue(PlayerMobConfig.parse(new Properties()).objectiveLabels(), "missing key → default true");
+        assertFalse(PlayerMobConfig.parse(props("objectiveLabels", "false")).objectiveLabels());
+        try {
+            PlayerMobConfig.setObjectiveLabels(false);
+            assertFalse(PlayerMobConfig.objectiveLabels());
+            PlayerMobConfig.setObjectiveLabels(true);
+            assertTrue(PlayerMobConfig.objectiveLabels());
+        } finally {
+            PlayerMobConfig.setObjectiveLabels(PlayerMobConfig.DEFAULT_OBJECTIVE_LABELS); // don't leak
+        }
+    }
+
+    @Test
     void carriedGearDefaultOnAndToggleAtRuntime() {
         assertTrue(PlayerMobConfig.DEFAULT_CARRIED_GEAR, "carried gear shows by default");
         assertTrue(PlayerMobConfig.parse(new Properties()).carriedGear(), "missing key → default true");

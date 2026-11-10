@@ -1273,6 +1273,22 @@
       "released": true,
       "released_in": "v0.119.0",
       "released_at": "2026-11-03T06:27:58Z"
+    },
+    {
+      "id": "objective-labels-toggle",
+      "version": "0.120.0",
+      "type": "feat",
+      "title": "Hide the Creative activity label",
+      "summary": "In Creative, the text under each PlayerMob showing what it is doing can now be turned off, with a config option or a command. Its objectives still show in the PlayerMob's menu.",
+      "highlights": [
+        "New config option objectiveLabels (on by default)",
+        "New command /playermob objectivelabels on|off"
+      ],
+      "pr": 249,
+      "date": "2026-11-10",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
