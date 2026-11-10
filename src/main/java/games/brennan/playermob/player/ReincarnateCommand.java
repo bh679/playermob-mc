@@ -105,6 +105,9 @@ import java.util.Collection;
  *   <li>{@code /playermob activityanimations [on|off]} — toggle (or report) the activity visuals for
  *       this session: the reaching pose and floating panel a PlayerMob shows while in a container or
  *       going through its gear. A session override of the config flag.</li>
+ *   <li>{@code /playermob objectivelabels [on|off]} — toggle (or report) the Creative objective label
+ *       for this session: the floating "what it's doing" text under each PlayerMob's name. The
+ *       right-click menu keeps its Objectives column either way. A session override of the config flag.</li>
  *   <li>{@code /playermob idleinventory [seconds]} — set (or report) the average gap between a resting
  *       PlayerMob's idle bag-checks for this session; {@code 0} turns them off.</li>
  *   <li>{@code /playermob naturalspawn [on|off]} — toggle (or report) the natural-spawn master
@@ -225,6 +228,10 @@ public final class ReincarnateCommand {
                     .executes(ReincarnateCommand::queryActivityAnimations)
                     .then(Commands.literal("on").executes(ctx -> setActivityAnimations(ctx, true)))
                     .then(Commands.literal("off").executes(ctx -> setActivityAnimations(ctx, false))))
+                .then(Commands.literal("objectivelabels")
+                    .executes(ReincarnateCommand::queryObjectiveLabels)
+                    .then(Commands.literal("on").executes(ctx -> setObjectiveLabels(ctx, true)))
+                    .then(Commands.literal("off").executes(ctx -> setObjectiveLabels(ctx, false))))
                 .then(Commands.literal("carriedgear")
                     .executes(ReincarnateCommand::queryCarriedGear)
                     .then(Commands.literal("on").executes(ctx -> setCarriedGear(ctx, true)))
@@ -1274,6 +1281,23 @@ public final class ReincarnateCommand {
     private static int setActivityAnimations(CommandContext<CommandSourceStack> ctx, boolean enabled) {
         PlayerMobConfig.setActivityAnimations(enabled);
         ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob activity animations "
+            + (enabled ? "enabled" : "disabled") + " for this session."), false);
+        return 1;
+    }
+
+    /** {@code /playermob objectivelabels} — report whether Creative players see what PlayerMobs are doing. */
+    private static int queryObjectiveLabels(CommandContext<CommandSourceStack> ctx) {
+        boolean on = PlayerMobConfig.objectiveLabels();
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob objective labels are "
+            + (on ? "ON — in Creative, each PlayerMob shows what it's doing under its name"
+                  : "OFF") + "."), false);
+        return 1;
+    }
+
+    /** {@code /playermob objectivelabels on|off} — flip the Creative objective label for this session. */
+    private static int setObjectiveLabels(CommandContext<CommandSourceStack> ctx, boolean enabled) {
+        PlayerMobConfig.setObjectiveLabels(enabled);
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob objective labels "
             + (enabled ? "enabled" : "disabled") + " for this session."), false);
         return 1;
     }

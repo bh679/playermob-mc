@@ -279,7 +279,7 @@ public final class PlayerMobRenderer
         // Creative objective readout, stashed per-state (see the readouts map).
         Minecraft mc = Minecraft.getInstance();
         boolean creative = mc.player != null && mc.player.isCreative();
-        String readout = creative ? entity.getObjectivesReadout() : null;
+        String readout = creative && entity.showsObjectiveLabel() ? entity.getObjectivesReadout() : null;
         if (readout == null || readout.isEmpty()
                 || state.distanceToCameraSq > MAX_READOUT_DISTANCE_SQR) {
             readouts.remove(state);
@@ -422,7 +422,7 @@ public final class PlayerMobRenderer
                                         PoseStack poseStack, MultiBufferSource buffer,
                                         int packedLight) {
         Minecraft mc = Minecraft.getInstance();
-        if (mc.player == null || !mc.player.isCreative()) {
+        if (mc.player == null || !mc.player.isCreative() || !entity.showsObjectiveLabel()) {
             return;
         }
         if (this.entityRenderDispatcher.distanceToSqr(entity) > MAX_READOUT_DISTANCE_SQR) {

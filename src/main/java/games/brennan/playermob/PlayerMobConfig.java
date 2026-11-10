@@ -55,6 +55,7 @@ public final class PlayerMobConfig {
     private static final String KEY_HUNT_FOR_FOOD = "huntForFood";
     private static final String KEY_ACTIVITY_ANIMATIONS = "activityAnimations";
     private static final String KEY_CARRIED_GEAR = "carriedGear";
+    private static final String KEY_OBJECTIVE_LABELS = "objectiveLabels";
     private static final String KEY_IDLE_INVENTORY_SECONDS = "idleInventorySeconds";
     private static final String KEY_EXACT_NAMES = "exactNames";
     private static final String KEY_ORDER_FAILURE_MESSAGES = "orderFailureMessages";
@@ -125,6 +126,8 @@ public final class PlayerMobConfig {
     public static final boolean DEFAULT_HUNT_FOR_FOOD = true;
     /** PlayerMobs show what they're up to (container open, changing gear, idle bag-check); on by default. */
     public static final boolean DEFAULT_ACTIVITY_ANIMATIONS = true;
+    /** Creative players see the floating objective label under each PlayerMob's name; on by default. */
+    public static final boolean DEFAULT_OBJECTIVE_LABELS = true;
     /** PlayerMobs show the weapons, tools, shield and banner in their backpack on their body; on by default. */
     public static final boolean DEFAULT_CARRIED_GEAR = true;
     /** Average seconds between a resting PlayerMob's idle bag-checks; {@code 0} = never. */
@@ -253,6 +256,7 @@ public final class PlayerMobConfig {
     private static volatile boolean huntForFood = DEFAULT_HUNT_FOR_FOOD;
     private static volatile boolean activityAnimations = DEFAULT_ACTIVITY_ANIMATIONS;
     private static volatile boolean carriedGear = DEFAULT_CARRIED_GEAR;
+    private static volatile boolean objectiveLabels = DEFAULT_OBJECTIVE_LABELS;
     private static volatile int idleInventorySeconds = DEFAULT_IDLE_INVENTORY_SECONDS;
     private static volatile boolean exactNames = DEFAULT_EXACT_NAMES;
     private static volatile boolean orderFailureMessages = DEFAULT_ORDER_FAILURE_MESSAGES;
@@ -434,6 +438,16 @@ public final class PlayerMobConfig {
      */
     public static boolean activityAnimations() {
         return activityAnimations;
+    }
+
+    /**
+     * When true (default), a Creative player sees each nearby PlayerMob's current objective as
+     * floating text under its name (the full goal stack for the one under the crosshair). False
+     * hides that label; the right-click menu's Objectives column still shows it. The server decides
+     * and syncs it per mob, so the setting and its command work on a dedicated server too.
+     */
+    public static boolean objectiveLabels() {
+        return objectiveLabels;
     }
 
     /**
@@ -698,6 +712,14 @@ public final class PlayerMobConfig {
     }
 
     /**
+     * Toggle the Creative objective label at runtime (e.g. from {@code /playermob objectivelabels on|off}).
+     * A session override — not written back to the file, which stays the startup default.
+     */
+    public static void setObjectiveLabels(boolean enabled) {
+        objectiveLabels = enabled;
+    }
+
+    /**
      * Toggle the carried-gear display at runtime (e.g. from {@code /playermob carriedgear on|off}).
      * A session override — not written back to the file, which stays the startup default.
      */
@@ -815,6 +837,7 @@ public final class PlayerMobConfig {
             huntForFood = v.huntForFood();
             activityAnimations = v.activityAnimations();
             carriedGear = v.carriedGear();
+            objectiveLabels = v.objectiveLabels();
             idleInventorySeconds = v.idleInventorySeconds();
             exactNames = v.exactNames();
             orderFailureMessages = v.orderFailureMessages();
@@ -865,7 +888,8 @@ public final class PlayerMobConfig {
                   float rangedEngageDistance, float meleeEngageDistance, boolean tntCombat,
                   boolean endCrystalCombat, boolean flintAndSteelCombat,
                   boolean extinguishWithBucket, boolean douseFires, boolean huntForFood,
-                  boolean activityAnimations, boolean carriedGear, int idleInventorySeconds,
+                  boolean activityAnimations, boolean carriedGear, boolean objectiveLabels,
+                  int idleInventorySeconds,
                   boolean exactNames, boolean orderFailureMessages,
                   ScavengeMode searchContainers, ScavengeMode searchArmorStands,
                   ScavengeMode collectFloorItems,
@@ -898,6 +922,7 @@ public final class PlayerMobConfig {
             parseBool(props.getProperty(KEY_HUNT_FOR_FOOD), DEFAULT_HUNT_FOR_FOOD),
             parseBool(props.getProperty(KEY_ACTIVITY_ANIMATIONS), DEFAULT_ACTIVITY_ANIMATIONS),
             parseBool(props.getProperty(KEY_CARRIED_GEAR), DEFAULT_CARRIED_GEAR),
+            parseBool(props.getProperty(KEY_OBJECTIVE_LABELS), DEFAULT_OBJECTIVE_LABELS),
             clampIdleInventorySeconds(Math.round(parseFloat(
                 props.getProperty(KEY_IDLE_INVENTORY_SECONDS), DEFAULT_IDLE_INVENTORY_SECONDS))),
             parseBool(props.getProperty(KEY_EXACT_NAMES), DEFAULT_EXACT_NAMES),
@@ -1094,6 +1119,10 @@ public final class PlayerMobConfig {
             .append("#   small floating panel — while it loots a container, right after it changes its own\n")
             .append("#   gear out of combat, and during idle bag-checks. Cosmetic only. Toggle live with\n")
             .append("#   /playermob activityanimations on|off (session override). Default true.\n")
+            .append("# objectiveLabels: when true, players in Creative see what each nearby PlayerMob is doing\n")
+            .append("#   as floating text under its name. Set false to hide that label (the right-click menu\n")
+            .append("#   still lists its objectives). Toggle live with /playermob objectivelabels on|off\n")
+            .append("#   (session override). Default true.\n")
             .append("# carriedGear: when true, the weapons, digging tools, shield, banner and arrows in a\n")
             .append("#   PlayerMob's backpack show on its body: weapons crossed on its back, tools at its\n")
             .append("#   thighs, a quiver on its back. Cosmetic only. Toggle live with\n")
@@ -1174,6 +1203,7 @@ public final class PlayerMobConfig {
             .append(KEY_HUNT_FOR_FOOD).append("=").append(DEFAULT_HUNT_FOR_FOOD).append("\n")
             .append(KEY_ACTIVITY_ANIMATIONS).append("=").append(DEFAULT_ACTIVITY_ANIMATIONS).append("\n")
             .append(KEY_CARRIED_GEAR).append("=").append(DEFAULT_CARRIED_GEAR).append("\n")
+            .append(KEY_OBJECTIVE_LABELS).append("=").append(DEFAULT_OBJECTIVE_LABELS).append("\n")
             .append(KEY_IDLE_INVENTORY_SECONDS).append("=").append(DEFAULT_IDLE_INVENTORY_SECONDS).append("\n")
             .append(KEY_EXACT_NAMES).append("=").append(DEFAULT_EXACT_NAMES).append("\n")
             .append(KEY_ORDER_FAILURE_MESSAGES).append("=")
