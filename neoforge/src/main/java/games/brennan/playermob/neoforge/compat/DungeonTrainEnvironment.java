@@ -922,6 +922,38 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         mob.setDigging(false);
     }
 
+    // ---- Block frame (combat reach) ---------------------------------------
+
+    @Override
+    public Vec3 toBlockFrame(Entity self, Vec3 world) {
+        Trains.Carriage c = carriageAt(self);
+        if (c == null) {
+            return world;
+        }
+        Vector3d sub = c.ship().worldToShip(new Vector3d(world.x, world.y, world.z));
+        return new Vec3(sub.x, sub.y, sub.z);
+    }
+
+    @Override
+    public Vec3 fromBlockFrame(Entity self, Vec3 frame) {
+        Trains.Carriage c = carriageAt(self);
+        if (c == null) {
+            return frame;
+        }
+        Vector3d w = c.ship().shipToWorld(new Vector3d(frame.x, frame.y, frame.z));
+        return new Vec3(w.x, w.y, w.z);
+    }
+
+    @Override
+    public boolean sharesBlockFrame(Entity self, Entity other) {
+        Trains.Carriage mine = carriageAt(self);
+        Trains.Carriage theirs = carriageAt(other);
+        if (mine == null || theirs == null) {
+            return mine == null && theirs == null;   // both off a train ⇒ both in the world frame
+        }
+        return mine.ship() == theirs.ship();         // same carriage group ⇒ same sub-level
+    }
+
     // ---- Resolution ------------------------------------------------------
 
     /** The train id of the carriage {@code self} is riding, or {@code null}. */

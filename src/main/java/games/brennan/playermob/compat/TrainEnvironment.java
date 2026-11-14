@@ -182,6 +182,24 @@ public interface TrainEnvironment {
     default boolean digObstructingBlock(Entity self) { return false; }
 
     /**
+     * Map a world-space point into the coordinate frame {@code self}'s surrounding blocks live in, so
+     * a goal can read, break and place them: the carriage's sub-level frame while {@code self} rides
+     * a train (its blocks are not at the mob's world position), the world itself otherwise. Identity
+     * by default. Dungeon Train locks carriage rotation, so directions are the same in both frames.
+     */
+    default Vec3 toBlockFrame(Entity self, Vec3 world) { return world; }
+
+    /** Inverse of {@link #toBlockFrame}: a point in {@code self}'s block frame back in world space. */
+    default Vec3 fromBlockFrame(Entity self, Vec3 frame) { return frame; }
+
+    /**
+     * Whether {@code other} stands among the same blocks as {@code self} (the same carriage group on a
+     * train, always off one), so {@code other}'s position means something in {@code self}'s
+     * {@link #toBlockFrame block frame}. {@code true} by default.
+     */
+    default boolean sharesBlockFrame(Entity self, Entity other) { return true; }
+
+    /**
      * A world-space deck point on the carriage the mob can actually board <em>right
      * now</em> — an opening it can step/hop into (a flatbed section, or a gap in the
      * wall at least the mob's height) with solid floor beneath — or {@code null} when

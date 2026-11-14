@@ -37,6 +37,7 @@ import games.brennan.playermob.entity.goal.SkepticalWatchGoal;
 import games.brennan.playermob.entity.goal.StayNearGoal;
 import games.brennan.playermob.entity.goal.EndCrystalCombatGoal;
 import games.brennan.playermob.entity.goal.TntCombatGoal;
+import games.brennan.playermob.entity.goal.ReachTargetGoal;
 import games.brennan.playermob.entity.goal.TrainRecoveryGoal;
 import games.brennan.playermob.entity.goal.WeaponAwareAttackGoal;
 import games.brennan.playermob.player.PlayerLifeRecord;
@@ -984,6 +985,12 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // cap — so the normal fight goals own combat the rest of the time. Gated on mobGriefing (it places
         // a real fire block). See FlintAndSteelIgniteGoal.
         this.goalSelector.addGoal(1, new FlintAndSteelIgniteGoal(this, /* speed */ 1.0));
+        // Fighting something it can't get to (up a pillar, on a roof, sealed in a hole)? Mine and build a way
+        // there like a player: pillar, stairs, tunnel, dig down. Priority 1, above the attack goal, for the same
+        // reason as the flint-and-steel goal: it fires mid-fight while the attack goal already holds MOVE. Its
+        // canUse() is narrow — config on, mobGriefing on, the fight stalled out of reach for 2 s, and no path
+        // there — so ordinary fights never see it. See ReachTargetGoal.
+        this.goalSelector.addGoal(1, new ReachTargetGoal(this, /* speed */ 1.0));
         // Carrying TNT + a way to light it? Bomb the enemy instead of trading bow/melee blows — registered
         // BEFORE the seek/attack goals at the same priority so its canUse() (config on, mobGriefing on, TNT +
         // an igniter on hand) wins the MOVE slot while armed. When it runs out of TNT/igniters its canUse()
