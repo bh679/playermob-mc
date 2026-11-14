@@ -66,6 +66,15 @@ class ReachPolicyTest {
     }
 
     @Test
+    void slabFloorBuildsAStepInsteadOfPillaring() {
+        // Standing on a bottom slab at y=63 (feet at 63.5), the leg cell is 64: a jump can't clear it.
+        World w = new World();
+        ReachPolicy.Step step = ReachPolicy.next(FEET, 0.5, 63.5, 0.5, 1.5, 67.0, 0.5, w, true, true);
+        assertEquals(ReachPolicy.Kind.PLACE, step.kind());
+        assertEquals(FEET.east(), step.cell());
+    }
+
+    @Test
     void cannotPillarWithoutBlocks() {
         assertEquals(ReachPolicy.Kind.STUCK, next(new World(), 1.5, 67.0, 0.5, false, true).kind());
     }
@@ -148,6 +157,15 @@ class ReachPolicyTest {
     void targetBelowDigsDown() {
         ReachPolicy.Step step = next(new World(), 0.5, 61.0, 0.5, true, true);
         assertEquals(ReachPolicy.Kind.MINE, step.kind());
+        assertEquals(FEET.below(), step.cell());
+    }
+
+    @Test
+    void openDropBelowIsTakenNotMined() {
+        World w = new World();
+        w.floor = false;
+        ReachPolicy.Step step = next(w, 0.5, 61.0, 0.5, true, true);
+        assertEquals(ReachPolicy.Kind.WALK, step.kind());
         assertEquals(FEET.below(), step.cell());
     }
 

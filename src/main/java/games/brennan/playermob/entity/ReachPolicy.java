@@ -19,7 +19,10 @@ public final class ReachPolicy {
 
     private ReachPolicy() {}
 
-    /** Target at least this many blocks higher/lower before the mob builds up / digs down. */
+    /**
+     * Target at least this many blocks lower before the mob digs down. (It builds up as soon as the
+     * target is out of swing reach above, {@link #MELEE_RISE}.)
+     */
     public static final int CLIMB_RISE = 2;
     /** Horizontal distance (blocks) within which the mob builds straight up / digs straight down. */
     public static final double OVERHEAD_RANGE = 1.5;
@@ -27,6 +30,8 @@ public final class ReachPolicy {
     public static final double MELEE_RANGE = 2.0;
     /** Height difference (blocks) a melee swing still covers. */
     public static final double MELEE_RISE = 1.5;
+    /** How high a jump lifts the mob's feet (vanilla's ~1.25, less a margin). */
+    public static final double JUMP_HEIGHT = 1.15;
     /**
      * Blocks at least this hard need the right tool to break, as for a player — obsidian, ancient debris,
      * reinforced deepslate (hardness 50+) with a bare hand or a stone pickaxe would take minutes.
@@ -113,12 +118,14 @@ public final class ReachPolicy {
             ? (dx >= 0.0 ? Direction.EAST : Direction.WEST)
             : (dz >= 0.0 ? Direction.SOUTH : Direction.NORTH);
 
-        if (dy >= CLIMB_RISE) {
+        if (dy >= MELEE_RISE) {
             // Headroom first: neither a pillar nor a stair step works without room to jump.
             if (cells.solid(aboveHead)) {
                 return mineOrStuck(cells, aboveHead);
             }
-            if (horiz <= OVERHEAD_RANGE) {
+            // Pillaring means jumping clear of the leg cell; standing in a partial floor (a slab deck) a jump
+            // can't, so build a stair step instead.
+            if (horiz <= OVERHEAD_RANGE && fy + JUMP_HEIGHT >= feet.getY() + 1) {
                 return hasBlocks ? Step.PILLAR : Step.STUCK;
             }
             return climbToward(feet.relative(dir), cells, hasBlocks);
@@ -126,6 +133,7 @@ public final class ReachPolicy {
 
         if (dy <= -CLIMB_RISE && horiz <= OVERHEAD_RANGE) {
             if (!canDigDown) return Step.STUCK;
+            if (!cells.solid(feet.below())) return new Step(Kind.WALK, feet.below());   // open drop: go down it
             return mineOrStuck(cells, feet.below());
         }
 

@@ -918,6 +918,13 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         return this.entityData.get(DATA_SHOW_OBJECTIVES);
     }
 
+    /**
+     * How long (ticks) a target goal keeps an enemy it can no longer see — 30 s, one
+     * {@code ReachTargetGoal} attempt — instead of vanilla's 3 s, so a hidden enemy is dug out
+     * rather than forgotten.
+     */
+    private static final int TARGET_MEMORY_TICKS = 600;
+
     @Override
     protected void registerGoals() {
         this.goalSelector.addGoal(0, new FloatGoal(this));
@@ -1050,12 +1057,15 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         this.goalSelector.addGoal(9, new LookAtPlayerGoal(this, LivingEntity.class, 8.0F));
         this.goalSelector.addGoal(10, new RandomLookAroundGoal(this));
 
-        this.targetSelector.addGoal(1, new HurtByTargetGoal(this));
+        // Target memory: vanilla target goals forget an unseen target after 3 s, so an enemy who seals
+        // itself in would be dropped before ReachTargetGoal could dig to it. Remember it as long as one
+        // reach attempt lasts, like a player who knows where you went.
+        this.targetSelector.addGoal(1, new HurtByTargetGoal(this).setUnseenMemoryTicks(TARGET_MEMORY_TICKS));
         // Defend an individual it loves: registered right after HurtByTargetGoal at
         // the same priority, so self-defence wins the TARGET-flag tie but defending
         // a friend still outranks proactively hunting a random hostile (priority 2).
         this.targetSelector.addGoal(1, new DefendLovedOneGoal(this, DispositionResolver.MAX_RANGE));
-        this.targetSelector.addGoal(2, new NearestAttackableTargetGoal<>(
+        NearestAttackableTargetGoal<LivingEntity> hostileTarget = new NearestAttackableTargetGoal<>(
             this,
             LivingEntity.class,
             10,
@@ -1067,13 +1077,15 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             /*(candidate, serverLevel) -> !recovering
                 && !this.crossingGap
                 && reactionToward(candidate) == Reaction.FIGHT
-                && TrainConfinement.allowsTarget(this, candidate)));
+                && TrainConfinement.allowsTarget(this, candidate));
             *///?} else {
             candidate -> !recovering
                 && !this.crossingGap
                 && reactionToward(candidate) == Reaction.FIGHT
-                && TrainConfinement.allowsTarget(this, candidate)));
+                && TrainConfinement.allowsTarget(this, candidate));
             //?}
+        hostileTarget.setUnseenMemoryTicks(TARGET_MEMORY_TICKS);
+        this.targetSelector.addGoal(2, hostileTarget);
         // Hunt food animals only while hungry, and below the hostile-targeting
         // goal (2) so defending against a zombie always beats chasing a cow.
         this.targetSelector.addGoal(3, new HuntForFoodGoal(this));

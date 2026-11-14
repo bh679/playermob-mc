@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import com.mojang.logging.LogUtils;
 import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.compat.GameRuleCompat;
 import games.brennan.playermob.compat.TrainConfinement;
@@ -22,6 +23,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.pathfinder.Path;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+
+import org.slf4j.Logger;
 
 import java.util.EnumSet;
 
@@ -60,10 +63,14 @@ public final class ReachTargetGoal extends Goal implements DescribableGoal {
     private static final int STUCK_GIVE_UP = 40;
     /** Re-ask the pathfinder (off a train) this often while running: a path opening up ends the dig. */
     private static final int PATH_RECHECK_TICKS = 20;
+    /** Added to the mob's Y before flooring to find its leg cell; covers frame jitter (see {@link #tick}). */
+    private static final double FEET_PROBE = 0.2;
     /** Swing the arm this often while mining, so the break reads as deliberate. */
     private static final int SWING_INTERVAL = 5;
     /** Ticks between placing blocks, so building reads as deliberate rather than instant. */
     private static final int PLACE_INTERVAL = 6;
+
+    private static final Logger LOGGER = LogUtils.getLogger();
 
     private final PlayerMobEntity mob;
     private final double speed;
@@ -132,7 +139,10 @@ public final class ReachTargetGoal extends Goal implements DescribableGoal {
         if (mob.tickCount - lastProgressTick < STALL_TICKS || !mob.onGround()) {
             return false;
         }
-        if (canStillShoot(target) || pathReaches(target)) {
+        boolean shoot = canStillShoot(target);
+        boolean path = !shoot && pathReaches(target);
+        trace("stalled dist={} shoot={} pathReaches={}", String.format("%.1f", dist), shoot, path);
+        if (shoot || path) {
             resetStall(target);
             return false;
         }
@@ -193,12 +203,28 @@ public final class ReachTargetGoal extends Goal implements DescribableGoal {
             return;
         }
 
+        // Mid-air (dropping into the hole it just dug, or off a step): wait to land before re-planning.
+        if (!mob.onGround() && !mob.isInWater()) {
+            return;
+        }
+
         Vec3 me = frame(mob.position());
         Vec3 them = frame(target.position());
-        BlockPos feet = BlockPos.containing(me.x, me.y + 0.5, me.z);   // leg cell, as the dig reflex rounds it
+        ReachPolicy.Cells cells = cells(level);
+        // Leg cell: the cell just above the feet, or the one over it when the feet are inside a partial
+        // floor block (a slab deck). Chosen by collision rather than by rounding the Y, because on a moving
+        // carriage the frame conversion jitters the Y by more than a slab's height tolerance, which flipped
+        // the cell between two rows tick to tick (placing a tread, then mining it as a wall).
+        BlockPos feet = BlockPos.containing(me.x, me.y + FEET_PROBE, me.z);
+        if (cells.solid(feet)) {
+            feet = feet.above();
+        }
         ReachPolicy.Step step = ReachPolicy.next(feet, me.x, me.y, me.z, them.x, them.y, them.z,
-            cells(level), BlockSourcePolicy.hasPlaceableBlock(mob.getInventory()),
+            cells, BlockSourcePolicy.hasPlaceableBlock(mob.getInventory()),
             /* canDigDown */ !TrainConfinement.isConfined(mob));
+        if (step.kind() != phase || (step.cell() != null && !step.cell().equals(breakPos) && step.kind() == ReachPolicy.Kind.MINE)) {
+            trace("step {} cell={} feet={}", step.kind(), step.cell(), feet);
+        }
         phase = step.kind();
         if (step.kind() != ReachPolicy.Kind.MINE) {
             clearBreak();
@@ -348,6 +374,16 @@ public final class ReachTargetGoal extends Goal implements DescribableGoal {
         if (TrainConfinement.isConfined(mob)) return false;
         Path path = mob.getNavigation().createPath(target, 0);
         return path != null && path.canReach();
+    }
+
+    /** Debug trace, gated on {@code debugSpawnLog} like the other goals' traces. */
+    private void trace(String fmt, Object... args) {
+        if (PlayerMobConfig.debugSpawnLog()) {
+            Object[] all = new Object[args.length + 1];
+            all[0] = mob.getName().getString();
+            System.arraycopy(args, 0, all, 1, args.length);
+            LOGGER.info("[ReachTarget {}] " + fmt, all);
+        }
     }
 
     private boolean enabled() {
