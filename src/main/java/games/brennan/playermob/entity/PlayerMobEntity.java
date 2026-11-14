@@ -37,6 +37,7 @@ import games.brennan.playermob.entity.goal.SkepticalWatchGoal;
 import games.brennan.playermob.entity.goal.StayNearGoal;
 import games.brennan.playermob.entity.goal.EndCrystalCombatGoal;
 import games.brennan.playermob.entity.goal.TntCombatGoal;
+import games.brennan.playermob.entity.goal.ReachTargetGoal;
 import games.brennan.playermob.entity.goal.TrainRecoveryGoal;
 import games.brennan.playermob.entity.goal.WeaponAwareAttackGoal;
 import games.brennan.playermob.player.PlayerLifeRecord;
@@ -917,6 +918,13 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         return this.entityData.get(DATA_SHOW_OBJECTIVES);
     }
 
+    /**
+     * How long (ticks) a target goal keeps an enemy it can no longer see — 30 s, one
+     * {@code ReachTargetGoal} attempt — instead of vanilla's 3 s, so a hidden enemy is dug out
+     * rather than forgotten.
+     */
+    private static final int TARGET_MEMORY_TICKS = 600;
+
     @Override
     protected void registerGoals() {
         this.goalSelector.addGoal(0, new FloatGoal(this));
@@ -984,6 +992,12 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // cap — so the normal fight goals own combat the rest of the time. Gated on mobGriefing (it places
         // a real fire block). See FlintAndSteelIgniteGoal.
         this.goalSelector.addGoal(1, new FlintAndSteelIgniteGoal(this, /* speed */ 1.0));
+        // Fighting something it can't get to (up a pillar, on a roof, sealed in a hole)? Mine and build a way
+        // there like a player: pillar, stairs, tunnel, dig down. Priority 1, above the attack goal, for the same
+        // reason as the flint-and-steel goal: it fires mid-fight while the attack goal already holds MOVE. Its
+        // canUse() is narrow — config on, mobGriefing on, the fight stalled out of reach for 2 s, and no path
+        // there — so ordinary fights never see it. See ReachTargetGoal.
+        this.goalSelector.addGoal(1, new ReachTargetGoal(this, /* speed */ 1.0));
         // Carrying TNT + a way to light it? Bomb the enemy instead of trading bow/melee blows — registered
         // BEFORE the seek/attack goals at the same priority so its canUse() (config on, mobGriefing on, TNT +
         // an igniter on hand) wins the MOVE slot while armed. When it runs out of TNT/igniters its canUse()
@@ -1043,12 +1057,15 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         this.goalSelector.addGoal(9, new LookAtPlayerGoal(this, LivingEntity.class, 8.0F));
         this.goalSelector.addGoal(10, new RandomLookAroundGoal(this));
 
-        this.targetSelector.addGoal(1, new HurtByTargetGoal(this));
+        // Target memory: vanilla target goals forget an unseen target after 3 s, so an enemy who seals
+        // itself in would be dropped before ReachTargetGoal could dig to it. Remember it as long as one
+        // reach attempt lasts, like a player who knows where you went.
+        this.targetSelector.addGoal(1, new HurtByTargetGoal(this).setUnseenMemoryTicks(TARGET_MEMORY_TICKS));
         // Defend an individual it loves: registered right after HurtByTargetGoal at
         // the same priority, so self-defence wins the TARGET-flag tie but defending
         // a friend still outranks proactively hunting a random hostile (priority 2).
         this.targetSelector.addGoal(1, new DefendLovedOneGoal(this, DispositionResolver.MAX_RANGE));
-        this.targetSelector.addGoal(2, new NearestAttackableTargetGoal<>(
+        NearestAttackableTargetGoal<LivingEntity> hostileTarget = new NearestAttackableTargetGoal<>(
             this,
             LivingEntity.class,
             10,
@@ -1060,13 +1077,15 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             /*(candidate, serverLevel) -> !recovering
                 && !this.crossingGap
                 && reactionToward(candidate) == Reaction.FIGHT
-                && TrainConfinement.allowsTarget(this, candidate)));
+                && TrainConfinement.allowsTarget(this, candidate));
             *///?} else {
             candidate -> !recovering
                 && !this.crossingGap
                 && reactionToward(candidate) == Reaction.FIGHT
-                && TrainConfinement.allowsTarget(this, candidate)));
+                && TrainConfinement.allowsTarget(this, candidate));
             //?}
+        hostileTarget.setUnseenMemoryTicks(TARGET_MEMORY_TICKS);
+        this.targetSelector.addGoal(2, hostileTarget);
         // Hunt food animals only while hungry, and below the hostile-targeting
         // goal (2) so defending against a zombie always beats chasing a cow.
         this.targetSelector.addGoal(3, new HuntForFoodGoal(this));

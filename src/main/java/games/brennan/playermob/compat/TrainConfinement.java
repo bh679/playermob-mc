@@ -159,6 +159,21 @@ public final class TrainConfinement {
         return environment.digObstructingBlock(self);
     }
 
+    /** {@code world} in {@code self}'s block frame; see {@link TrainEnvironment#toBlockFrame}. */
+    public static Vec3 toBlockFrame(Entity self, Vec3 world) {
+        return environment.toBlockFrame(self, world);
+    }
+
+    /** {@code frame} (in {@code self}'s block frame) in world space; see {@link TrainEnvironment#fromBlockFrame}. */
+    public static Vec3 fromBlockFrame(Entity self, Vec3 frame) {
+        return environment.fromBlockFrame(self, frame);
+    }
+
+    /** Whether {@code other} shares {@code self}'s block frame; see {@link TrainEnvironment#sharesBlockFrame}. */
+    public static boolean sharesBlockFrame(Entity self, Entity other) {
+        return environment.sharesBlockFrame(self, other);
+    }
+
     /**
      * The fixed march direction for a mob that boarded at {@code carriageIndex}:
      * march toward carriage 0 and continue past it. Negative side marches up

@@ -50,6 +50,7 @@ public final class PlayerMobConfig {
     private static final String KEY_TNT_COMBAT = "tntCombat";
     private static final String KEY_END_CRYSTAL_COMBAT = "endCrystalCombat";
     private static final String KEY_FLINT_AND_STEEL_COMBAT = "flintAndSteelCombat";
+    private static final String KEY_COMBAT_REACH = "combatReach";
     private static final String KEY_EXTINGUISH_WITH_BUCKET = "extinguishWithBucket";
     private static final String KEY_DOUSE_FIRES = "douseFires";
     private static final String KEY_HUNT_FOR_FOOD = "huntForFood";
@@ -118,6 +119,8 @@ public final class PlayerMobConfig {
     public static final boolean DEFAULT_END_CRYSTAL_COMBAT = true;
     /** A PlayerMob carrying flint and steel cooks its animal kills with it and occasionally torches enemies; on by default (needs mobGriefing). */
     public static final boolean DEFAULT_FLINT_AND_STEEL_COMBAT = true;
+    /** A PlayerMob that can't reach what it is fighting mines and builds its way there; on by default (needs mobGriefing). */
+    public static final boolean DEFAULT_COMBAT_REACH = true;
     /** A PlayerMob on fire and holding a water bucket douses itself with it; on by default. */
     public static final boolean DEFAULT_EXTINGUISH_WITH_BUCKET = true;
     /** A PlayerMob usually notices a fire in its path and puts it out before walking in; on by default. */
@@ -251,6 +254,7 @@ public final class PlayerMobConfig {
     private static volatile boolean tntCombat = DEFAULT_TNT_COMBAT;
     private static volatile boolean endCrystalCombat = DEFAULT_END_CRYSTAL_COMBAT;
     private static volatile boolean flintAndSteelCombat = DEFAULT_FLINT_AND_STEEL_COMBAT;
+    private static volatile boolean combatReach = DEFAULT_COMBAT_REACH;
     private static volatile boolean extinguishWithBucket = DEFAULT_EXTINGUISH_WITH_BUCKET;
     private static volatile boolean douseFires = DEFAULT_DOUSE_FIRES;
     private static volatile boolean huntForFood = DEFAULT_HUNT_FOR_FOOD;
@@ -401,6 +405,16 @@ public final class PlayerMobConfig {
      */
     public static boolean flintAndSteelCombat() {
         return flintAndSteelCombat;
+    }
+
+    /**
+     * When true (default), a PlayerMob fighting something it can't get to (up a pillar, on a roof, sealed
+     * in a hole) mines and builds its way there the way a player would: it pillars and stairs up with
+     * blocks from its backpack and tunnels through anything its tools can break. Also requires the
+     * {@code mobGriefing} gamerule. See {@code ReachTargetGoal}.
+     */
+    public static boolean combatReach() {
+        return combatReach;
     }
 
     /**
@@ -680,6 +694,14 @@ public final class PlayerMobConfig {
     }
 
     /**
+     * Toggle combat mining/building at runtime. A session override — not written back to the file,
+     * which stays the startup default.
+     */
+    public static void setCombatReach(boolean enabled) {
+        combatReach = enabled;
+    }
+
+    /**
      * Toggle bucket self-extinguishing at runtime (e.g. from {@code /playermob extinguishwithbucket on|off}).
      * A session override — not written back to the file, which stays the startup default.
      */
@@ -832,6 +854,7 @@ public final class PlayerMobConfig {
             tntCombat = v.tntCombat();
             endCrystalCombat = v.endCrystalCombat();
             flintAndSteelCombat = v.flintAndSteelCombat();
+            combatReach = v.combatReach();
             extinguishWithBucket = v.extinguishWithBucket();
             douseFires = v.douseFires();
             huntForFood = v.huntForFood();
@@ -886,7 +909,7 @@ public final class PlayerMobConfig {
                   AutoNameMode autoNameMode,
                   boolean requireArrows, boolean seekArrowsWhenEmpty,
                   float rangedEngageDistance, float meleeEngageDistance, boolean tntCombat,
-                  boolean endCrystalCombat, boolean flintAndSteelCombat,
+                  boolean endCrystalCombat, boolean flintAndSteelCombat, boolean combatReach,
                   boolean extinguishWithBucket, boolean douseFires, boolean huntForFood,
                   boolean activityAnimations, boolean carriedGear, boolean objectiveLabels,
                   int idleInventorySeconds,
@@ -917,6 +940,7 @@ public final class PlayerMobConfig {
             parseBool(props.getProperty(KEY_TNT_COMBAT), DEFAULT_TNT_COMBAT),
             parseBool(props.getProperty(KEY_END_CRYSTAL_COMBAT), DEFAULT_END_CRYSTAL_COMBAT),
             parseBool(props.getProperty(KEY_FLINT_AND_STEEL_COMBAT), DEFAULT_FLINT_AND_STEEL_COMBAT),
+            parseBool(props.getProperty(KEY_COMBAT_REACH), DEFAULT_COMBAT_REACH),
             parseBool(props.getProperty(KEY_EXTINGUISH_WITH_BUCKET), DEFAULT_EXTINGUISH_WITH_BUCKET),
             parseBool(props.getProperty(KEY_DOUSE_FIRES), DEFAULT_DOUSE_FIRES),
             parseBool(props.getProperty(KEY_HUNT_FOR_FOOD), DEFAULT_HUNT_FOR_FOOD),
@@ -1093,6 +1117,11 @@ public final class PlayerMobConfig {
             .append("#   out of the kit, then reverting to normal bow/melee combat. Also requires the mobGriefing\n")
             .append("#   gamerule (it places blocks + triggers real explosions). Toggle live with\n")
             .append("#   /playermob endcrystalcombat on|off (session override). Default true.\n")
+            .append("# combatReach: when true, a PlayerMob fighting something it can't get to (up a pillar, on a\n")
+            .append("#   roof, sealed in a hole) mines and builds its way there like a player: it pillars and stairs\n")
+            .append("#   up with blocks from its backpack and tunnels through anything its tools can break (never\n")
+            .append("#   train track, a carriage floor, containers, or unbreakable blocks). Also requires the\n")
+            .append("#   mobGriefing gamerule. Default true.\n")
             .append("# flintAndSteelCombat: when true, a PlayerMob carrying flint and steel uses it like a player\n")
             .append("#   would. Hunting: it lights the block a food animal is standing on just before the killing\n")
             .append("#   blow, so the animal dies burning and the meat drops cooked, then stamps that fire out a\n")
@@ -1198,6 +1227,7 @@ public final class PlayerMobConfig {
             .append(KEY_TNT_COMBAT).append("=").append(DEFAULT_TNT_COMBAT).append("\n")
             .append(KEY_END_CRYSTAL_COMBAT).append("=").append(DEFAULT_END_CRYSTAL_COMBAT).append("\n")
             .append(KEY_FLINT_AND_STEEL_COMBAT).append("=").append(DEFAULT_FLINT_AND_STEEL_COMBAT).append("\n")
+            .append(KEY_COMBAT_REACH).append("=").append(DEFAULT_COMBAT_REACH).append("\n")
             .append(KEY_EXTINGUISH_WITH_BUCKET).append("=").append(DEFAULT_EXTINGUISH_WITH_BUCKET).append("\n")
             .append(KEY_DOUSE_FIRES).append("=").append(DEFAULT_DOUSE_FIRES).append("\n")
             .append(KEY_HUNT_FOR_FOOD).append("=").append(DEFAULT_HUNT_FOR_FOOD).append("\n")
