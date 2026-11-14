@@ -1289,6 +1289,23 @@
       "released": true,
       "released_in": "v0.120.0",
       "released_at": "2026-11-10T15:35:04Z"
+    },
+    {
+      "id": "echo-mine-build-reach",
+      "version": "0.120.0",
+      "type": "feat",
+      "title": "PlayerMobs dig and build their way to you",
+      "summary": "A PlayerMob that can't reach you in a fight no longer just waits. It pillars up, builds steps, tunnels through walls or digs down after you, like a player would.",
+      "highlights": [
+        "Never breaks chests and other storage, unbreakable blocks or train track; the hardest blocks need the right tool",
+        "Keeps hunting you for up to 30 seconds after losing sight of you",
+        "Turn it off with combatReach=false, or with the mobGriefing gamerule"
+      ],
+      "pr": 251,
+      "date": "2026-11-14",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
