@@ -113,6 +113,10 @@ public final class NaturalSpawnGear {
                 }
             }
             mob.receiveSpawnGear(stacks);
+            if (PlayerMobConfig.debugSpawnLog()) {
+                LOGGER.info("[NaturalGear] {} near {} (tier {}) got {}", mob.getUUID(),
+                    player.getName().getString(), tier, picks);
+            }
         } catch (RuntimeException e) {
             LOGGER.warn("[playermob] natural-spawn items failed for {}; it spawns empty-handed", mob, e);
         }

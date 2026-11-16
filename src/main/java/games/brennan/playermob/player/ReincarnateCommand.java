@@ -1278,11 +1278,11 @@ public final class ReincarnateCommand {
     /** {@code /playermob naturalspawngear} — report whether wild PlayerMobs spawn carrying items. */
     private static int queryNaturalSpawnGear(CommandContext<CommandSourceStack> ctx) {
         boolean on = PlayerMobConfig.naturalSpawnGear();
-        boolean host = games.brennan.playermob.entity.NaturalSpawnGear.active() || !on;
-        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob wild-spawn items are "
-            + (on ? "ON - wild mobs carry items up to the nearest player's gear tier"
-                  : "OFF - wild mobs spawn empty-handed")
-            + (host ? "" : " (turned off by another mod)") + "."), false);
+        boolean active = games.brennan.playermob.entity.NaturalSpawnGear.active();
+        String state = active ? "ON - wild mobs carry items up to the nearest player's gear tier"
+            : on ? "OFF - another mod gives PlayerMobs their own gear"
+            : "OFF - wild mobs spawn empty-handed";
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob wild-spawn items are " + state + "."), false);
         return 1;
     }
 
