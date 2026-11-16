@@ -1306,6 +1306,19 @@
       "released": true,
       "released_in": "v0.121.0",
       "released_at": "2026-11-14T17:48:35Z"
+    },
+    {
+      "id": "zombified-players-are-hostile",
+      "version": "0.122.0",
+      "type": "feat",
+      "title": "PlayerMobs know a zombie when they see one",
+      "summary": "A player cursed into a zombie is treated like any other zombie. PlayerMobs fight it or run from it, and never greet it.",
+      "highlights": [],
+      "pr": 253,
+      "date": "2026-11-16",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
