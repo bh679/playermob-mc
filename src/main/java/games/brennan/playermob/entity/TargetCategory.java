@@ -67,11 +67,12 @@ public enum TargetCategory {
      * greets, gifts or befriends.
      */
     public static final String ZOMBIFIED_EFFECT_ID = "dungeontotems:zombified";
+    /** That effect's description id, which every supported Minecraft version exposes the same way. */
+    private static final String ZOMBIFIED_DESCRIPTION_ID = "effect.dungeontotems.zombified";
 
     /** Whether {@code player} carries the {@link #ZOMBIFIED_EFFECT_ID} curse. */
     public static boolean isZombified(Player player) {
-        return player.getActiveEffects().stream().anyMatch(effect ->
-            ZOMBIFIED_EFFECT_ID.equals(String.valueOf(BuiltInRegistries.MOB_EFFECT.getKey(effect.getEffect().value()))));
+        return player.getActiveEffects().stream().anyMatch(effect -> ZOMBIFIED_DESCRIPTION_ID.equals(effect.getDescriptionId()));
     }
 
     /** Whether {@code entity} is one of the {@link #TRADER_MOB_IDS}. */
