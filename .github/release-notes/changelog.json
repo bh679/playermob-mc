@@ -1319,6 +1319,23 @@
       "released": true,
       "released_in": "v0.122.0",
       "released_at": "2026-11-16T02:51:59Z"
+    },
+    {
+      "id": "natural-spawn-tier-items",
+      "version": "0.123.0",
+      "type": "feat",
+      "title": "Wild PlayerMobs carry gear like yours",
+      "summary": "Naturally spawning PlayerMobs now arrive carrying a random handful of items no better than what the nearest player has: if you are in iron, they can be too, but never in diamond.",
+      "highlights": [
+        "Items are drawn from your best gear tier or anything below it: tools, armour, weapons, materials and food.",
+        "Everything they carry drops when they die.",
+        "Turn it off with naturalSpawnGear=false or /playermob naturalspawngear off."
+      ],
+      "pr": 254,
+      "date": "2026-11-16",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }

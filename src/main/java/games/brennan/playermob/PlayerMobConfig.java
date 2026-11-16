@@ -54,6 +54,7 @@ public final class PlayerMobConfig {
     private static final String KEY_EXTINGUISH_WITH_BUCKET = "extinguishWithBucket";
     private static final String KEY_DOUSE_FIRES = "douseFires";
     private static final String KEY_HUNT_FOR_FOOD = "huntForFood";
+    private static final String KEY_NATURAL_SPAWN_GEAR = "naturalSpawnGear";
     private static final String KEY_ACTIVITY_ANIMATIONS = "activityAnimations";
     private static final String KEY_CARRIED_GEAR = "carriedGear";
     private static final String KEY_OBJECTIVE_LABELS = "objectiveLabels";
@@ -127,6 +128,8 @@ public final class PlayerMobConfig {
     public static final boolean DEFAULT_DOUSE_FIRES = true;
     /** A hungry PlayerMob hunts nearby food animals (cow/pig/chicken/sheep/rabbit); on by default. */
     public static final boolean DEFAULT_HUNT_FOR_FOOD = true;
+    /** A wild PlayerMob spawns carrying random items no better than the nearest player's; on by default. */
+    public static final boolean DEFAULT_NATURAL_SPAWN_GEAR = true;
     /** PlayerMobs show what they're up to (container open, changing gear, idle bag-check); on by default. */
     public static final boolean DEFAULT_ACTIVITY_ANIMATIONS = true;
     /** Creative players see the floating objective label under each PlayerMob's name; on by default. */
@@ -258,6 +261,7 @@ public final class PlayerMobConfig {
     private static volatile boolean extinguishWithBucket = DEFAULT_EXTINGUISH_WITH_BUCKET;
     private static volatile boolean douseFires = DEFAULT_DOUSE_FIRES;
     private static volatile boolean huntForFood = DEFAULT_HUNT_FOR_FOOD;
+    private static volatile boolean naturalSpawnGear = DEFAULT_NATURAL_SPAWN_GEAR;
     private static volatile boolean activityAnimations = DEFAULT_ACTIVITY_ANIMATIONS;
     private static volatile boolean carriedGear = DEFAULT_CARRIED_GEAR;
     private static volatile boolean objectiveLabels = DEFAULT_OBJECTIVE_LABELS;
@@ -443,6 +447,14 @@ public final class PlayerMobConfig {
      */
     public static boolean huntForFood() {
         return huntForFood;
+    }
+
+    /**
+     * When true (default), a wild PlayerMob (natural / chunk-generation / structure spawn) arrives carrying a
+     * random handful of items at the nearest player's gear tier or below. See {@code NaturalSpawnGear}.
+     */
+    public static boolean naturalSpawnGear() {
+        return naturalSpawnGear;
     }
 
     /**
@@ -726,6 +738,14 @@ public final class PlayerMobConfig {
     }
 
     /**
+     * Toggle wild-spawn items at runtime (e.g. from {@code /playermob naturalspawngear on|off}). A session
+     * override, not written back to the file, which stays the startup default.
+     */
+    public static void setNaturalSpawnGear(boolean enabled) {
+        naturalSpawnGear = enabled;
+    }
+
+    /**
      * Toggle the activity visuals at runtime (e.g. from {@code /playermob activityanimations on|off}).
      * A session override — not written back to the file, which stays the startup default.
      */
@@ -858,6 +878,7 @@ public final class PlayerMobConfig {
             extinguishWithBucket = v.extinguishWithBucket();
             douseFires = v.douseFires();
             huntForFood = v.huntForFood();
+            naturalSpawnGear = v.naturalSpawnGear();
             activityAnimations = v.activityAnimations();
             carriedGear = v.carriedGear();
             objectiveLabels = v.objectiveLabels();
@@ -920,7 +941,7 @@ public final class PlayerMobConfig {
                   ModdedRangedWeapons moddedRanged,
                   Map<String, Float> naturalSpawnScales,
                   boolean skinSourceBundled, boolean skinSourceOnline, boolean skinSourceLocal,
-                  float customSkinChance) {}
+                  float customSkinChance, boolean naturalSpawnGear) {}
 
     static Values parse(Properties props) {
         float[] engage = parseEngageDistances(props);
@@ -960,7 +981,8 @@ public final class PlayerMobConfig {
             parseBool(props.getProperty(KEY_SKIN_SOURCE_BUNDLED), DEFAULT_SKIN_SOURCE_BUNDLED),
             parseBool(props.getProperty(KEY_SKIN_SOURCE_ONLINE), DEFAULT_SKIN_SOURCE_ONLINE),
             parseBool(props.getProperty(KEY_SKIN_SOURCE_LOCAL), DEFAULT_SKIN_SOURCE_LOCAL),
-            clamp01(parseFloat(props.getProperty(KEY_CUSTOM_SKIN_CHANCE), DEFAULT_CUSTOM_SKIN_CHANCE)));
+            clamp01(parseFloat(props.getProperty(KEY_CUSTOM_SKIN_CHANCE), DEFAULT_CUSTOM_SKIN_CHANCE)),
+            parseBool(props.getProperty(KEY_NATURAL_SPAWN_GEAR), DEFAULT_NATURAL_SPAWN_GEAR));
     }
 
     /**
@@ -1144,6 +1166,10 @@ public final class PlayerMobConfig {
             .append("#   attack target, letting its weapon do the kill, then eats the drops. Set false to leave\n")
             .append("#   animals alone entirely. Toggle live with /playermob huntforfood on|off (session\n")
             .append("#   override). Default true.\n")
+            .append("# naturalSpawnGear: when true, a wild PlayerMob (natural, chunk-generation or structure\n")
+            .append("#   spawn) arrives carrying a random handful of items no better than the nearest player's\n")
+            .append("#   best gear tier (wood/leather, stone/chain/gold, iron, diamond, netherite). Toggle live\n")
+            .append("#   with /playermob naturalspawngear on|off (session override). Default true.\n")
             .append("# activityAnimations: when true, a PlayerMob shows what it is up to — arms reaching at a\n")
             .append("#   small floating panel — while it loots a container, right after it changes its own\n")
             .append("#   gear out of combat, and during idle bag-checks. Cosmetic only. Toggle live with\n")
@@ -1231,6 +1257,7 @@ public final class PlayerMobConfig {
             .append(KEY_EXTINGUISH_WITH_BUCKET).append("=").append(DEFAULT_EXTINGUISH_WITH_BUCKET).append("\n")
             .append(KEY_DOUSE_FIRES).append("=").append(DEFAULT_DOUSE_FIRES).append("\n")
             .append(KEY_HUNT_FOR_FOOD).append("=").append(DEFAULT_HUNT_FOR_FOOD).append("\n")
+            .append(KEY_NATURAL_SPAWN_GEAR).append("=").append(DEFAULT_NATURAL_SPAWN_GEAR).append("\n")
             .append(KEY_ACTIVITY_ANIMATIONS).append("=").append(DEFAULT_ACTIVITY_ANIMATIONS).append("\n")
             .append(KEY_CARRIED_GEAR).append("=").append(DEFAULT_CARRIED_GEAR).append("\n")
             .append(KEY_OBJECTIVE_LABELS).append("=").append(DEFAULT_OBJECTIVE_LABELS).append("\n")

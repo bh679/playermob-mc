@@ -102,6 +102,9 @@ import java.util.Collection;
  *   <li>{@code /playermob huntforfood [on|off]} — toggle (or report) animal-hunting for this session:
  *       when {@code on}, a hungry PlayerMob hunts a nearby adult food animal (cow/pig/chicken/sheep/rabbit)
  *       for meat; {@code off} leaves animals alone entirely. A session override of the config flag.</li>
+ *   <li>{@code /playermob naturalspawngear [on|off]} — toggle (or report) wild-spawn items for this
+ *       session: when {@code on}, a wild PlayerMob arrives with random items at the nearest player's gear
+ *       tier or below. A session override of the config flag.</li>
  *   <li>{@code /playermob activityanimations [on|off]} — toggle (or report) the activity visuals for
  *       this session: the reaching pose and floating panel a PlayerMob shows while in a container or
  *       going through its gear. A session override of the config flag.</li>
@@ -224,6 +227,10 @@ public final class ReincarnateCommand {
                     .executes(ReincarnateCommand::queryHuntForFood)
                     .then(Commands.literal("on").executes(ctx -> setHuntForFood(ctx, true)))
                     .then(Commands.literal("off").executes(ctx -> setHuntForFood(ctx, false))))
+                .then(Commands.literal("naturalspawngear")
+                    .executes(ReincarnateCommand::queryNaturalSpawnGear)
+                    .then(Commands.literal("on").executes(ctx -> setNaturalSpawnGear(ctx, true)))
+                    .then(Commands.literal("off").executes(ctx -> setNaturalSpawnGear(ctx, false))))
                 .then(Commands.literal("activityanimations")
                     .executes(ReincarnateCommand::queryActivityAnimations)
                     .then(Commands.literal("on").executes(ctx -> setActivityAnimations(ctx, true)))
@@ -1264,6 +1271,25 @@ public final class ReincarnateCommand {
     private static int setHuntForFood(CommandContext<CommandSourceStack> ctx, boolean enabled) {
         PlayerMobConfig.setHuntForFood(enabled);
         ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob animal-hunting "
+            + (enabled ? "enabled" : "disabled") + " for this session."), false);
+        return 1;
+    }
+
+    /** {@code /playermob naturalspawngear} — report whether wild PlayerMobs spawn carrying items. */
+    private static int queryNaturalSpawnGear(CommandContext<CommandSourceStack> ctx) {
+        boolean on = PlayerMobConfig.naturalSpawnGear();
+        boolean active = games.brennan.playermob.entity.NaturalSpawnGear.active();
+        String state = active ? "ON - wild mobs carry items up to the nearest player's gear tier"
+            : on ? "OFF - another mod gives PlayerMobs their own gear"
+            : "OFF - wild mobs spawn empty-handed";
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob wild-spawn items are " + state + "."), false);
+        return 1;
+    }
+
+    /** {@code /playermob naturalspawngear on|off} — flip wild-spawn items for this session. */
+    private static int setNaturalSpawnGear(CommandContext<CommandSourceStack> ctx, boolean enabled) {
+        PlayerMobConfig.setNaturalSpawnGear(enabled);
+        ctx.getSource().sendSuccess(() -> Component.literal("PlayerMob wild-spawn items "
             + (enabled ? "enabled" : "disabled") + " for this session."), false);
         return 1;
     }
