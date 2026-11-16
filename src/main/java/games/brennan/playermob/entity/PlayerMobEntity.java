@@ -351,6 +351,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private static final String TAG_SKIN_PLAYER_NAME = "SkinPlayerName";
     private static final String TAG_CLOSES_DOORS = "ClosesDoors";
     private static final String TAG_NATURAL_ORIGIN = "NaturalOrigin";
+    private static final String TAG_NATURAL_GEAR_PENDING = "NaturalGearPending";
     private static final String TAG_CARRIED_GEAR_LIMIT = "CarriedGearLimit";
     private static final String TAG_TRAIN_EXPLORE_DIR = "TrainExploreDir";
     private static final String TAG_ORDER_TIMEOUT = "OrderTimeout";
@@ -480,6 +481,13 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * merge carries no {@code NaturalOrigin} key; an explicit key still wins.
      */
     private boolean naturalOriginResolved = false;
+
+    /**
+     * Set in {@link #finalizeSpawn} for a wild spawn; on the first server tick the mob is handed its
+     * {@link NaturalSpawnGear} items and this clears. Persisted (only while set) so a chunk-generated
+     * mob that is saved before it ever ticks still gets them when its chunk is next loaded.
+     */
+    private boolean naturalGearPending = false;
 
     /**
      * Whether this mob's skin came from loaded NBT (a reincarnation egg's snapshot,
@@ -1283,6 +1291,12 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     protected void customServerAiStep() {
         super.customServerAiStep();
     //?}
+        if (naturalGearPending) {
+            naturalGearPending = false;
+            if (NaturalSpawnGear.active() && level() instanceof ServerLevel serverLevel) {
+                NaturalSpawnGear.apply(this, serverLevel);
+            }
+        }
         // A blow landed a few ticks ago may now be due a response — see armRetaliation.
         releasePendingRetaliation();
 
@@ -1860,11 +1874,32 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         }
         this.naturalOrigin = ScavengeMode.isNaturalOrigin(reason.name());
         this.naturalOriginResolved = true;
+        // A wild PlayerMob gets a random handful of items on its first tick (see NaturalSpawnGear).
+        this.naturalGearPending = echo == null && NaturalSpawnGear.isWildSpawn(reason.name());
         maybeAutoName(reason.name());
         //? if >=1.21.1 {
         return super.finalizeSpawn(world, difficulty, reason, data);
         //?} else {
         /*return super.finalizeSpawn(world, difficulty, reason, data, dataTag);*///?}
+    }
+
+    /**
+     * Hand a wild spawn its {@link NaturalSpawnGear} items: armour and a shield into empty armour / off-hand
+     * slots, the first weapon or tool into an empty main hand, the rest into the backpack. What does not fit
+     * is dropped from the roll, never onto the ground. Everything given drops on death like any other gear.
+     */
+    void receiveSpawnGear(List<ItemStack> stacks) {
+        for (ItemStack stack : stacks) {
+            EquipmentSlot slot = getEquipmentSlotForItem(stack);
+            String id = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+            boolean wearable = slot != EquipmentSlot.MAINHAND;
+            boolean handheld = slot == EquipmentSlot.MAINHAND && NaturalSpawnGear.isHandheld(id);
+            if ((wearable || handheld) && getItemBySlot(slot).isEmpty()) {
+                setItemSlot(slot, stack);
+            } else {
+                inventory.addItem(stack);
+            }
+        }
     }
 
     /**
@@ -4304,6 +4339,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         tag.putBoolean(TAG_SKIN_SLIM, isSkinSlim());
         tag.putBoolean(TAG_CLOSES_DOORS, this.closesDoors);
         tag.putBoolean(TAG_NATURAL_ORIGIN, this.naturalOrigin);
+        // Additive: only written while pending, so a geared or older mob round-trips no key.
+        if (this.naturalGearPending) {
+            tag.putBoolean(TAG_NATURAL_GEAR_PENDING, true);
+        }
         // Additive — only written once limited, so an unlimited mob round-trips no key.
         if (this.carriedGearLimit != CarriedGear.NO_LIMIT) {
             tag.putInt(TAG_CARRIED_GEAR_LIMIT, this.carriedGearLimit);
@@ -4398,6 +4437,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             NbtCompat.getIntOr(tag, TAG_CARRIED_GEAR_LIMIT, CarriedGear.NO_LIMIT));
         // Missing key (pre-door-feature saves) ⇒ false ⇒ leave-open. Additive.
         this.closesDoors = NbtCompat.getBooleanOr(tag, TAG_CLOSES_DOORS, false);
+        // Only an explicit key sets it, so an egg's entity_data merge never clears a pending roll.
+        if (NbtCompat.getBooleanOr(tag, TAG_NATURAL_GEAR_PENDING, false)) {
+            this.naturalGearPending = true;
+        }
         // An explicit key always wins. Absent: keep what finalizeSpawn decided if it already ran (a spawn
         // egg's entity_data merge lands after it), else default to naturally spawned — which is what mobs
         // saved before the scavenging gates existed should count as.

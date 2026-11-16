@@ -367,6 +367,21 @@ class PlayerMobConfigTest {
     }
 
     @Test
+    void naturalSpawnGearDefaultsOnAndTogglesAtRuntime() {
+        assertTrue(PlayerMobConfig.DEFAULT_NATURAL_SPAWN_GEAR, "wild-spawn items are on by default");
+        assertTrue(PlayerMobConfig.parse(new Properties()).naturalSpawnGear(), "missing key → default true");
+        assertFalse(PlayerMobConfig.parse(props("naturalSpawnGear", "false")).naturalSpawnGear());
+        try {
+            PlayerMobConfig.setNaturalSpawnGear(false);
+            assertFalse(PlayerMobConfig.naturalSpawnGear());
+            PlayerMobConfig.setNaturalSpawnGear(true);
+            assertTrue(PlayerMobConfig.naturalSpawnGear());
+        } finally {
+            PlayerMobConfig.setNaturalSpawnGear(PlayerMobConfig.DEFAULT_NATURAL_SPAWN_GEAR);
+        }
+    }
+
+    @Test
     void huntForFoodDefaultsOnAndTogglesAtRuntime() {
         assertTrue(PlayerMobConfig.DEFAULT_HUNT_FOR_FOOD, "animal-hunting is on by default");
         assertTrue(PlayerMobConfig.parse(new Properties()).huntForFood(), "missing key → default true");
