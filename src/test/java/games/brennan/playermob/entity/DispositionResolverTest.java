@@ -290,4 +290,18 @@ class DispositionResolverTest {
             }
         }
     }
+
+    /** A Zombified player classifies as a hostile mob: every mob fights or flees it, at any range, never befriends it. */
+    @Test
+    void hostileTargetsAreAlwaysFoughtOrFled() {
+        for (int ff = DispositionTraits.MIN; ff <= DispositionTraits.MAX; ff++) {
+            for (int friendliness = DispositionTraits.MIN; friendliness <= DispositionTraits.MAX; friendliness++) {
+                for (double distance : new double[] {1.0, 8.0, 30.0}) {
+                    Reaction reaction = resolve(ff, friendliness, 10.0F, TargetCategory.HOSTILE_MOBS, distance);
+                    assertTrue(reaction == Reaction.FIGHT || reaction == Reaction.FLEE,
+                        "ff " + ff + ", friendliness " + friendliness + " at " + distance + " gave " + reaction);
+                }
+            }
+        }
+    }
 }

@@ -61,6 +61,19 @@ public enum TargetCategory {
      */
     public static final Set<String> TRADER_MOB_IDS = Set.of("piglinproliferation:piglin_traveler");
 
+    /**
+     * Dungeon Totems' Zombified curse, by effect id so that mod is not a dependency. A Zombified
+     * player is a zombie to a PlayerMob: a {@link #HOSTILE_MOBS} target it fights or flees, never
+     * greets, gifts or befriends.
+     */
+    public static final String ZOMBIFIED_EFFECT_ID = "dungeontotems:zombified";
+
+    /** Whether {@code player} carries the {@link #ZOMBIFIED_EFFECT_ID} curse. */
+    public static boolean isZombified(Player player) {
+        return player.getActiveEffects().stream().anyMatch(effect ->
+            ZOMBIFIED_EFFECT_ID.equals(String.valueOf(BuiltInRegistries.MOB_EFFECT.getKey(effect.getEffect().value()))));
+    }
+
     /** Whether {@code entity} is one of the {@link #TRADER_MOB_IDS}. */
     public static boolean isTraderMob(LivingEntity entity) {
         return TRADER_MOB_IDS.contains(BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString());
@@ -80,14 +93,15 @@ public enum TargetCategory {
      * before the {@code Enemy} check (so a neutral {@code Enemy} like a zombified
      * piglin classifies as {@link #NEUTRAL_MOBS}, not {@link #HOSTILE_MOBS}); the
      * hostile check last so a future hostile animal still classifies as an animal. Trader mobs
-     * are checked ahead of the neutral/hostile checks, since their class is a hostile one.
+     * are checked ahead of the neutral/hostile checks, since their class is a hostile one. A Zombified
+     * player ({@link #isZombified}) classifies as {@link #HOSTILE_MOBS}.
      */
     public static TargetCategory classify(LivingEntity entity) {
         if (entity instanceof PlayerMobEntity) return PLAYERS; // own kind — never creative/spectator
         if (entity instanceof Player player) {
             // Players in Creative or Spectator are treated as not present.
             if (player.isCreative() || player.isSpectator()) return null;
-            return PLAYERS;
+            return isZombified(player) ? HOSTILE_MOBS : PLAYERS;
         }
         if (entity instanceof AbstractVillager) return VILLAGERS;
         if (entity instanceof Animal) return ANIMALS;
