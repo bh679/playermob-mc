@@ -1322,7 +1322,7 @@
     },
     {
       "id": "natural-spawn-tier-items",
-      "version": "0.122.0",
+      "version": "0.123.0",
       "type": "feat",
       "title": "Wild PlayerMobs carry gear like yours",
       "summary": "Naturally spawning PlayerMobs now arrive carrying a random handful of items no better than what the nearest player has: if you are in iron, they can be too, but never in diamond.",
