@@ -4,6 +4,8 @@ import games.brennan.playermob.compat.NbtCompat;
 import games.brennan.playermob.entity.DispositionTraits;
 import net.minecraft.nbt.CompoundTag;
 
+import java.util.function.UnaryOperator;
+
 /**
  * One life's running tally of how a player has treated PlayerMobs — the
  * <em>inverse</em> of the mob-side {@link games.brennan.playermob.entity.FeelingLedger}.
@@ -106,7 +108,7 @@ public final class PlayerLifeRecord {
 
     /** A fresh life — no conduct recorded yet. */
     public static final PlayerLifeRecord EMPTY =
-        new PlayerLifeRecord(0.0F, 0, 0.0F, 0, 0, 0.0F, 0, 0.0F, 0.0F, 0.0F);
+        new PlayerLifeRecord(0.0F, 0, 0.0F, 0, 0, 0.0F, 0, 0.0F, 0.0F, 0.0F, ReflexTally.EMPTY);
 
     private final float damageDealt;
     private final int kills;
@@ -123,10 +125,12 @@ public final class PlayerLifeRecord {
     private final float sabotage;
     /** Animals this life fed by hand. */
     private final float fed;
+    /** Evidence of the player's reflexes — distilled into reaction speed. */
+    private final ReflexTally reflexes;
 
     PlayerLifeRecord(float damageDealt, int kills, float kindness, int harms, int attacks,
                      float defensiveDamage, int defensiveKills, float timidity, float sabotage,
-                     float fed) {
+                     float fed, ReflexTally reflexes) {
         this.damageDealt = damageDealt;
         this.kills = kills;
         this.kindness = kindness;
@@ -137,6 +141,7 @@ public final class PlayerLifeRecord {
         this.timidity = Math.max(0.0F, timidity);
         this.sabotage = Math.max(0.0F, sabotage);
         this.fed = Math.max(0.0F, fed);
+        this.reflexes = reflexes == null ? ReflexTally.EMPTY : reflexes;
     }
 
     public float damageDealt() { return damageDealt; }
@@ -154,11 +159,13 @@ public final class PlayerLifeRecord {
     public float sabotage() { return sabotage; }
     /** How many times this life fed an animal by hand. */
     public float fed() { return fed; }
+    /** This life's reflex evidence (see {@link ReflexTally}). */
+    public ReflexTally reflexes() { return reflexes; }
 
     /** True for a life with no recorded conduct (used to skip empty saves). */
     public boolean isEmpty() {
         return damageDealt == 0.0F && kills == 0 && kindness == 0.0F && harms == 0 && attacks == 0
-            && timidity == 0.0F && sabotage == 0.0F && fed == 0.0F;
+            && timidity == 0.0F && sabotage == 0.0F && fed == 0.0F && reflexes.isEmpty();
     }
 
     /** The kind of player→mob action being credited; routes a magnitude to the right tally. */
@@ -187,38 +194,44 @@ public final class PlayerLifeRecord {
                 float dealt = Math.max(0.0F, magnitude);
                 yield new PlayerLifeRecord(damageDealt + dealt, kills, kindness, harms, attacks + 1,
                     defensive ? defensiveDamage + dealt : defensiveDamage, defensiveKills, timidity,
-                    sabotage, fed);
+                    sabotage, fed, reflexes);
             }
             case KILL   -> new PlayerLifeRecord(damageDealt, kills + 1, kindness, harms, attacks,
                                defensiveDamage, defensive ? defensiveKills + 1 : defensiveKills,
-                               timidity, sabotage, fed);
+                               timidity, sabotage, fed, reflexes);
             case CROUCH -> withKindness(CROUCH_KINDNESS);
             case TRAVEL -> withKindness(TRAVEL_KINDNESS);
             case DEFEND -> withKindness(DEFEND_KINDNESS);
             case TAME   -> withKindness(TAME_KINDNESS);
             case GIFT   -> withKindness(Math.max(0.0F, magnitude));
             case HARM   -> new PlayerLifeRecord(damageDealt, kills, kindness, harms + 1, attacks,
-                               defensiveDamage, defensiveKills, timidity, sabotage, fed);
+                               defensiveDamage, defensiveKills, timidity, sabotage, fed, reflexes);
             // Signed: a negative magnitude is a mob handing back what it had banked, once the
             // player finally hit it. The constructor floors the tally at 0.
             case FLEE   -> new PlayerLifeRecord(damageDealt, kills, kindness, harms, attacks,
-                               defensiveDamage, defensiveKills, timidity + magnitude, sabotage, fed);
+                               defensiveDamage, defensiveKills, timidity + magnitude, sabotage, fed, reflexes);
             case SABOTAGE -> new PlayerLifeRecord(damageDealt, kills, kindness, harms, attacks,
                                defensiveDamage, defensiveKills, timidity,
-                               sabotage + Math.max(0.0F, magnitude), fed);
+                               sabotage + Math.max(0.0F, magnitude), fed, reflexes);
             case FEED   -> new PlayerLifeRecord(damageDealt, kills, kindness, harms, attacks,
                                defensiveDamage, defensiveKills, timidity, sabotage,
-                               fed + Math.max(0.0F, magnitude));
+                               fed + Math.max(0.0F, magnitude), reflexes);
         };
+    }
+
+    /** Return a fresh record with {@code update} applied to the reflex tally. */
+    public PlayerLifeRecord withReflexes(UnaryOperator<ReflexTally> update) {
+        return new PlayerLifeRecord(damageDealt, kills, kindness, harms, attacks,
+            defensiveDamage, defensiveKills, timidity, sabotage, fed, update.apply(reflexes));
     }
 
     private PlayerLifeRecord withKindness(float delta) {
         return new PlayerLifeRecord(damageDealt, kills, kindness + delta, harms, attacks,
-            defensiveDamage, defensiveKills, timidity, sabotage, fed);
+            defensiveDamage, defensiveKills, timidity, sabotage, fed, reflexes);
     }
 
     /**
-     * Distil this life into the two locked traits the reincarnated mob is born with.
+     * Distil this life into the three locked traits the reincarnated mob is born with.
      * <ul>
      *   <li><b>Fight/Flight</b> rises with combat aggression (damage dealt + kills) and falls
      *       with timidity — damage taken from a mob that never got a blow back, plus a bonus per
@@ -230,14 +243,17 @@ public final class PlayerLifeRecord {
      *       (damage, kills, harming loved ones). A cruel life reincarnates unfriendly;
      *       a kind one, welcoming. Feeding animals by hand pushes it up too, on its own
      *       capped term.</li>
+     *   <li><b>Reaction speed</b> comes from the player's reflexes, not their conduct — how fast
+     *       they struck back, whether they landed the first hit, dodged, bridged, kept their hands
+     *       busy and kept moving down the train. Scored as a weighted average pulled toward 5,
+     *       so a life with no evidence reads exactly 5 — see {@link ReflexTally}.</li>
      * </ul>
      * Both combat terms weigh self-defence — blows against a mob that picked the fight —
      * at {@link #DEFENSIVE_SCALE}: killing what came for you is neither aggression nor
      * cruelty in the way hunting something down is. {@code harms} is never discounted;
      * there is no self-defence in hurting someone's loved one.
-     * Both are rounded and clamped to {@code [0, 10]} and marked explicit so the
-     * mob's spawn roll leaves them untouched. Reaction speed is <em>not</em> derived — it
-     * is left unset and rolls at spawn like any other new mob.
+     * All three are rounded and clamped to {@code [0, 10]} and marked explicit so the
+     * mob's spawn roll leaves them untouched.
      */
     public DispositionTraits toTraits() {
         // Defensive tallies are subsets of the totals: full-weight the rest, tenth-weight those.
@@ -264,9 +280,10 @@ public final class PlayerLifeRecord {
         DispositionTraits traits = new DispositionTraits();
         traits.setFightFlight(fightFlight);
         traits.setFriendliness(friendliness);
-        // Reaction speed is deliberately left unset, so it rolls normally at spawn: no life
-        // statistic here (damage, kills, kindness, timidity) is a credible proxy for reflexes,
-        // and deriving one from them would be noise dressed up as continuity.
+        // Reaction speed reads the reflex tally, never the conduct above: damage or kindness is no
+        // proxy for reflexes. Always set — the snapshot writes the key either way, and an unset
+        // trait used to reach every echo as a pinned 5.
+        traits.setReactionSpeed(reflexes.reactionSpeed());
         return traits;
     }
 
@@ -288,6 +305,9 @@ public final class PlayerLifeRecord {
         tag.putFloat(TAG_TIMIDITY, timidity);
         tag.putFloat(TAG_SABOTAGE, sabotage);
         tag.putFloat(TAG_FED, fed);
+        if (!reflexes.isEmpty()) {
+            tag.put(ReflexTally.TAG, reflexes.save());
+        }
     }
 
     /** Read a record back; missing keys default to zero (forward/backward compatible). */
@@ -309,6 +329,9 @@ public final class PlayerLifeRecord {
             // as it did on the build that wrote it.
             NbtCompat.getFloatOr(tag, TAG_SABOTAGE, 0f),
             // Missing on saves from before feeding was scored ⇒ 0 ⇒ likewise unchanged.
-            NbtCompat.getFloatOr(tag, TAG_FED, 0f));
+            NbtCompat.getFloatOr(tag, TAG_FED, 0f),
+            // Missing on saves from before reflexes were scored ⇒ EMPTY ⇒ reaction speed 5,
+            // exactly what every echo carried on the build that wrote it.
+            ReflexTally.load(NbtCompat.getCompoundOrEmpty(tag, ReflexTally.TAG)));
     }
 }

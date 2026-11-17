@@ -16,6 +16,12 @@
     "EntityRemovalPetLedgerMixin",
     "RaiderTargetsPlayerMobMixin",
     "LivingHurtWitnessMixin",
+    "LivingDeathReflexMixin",
+    "BlockItemPlaceReflexMixin",
+    "ProjectileReflexMixin",
+    "ServerGamePacketReflexMixin",
+    "PlayerJumpReflexMixin",
+    "ServerPlayerTickReflexMixin",
     "WorldGenRegionMixin"
   ],
   "client": [],

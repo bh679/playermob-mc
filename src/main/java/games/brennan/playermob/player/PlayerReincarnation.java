@@ -119,6 +119,9 @@ public final class PlayerReincarnation {
      */
     public static void onDeath(ServerPlayer player) {
         try {
+            // Settle the reflex windows still open (actions, pace, unresolved first hits) into the
+            // live record before it is read, and forget this life's timers.
+            ReflexHooks.onPlayerDeath(player);
             //? if >=26 {
             /*ServerLevel level = player.level(); // 26.x: ServerPlayer.serverLevel() → level()
             *///?} else {
@@ -281,9 +284,9 @@ public final class PlayerReincarnation {
         applyGear(ghost, player);
 
         CompoundTag snapshot = ghost.captureCustomData();
-        // Overwrite the ghost's default 5/5 traits with the life-derived ones. The
+        // Overwrite the ghost's default 5/5/5 traits with the life-derived ones. The
         // entity already wrote the trait keys, so this is the single authoritative
-        // write of FightFlight/Friendliness.
+        // write of FightFlight/Friendliness/ReactionSpeed.
         record.toTraits().save(snapshot);
         // A spawn egg's ENTITY_DATA must name its entity type, or ItemStack encoding
         // throws "Missing id for entity" the moment the egg is saved in an inventory.

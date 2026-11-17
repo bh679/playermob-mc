@@ -142,6 +142,21 @@ public final class PlayerLifeStore extends SavedData {
         //?}
     }
 
+    /** Apply one reflex sample to a survival player's live record (see {@link ReflexTally}). */
+    public static void recordReflex(ServerPlayer player,
+                                    java.util.function.UnaryOperator<ReflexTally> update) {
+        //? if >=26 {
+        /*get(player.level()).creditReflex(player.getUUID(), update);
+        *///?} else {
+        get(player.serverLevel()).creditReflex(player.getUUID(), update);
+        //?}
+    }
+
+    public void creditReflex(UUID id, java.util.function.UnaryOperator<ReflexTally> update) {
+        current.put(id, current(id).withReflexes(update));
+        setDirty();
+    }
+
     public void credit(UUID id, PlayerLifeRecord.Signal signal, float magnitude) {
         credit(id, signal, magnitude, false);
     }
