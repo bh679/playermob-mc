@@ -1,6 +1,7 @@
 package games.brennan.playermob.mixin;
 
 import games.brennan.playermob.player.ReflexHooks;
+import games.brennan.playermob.player.ReflexTracker;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import org.spongepowered.asm.mixin.Mixin;
@@ -23,7 +24,7 @@ public abstract class PlayerJumpReflexMixin {
     @Inject(method = "jumpFromGround", at = @At("HEAD"))
     private void playermob$countJump(CallbackInfo ci) {
         if ((Object) this instanceof Player player) {
-            ReflexHooks.onAction(player);
+            ReflexHooks.onAction(player, ReflexTracker.ActionKind.OTHER);
         }
     }
 }

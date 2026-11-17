@@ -91,49 +91,48 @@ class ReflexTrackerTest {
 
     @Test
     void aBridgeRunCountsFromTheFourthBlock() {
-        for (int i = 0; i < 3; i++) tracker.onBlockPlaced(i, 64, 0, false, false, i * 5);
+        for (int i = 0; i < 3; i++) tracker.onBlockPlaced(i, 64, 0, false, i * 5);
         assertEquals(0, tally.bridgeBlocks());
-        tracker.onBlockPlaced(3, 64, 0, false, false, 15);
+        tracker.onBlockPlaced(3, 64, 0, false, 15);
         assertEquals(4, tally.bridgeBlocks());
-        tracker.onBlockPlaced(4, 64, 0, false, false, 20);
+        tracker.onBlockPlaced(4, 64, 0, false, 20);
         assertEquals(5, tally.bridgeBlocks());
     }
 
     @Test
-    void aSlowOrCrouchedBridgeIsNoRun() {
-        for (int i = 0; i < 6; i++) tracker.onBlockPlaced(i, 64, 0, false, false, i * 20);
-        for (int i = 0; i < 6; i++) tracker.onBlockPlaced(100 + i, 64, 0, false, true, 200 + i * 4);
+    void aSlowBridgeIsNoRun() {
+        for (int i = 0; i < 6; i++) tracker.onBlockPlaced(i, 64, 0, false, i * 20);
         assertEquals(0, tally.bridgeBlocks());
     }
 
     @Test
     void aBridgeMustBeAdjacentAtOneHeight() {
-        for (int i = 0; i < 6; i++) tracker.onBlockPlaced(i * 2, 64, 0, false, false, i * 4);
+        for (int i = 0; i < 6; i++) tracker.onBlockPlaced(i * 2, 64, 0, false, i * 4);
         assertEquals(0, tally.bridgeBlocks());
     }
 
     @Test
     void aJumpPillarCountsFromTheThirdBlock() {
-        tracker.onBlockPlaced(0, 64, 0, false, false, 0);
-        tracker.onBlockPlaced(0, 65, 0, true, false, 10);
+        tracker.onBlockPlaced(0, 64, 0, false, 0);
+        tracker.onBlockPlaced(0, 65, 0, true, 10);
         assertEquals(0, tally.jumpBlocks());
-        tracker.onBlockPlaced(0, 66, 0, true, false, 20);
+        tracker.onBlockPlaced(0, 66, 0, true, 20);
         assertEquals(3, tally.jumpBlocks());
     }
 
     @Test
     void aPillarMustBeStraightUpAndAirborne() {
-        tracker.onBlockPlaced(0, 64, 0, true, false, 0);
-        tracker.onBlockPlaced(0, 65, 0, false, false, 10);   // standing, not jumping
-        tracker.onBlockPlaced(1, 66, 0, true, false, 20);    // not straight up
+        tracker.onBlockPlaced(0, 64, 0, true, 0);
+        tracker.onBlockPlaced(0, 65, 0, false, 10);   // standing, not jumping
+        tracker.onBlockPlaced(1, 66, 0, true, 20);    // not straight up
         assertEquals(0, tally.jumpBlocks());
     }
 
     @Test
     void idleSecondsAreNotActiveTime() {
-        tracker.onAction(0);
-        tracker.onAction(20);          // 1 s later: active
-        tracker.onAction(20 * 100);    // 99 s idle: counts as 1 s, not 99
+        tracker.onAction(ReflexTracker.ActionKind.OTHER, 0);
+        tracker.onAction(ReflexTracker.ActionKind.OTHER, 20);        // 1 s later: active
+        tracker.onAction(ReflexTracker.ActionKind.OTHER, 20 * 100);  // 99 s idle: 1 s, not 99
         tracker.flush();
         assertEquals(3, tally.actions());
         assertEquals(3.0F, tally.activeSeconds(), 1e-6);
@@ -181,5 +180,64 @@ class ReflexTrackerTest {
         assertFalse(ReflexTracker.isDodge(5.0, false));
         assertFalse(ReflexTracker.isThreat(5.0, false), "a wild miss is not judged at all");
         assertTrue(ReflexTracker.isThreat(5.0, true));
+    }
+
+    // ---- Real event order: die() runs inside hurt(), before the killing blow's hurt RETURN ----
+
+    @Test
+    void aOneShotKillOfAMobComingForYouIsACleanFirstHit() {
+        // ReflexHooks.onHurt: the killing blow is counted, then the death it caused.
+        tracker.onHitMob(zombie, true, 10);
+        tracker.onMobDied(zombie, true);
+        assertEquals(1, tally.cleanFirstHits());
+        tracker.expire(10 + ReflexTracker.FIRST_HIT_EXPIRE_TICKS + 1);
+        assertEquals(0, tally.firstHits(), "no phantom first hit left open on the corpse");
+    }
+
+    @Test
+    void aKillThatAnswersAHitIsAStrikeBack() {
+        tracker.onStruckBy(zombie, 100);
+        tracker.onHitMob(zombie, true, 108);
+        tracker.onMobDied(zombie, true);
+        assertEquals(1, tally.strikeSamples());
+        assertEquals(0, tally.firstHits() + tally.cleanFirstHits());
+    }
+
+    @Test
+    void aKillThatIsNotTheirOwnBlowSettlesPlain() {
+        tracker.onHitMob(zombie, true, 10);
+        tracker.onMobDied(zombie, false);   // e.g. thorns landed the killing damage
+        assertEquals(1, tally.firstHits());
+    }
+
+    // ---- Held-button filtering ----
+
+    @Test
+    void holdingMineSwingsEveryTickButCountsOnce() {
+        for (int t = 0; t < 40; t++) tracker.onAction(ReflexTracker.ActionKind.SWING, t);
+        tracker.flush();
+        assertEquals(1, tally.actions());
+    }
+
+    @Test
+    void holdingUseRepeatsEveryFourTicksButCountsOnce() {
+        for (int t = 0; t < 40; t += 4) tracker.onAction(ReflexTracker.ActionKind.USE, t);
+        tracker.flush();
+        assertEquals(1, tally.actions());
+    }
+
+    @Test
+    void deliberateClicksAllCount() {
+        for (int t = 0; t < 40; t += 3) tracker.onAction(ReflexTracker.ActionKind.SWING, t);
+        for (int t = 100; t < 140; t += 6) tracker.onAction(ReflexTracker.ActionKind.USE, t);
+        tracker.flush();
+        assertEquals(14 + 7, tally.actions());
+    }
+
+    @Test
+    void aCrouchTappedBridgeStillCounts() {
+        // Crouch isn't an input to the tracker any more: only geometry and timing decide.
+        for (int i = 0; i < 4; i++) tracker.onBlockPlaced(i, 64, 0, false, i * 6);
+        assertEquals(4, tally.bridgeBlocks());
     }
 }

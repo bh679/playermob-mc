@@ -39,6 +39,16 @@ public final class ReflexTracker {
 
     /** A gap between actions longer than this many seconds is idle, not active time. */
     static final int ACTIVE_GAP_SECONDS = 3;
+    /**
+     * A swing this soon after the last is a held button, not a press: the client swings every
+     * tick while mining. A deliberate click can't come one tick apart.
+     */
+    static final int SWING_REPEAT_TICKS = 1;
+    /** Likewise for use: a held right-click re-sends its use every 4 ticks. */
+    static final int USE_REPEAT_TICKS = 4;
+
+    /** The kind of input, for filtering a held button's auto-repeat out of the count. */
+    public enum ActionKind { SWING, USE, OTHER }
 
     /** Consecutive off-train pace samples after which re-boarding doesn't count as progress. */
     static final int OFF_TRAIN_ABSORB_SAMPLES = 5;
@@ -69,6 +79,8 @@ public final class ReflexTracker {
     private int windowActions;
     private int windowActiveSeconds;
     private int lastActionSecond = Integer.MIN_VALUE;
+    private int lastSwingTick = Integer.MIN_VALUE;
+    private int lastUseTick = Integer.MIN_VALUE;
 
     // Pace.
     private boolean paceAnchored;
@@ -144,20 +156,22 @@ public final class ReflexTracker {
 
     // ---- Block placement --------------------------------------------------
 
-    /** The player placed a block at {@code (x, y, z)} (in whatever space the block lives in). */
-    public void onBlockPlaced(long x, long y, long z, boolean airborne, boolean crouching, int tick) {
+    /**
+     * The player placed a block at {@code (x, y, z)} (in whatever space the block lives in).
+     * Crouching is not checked: shift-tapping at the edge is how most players speed-bridge, and
+     * the {@value #BRIDGE_GAP_TICKS}-tick gap already rules out a slow, held-shift bridge.
+     */
+    public void onBlockPlaced(long x, long y, long z, boolean airborne, int tick) {
         if (hasLastBlock) {
             int gap = tick - lastBlockTick;
             long dx = x - lastX, dy = y - lastY, dz = z - lastZ;
             boolean beside = dy == 0 && Math.abs(dx) + Math.abs(dz) == 1;
             boolean above = dx == 0 && dz == 0 && dy == 1;
 
-            bridgeRun = (beside && !crouching && gap >= 0 && gap <= BRIDGE_GAP_TICKS)
-                ? bridgeRun + 1 : (crouching ? 0 : 1);
-            jumpRun = (above && airborne && gap >= 0 && gap <= JUMP_GAP_TICKS)
-                ? jumpRun + 1 : 1;
+            bridgeRun = (beside && gap >= 0 && gap <= BRIDGE_GAP_TICKS) ? bridgeRun + 1 : 1;
+            jumpRun = (above && airborne && gap >= 0 && gap <= JUMP_GAP_TICKS) ? jumpRun + 1 : 1;
         } else {
-            bridgeRun = crouching ? 0 : 1;
+            bridgeRun = 1;
             jumpRun = 1;
         }
         hasLastBlock = true;
@@ -180,8 +194,21 @@ public final class ReflexTracker {
 
     // ---- Actions ----------------------------------------------------------
 
-    /** One deliberate input (swing, hotbar swap, sneak/sprint toggle, jump, use, break). */
-    public void onAction(int tick) {
+    /**
+     * One input (swing, hotbar swap, sneak/sprint toggle, jump, use, break). A swing or use that
+     * repeats as fast as a held button auto-repeats is dropped, so holding a button down reads as
+     * one press, not twenty a second.
+     */
+    public void onAction(ActionKind kind, int tick) {
+        if (kind == ActionKind.SWING) {
+            boolean repeat = isRepeat(lastSwingTick, tick, SWING_REPEAT_TICKS);
+            lastSwingTick = tick;
+            if (repeat) return;
+        } else if (kind == ActionKind.USE) {
+            boolean repeat = isRepeat(lastUseTick, tick, USE_REPEAT_TICKS);
+            lastUseTick = tick;
+            if (repeat) return;
+        }
         int second = Math.floorDiv(tick, 20);
         windowActions++;
         if (lastActionSecond == Integer.MIN_VALUE) {
@@ -192,6 +219,10 @@ public final class ReflexTracker {
             windowActiveSeconds += gap <= ACTIVE_GAP_SECONDS ? gap : 1;
         }
         lastActionSecond = Math.max(lastActionSecond, second);
+    }
+
+    private static boolean isRepeat(int last, int tick, int within) {
+        return last != Integer.MIN_VALUE && tick >= last && tick - last <= within;
     }
 
     // ---- Pace -------------------------------------------------------------

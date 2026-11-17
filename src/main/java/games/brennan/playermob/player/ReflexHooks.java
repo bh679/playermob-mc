@@ -6,6 +6,7 @@ import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.damagesource.DamageTypes;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
@@ -78,7 +79,14 @@ public final class ReflexHooks {
 
     // ---- hooks ------------------------------------------------------------
 
-    /** A living entity just took damage (server side, hit landed). */
+    /**
+     * A living entity just took damage (server side, hit landed — {@code RETURN} of {@code hurt}).
+     *
+     * <p>Owns the killing blow's death too. {@code die} runs <em>inside</em> {@code hurt}, so the
+     * death hook fires before this one for the same blow; settling it there would lose the
+     * strike back the kill answered, and open a phantom first hit on the corpse. So
+     * {@link #onDie} leaves the killer's tracker alone and this hook settles it, hit first.</p>
+     */
     public static void onHurt(LivingEntity victim, DamageSource source) {
         try {
             Entity cause = source.getEntity();
@@ -89,9 +97,17 @@ public final class ReflexHooks {
                 }
             } else if (counts(cause) && victim != cause) {
                 ServerPlayer player = (ServerPlayer) cause;
-                if (isHostile(victim, player)) {
+                if (!isHostile(victim, player)) {
+                    return;
+                }
+                ReflexTracker t = tracker(player);
+                boolean ownBlow = isOwnBlow(source, player);
+                if (ownBlow) {
                     boolean targeting = victim instanceof Mob m && m.getTarget() == player;
-                    tracker(player).onHitMob(victim.getUUID(), targeting, tick(player));
+                    t.onHitMob(victim.getUUID(), targeting, tick(player));
+                }
+                if (victim.isDeadOrDying()) {
+                    t.onMobDied(victim.getUUID(), ownBlow);
                 }
             }
         } catch (RuntimeException e) {
@@ -99,22 +115,38 @@ public final class ReflexHooks {
         }
     }
 
-    /** A living entity is dying. Settles any first hit a player had open on it. */
+    /**
+     * The player's own attack — melee, or a projectile they fired. Thorns names the player as its
+     * source too, but it lands in the same tick as the mob's hit with no input at all, so it
+     * would read as a perfect strike back.
+     */
+    private static boolean isOwnBlow(DamageSource source, ServerPlayer player) {
+        if (source.is(DamageTypes.THORNS)) {
+            return false;
+        }
+        Entity direct = source.getDirectEntity();
+        return direct == player || direct instanceof Projectile;
+    }
+
+    /**
+     * A living entity is dying. Settles any first hit a player other than the killer had open on
+     * it; the killer's is settled by {@link #onHurt} once the killing blow itself is counted.
+     */
     public static void onDie(LivingEntity dying, DamageSource source) {
         if (dying instanceof Player) {
             return;   // the player's own death goes through onPlayerDeath
         }
         try {
             Entity killer = source.getEntity();
-            UUID killerId = killer instanceof ServerPlayer ? killer.getUUID() : null;
+            UUID killerId = counts(killer) ? killer.getUUID() : null;
             synchronized (ReflexHooks.class) {
                 if (TRACKERS.isEmpty()) {
                     return;
                 }
                 UUID mob = dying.getUUID();
                 for (Map.Entry<UUID, ReflexTracker> e : TRACKERS.entrySet()) {
-                    if (e.getValue().tracks(mob)) {
-                        e.getValue().onMobDied(mob, e.getKey().equals(killerId));
+                    if (!e.getKey().equals(killerId) && e.getValue().tracks(mob)) {
+                        e.getValue().onMobDied(mob, false);
                     }
                 }
             }
@@ -147,21 +179,20 @@ public final class ReflexHooks {
         try {
             ServerPlayer player = (ServerPlayer) placer;
             // Not also an action: the use-item-on packet that placed it already counted one.
-            tracker(player).onBlockPlaced(x, y, z, !player.onGround(), player.isShiftKeyDown(),
-                tick(player));
+            tracker(player).onBlockPlaced(x, y, z, !player.onGround(), tick(player));
         } catch (RuntimeException e) {
             LOGGER.error("[playermob] reflex place hook failed", e);
         }
     }
 
     /** One deliberate input from the player (swing, swap, toggle, jump, use, break). */
-    public static void onAction(Player actor) {
+    public static void onAction(Player actor, ReflexTracker.ActionKind kind) {
         if (!counts(actor)) {
             return;
         }
         try {
             ServerPlayer player = (ServerPlayer) actor;
-            tracker(player).onAction(tick(player));
+            tracker(player).onAction(kind, tick(player));
         } catch (RuntimeException e) {
             LOGGER.error("[playermob] reflex action hook failed", e);
         }
