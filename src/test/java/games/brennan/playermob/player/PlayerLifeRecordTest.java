@@ -531,7 +531,8 @@ class PlayerLifeRecordTest {
         r.toTraits().save(snapshot);
         int expected = r.reflexes().reactionSpeed();
         assertTrue(expected < DispositionTraits.DEFAULT);
-        assertEquals(expected, snapshot.getInt(DispositionTraits.TAG_REACTION_SPEED));
+        assertEquals(expected, games.brennan.playermob.compat.NbtCompat.getIntOr(
+            snapshot, DispositionTraits.TAG_REACTION_SPEED, -1));
         for (long seed = 0; seed < 50; seed++) {
             DispositionTraits echo = new DispositionTraits();
             echo.load(snapshot);
