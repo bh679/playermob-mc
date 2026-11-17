@@ -1339,7 +1339,7 @@
     },
     {
       "id": "echo-reaction-speed",
-      "version": "0.123.0",
+      "version": "0.124.0",
       "type": "feat",
       "title": "Echoes inherit your reflexes",
       "summary": "An echo's reaction speed now comes from how you played that life. Quick hands leave a quick echo, and a slow life leaves a sluggish one. Before this, every echo reacted at the same middling speed.",
