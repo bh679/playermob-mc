@@ -17,7 +17,8 @@ import java.util.UUID;
 /**
  * Reaction-speed signal: dodges. A projectile owned by a mob that targets a player remembers
  * that player and its closest pass to them; when it first hits something it reports either a
- * hit on its target or, if it passed close and missed, a dodge
+ * hit on its target or, if it passed close and missed, a dodge. A {@code MISS} result is no
+ * impact and is skipped
  * ({@link ReflexHooks#onProjectileResolved}). Projectiles not aimed at a player by a mob are
  * never tracked, so the per-tick cost is one owner check.
  */
@@ -53,7 +54,10 @@ public abstract class ProjectileReflexMixin {
     @Inject(method = "onHit", at = @At("HEAD"))
     private void playermob$resolve(HitResult result, CallbackInfo ci) {
         Projectile self = (Projectile) (Object) this;
-        if (playermob$resolved || playermob$aimedAt == null || self.level().isClientSide()) {
+        // Vanilla calls onHit every tick with a MISS result while the arrow is in flight (NeoForge
+        // filters those out before onHit, Fabric doesn't) — only a real impact resolves it.
+        if (playermob$resolved || playermob$aimedAt == null || self.level().isClientSide()
+                || result.getType() == HitResult.Type.MISS) {
             return;
         }
         playermob$resolved = true;
