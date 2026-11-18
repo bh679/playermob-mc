@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.entity.ReactionChannel;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.entity.StayAnchor;
 import games.brennan.playermob.entity.StayNearPolicy;
@@ -116,7 +117,7 @@ public final class StayNearGoal extends Goal implements DescribableGoal {
         }
         mob.getLookControl().setLookAt(target.x, target.y, target.z);
         if (--repathCooldown <= 0 || mob.getNavigation().isDone()) {
-            repathCooldown = mob.reactTicks(REPATH_INTERVAL);
+            repathCooldown = mob.reactTicks(ReactionChannel.MOVEMENT, REPATH_INTERVAL);
             issueMove();
         }
     }

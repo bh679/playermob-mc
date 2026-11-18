@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.entity.ReactionChannel;
 import games.brennan.playermob.compat.CrossbowCompat;
 import games.brennan.playermob.entity.DispositionResolver;
 import games.brennan.playermob.entity.PlayerMobEntity;
@@ -113,14 +114,14 @@ public final class PlayerMobCrossbowAttackGoal extends Goal {
 
         double distSqr = this.mob.distanceToSqr(target);
         boolean shouldClose = (distSqr > (double) this.attackRadiusSqr
-            || this.seeTime < this.mob.reactTicks(SEE_TIME_TO_SETTLE))
+            || this.seeTime < this.mob.reactTicks(ReactionChannel.RANGED, SEE_TIME_TO_SETTLE))
             && this.attackDelay == 0;
         if (shouldClose) {
             --this.updatePathDelay;
             if (this.updatePathDelay <= 0) {
                 this.mob.getNavigation().moveTo(target,
                     this.canRun() ? this.speedModifier : this.speedModifier * 0.5);
-                this.updatePathDelay = this.mob.reactTicks(
+                this.updatePathDelay = this.mob.reactTicks(ReactionChannel.RANGED, 
                     PATHFINDING_DELAY_RANGE.sample(this.mob.getRandom()));
             }
         } else {
@@ -151,7 +152,7 @@ public final class PlayerMobCrossbowAttackGoal extends Goal {
                 // beat — 0 at ff10 (charge-limited) up to 200 ticks at ff0 — and reaction
                 // speed stretches or compresses that beat.
                 this.attackDelay = DispositionResolver.rangedAttackExtraDelayTicks(
-                    this.mob.fightFlight(), this.mob.reactionSpeed());
+                    this.mob.fightFlight(), this.mob.reactionSpeed(ReactionChannel.RANGED));
                 this.mob.setChargingCrossbow(false);
             }
         } else if (this.crossbowState == CrossbowState.CHARGED) {

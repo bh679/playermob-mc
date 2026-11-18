@@ -66,7 +66,10 @@ public final class ReflexTracker {
     // Strike back / first hit.
     private final Map<UUID, Integer> struckAt = new HashMap<>();
     private final Map<UUID, Integer> lastHurtByAt = new HashMap<>();
-    private final Map<UUID, Integer> openFirstHits = new HashMap<>();
+    /** Open first hits: when each was landed and whether by the player's own blow (melee). */
+    private final Map<UUID, Opener> openFirstHits = new HashMap<>();
+
+    private record Opener(int tick, boolean melee) {}
 
     // Block placement.
     private boolean hasLastBlock;
@@ -74,6 +77,9 @@ public final class ReflexTracker {
     private int lastBlockTick;
     private int bridgeRun;
     private int jumpRun;
+    /** Ticks summed over the gaps inside the current run (one fewer gap than blocks). */
+    private int bridgeRunGapTicks;
+    private int jumpRunGapTicks;
 
     // Actions.
     private int windowActions;
@@ -100,21 +106,29 @@ public final class ReflexTracker {
         struckAt.putIfAbsent(attacker, tick);   // latency runs from the first unanswered hit
         lastHurtByAt.put(attacker, tick);
         // It hit back before the player finished it: the first hit was not clean.
-        if (openFirstHits.remove(attacker) != null) {
-            sink.accept(t -> t.withFirstHit(false));
+        Opener opener = openFirstHits.remove(attacker);
+        if (opener != null) {
+            sink.accept(t -> t.withFirstHit(false, opener.melee()));
         }
+    }
+
+    /** As {@link #onHitMob(UUID, boolean, boolean, int)} for a melee blow. */
+    public void onHitMob(UUID mob, boolean mobTargetsPlayer, int tick) {
+        onHitMob(mob, mobTargetsPlayer, true, tick);
     }
 
     /**
      * The player just landed a hit on hostile mob {@code mob}. {@code mobTargetsPlayer} says the
-     * mob was already coming for them — hitting an idle mob first is not a reflex.
+     * mob was already coming for them — hitting an idle mob first is not a reflex. {@code melee}
+     * says it was the player's own blow rather than a projectile; only melee feeds the echo's
+     * melee reaction speed (ranged is scored from the player's own arrows instead).
      */
-    public void onHitMob(UUID mob, boolean mobTargetsPlayer, int tick) {
+    public void onHitMob(UUID mob, boolean mobTargetsPlayer, boolean melee, int tick) {
         Integer struck = struckAt.remove(mob);
         if (struck != null) {
             int latency = tick - struck;
             if (latency >= 0 && latency <= STRIKE_WINDOW_TICKS) {
-                sink.accept(t -> t.withStrikeBack(latency));
+                sink.accept(t -> t.withStrikeBack(latency, melee));
             }
             return;
         }
@@ -123,7 +137,7 @@ public final class ReflexTracker {
         }
         Integer hurtBy = lastHurtByAt.get(mob);
         if (hurtBy == null || tick - hurtBy > FIRST_HIT_QUIET_TICKS) {
-            openFirstHits.put(mob, tick);
+            openFirstHits.put(mob, new Opener(tick, melee));
         }
     }
 
@@ -131,9 +145,19 @@ public final class ReflexTracker {
     public void onMobDied(UUID mob, boolean killedByPlayer) {
         struckAt.remove(mob);
         lastHurtByAt.remove(mob);
-        if (openFirstHits.remove(mob) != null) {
-            sink.accept(t -> t.withFirstHit(killedByPlayer));
+        Opener opener = openFirstHits.remove(mob);
+        if (opener != null) {
+            sink.accept(t -> t.withFirstHit(killedByPlayer, opener.melee()));
         }
+    }
+
+    /**
+     * One of the player's own arrows landed: {@code hit} if it struck a living target other than
+     * them. {@code crit} is whether it left a bow fully drawn, {@code null} when that can't be told
+     * (crossbow bolts are always critical, tridents never).
+     */
+    public void onOwnArrow(boolean hit, Boolean crit) {
+        sink.accept(t -> t.withArrow(hit, crit));
     }
 
     /** One mob projectile aimed at the player has resolved. */
@@ -168,28 +192,56 @@ public final class ReflexTracker {
             boolean beside = dy == 0 && Math.abs(dx) + Math.abs(dz) == 1;
             boolean above = dx == 0 && dz == 0 && dy == 1;
 
-            bridgeRun = (beside && gap >= 0 && gap <= BRIDGE_GAP_TICKS) ? bridgeRun + 1 : 1;
-            jumpRun = (above && airborne && gap >= 0 && gap <= JUMP_GAP_TICKS) ? jumpRun + 1 : 1;
+            if (beside && gap >= 0 && gap <= BRIDGE_GAP_TICKS) {
+                bridgeRun++;
+                bridgeRunGapTicks += gap;
+            } else {
+                bridgeRun = 1;
+                bridgeRunGapTicks = 0;
+            }
+            if (above && airborne && gap >= 0 && gap <= JUMP_GAP_TICKS) {
+                jumpRun++;
+                jumpRunGapTicks += gap;
+            } else {
+                jumpRun = 1;
+                jumpRunGapTicks = 0;
+            }
+            creditRun(bridgeRun, BRIDGE_MIN_RUN, true, gap);
+            creditRun(jumpRun, JUMP_MIN_RUN, false, gap);
         } else {
             bridgeRun = 1;
             jumpRun = 1;
+            bridgeRunGapTicks = 0;
+            jumpRunGapTicks = 0;
         }
         hasLastBlock = true;
         lastX = x;
         lastY = y;
         lastZ = z;
         lastBlockTick = tick;
-
-        creditRun(bridgeRun, BRIDGE_MIN_RUN, true);
-        creditRun(jumpRun, JUMP_MIN_RUN, false);
     }
 
-    /** At the threshold credit the whole run so far; past it, one block at a time. */
-    private void creditRun(int run, int minRun, boolean bridge) {
-        int count = run == minRun ? minRun : (run > minRun ? 1 : 0);
-        if (count > 0) {
-            sink.accept(bridge ? t -> t.withBridgeBlocks(count) : t -> t.withJumpBlocks(count));
+    /**
+     * At the threshold credit the whole run so far (its blocks and the gaps between them); past it,
+     * one block and the gap that led to it. The gaps are how the echo's building speed is scored.
+     */
+    private void creditRun(int run, int minRun, boolean bridge, int lastGap) {
+        int count;
+        int gaps;
+        int gapTicks;
+        if (run == minRun) {
+            count = minRun;
+            gaps = minRun - 1;
+            gapTicks = bridge ? bridgeRunGapTicks : jumpRunGapTicks;
+        } else if (run > minRun) {
+            count = 1;
+            gaps = 1;
+            gapTicks = lastGap;
+        } else {
+            return;
         }
+        sink.accept(bridge ? t -> t.withBridgeBlocks(count, gaps, gapTicks)
+                           : t -> t.withJumpBlocks(count, gaps, gapTicks));
     }
 
     // ---- Actions ----------------------------------------------------------
@@ -265,12 +317,12 @@ public final class ReflexTracker {
     public void expire(int tick) {
         struckAt.values().removeIf(t -> tick - t > STRIKE_WINDOW_TICKS || tick < t);
         lastHurtByAt.values().removeIf(t -> tick - t > FIRST_HIT_QUIET_TICKS || tick < t);
-        Iterator<Integer> open = openFirstHits.values().iterator();
+        Iterator<Opener> open = openFirstHits.values().iterator();
         while (open.hasNext()) {
-            int opened = open.next();
-            if (tick - opened > FIRST_HIT_EXPIRE_TICKS || tick < opened) {
+            Opener opener = open.next();
+            if (tick - opener.tick() > FIRST_HIT_EXPIRE_TICKS || tick < opener.tick()) {
                 open.remove();
-                sink.accept(t -> t.withFirstHit(false));
+                sink.accept(t -> t.withFirstHit(false, opener.melee()));
             }
         }
     }

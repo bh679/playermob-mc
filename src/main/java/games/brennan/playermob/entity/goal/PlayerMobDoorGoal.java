@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.entity.ReactionChannel;
 import games.brennan.playermob.entity.DoorObstruction;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.core.BlockPos;
@@ -75,7 +76,7 @@ public final class PlayerMobDoorGoal extends DoorInteractGoal implements Describ
 
     @Override
     public void start() {
-        this.forgetTime = playerMob.reactTicks(CLOSE_DELAY_TICKS);
+        this.forgetTime = playerMob.reactTicks(ReactionChannel.MOVEMENT, CLOSE_DELAY_TICKS);
         operateDeliberately(true);
     }
 

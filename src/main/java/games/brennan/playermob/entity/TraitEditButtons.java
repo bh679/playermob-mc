@@ -61,10 +61,10 @@ public final class TraitEditButtons {
                 traits.setFriendliness(traits.friendliness() + 1);
                 return true;
             case REACTION_SPEED_DOWN:
-                traits.setReactionSpeed(traits.reactionSpeed() - 1);
+                traits.shiftReactionSpeed(-1);
                 return true;
             case REACTION_SPEED_UP:
-                traits.setReactionSpeed(traits.reactionSpeed() + 1);
+                traits.shiftReactionSpeed(+1);
                 return true;
             default:
                 return false;

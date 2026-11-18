@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.entity.ReactionChannel;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
@@ -76,7 +77,7 @@ public final class CrossGroupGapGoal extends Goal implements DescribableGoal {
             return false;
         }
         if (!TrainConfinement.isConfined(mob)) {
-            scanCooldown = mob.reactTicks(EMPTY_SCAN_COOLDOWN);
+            scanCooldown = mob.reactTicks(ReactionChannel.MOVEMENT, EMPTY_SCAN_COOLDOWN);
             return false;
         }
         if (mob.getTarget() != null) {
@@ -84,12 +85,12 @@ public final class CrossGroupGapGoal extends Goal implements DescribableGoal {
         }
         int dir = mob.effectiveTrainMarchDir();
         if (dir == 0) {
-            scanCooldown = mob.reactTicks(EMPTY_SCAN_COOLDOWN); // not latched yet, or a loved player shares our carriage (idle with them)
+            scanCooldown = mob.reactTicks(ReactionChannel.MOVEMENT, EMPTY_SCAN_COOLDOWN); // not latched yet, or a loved player shares our carriage (idle with them)
             return false;
         }
         if (TrainConfinement.nextCarriageTarget(mob, dir) != null) {
             // Still rooms to explore within this group — that's AdvanceCarriageGoal's job.
-            scanCooldown = mob.reactTicks(EMPTY_SCAN_COOLDOWN);
+            scanCooldown = mob.reactTicks(ReactionChannel.MOVEMENT, EMPTY_SCAN_COOLDOWN);
             return false;
         }
         Vec3 next = TrainConfinement.nextGroupTarget(mob, dir);
@@ -137,7 +138,7 @@ public final class CrossGroupGapGoal extends Goal implements DescribableGoal {
         phaseTicks = 0;
         settleTicks = 0;
         repathCooldown = 0;
-        scanCooldown = mob.reactTicks(POST_VISIT_COOLDOWN);
+        scanCooldown = mob.reactTicks(ReactionChannel.MOVEMENT, POST_VISIT_COOLDOWN);
     }
 
     @Override
@@ -181,7 +182,7 @@ public final class CrossGroupGapGoal extends Goal implements DescribableGoal {
         }
         settleTicks = 0;
         if (--repathCooldown <= 0) {
-            repathCooldown = mob.reactTicks(REPATH_INTERVAL);
+            repathCooldown = mob.reactTicks(ReactionChannel.MOVEMENT, REPATH_INTERVAL);
             issueMove();
         }
     }

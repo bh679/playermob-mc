@@ -240,4 +240,59 @@ class ReflexTrackerTest {
         for (int i = 0; i < 4; i++) tracker.onBlockPlaced(i, 64, 0, false, i * 6);
         assertEquals(4, tally.bridgeBlocks());
     }
+
+    // ---- Channels ----
+
+    @Test
+    void aProjectileStrikeBackIsNotMelee() {
+        tracker.onStruckBy(zombie, 0);
+        tracker.onHitMob(zombie, true, false, 6);
+        assertEquals(1, tally.strikeSamples());
+        assertEquals(0, tally.meleeStrikeSamples());
+    }
+
+    @Test
+    void aFirstHitRemembersWhetherItWasMelee() {
+        tracker.onHitMob(zombie, true, false, 10);   // opened with an arrow
+        tracker.onMobDied(zombie, true);
+        assertEquals(1, tally.cleanFirstHits());
+        assertEquals(0, tally.meleeCleanFirstHits());
+        UUID other = UUID.randomUUID();
+        tracker.onHitMob(other, true, true, 20);
+        tracker.onMobDied(other, true);
+        assertEquals(1, tally.meleeCleanFirstHits());
+    }
+
+    @Test
+    void bridgeRunsCreditTheirGaps() {
+        tracker.onBlockPlaced(0, 64, 0, false, 0);
+        tracker.onBlockPlaced(1, 64, 0, false, 3);
+        tracker.onBlockPlaced(2, 64, 0, false, 7);
+        tracker.onBlockPlaced(3, 64, 0, false, 9);    // threshold: 3 gaps, 9 ticks
+        assertEquals(3, tally.bridgeGaps());
+        // gaps 3 + 4 + 2 = 9 over 3 → mean 3 ticks → 10 - 5 * (3 - 2) / (5 - 2)
+        assertEquals(10.0 - 5.0 / 3.0, tally.bridgeGapScore(), 1e-6);
+        tracker.onBlockPlaced(4, 64, 0, false, 13);   // one more gap of 4
+        assertEquals(4, tally.bridgeGaps());
+        assertEquals(5, tally.bridgeBlocks());
+    }
+
+    @Test
+    void pillarsCreditTheirGaps() {
+        tracker.onBlockPlaced(0, 64, 0, true, 0);
+        tracker.onBlockPlaced(0, 65, 0, true, 10);
+        tracker.onBlockPlaced(0, 66, 0, true, 21);
+        assertEquals(2, tally.jumpGaps());
+        assertEquals(3, tally.jumpBlocks());
+    }
+
+    @Test
+    void ownArrowsAreTallied() {
+        tracker.onOwnArrow(true, true);
+        tracker.onOwnArrow(false, null);
+        assertEquals(2, tally.arrowShots());
+        assertEquals(1, tally.arrowHits());
+        assertEquals(1, tally.bowShots());
+        assertEquals(1, tally.critShots());
+    }
 }

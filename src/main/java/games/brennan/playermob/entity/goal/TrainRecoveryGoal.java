@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.entity.ReactionChannel;
 import com.mojang.logging.LogUtils;
 import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.compat.GameRuleCompat;
@@ -433,12 +434,12 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
      * trace at all.
      */
     private int pathReissueTicks() {
-        return mob.reactTicks(PATH_REISSUE_TICKS);
+        return mob.reactTicks(ReactionChannel.MOVEMENT, PATH_REISSUE_TICKS);
     }
 
     /** How often this mob lays the next bridge/step block, scaled by reaction speed. */
     private int placeIntervalTicks() {
-        return mob.reactTicks(PLACE_INTERVAL_TICKS);
+        return mob.reactTicks(ReactionChannel.BUILDING, PLACE_INTERVAL_TICKS);
     }
     private final double moveSpeed;
 
@@ -2110,7 +2111,7 @@ public final class TrainRecoveryGoal extends Goal implements DescribableGoal {
         if (breakTicksTotal == 0) {
             // First tick in reach: pick the right tool and size the break.
             if (mob.equipBetterToolFor(state)) {
-                toolReadyTick = mob.tickCount + mob.reactRoll(TOOL_SWAP_MIN_TICKS, TOOL_SWAP_MAX_TICKS);
+                toolReadyTick = mob.tickCount + mob.reactRoll(ReactionChannel.ITEMS, TOOL_SWAP_MIN_TICKS, TOOL_SWAP_MAX_TICKS);
             }
             breakTicksTotal = breakTicksFor(state);
             gatherBreakTicks = 0;

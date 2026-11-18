@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.entity.ReactionChannel;
 import games.brennan.playermob.compat.CrossbowCompat;
 import games.brennan.playermob.entity.AimCone;
 import games.brennan.playermob.entity.ArrowThreat;
@@ -287,8 +288,8 @@ public final class BlockArrowsGoal extends Goal {
             if (!ArrowThreat.isIncoming(mobX, mobY, mobZ,
                     arrow.getX(), arrow.getY(), arrow.getZ(),
                     v.x, v.y, v.z, hitRadius,
-                    mob.reactReflexWindow(MIN_LEAD_TICKS),
-                    mob.reactTicksInverse((int) MAX_LEAD_TICKS))) {
+                    mob.reactReflexWindow(ReactionChannel.DEFENCE, MIN_LEAD_TICKS),
+                    mob.reactTicksInverse(ReactionChannel.DEFENCE, (int) MAX_LEAD_TICKS))) {
                 continue;
             }
             double distSqr = arrow.distanceToSqr(mobX, mobY, mobZ);

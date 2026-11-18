@@ -2,7 +2,9 @@ package games.brennan.playermob.mixin;
 
 import games.brennan.playermob.player.ReflexHooks;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.projectile.AbstractArrow;
 import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
@@ -21,6 +23,9 @@ import java.util.UUID;
  * impact and is skipped
  * ({@link ReflexHooks#onProjectileResolved}). Projectiles not aimed at a player by a mob are
  * never tracked, so the per-tick cost is one owner check.
+ *
+ * <p>It also follows the player's <em>own</em> arrows (and tridents) for the echo's ranged reaction
+ * speed: whether each one hit a living target, and whether a bow shot left fully drawn.</p>
  */
 @Mixin(Projectile.class)
 public abstract class ProjectileReflexMixin {
@@ -29,6 +34,9 @@ public abstract class ProjectileReflexMixin {
     @Unique private boolean playermob$checkedAim;
     @Unique private boolean playermob$resolved;
     @Unique private double playermob$closest = Double.MAX_VALUE;
+    /** A counted player who fired this arrow, and whether it left a bow fully drawn (null: can't tell). */
+    @Unique private UUID playermob$shooter;
+    @Unique private Boolean playermob$crit;
 
     @Inject(method = "tick", at = @At("TAIL"))
     private void playermob$trackPass(CallbackInfo ci) {
@@ -40,6 +48,11 @@ public abstract class ProjectileReflexMixin {
             playermob$checkedAim = true;
             ServerPlayer target = ReflexHooks.aimedAt(self);
             playermob$aimedAt = target == null ? null : target.getUUID();
+            ServerPlayer shooter = ReflexHooks.arrowShooter(self);
+            if (shooter != null) {
+                playermob$shooter = shooter.getUUID();
+                playermob$crit = ReflexHooks.bowCrit((AbstractArrow) (Object) this, shooter);
+            }
         }
         if (playermob$aimedAt == null) {
             return;
@@ -56,8 +69,21 @@ public abstract class ProjectileReflexMixin {
         Projectile self = (Projectile) (Object) this;
         // Vanilla calls onHit every tick with a MISS result while the arrow is in flight (NeoForge
         // filters those out before onHit, Fabric doesn't) — only a real impact resolves it.
-        if (playermob$resolved || playermob$aimedAt == null || self.level().isClientSide()
+        if (playermob$resolved || self.level().isClientSide()
                 || result.getType() == HitResult.Type.MISS) {
+            return;
+        }
+        if (playermob$shooter != null) {
+            // One of the player's own shots: a hit if it struck a living thing other than them.
+            playermob$resolved = true;
+            if (self.level().getPlayerByUUID(playermob$shooter) instanceof ServerPlayer shooter) {
+                boolean hit = result instanceof EntityHitResult entityHit
+                    && entityHit.getEntity() instanceof LivingEntity living && living != shooter;
+                ReflexHooks.onOwnArrowResolved(shooter, hit, playermob$crit);
+            }
+            return;
+        }
+        if (playermob$aimedAt == null) {
             return;
         }
         playermob$resolved = true;

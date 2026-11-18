@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.entity.ReactionChannel;
 import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.compat.GameRuleCompat;
 import games.brennan.playermob.compat.TrainConfinement;
@@ -185,13 +186,13 @@ public final class TntCombatGoal extends Goal implements DescribableGoal {
             } else {
                 // Couldn't get a charge down — stand down and let the normal fight goal take over for a beat.
                 phase = Phase.DONE;
-                cooldown = mob.reactTicks(FAIL_COOLDOWN);
+                cooldown = mob.reactTicks(ReactionChannel.BUILDING, FAIL_COOLDOWN);
             }
             return;
         }
         if (++walkTicks > WALK_TIMEOUT_TICKS) {
             phase = Phase.DONE;
-            cooldown = mob.reactTicks(FAIL_COOLDOWN);
+            cooldown = mob.reactTicks(ReactionChannel.BUILDING, FAIL_COOLDOWN);
             return;
         }
         mob.getNavigation().moveTo(target, speed);
@@ -406,11 +407,11 @@ public final class TntCombatGoal extends Goal implements DescribableGoal {
                 walkTicks = 0;
             } else {
                 phase = Phase.DONE;
-                cooldown = mob.reactTicks(POST_CYCLE_COOLDOWN);
+                cooldown = mob.reactTicks(ReactionChannel.BUILDING, POST_CYCLE_COOLDOWN);
             }
             return;
         }
-        if (++fleeRepathTicks >= mob.reactTicks(FLEE_REPATH_INTERVAL) || mob.getNavigation().isDone()) {
+        if (++fleeRepathTicks >= mob.reactTicks(ReactionChannel.MOVEMENT, FLEE_REPATH_INTERVAL) || mob.getNavigation().isDone()) {
             fleeRepathTicks = 0;
             Vec3 away = DefaultRandomPos.getPosAway(mob, RETREAT_RADIUS, RETREAT_VERTICAL, danger.position());
             if (away != null) {

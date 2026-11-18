@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.entity.ReactionChannel;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.DispositionResolver;
 import games.brennan.playermob.entity.FollowLovedOnePolicy;
@@ -79,7 +80,7 @@ public final class FollowLovedOneGoal extends Goal implements DescribableGoal {
         }
         LivingEntity candidate = mob.findFollowTarget();
         if (candidate == null || !tooFarFrom(candidate)) {
-            scanCooldown = mob.reactTicks(IDLE_SCAN_COOLDOWN); // no one to chase right now — ease off the wide scan
+            scanCooldown = mob.reactTicks(ReactionChannel.MOVEMENT, IDLE_SCAN_COOLDOWN); // no one to chase right now — ease off the wide scan
             return false;
         }
         this.loved = candidate;
@@ -124,7 +125,7 @@ public final class FollowLovedOneGoal extends Goal implements DescribableGoal {
         }
         mob.getLookControl().setLookAt(loved, 30.0F, 30.0F);
         if (--repathCooldown <= 0 || mob.getNavigation().isDone()) {
-            repathCooldown = mob.reactTicks(REPATH_INTERVAL);
+            repathCooldown = mob.reactTicks(ReactionChannel.MOVEMENT, REPATH_INTERVAL);
             issueMove();
         }
     }

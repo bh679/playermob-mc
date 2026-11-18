@@ -284,6 +284,8 @@ public final class PlayerLifeRecord {
         // proxy for reflexes. Always set — the snapshot writes the key either way, and an unset
         // trait used to reach every echo as a pinned 5.
         traits.setReactionSpeed(reflexes.reactionSpeed());
+        // …and one per kind of action, each leaning on that overall score (see ReflexTally).
+        reflexes.channelSpeeds().forEach(traits::setReactionSpeed);
         return traits;
     }
 

@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.entity.ReactionChannel;
 import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.compat.GameRuleCompat;
 import games.brennan.playermob.compat.TrainConfinement;
@@ -78,7 +79,7 @@ public final class CollectFloorItemsGoal extends Goal implements DescribableGoal
 
         ItemEntity found = findClosestWantedItem();
         if (found == null) {
-            scanCooldown = mob.reactTicks(EMPTY_SCAN_COOLDOWN);
+            scanCooldown = mob.reactTicks(ReactionChannel.ITEMS, EMPTY_SCAN_COOLDOWN);
             return false;
         }
         target = found;
@@ -109,7 +110,7 @@ public final class CollectFloorItemsGoal extends Goal implements DescribableGoal
         target = null;
         phase = Phase.IDLE;
         phaseTicks = 0;
-        scanCooldown = mob.reactTicks(POST_VISIT_COOLDOWN);
+        scanCooldown = mob.reactTicks(ReactionChannel.ITEMS, POST_VISIT_COOLDOWN);
     }
 
     @Override

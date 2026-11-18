@@ -568,4 +568,24 @@ class PlayerLifeRecordTest {
         assertTrue(loaded.reflexes().isEmpty());
         assertEquals(DispositionTraits.DEFAULT, loaded.toTraits().reactionSpeed());
     }
+
+    @Test
+    void theSnapshotCarriesEveryChannelAndTheEchoKeepsThem() {
+        PlayerLifeRecord r = PlayerLifeRecord.EMPTY;
+        for (int i = 0; i < 30; i++) {
+            r = r.withReflexes(t -> t.withStrikeBack(0, true).withArrow(false, false));
+        }
+        CompoundTag snapshot = new CompoundTag();
+        r.toTraits().save(snapshot);
+        assertTrue(snapshot.contains(DispositionTraits.TAG_REACTION_SPEEDS));
+        DispositionTraits echo = new DispositionTraits();
+        echo.load(snapshot);
+        echo.rollIfUnset(net.minecraft.util.RandomSource.create(1));
+        for (games.brennan.playermob.entity.ReactionChannel channel
+                : games.brennan.playermob.entity.ReactionChannel.SPECIFIC) {
+            assertEquals(r.reflexes().reactionSpeed(channel), echo.reactionSpeed(channel), channel.name());
+        }
+        assertTrue(echo.reactionSpeed(games.brennan.playermob.entity.ReactionChannel.MELEE)
+            > echo.reactionSpeed(games.brennan.playermob.entity.ReactionChannel.RANGED));
+    }
 }
