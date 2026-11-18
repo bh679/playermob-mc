@@ -1353,6 +1353,23 @@
       "released": true,
       "released_in": "v0.124.0",
       "released_at": "2026-11-18T03:00:50Z"
+    },
+    {
+      "id": "echo-reaction-channels",
+      "version": "0.125.0",
+      "type": "feat",
+      "title": "Echoes react at your speed for each thing they do",
+      "summary": "An echo no longer has one reaction speed for everything. It fights, shoots, builds and moves as quickly as you did each of those things in that life, so a sharp swordsman who fumbled the bow leaves an echo that swings fast but is slow to shoot.",
+      "highlights": [
+        "Shooting speed follows how often your arrows hit and how often you loosed them fully drawn",
+        "Building speed follows how quickly you bridged and pillared",
+        "Anything you never did, your echo does at your usual pace"
+      ],
+      "pr": 258,
+      "date": "2026-11-18",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
