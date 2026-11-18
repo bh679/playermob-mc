@@ -21,22 +21,23 @@ import java.util.Map;
  * The tallies sit in one array indexed by {@link Stat}, each with its NBT key.</p>
  *
  * <p><b>Scored as a rate, not a volume.</b> {@link #reactionSpeed()} is a weighted <em>average</em>
- * of per-signal scores, pulled toward neutral by a prior of {@link #PRIOR_WEIGHT} points at 5, so a
- * long life doesn't drift to 10 and a thin one stays near 5. No evidence at all scores exactly 5.</p>
+ * of per-signal scores, so a long life doesn't drift to 10.</p>
  *
- * <p><b>Channels lean on the overall score, not on 5.</b> {@link #reactionSpeed(ReactionChannel)}
- * averages that channel's own evidence with {@link #CHANNEL_PRIOR_WEIGHT} points at the overall
- * score. A player who never drew a bow leaves an echo whose ranged speed is their general speed; a
- * player who shot all life leaves one with their own number. A channel with no evidence equals the
- * overall score exactly.</p>
+ * <p><b>No score means 0.</b> Every average starts from a prior of {@link #PRIOR_WEIGHT} /
+ * {@link #CHANNEL_PRIOR_WEIGHT} points at <em>0</em>: a skill the player never showed is 0, and
+ * thin evidence leans toward 0 — each sample pulls the score up toward the player's real level,
+ * so one lucky shot can't jump a skill to 8. The one exception is {@link ReactionChannel#ITEMS},
+ * which has no player signal yet and follows the overall score until it does.</p>
  */
 public final class ReflexTally {
 
     // ---- Scoring ----------------------------------------------------------
-    /** Weight of the neutral-5 prior every life starts with (overall score). */
-    static final double PRIOR_WEIGHT = 5.0;
-    /** Weight of the overall-score prior each channel starts with. */
-    static final double CHANNEL_PRIOR_WEIGHT = 5.0;
+    /** Weight of the prior at {@link #PRIOR_VALUE} every overall score starts from. */
+    static final double PRIOR_WEIGHT = 3.0;
+    /** Weight of the prior at {@link #PRIOR_VALUE} every channel score starts from. */
+    static final double CHANNEL_PRIOR_WEIGHT = 3.0;
+    /** What no evidence scores: a skill the player never showed is 0. */
+    static final double PRIOR_VALUE = 0.0;
 
     /** Strike-back latency (ticks) scoring 10, 5 and 0 — linear between. */
     static final double STRIKE_FAST_TICKS = 6.0;
@@ -375,7 +376,7 @@ public final class ReflexTally {
         addDefence(a);
         addMovement(a);
         a.add(Math.min(activeSeconds() / 60.0, ACTIONS_MAX_WEIGHT), actionScore());
-        return a.meanWithPrior(PRIOR_WEIGHT, DispositionTraits.DEFAULT) + moveBonus();
+        return a.meanWithPrior(PRIOR_WEIGHT, PRIOR_VALUE) + moveBonus();
     }
 
     /** The echo's overall reaction speed, rounded and clamped to {@code [0, 10]}. */
@@ -383,10 +384,12 @@ public final class ReflexTally {
         return clampTrait(rawScore());
     }
 
-    /** Unrounded score for one channel, leaning on the overall score. */
+    /** Unrounded score for one channel; no evidence is 0 (Items follows the overall score for now). */
     double rawScore(ReactionChannel channel) {
         int overall = reactionSpeed();
-        if (channel == null || channel == ReactionChannel.OVERALL) {
+        if (channel == null || channel == ReactionChannel.OVERALL || channel == ReactionChannel.ITEMS) {
+            // Items has no player signal yet (swap-to-use and chest speed come later): until it
+            // does, it follows the overall score rather than reading every echo as fumbling at 0.
             return overall;
         }
         Acc a = new Acc();
@@ -396,10 +399,9 @@ public final class ReflexTally {
             case DEFENCE -> addDefence(a);
             case BUILDING -> addBuilding(a);
             case MOVEMENT -> addMovement(a);
-            case ITEMS -> { /* no player signal yet — follows the overall score */ }
             default -> { }
         }
-        return a.meanWithPrior(CHANNEL_PRIOR_WEIGHT, overall);
+        return a.meanWithPrior(CHANNEL_PRIOR_WEIGHT, PRIOR_VALUE);
     }
 
     /** The echo's reaction speed for one kind of action, rounded and clamped to {@code [0, 10]}. */

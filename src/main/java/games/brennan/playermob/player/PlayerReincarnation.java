@@ -177,6 +177,8 @@ public final class PlayerReincarnation {
         if (snapshot == null) {
             return ItemStack.EMPTY;
         }
+        // An outdated life gets random reaction speeds baked into this egg (EchoReactionUpgrade).
+        snapshot = EchoReactionUpgrade.upgrade(snapshot.copy(), level.getRandom());
         ItemStack egg = new ItemStack(PlayerMobRegistry.PLAYER_MOB_SPAWN_EGG);
         RegistryCompat.applyEntityData(egg, snapshot);
         String name = store.mostRecentNameForPlayer(playerId);
@@ -239,7 +241,9 @@ public final class PlayerReincarnation {
             if (echo == null) {
                 return null; // the chosen pool had no eligible life — stay a fresh mob
             }
-            mob.applyCustomData(echo.snapshot().copy());
+            // A life captured before per-skill reaction speeds rolls them fresh (EchoReactionUpgrade);
+            // upgrade() copies when it changes anything, and the stored record stays as it was.
+            mob.applyCustomData(EchoReactionUpgrade.upgrade(echo.snapshot().copy(), world.getRandom()));
             // A local echo shelves the drafts its life died holding (remote picks arrive stripped —
             // ReincarnationSources.pick — so this is only ever the author's own server's log).
             if (!remote && PlayerMobConfig.echoDraftBooks() && !echo.draftBooks().isEmpty()) {

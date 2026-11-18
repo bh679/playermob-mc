@@ -21,22 +21,23 @@ class ReflexChannelScoringTest {
     }
 
     @Test
-    void aChannelWithNoEvidenceEqualsTheOverallScore() {
+    void aSkillWithNoEvidenceIsZero() {
         ReflexTally fast = repeat(30, t -> t.withStrikeBack(0));
         int overall = fast.reactionSpeed();
         assertTrue(overall > 5);
         for (ReactionChannel channel : new ReactionChannel[] {
                 ReactionChannel.RANGED, ReactionChannel.DEFENCE, ReactionChannel.BUILDING,
-                ReactionChannel.MOVEMENT, ReactionChannel.ITEMS}) {
-            assertEquals(overall, fast.reactionSpeed(channel), channel.name());
+                ReactionChannel.MOVEMENT}) {
+            assertEquals(0, fast.reactionSpeed(channel), channel.name());
         }
+        assertEquals(overall, fast.reactionSpeed(ReactionChannel.ITEMS), "Items follows overall until it has signals");
         assertEquals(overall, fast.reactionSpeed(ReactionChannel.OVERALL));
     }
 
     @Test
-    void anEmptyLifeIsFiveEverywhere() {
+    void anEmptyLifeIsZeroEverywhere() {
         for (int v : ReflexTally.EMPTY.channelSpeeds().values()) {
-            assertEquals(5, v);
+            assertEquals(0, v);
         }
         assertEquals(6, ReflexTally.EMPTY.channelSpeeds().size());
     }
@@ -44,11 +45,11 @@ class ReflexChannelScoringTest {
     @Test
     void meleeMovesWithMeleeEvidenceOnly() {
         ReflexTally t = repeat(30, x -> x.withStrikeBack(0, true));
-        assertTrue(t.reactionSpeed(ReactionChannel.MELEE) > t.reactionSpeed(),
-            "melee leans on overall, then its own (faster) evidence pulls it higher");
+        assertTrue(t.reactionSpeed(ReactionChannel.MELEE) >= 9);
         ReflexTally ranged = repeat(30, x -> x.withStrikeBack(0, false));
-        assertEquals(ranged.reactionSpeed(), ranged.reactionSpeed(ReactionChannel.MELEE),
+        assertEquals(0, ranged.reactionSpeed(ReactionChannel.MELEE),
             "projectile strike backs move the overall score but not melee");
+        assertTrue(ranged.reactionSpeed() >= 9);
         assertEquals(0, ranged.meleeStrikeSamples());
     }
 
@@ -103,15 +104,21 @@ class ReflexChannelScoringTest {
 
     @Test
     void dodgesDriveDefence() {
-        ReflexTally t = ReflexTally.EMPTY;
-        for (int i = 0; i < 20; i++) t = t.withProjectile(false);
-        assertTrue(t.reactionSpeed(ReactionChannel.DEFENCE) < t.reactionSpeed(ReactionChannel.ITEMS));
+        ReflexTally hit = ReflexTally.EMPTY;
+        ReflexTally dodged = ReflexTally.EMPTY;
+        for (int i = 0; i < 20; i++) {
+            hit = hit.withProjectile(false);
+            dodged = dodged.withProjectile(true);
+        }
+        assertEquals(0, hit.reactionSpeed(ReactionChannel.DEFENCE));
+        assertEquals(8, dodged.reactionSpeed(ReactionChannel.DEFENCE));   // 10 * 10 / 13
     }
 
     @Test
     void paceDrivesMovement() {
         ReflexTally t = ReflexTally.EMPTY.withPace(60, 600);  // 6 carriages a minute
-        assertTrue(t.reactionSpeed(ReactionChannel.MOVEMENT) > t.reactionSpeed(ReactionChannel.ITEMS));
+        assertEquals(8, t.reactionSpeed(ReactionChannel.MOVEMENT));
+        assertEquals(0, t.reactionSpeed(ReactionChannel.BUILDING));
     }
 
     @Test
@@ -138,7 +145,7 @@ class ReflexChannelScoringTest {
         assertEquals(3, t.dodges());
         assertEquals(9, t.bridgeBlocks());
         assertEquals(0, t.meleeStrikeSamples(), "no melee split in an old tally");
-        assertEquals(t.reactionSpeed(), t.reactionSpeed(ReactionChannel.MELEE));
+        assertEquals(0, t.reactionSpeed(ReactionChannel.MELEE), "so its melee skill reads as unrecorded");
     }
 
     @Test
