@@ -1350,9 +1350,9 @@
       ],
       "pr": 256,
       "date": "2026-11-17",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.124.0",
+      "released_at": "2026-11-18T03:00:50Z"
     }
   ]
 }
