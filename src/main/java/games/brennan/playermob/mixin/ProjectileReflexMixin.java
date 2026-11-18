@@ -4,7 +4,11 @@ import games.brennan.playermob.player.ReflexHooks;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
+//? if >=26 {
+/*import net.minecraft.world.entity.projectile.arrow.AbstractArrow;
+*///?} else {
 import net.minecraft.world.entity.projectile.AbstractArrow;
+//?}
 import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
