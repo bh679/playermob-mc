@@ -150,4 +150,16 @@ class ReflexChannelScoringTest {
         assertEquals(t.breakdown(), back.breakdown());
         assertEquals(t.channelSpeeds(), back.channelSpeeds());
     }
+
+    @Test
+    void arrowsAndBlockGapsDontMoveTheOverallScore() {
+        ReflexTally base = repeat(10, x -> x.withStrikeBack(10, true));
+        ReflexTally withArrows = base;
+        for (int i = 0; i < 20; i++) withArrows = withArrows.withArrow(false, false);
+        ReflexTally withGaps = base.withBridgeBlocks(0, 20, 160);   // gaps only, no bonus blocks
+        assertEquals(base.rawScore(), withArrows.rawScore(), EPS);
+        assertEquals(base.rawScore(), withGaps.rawScore(), EPS);
+        assertTrue(withArrows.reactionSpeed(ReactionChannel.RANGED) < base.reactionSpeed());
+        assertTrue(withGaps.reactionSpeed(ReactionChannel.BUILDING) < base.reactionSpeed());
+    }
 }

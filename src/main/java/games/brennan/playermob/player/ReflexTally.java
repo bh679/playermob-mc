@@ -363,13 +363,16 @@ public final class ReflexTally {
         a.add(Math.min(paceSeconds() / 60.0, PACE_MAX_WEIGHT), paceScore());
     }
 
-    /** Unrounded overall score — every signal at once, plus the move bonus. */
+    /**
+     * Unrounded overall score, exactly as v0.124.0 scored it: every strike back and first hit
+     * (melee and ranged), dodges, pace and actions per second, plus the move bonus. Arrow accuracy
+     * and block-gap timing feed only their own channels: a qualifying-but-unhurried bridge would
+     * otherwise drag down the overall score a player who never bridges keeps.
+     */
     double rawScore() {
         Acc a = new Acc();
         addMelee(a, false);
-        addRanged(a);
         addDefence(a);
-        addBuilding(a);
         addMovement(a);
         a.add(Math.min(activeSeconds() / 60.0, ACTIONS_MAX_WEIGHT), actionScore());
         return a.meanWithPrior(PRIOR_WEIGHT, DispositionTraits.DEFAULT) + moveBonus();
