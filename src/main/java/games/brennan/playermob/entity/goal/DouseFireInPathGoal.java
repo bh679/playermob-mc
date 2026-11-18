@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.entity.ReactionChannel;
 import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.entity.PathFirePolicy;
 import games.brennan.playermob.entity.PlayerMobEntity;
@@ -115,7 +116,7 @@ public final class DouseFireInPathGoal extends Goal implements DescribableGoal {
         mob.getNavigation().stop();
         waterPos = null;
         phase = Phase.HESITATE;
-        waitTicks = mob.reactRoll(PathFirePolicy.REACTION_MIN_TICKS, PathFirePolicy.REACTION_MAX_TICKS);
+        waitTicks = mob.reactRoll(ReactionChannel.ITEMS, PathFirePolicy.REACTION_MIN_TICKS, PathFirePolicy.REACTION_MAX_TICKS);
     }
 
     @Override
@@ -223,7 +224,7 @@ public final class DouseFireInPathGoal extends Goal implements DescribableGoal {
      * replaces.
      */
     private int bucketSwapTicks() {
-        return mob.reactRoll(PathFirePolicy.BUCKET_SWAP_MIN_TICKS, PathFirePolicy.BUCKET_SWAP_MAX_TICKS);
+        return mob.reactRoll(ReactionChannel.ITEMS, PathFirePolicy.BUCKET_SWAP_MIN_TICKS, PathFirePolicy.BUCKET_SWAP_MAX_TICKS);
     }
 
     /**

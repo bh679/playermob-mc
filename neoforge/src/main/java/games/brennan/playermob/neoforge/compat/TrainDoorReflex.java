@@ -1,5 +1,6 @@
 package games.brennan.playermob.neoforge.compat;
 
+import games.brennan.playermob.entity.ReactionChannel;
 import com.mojang.logging.LogUtils;
 import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.entity.DoorHeading;
@@ -133,7 +134,8 @@ final class TrainDoorReflex {
             ? StuckDoorPolicy.retryCooldown(PROBE_RETRY_TICKS, st.probeStrikes)
             : DoorStuckMonitor.COOLDOWN_TICKS;
         boolean wedged = st.stuck.tick(sub.x, sub.z, tryingToMove,
-            mob.reactTicks(DoorStuckMonitor.STUCK_TICKS), mob.reactTicks(cooldown));
+            mob.reactTicks(ReactionChannel.MOVEMENT, DoorStuckMonitor.STUCK_TICKS),
+            mob.reactTicks(ReactionChannel.MOVEMENT, cooldown));
 
         Scan scan = scanHandDoors(level, mob, sub);
         if (wedged) {

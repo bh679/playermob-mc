@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.entity.ReactionChannel;
 import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.compat.GameRuleCompat;
 import games.brennan.playermob.compat.TrainConfinement;
@@ -339,7 +340,7 @@ public final class FlintAndSteelIgniteGoal extends Goal implements DescribableGo
     /** Stand down for a beat and let the normal fight goal take the slot back. */
     private void fail() {
         phase = Phase.DONE;
-        cooldown = mob.reactTicks(FAIL_COOLDOWN);
+        cooldown = mob.reactTicks(ReactionChannel.ITEMS, FAIL_COOLDOWN);
     }
 
     /**
@@ -349,7 +350,7 @@ public final class FlintAndSteelIgniteGoal extends Goal implements DescribableGo
      * {@link FlintAndSteelPolicy#SWAP_MIN_TICKS}–{@link FlintAndSteelPolicy#SWAP_MAX_TICKS} roll it replaces.
      */
     private int swapDelayTicks() {
-        return mob.reactRoll(FlintAndSteelPolicy.SWAP_MIN_TICKS, FlintAndSteelPolicy.SWAP_MAX_TICKS);
+        return mob.reactRoll(ReactionChannel.ITEMS, FlintAndSteelPolicy.SWAP_MIN_TICKS, FlintAndSteelPolicy.SWAP_MAX_TICKS);
     }
 
     /**

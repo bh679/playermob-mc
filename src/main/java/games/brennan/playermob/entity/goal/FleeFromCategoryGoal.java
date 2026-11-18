@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.entity.ReactionChannel;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.entity.Reaction;
@@ -159,7 +160,7 @@ public final class FleeFromCategoryGoal extends Goal implements DescribableGoal 
                     // Opened up enough → hide and peek.
                     mob.getNavigation().stop();
                     phase = Phase.HIDE;
-                    hideTicksLeft = mob.reactRoll(HIDE_MIN_TICKS, HIDE_MAX_TICKS);
+                    hideTicksLeft = mob.reactRoll(ReactionChannel.MOVEMENT, HIDE_MIN_TICKS, HIDE_MAX_TICKS);
                     mob.setCrouching(true);
                 } else if (mob.getNavigation().isDone()) {
                     // Reached as far as vanilla nav can retreat. On a train, if that's a
@@ -223,7 +224,7 @@ public final class FleeFromCategoryGoal extends Goal implements DescribableGoal 
         leapDir = chosen.dir();
         leapTicks = 0;
         leapSettleTicks = 0;
-        leapRepathCooldown = mob.reactTicks(LEAP_REPATH_INTERVAL);
+        leapRepathCooldown = mob.reactTicks(ReactionChannel.MOVEMENT, LEAP_REPATH_INTERVAL);
         leap.reset();
         mob.setCrouching(false);
         // Start walking to the gap edge immediately. Vanilla nav can't cross the gap, so it stops
@@ -262,14 +263,14 @@ public final class FleeFromCategoryGoal extends Goal implements DescribableGoal 
         mob.getLookControl().setLookAt(target.x, target.y, target.z);
         if (mob.getNavigation().isDone()) {
             // As close to the gap as vanilla can walk (and the carry reading is clean) → hop.
-            if (++leapSettleTicks >= mob.reactTicks(LEAP_SETTLE_TICKS)) {
+            if (++leapSettleTicks >= mob.reactTicks(ReactionChannel.MOVEMENT, LEAP_SETTLE_TICKS)) {
                 leap.launch(mob, target, TrainConfinement.groupGapWidth(mob, leapDir));
             }
             return;
         }
         leapSettleTicks = 0;
         if (--leapRepathCooldown <= 0) {
-            leapRepathCooldown = mob.reactTicks(LEAP_REPATH_INTERVAL);
+            leapRepathCooldown = mob.reactTicks(ReactionChannel.MOVEMENT, LEAP_REPATH_INTERVAL);
             mob.getNavigation().moveTo(target.x, target.y, target.z, sprintSpeed);
         }
     }
@@ -300,7 +301,7 @@ public final class FleeFromCategoryGoal extends Goal implements DescribableGoal 
         this.leapTicks = 0;
         this.leapSettleTicks = 0;
         this.leapRepathCooldown = 0;
-        this.cooldownTicks = mob.reactTicks(RESUME_COOLDOWN_TICKS);
+        this.cooldownTicks = mob.reactTicks(ReactionChannel.MOVEMENT, RESUME_COOLDOWN_TICKS);
     }
 
     @Override

@@ -12,7 +12,16 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.player.Player;
+//? if >=26 {
+/*import net.minecraft.world.entity.projectile.arrow.AbstractArrow;
+import net.minecraft.world.entity.projectile.arrow.ThrownTrident;
+*///?} else {
+import net.minecraft.world.entity.projectile.AbstractArrow;
+import net.minecraft.world.entity.projectile.ThrownTrident;
+//?}
 import net.minecraft.world.entity.projectile.Projectile;
+import net.minecraft.world.item.BowItem;
+import net.minecraft.world.item.CrossbowItem;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
@@ -104,7 +113,8 @@ public final class ReflexHooks {
                 boolean ownBlow = isOwnBlow(source, player);
                 if (ownBlow) {
                     boolean targeting = victim instanceof Mob m && m.getTarget() == player;
-                    t.onHitMob(victim.getUUID(), targeting, tick(player));
+                    boolean melee = source.getDirectEntity() == player;
+                    t.onHitMob(victim.getUUID(), targeting, melee, tick(player));
                 }
                 if (victim.isDeadOrDying()) {
                     t.onMobDied(victim.getUUID(), ownBlow);
@@ -242,6 +252,46 @@ public final class ReflexHooks {
         double dy = Math.max(Math.max(box.minY - point.y, 0.0), point.y - box.maxY);
         double dz = Math.max(Math.max(box.minZ - point.z, 0.0), point.z - box.maxZ);
         return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    /**
+     * Whether {@code arrow}, just fired by {@code shooter}, can say anything about a full bow draw:
+     * {@code Boolean.TRUE/FALSE} for a bow shot (crit or not), {@code null} when it can't — a
+     * crossbow bolt is always critical and a trident never is, whatever the player's timing.
+     */
+    public static Boolean bowCrit(AbstractArrow arrow, ServerPlayer shooter) {
+        if (arrow instanceof ThrownTrident) {
+            return null;
+        }
+        boolean bow = shooter.getMainHandItem().getItem() instanceof BowItem
+            || shooter.getOffhandItem().getItem() instanceof BowItem;
+        boolean crossbow = shooter.getMainHandItem().getItem() instanceof CrossbowItem
+            || shooter.getOffhandItem().getItem() instanceof CrossbowItem;
+        if (!bow || crossbow) {
+            return null;
+        }
+        return arrow.isCritArrow();
+    }
+
+    /** The player who shot {@code projectile}, if it's an arrow or trident a counted player fired. */
+    public static ServerPlayer arrowShooter(Projectile projectile) {
+        if (projectile instanceof AbstractArrow && projectile.getOwner() instanceof ServerPlayer sp
+                && counts(sp)) {
+            return sp;
+        }
+        return null;
+    }
+
+    /** One of {@code shooter}'s own arrows landed; {@code hit} when it struck a living thing not them. */
+    public static void onOwnArrowResolved(ServerPlayer shooter, boolean hit, Boolean crit) {
+        if (!counts(shooter)) {
+            return;
+        }
+        try {
+            tracker(shooter).onOwnArrow(hit, crit);
+        } catch (RuntimeException e) {
+            LOGGER.error("[playermob] reflex arrow hook failed", e);
+        }
     }
 
     /** A tracked mob projectile resolved: it hit {@code target} or passed {@code closest} blocks away. */

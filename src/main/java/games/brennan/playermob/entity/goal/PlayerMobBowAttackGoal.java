@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.entity.ReactionChannel;
 import games.brennan.playermob.entity.DispositionResolver;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.world.entity.LivingEntity;
@@ -103,7 +104,7 @@ public final class PlayerMobBowAttackGoal extends Goal {
             --this.seeTime;
         }
 
-        if (!(distSqr > (double) this.attackRadiusSqr) && this.seeTime >= this.mob.reactTicks(SEE_TIME_TO_COMMIT)) {
+        if (!(distSqr > (double) this.attackRadiusSqr) && this.seeTime >= this.mob.reactTicks(ReactionChannel.RANGED, SEE_TIME_TO_COMMIT)) {
             this.mob.getNavigation().stop();
             ++this.strafingTime;
         } else {
@@ -146,7 +147,7 @@ public final class PlayerMobBowAttackGoal extends Goal {
                     // beat — 0 at ff10 (draw-limited) up to 200 ticks at ff0 — and reaction
                     // speed stretches or compresses that beat.
                     this.attackTime = DispositionResolver.rangedAttackExtraDelayTicks(
-                        this.mob.fightFlight(), this.mob.reactionSpeed());
+                        this.mob.fightFlight(), this.mob.reactionSpeed(ReactionChannel.RANGED));
                 }
             }
         } else if (--this.attackTime <= 0 && this.seeTime >= -60) {

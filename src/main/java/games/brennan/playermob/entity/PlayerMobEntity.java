@@ -1226,7 +1226,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * through its gear for a moment. No-op mid-fight (see {@link MobActivity#resolve}).
      */
     private void notifyLoadoutChanged() {
-        this.loadoutPulseTicks = reactTicks(LOADOUT_PULSE_TICKS);
+        this.loadoutPulseTicks = reactTicks(ReactionChannel.ITEMS, LOADOUT_PULSE_TICKS);
         refreshActivity();
     }
 
@@ -1415,8 +1415,8 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         Direction.Axis travelAxis = DoorObstruction.travelAxis(this, getX(), getZ());
         boolean tryingToMove = !getNavigation().isDone();
         if (!offTrainDoorStuck.tick(getX(), getZ(), tryingToMove,
-                reactTicks(DoorStuckMonitor.STUCK_TICKS),
-                reactTicks(DoorStuckMonitor.COOLDOWN_TICKS))
+                reactTicks(ReactionChannel.MOVEMENT, DoorStuckMonitor.STUCK_TICKS),
+                reactTicks(ReactionChannel.MOVEMENT, DoorStuckMonitor.COOLDOWN_TICKS))
                 || travelAxis == null) {
             return;
         }
@@ -1444,7 +1444,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * {@link #pushDispositionToClient} so the open menu updates live.
      */
     private void tickFeelingEvents() {
-        if ((this.tickCount + getId()) % reactTicks(SOCIAL_SCAN_INTERVAL) != 0) {
+        if ((this.tickCount + getId()) % reactTicks(ReactionChannel.OVERALL, SOCIAL_SCAN_INTERVAL) != 0) {
             return;
         }
         boolean changed = false;
@@ -2252,13 +2252,20 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         return traits.reactionSpeed();
     }
 
+    /** This mob's reaction speed for one kind of action — see {@link DispositionTraits#reactionSpeed(ReactionChannel)}. */
+    public int reactionSpeed(ReactionChannel channel) {
+        return traits.reactionSpeed(channel);
+    }
+
     /**
      * Scale a fixed delay constant by this mob's reaction speed — {@link ReactionSpeed#ticks}.
      * Goal code keeps its tuned constant as the documented neutral baseline and wraps the use
-     * site in this, so the tuning intent stays readable: {@code mob.reactTicks(EMPTY_SCAN_COOLDOWN)}.
+     * site in this, so the tuning intent stays readable:
+     * {@code mob.reactTicks(ReactionChannel.ITEMS, EMPTY_SCAN_COOLDOWN)}. The channel names the
+     * kind of action the delay belongs to; an echo reads its player's speed at that kind of thing.
      */
-    public int reactTicks(int baseTicks) {
-        return ReactionSpeed.ticks(traits.reactionSpeed(), baseTicks);
+    public int reactTicks(ReactionChannel channel, int baseTicks) {
+        return ReactionSpeed.ticks(traits.reactionSpeed(channel), baseTicks);
     }
 
     /**
@@ -2267,24 +2274,24 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * {@code min + getRandom().nextInt(span + 1)} idiom at every tuned-window call site; at the
      * neutral reaction speed the two are distributionally identical.
      */
-    public int reactRoll(int min, int max) {
-        return ReactionSpeed.roll(traits.reactionSpeed(), min, max, getRandom());
+    public int reactRoll(ReactionChannel channel, int min, int max) {
+        return ReactionSpeed.roll(traits.reactionSpeed(channel), min, max, getRandom());
     }
 
     /**
      * Scale an anticipation horizon — a quantity that should grow, not shrink, with reaction
      * speed. See {@link ReactionSpeed#ticksInverse}.
      */
-    public int reactTicksInverse(int baseTicks) {
-        return ReactionSpeed.ticksInverse(traits.reactionSpeed(), baseTicks);
+    public int reactTicksInverse(ReactionChannel channel, int baseTicks) {
+        return ReactionSpeed.ticksInverse(traits.reactionSpeed(channel), baseTicks);
     }
 
     /**
      * This mob's reflex blind window: a threat landing sooner than this is not reacted to at
      * all. Zero at reaction 10. See {@link ReactionSpeed#reflexWindowTicks}.
      */
-    public int reactReflexWindow(int atNeutral) {
-        return ReactionSpeed.reflexWindowTicks(traits.reactionSpeed(), atNeutral);
+    public int reactReflexWindow(ReactionChannel channel, int atNeutral) {
+        return ReactionSpeed.reflexWindowTicks(traits.reactionSpeed(channel), atNeutral);
     }
 
     /** The mob's current feeling (0–10, default 5) toward a specific entity. */
@@ -2546,7 +2553,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * as before this trait existed.</p>
      */
     private void armRetaliation(LivingEntity attacker) {
-        int delay = reactTicks(RETALIATE_REACTION_TICKS);
+        int delay = reactTicks(ReactionChannel.MELEE, RETALIATE_REACTION_TICKS);
         if (delay <= 0) {
             return;   // instant reflex: leave the vanilla lastHurtByMob exactly as it was
         }
@@ -3367,7 +3374,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (isOperatingDoor() || this.recovering) {
             return false;
         }
-        this.doorOpTicks = reactTicks(DOOR_OP_TICKS);
+        this.doorOpTicks = reactTicks(ReactionChannel.MOVEMENT, DOOR_OP_TICKS);
         return true;
     }
 
@@ -3389,7 +3396,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (this.doorOpFacing) {
             getLookControl().setLookAt(getX() + this.doorOpDx, getEyeY() + this.doorOpDy, getZ() + this.doorOpDz);
         }
-        if (this.doorOpTicks == reactTicks(DOOR_OP_REACH_TICKS)) {
+        if (this.doorOpTicks == reactTicks(ReactionChannel.MOVEMENT, DOOR_OP_REACH_TICKS)) {
             if (this.doorOpFacing) {
                 swing(InteractionHand.MAIN_HAND);
             }

@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.entity.ReactionChannel;
 import games.brennan.playermob.compat.GameRuleCompat;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.EquipmentEvaluator;
@@ -93,7 +94,7 @@ public final class HarvestCropsGoal extends Goal implements DescribableGoal {
 
         BlockPos found = findClosestRipeCrop();
         if (found == null) {
-            scanCooldown = mob.reactTicks(EMPTY_SCAN_COOLDOWN);
+            scanCooldown = mob.reactTicks(ReactionChannel.ITEMS, EMPTY_SCAN_COOLDOWN);
             return false;
         }
         targetPos = found;
@@ -131,7 +132,7 @@ public final class HarvestCropsGoal extends Goal implements DescribableGoal {
         }
         phase = Phase.IDLE;
         phaseTicks = 0;
-        scanCooldown = mob.reactTicks(POST_VISIT_COOLDOWN);
+        scanCooldown = mob.reactTicks(ReactionChannel.ITEMS, POST_VISIT_COOLDOWN);
     }
 
     @Override
@@ -180,7 +181,7 @@ public final class HarvestCropsGoal extends Goal implements DescribableGoal {
         if (phaseTicks == 1) {
             mob.swing(InteractionHand.MAIN_HAND);
         }
-        if (phaseTicks >= mob.reactTicks(HARVEST_WINDUP_TICKS)) {
+        if (phaseTicks >= mob.reactTicks(ReactionChannel.ITEMS, HARVEST_WINDUP_TICKS)) {
             harvest(state);
             stop();
         }

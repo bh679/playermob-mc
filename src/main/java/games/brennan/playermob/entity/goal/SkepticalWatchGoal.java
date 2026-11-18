@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.entity.ReactionChannel;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.entity.Reaction;
 import net.minecraft.world.entity.LivingEntity;
@@ -82,7 +83,7 @@ public final class SkepticalWatchGoal extends Goal implements DescribableGoal {
 
     @Override
     public void start() {
-        this.stareTicksLeft = mob.reactRoll(MIN_STARE_TICKS, MAX_STARE_TICKS);
+        this.stareTicksLeft = mob.reactRoll(ReactionChannel.OVERALL, MIN_STARE_TICKS, MAX_STARE_TICKS);
         mob.getNavigation().stop();
     }
 
@@ -111,7 +112,7 @@ public final class SkepticalWatchGoal extends Goal implements DescribableGoal {
         mob.lowerShield();
         this.watched = null;
         this.stareTicksLeft = 0;
-        this.cooldownTicks = mob.reactTicks(RESUME_COOLDOWN_TICKS);
+        this.cooldownTicks = mob.reactTicks(ReactionChannel.OVERALL, RESUME_COOLDOWN_TICKS);
     }
 
     @Override

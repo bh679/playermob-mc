@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.entity.ReactionChannel;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
@@ -85,7 +86,7 @@ public final class AdvanceCarriageGoal extends Goal implements DescribableGoal {
             return false;
         }
         if (!TrainConfinement.isConfined(mob)) {
-            scanCooldown = mob.reactTicks(EMPTY_SCAN_COOLDOWN);
+            scanCooldown = mob.reactTicks(ReactionChannel.MOVEMENT, EMPTY_SCAN_COOLDOWN);
             return false;
         }
         if (mob.getTarget() != null) {
@@ -93,7 +94,7 @@ public final class AdvanceCarriageGoal extends Goal implements DescribableGoal {
         }
         int dir = mob.effectiveTrainMarchDir();
         if (dir == 0) {
-            scanCooldown = mob.reactTicks(EMPTY_SCAN_COOLDOWN); // not latched yet, or a loved player shares our carriage (idle with them)
+            scanCooldown = mob.reactTicks(ReactionChannel.MOVEMENT, EMPTY_SCAN_COOLDOWN); // not latched yet, or a loved player shares our carriage (idle with them)
             return false;
         }
         Vec3 next = TrainConfinement.nextCarriageTarget(mob, dir);
@@ -130,7 +131,7 @@ public final class AdvanceCarriageGoal extends Goal implements DescribableGoal {
         target = null;
         phaseTicks = 0;
         repathCooldown = 0;
-        scanCooldown = mob.reactTicks(POST_VISIT_COOLDOWN);
+        scanCooldown = mob.reactTicks(ReactionChannel.MOVEMENT, POST_VISIT_COOLDOWN);
     }
 
     @Override
@@ -161,7 +162,7 @@ public final class AdvanceCarriageGoal extends Goal implements DescribableGoal {
             return;
         }
         if (--repathCooldown <= 0 || mob.getNavigation().isDone()) {
-            repathCooldown = mob.reactTicks(REPATH_INTERVAL);
+            repathCooldown = mob.reactTicks(ReactionChannel.MOVEMENT, REPATH_INTERVAL);
             issueMove();
         }
     }

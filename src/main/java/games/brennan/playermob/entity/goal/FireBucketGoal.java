@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.entity.ReactionChannel;
 import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.core.BlockPos;
@@ -249,7 +250,7 @@ public final class FireBucketGoal extends Goal implements DescribableGoal {
      * is where reaction speed reaches all of them.
      */
     private int randomTicks(int minInclusive, int maxInclusive) {
-        return mob.reactRoll(minInclusive, maxInclusive);
+        return mob.reactRoll(ReactionChannel.ITEMS, minInclusive, maxInclusive);
     }
 
     /**

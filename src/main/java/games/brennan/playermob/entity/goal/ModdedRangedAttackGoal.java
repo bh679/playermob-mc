@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.entity.ReactionChannel;
 import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.entity.DispositionResolver;
 import games.brennan.playermob.entity.ModdedRangedWeapons;
@@ -117,7 +118,7 @@ public final class ModdedRangedAttackGoal extends Goal {
             --this.seeTime;
         }
 
-        if (!(distSqr > (double) this.attackRadiusSqr) && this.seeTime >= this.mob.reactTicks(SEE_TIME_TO_COMMIT)) {
+        if (!(distSqr > (double) this.attackRadiusSqr) && this.seeTime >= this.mob.reactTicks(ReactionChannel.RANGED, SEE_TIME_TO_COMMIT)) {
             this.mob.getNavigation().stop();
             ++this.strafingTime;
         } else {
@@ -163,7 +164,7 @@ public final class ModdedRangedAttackGoal extends Goal {
                     this.mob.consumeOneModdedAmmo(this.mob.getMainHandItem()); // one cartridge per shot
                 }
                 this.postShotCooldown = DispositionResolver.rangedAttackExtraDelayTicks(
-                    this.mob.fightFlight(), this.mob.reactionSpeed());
+                    this.mob.fightFlight(), this.mob.reactionSpeed(ReactionChannel.RANGED));
             }
             return;
         }
@@ -179,7 +180,7 @@ public final class ModdedRangedAttackGoal extends Goal {
             this.reloading = true;
             // Reaction speed scales the load/aim hold, re-clamped to the bounds the config parser
             // enforces so a fast mob can't drop below a mod's minimum sane animation length.
-            this.reloadTicksLeft = ModdedRangedWeapons.clampHold(this.mob.reactTicks(
+            this.reloadTicksLeft = ModdedRangedWeapons.clampHold(this.mob.reactTicks(ReactionChannel.RANGED, 
                 PlayerMobConfig.moddedRanged().holdTicks(this.mob.getMainHandItem())));
         }
     }

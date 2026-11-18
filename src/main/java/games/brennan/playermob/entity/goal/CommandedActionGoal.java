@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.entity.ReactionChannel;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.entity.Reaction;
 import net.minecraft.core.BlockPos;
@@ -256,7 +257,7 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
             }
             mob.getNavigation().stop();
             struck = true;
-            followThroughTicks = mob.reactTicks(STRIKE_FOLLOW_THROUGH_TICKS);
+            followThroughTicks = mob.reactTicks(ReactionChannel.MELEE, STRIKE_FOLLOW_THROUGH_TICKS);
         }
         if (--followThroughTicks <= 0) {
             phase = Phase.DONE;
@@ -271,7 +272,7 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
         if (target != null) {
             faceBodyToward(target);
         }
-        if (swingTicks % mob.reactTicks(SWING_INTERVAL_TICKS) == 0) {
+        if (swingTicks % mob.reactTicks(ReactionChannel.MELEE, SWING_INTERVAL_TICKS) == 0) {
             mob.swing(InteractionHand.MAIN_HAND);
             swingsDone++;
         }
@@ -362,7 +363,7 @@ public final class CommandedActionGoal extends Goal implements DescribableGoal {
             phase = Phase.DONE;
             return;
         }
-        if (++fleeRepathTicks >= mob.reactTicks(FLEE_REPATH_INTERVAL) || mob.getNavigation().isDone()) {
+        if (++fleeRepathTicks >= mob.reactTicks(ReactionChannel.MOVEMENT, FLEE_REPATH_INTERVAL) || mob.getNavigation().isDone()) {
             fleeRepathTicks = 0;
             LivingEntity target = order.targetEntity();
             Vec3 threat = target != null ? target.position() : fleeOrigin;

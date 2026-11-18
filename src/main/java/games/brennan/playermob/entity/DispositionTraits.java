@@ -4,6 +4,9 @@ import games.brennan.playermob.compat.NbtCompat;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.util.RandomSource;
 
+import java.util.EnumMap;
+import java.util.Map;
+
 /**
  * The three locked personal traits a {@link PlayerMobEntity} is born with:
  * <b>fight/flight</b> (how it reacts when pushed — high fights, low flees),
@@ -37,6 +40,8 @@ public final class DispositionTraits {
     public static final String TAG_FIGHT_FLIGHT = "FightFlight";
     public static final String TAG_FRIENDLINESS = "Friendliness";
     public static final String TAG_REACTION_SPEED = "ReactionSpeed";
+    /** Per-channel reaction speeds (see {@link ReactionChannel}); absent on wild mobs and old saves. */
+    public static final String TAG_REACTION_SPEEDS = "ReactionSpeeds";
 
     public static final int MIN = 0;
     public static final int MAX = 10;
@@ -48,6 +53,8 @@ public final class DispositionTraits {
     private boolean fightFlightExplicit = false;
     private boolean friendlinessExplicit = false;
     private boolean reactionSpeedExplicit = false;
+    /** Channels with a value of their own; any channel missing here reads the overall trait. */
+    private final Map<ReactionChannel, Integer> channelSpeeds = new EnumMap<>(ReactionChannel.class);
 
     public int fightFlight() {
         return fightFlight;
@@ -59,6 +66,42 @@ public final class DispositionTraits {
 
     public int reactionSpeed() {
         return reactionSpeed;
+    }
+
+    /**
+     * The reaction speed for one kind of action: the channel's own value when the mob has one
+     * (an echo, scored from its player's life), otherwise the overall trait — so a mob without
+     * channel values behaves exactly as it did before channels existed.
+     */
+    public int reactionSpeed(ReactionChannel channel) {
+        if (channel == null || channel == ReactionChannel.OVERALL) {
+            return reactionSpeed;
+        }
+        Integer own = channelSpeeds.get(channel);
+        return own == null ? reactionSpeed : own;
+    }
+
+    /** True if {@code channel} carries a value of its own rather than following the overall trait. */
+    public boolean hasOwnReactionSpeed(ReactionChannel channel) {
+        return channelSpeeds.containsKey(channel);
+    }
+
+    /** Give one channel its own value (clamped). {@link ReactionChannel#OVERALL} sets the overall trait. */
+    public void setReactionSpeed(ReactionChannel channel, int value) {
+        if (channel == null || channel == ReactionChannel.OVERALL) {
+            setReactionSpeed(value);
+            return;
+        }
+        channelSpeeds.put(channel, clamp(value));
+    }
+
+    /**
+     * Move the overall trait and every channel that has its own value by {@code delta} — how the
+     * trait editor's one reaction-speed control acts on an echo with per-channel values.
+     */
+    public void shiftReactionSpeed(int delta) {
+        setReactionSpeed(reactionSpeed + delta);
+        channelSpeeds.replaceAll((channel, value) -> clamp(value + delta));
     }
 
     /** Set fight/flight and mark it explicit (won't be re-rolled at spawn). Clamps to [0,10]. */
@@ -111,6 +154,11 @@ public final class DispositionTraits {
         tag.putInt(TAG_FIGHT_FLIGHT, fightFlight);
         tag.putInt(TAG_FRIENDLINESS, friendliness);
         tag.putInt(TAG_REACTION_SPEED, reactionSpeed);
+        if (!channelSpeeds.isEmpty()) {
+            CompoundTag channels = new CompoundTag();
+            channelSpeeds.forEach((channel, value) -> channels.putInt(channel.key(), value));
+            tag.put(TAG_REACTION_SPEEDS, channels);
+        }
     }
 
     /**
@@ -129,6 +177,17 @@ public final class DispositionTraits {
         }
         if (tag.contains(TAG_REACTION_SPEED)) {
             setReactionSpeed(NbtCompat.getIntOr(tag, TAG_REACTION_SPEED, DEFAULT));
+        }
+        // Per-channel values: absent on wild mobs and saves from before channels — every channel
+        // then follows the overall trait, exactly as before.
+        if (tag.contains(TAG_REACTION_SPEEDS)) {
+            CompoundTag channels = NbtCompat.getCompoundOrEmpty(tag, TAG_REACTION_SPEEDS);
+            channelSpeeds.clear();
+            for (ReactionChannel channel : ReactionChannel.SPECIFIC) {
+                if (channels.contains(channel.key())) {
+                    channelSpeeds.put(channel, clamp(NbtCompat.getIntOr(channels, channel.key(), reactionSpeed)));
+                }
+            }
         }
     }
 

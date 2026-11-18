@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.entity.ReactionChannel;
 import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.compat.GameRuleCompat;
 import games.brennan.playermob.compat.TrainConfinement;
@@ -87,7 +88,7 @@ public final class RaidArmorStandsGoal extends Goal implements DescribableGoal {
 
         ArmorStand found = findClosestArmorStand();
         if (found == null) {
-            scanCooldown = mob.reactTicks(EMPTY_SCAN_COOLDOWN);
+            scanCooldown = mob.reactTicks(ReactionChannel.ITEMS, EMPTY_SCAN_COOLDOWN);
             return false;
         }
         target = found;
@@ -123,7 +124,7 @@ public final class RaidArmorStandsGoal extends Goal implements DescribableGoal {
         phaseTicks = 0;
         slotCursor = 0;
         nextSwapAt = -1;
-        scanCooldown = mob.reactTicks(POST_VISIT_COOLDOWN);
+        scanCooldown = mob.reactTicks(ReactionChannel.ITEMS, POST_VISIT_COOLDOWN);
     }
 
     @Override
@@ -151,7 +152,7 @@ public final class RaidArmorStandsGoal extends Goal implements DescribableGoal {
                 }
             }
             case APPROACHING -> {
-                if (phaseTicks >= mob.reactTicks(APPROACH_PAUSE_TICKS)) {
+                if (phaseTicks >= mob.reactTicks(ReactionChannel.ITEMS, APPROACH_PAUSE_TICKS)) {
                     phase = Phase.LOOTING;
                     phaseTicks = 0;
                     slotCursor = 0;
@@ -174,7 +175,7 @@ public final class RaidArmorStandsGoal extends Goal implements DescribableGoal {
                 stop();
                 return;
             }
-            int delay = mob.reactRoll(MIN_SWAP_DELAY_TICKS, MAX_SWAP_DELAY_TICKS);
+            int delay = mob.reactRoll(ReactionChannel.ITEMS, MIN_SWAP_DELAY_TICKS, MAX_SWAP_DELAY_TICKS);
             nextSwapAt = mob.tickCount + delay;
             return;
         }

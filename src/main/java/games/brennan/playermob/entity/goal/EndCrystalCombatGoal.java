@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.entity.ReactionChannel;
 import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.compat.EndCrystalCompat;
 import games.brennan.playermob.compat.GameRuleCompat;
@@ -195,13 +196,13 @@ public final class EndCrystalCombatGoal extends Goal implements DescribableGoal 
             if (!startBuild(target)) {
                 // Couldn't build a bunker here — stand down and let the normal fight goal take over for a beat.
                 phase = Phase.DONE;
-                cooldown = mob.reactTicks(FAIL_COOLDOWN);
+                cooldown = mob.reactTicks(ReactionChannel.BUILDING, FAIL_COOLDOWN);
             }
             return;
         }
         if (++walkTicks > WALK_TIMEOUT_TICKS) {
             phase = Phase.DONE;
-            cooldown = mob.reactTicks(FAIL_COOLDOWN);
+            cooldown = mob.reactTicks(ReactionChannel.BUILDING, FAIL_COOLDOWN);
             return;
         }
         mob.getNavigation().moveTo(target, speed);
@@ -269,7 +270,7 @@ public final class EndCrystalCombatGoal extends Goal implements DescribableGoal 
             enterBrace();
             return;
         }
-        buildDelay = mob.reactRoll(BUILD_GAP_MIN, BUILD_GAP_MAX); // 5-20 ticks, skewed by reaction speed
+        buildDelay = mob.reactRoll(ReactionChannel.BUILDING, BUILD_GAP_MIN, BUILD_GAP_MAX); // 5-20 ticks, skewed by reaction speed
     }
 
     /** Perform one placement of the staged build (see {@link #tickBuild()}), swinging as the mob sets each block. */
@@ -347,7 +348,7 @@ public final class EndCrystalCombatGoal extends Goal implements DescribableGoal 
         if (shieldEngaged && !mob.isUsingItem() && mob.getOffhandItem().is(Items.SHIELD)) {
             mob.startUsingItem(InteractionHand.OFF_HAND);
         }
-        if (++braceTicks < mob.reactTicks(BRACE_TICKS)) {
+        if (++braceTicks < mob.reactTicks(ReactionChannel.BUILDING, BRACE_TICKS)) {
             return;
         }
         // Braced — punch the crystal (a real melee hit) to detonate it, covered by the block + crouch + shield.
@@ -363,7 +364,7 @@ public final class EndCrystalCombatGoal extends Goal implements DescribableGoal 
             walkTicks = 0;
         } else {
             phase = Phase.DONE;
-            cooldown = mob.reactTicks(POST_CYCLE_COOLDOWN);
+            cooldown = mob.reactTicks(ReactionChannel.BUILDING, POST_CYCLE_COOLDOWN);
         }
     }
 
