@@ -505,4 +505,67 @@ class PlayerLifeRecordTest {
         }
         return r;
     }
+
+    // ---- Reaction speed (reflexes) ----------------------------------------
+
+    @Test
+    void reactionSpeedIsAlwaysSetExplicitlyFromTheReflexTally() {
+        PlayerLifeRecord r = PlayerLifeRecord.EMPTY;
+        for (int i = 0; i < 30; i++) {
+            r = r.withReflexes(t -> t.withStrikeBack(0));
+        }
+        DispositionTraits traits = r.toTraits();
+        assertEquals(r.reflexes().reactionSpeed(), traits.reactionSpeed());
+        assertTrue(traits.reactionSpeed() > DispositionTraits.DEFAULT);
+        assertTrue(traits.isExplicit(), "all three traits pinned, none left to the spawn roll");
+    }
+
+    @Test
+    void snapshotKeepsTheDerivedReactionSpeedThroughTheSpawnRoll() {
+        // Inverse of the old bug: the snapshot carried a pinned 5 whatever the life was.
+        PlayerLifeRecord r = PlayerLifeRecord.EMPTY;
+        for (int i = 0; i < 30; i++) {
+            r = r.withReflexes(t -> t.withStrikeBack(40));
+        }
+        CompoundTag snapshot = new CompoundTag();
+        r.toTraits().save(snapshot);
+        int expected = r.reflexes().reactionSpeed();
+        assertTrue(expected < DispositionTraits.DEFAULT);
+        assertEquals(expected, games.brennan.playermob.compat.NbtCompat.getIntOr(
+            snapshot, DispositionTraits.TAG_REACTION_SPEED, -1));
+        for (long seed = 0; seed < 50; seed++) {
+            DispositionTraits echo = new DispositionTraits();
+            echo.load(snapshot);
+            echo.rollIfUnset(net.minecraft.util.RandomSource.create(seed));
+            assertEquals(expected, echo.reactionSpeed());
+        }
+    }
+
+    @Test
+    void conductCreditsKeepTheReflexTally() {
+        PlayerLifeRecord r = PlayerLifeRecord.EMPTY.withReflexes(t -> t.withBridgeBlocks(7))
+            .credit(Signal.ATTACK, 3F).credit(Signal.KILL, 1F).credit(Signal.GIFT, 2F)
+            .credit(Signal.FLEE, 1F).credit(Signal.FEED, 1F).credit(Signal.SABOTAGE, 1F)
+            .credit(Signal.HARM, 0F);
+        assertEquals(7, r.reflexes().bridgeBlocks());
+    }
+
+    @Test
+    void reflexesAloneMakeALifeNonEmptyAndRoundTrip() {
+        PlayerLifeRecord r = PlayerLifeRecord.EMPTY.withReflexes(t -> t.withFirstHit(true));
+        assertFalse(r.isEmpty());
+        CompoundTag tag = new CompoundTag();
+        r.save(tag);
+        assertEquals(1, PlayerLifeRecord.load(tag).reflexes().cleanFirstHits());
+    }
+
+    @Test
+    void legacyTagWithoutReflexesReadsNeutralReactionSpeed() {
+        CompoundTag tag = new CompoundTag();
+        PlayerLifeRecord.EMPTY.credit(Signal.ATTACK, 50F).save(tag);
+        tag.remove(ReflexTally.TAG);
+        PlayerLifeRecord loaded = PlayerLifeRecord.load(tag);
+        assertTrue(loaded.reflexes().isEmpty());
+        assertEquals(DispositionTraits.DEFAULT, loaded.toTraits().reactionSpeed());
+    }
 }

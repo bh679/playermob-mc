@@ -1553,13 +1553,17 @@ public final class ReincarnateCommand {
         String summary = String.format(
             "%s — attacks %d, kills %d (%d in self-defence), damage %.1f (%.1f in self-defence), "
                 + "kindness %.1f, fed %.0f, harms %d, timidity %.1f "
-                + "→ would reincarnate Fight/Flight %d, Friendliness %d (reaction speed rolls fresh)%s",
+                + "→ would reincarnate Fight/Flight %d, Friendliness %d, Reaction speed %d%s",
             nameOf(profile), tally.attacks(), tally.kills(), tally.defensiveKills(),
             tally.damageDealt(), tally.defensiveDamage(), tally.kindness(), tally.fed(), tally.harms(),
             tally.timidity(),
-            traits.fightFlight(), traits.friendliness(),
+            traits.fightFlight(), traits.friendliness(), traits.reactionSpeed(),
             hasPast ? " (has a stored past life)" : "");
         source.sendSuccess(() -> Component.literal(summary), false);
+        // Per-signal reflex breakdown, for tuning ReflexTally's curves against real play. Open
+        // windows (the last <=20 s of actions and pace) are not in it until they flush.
+        String reflexes = "Reflexes — " + tally.reflexes().breakdown();
+        source.sendSuccess(() -> Component.literal(reflexes), false);
         return 1;
     }
 

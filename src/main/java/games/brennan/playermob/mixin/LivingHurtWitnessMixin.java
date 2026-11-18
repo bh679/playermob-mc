@@ -1,6 +1,7 @@
 package games.brennan.playermob.mixin;
 
 import games.brennan.playermob.entity.WitnessedAttacks;
+import games.brennan.playermob.player.ReflexHooks;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.LivingEntity;
 import org.spongepowered.asm.mixin.Mixin;
@@ -28,6 +29,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * {@code playermob.mixins.json}. {@code hurt} is the 1.21.1 Mojmap name, matching the other
  * mixins in this package.</p>
  *
+ * <p>The same landed hit also feeds the reaction-speed signal ({@link ReflexHooks#onHurt}):
+ * strike-back latency and first hits, against any hostile mob.</p>
+ *
  * <p><b>26.x target split.</b> In 1.21.2+/26.x the damage entry point was split: {@code hurt}
  * became a {@code final void} dispatcher on {@code Entity} and the server-authoritative,
  * boolean-returning logic moved to {@code LivingEntity.hurtServer(ServerLevel, DamageSource,
@@ -46,6 +50,7 @@ public abstract class LivingHurtWitnessMixin {
                                          CallbackInfoReturnable<Boolean> cir) {
         if (cir.getReturnValueZ()) {
             WitnessedAttacks.onHurt((LivingEntity) (Object) this, source, amount);
+            ReflexHooks.onHurt((LivingEntity) (Object) this, source);
         }
     }
     *///?} else {
@@ -54,6 +59,7 @@ public abstract class LivingHurtWitnessMixin {
                                          CallbackInfoReturnable<Boolean> cir) {
         if (cir.getReturnValueZ()) {
             WitnessedAttacks.onHurt((LivingEntity) (Object) this, source, amount);
+            ReflexHooks.onHurt((LivingEntity) (Object) this, source);
         }
     }
     //?}
