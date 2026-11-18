@@ -20,10 +20,10 @@ class ReflexTallyTest {
     }
 
     @Test
-    void noEvidenceScoresExactlyNeutral() {
+    void noEvidenceScoresZero() {
         assertTrue(ReflexTally.EMPTY.isEmpty());
-        assertEquals(DispositionTraits.DEFAULT, ReflexTally.EMPTY.reactionSpeed());
-        assertEquals(5.0, ReflexTally.EMPTY.rawScore(), EPS);
+        assertEquals(0, ReflexTally.EMPTY.reactionSpeed());
+        assertEquals(0.0, ReflexTally.EMPTY.rawScore(), EPS);
     }
 
     @Test
@@ -37,23 +37,23 @@ class ReflexTallyTest {
     }
 
     @Test
-    void aFewSamplesStayNearNeutralThePriorHolds() {
-        // 3 instant strike-backs: (5*5 + 3*10) / 8 = 6.875.
-        assertEquals(6.875, strikes(3, 0).rawScore(), EPS);
-        assertEquals(7, strikes(3, 0).reactionSpeed());
+    void aFewSamplesLeanTowardZero() {
+        // 3 instant strike-backs: (3 * 0 + 3 * 10) / 6 = 5.0 — the real level is 10, thin evidence leans to 0.
+        assertEquals(5.0, strikes(3, 0).rawScore(), EPS);
+        assertEquals(5, strikes(3, 0).reactionSpeed());
     }
 
     @Test
     void fastStrikersScoreHighSlowOnesLow() {
         assertEquals(9, strikes(20, 0).reactionSpeed());
-        assertEquals(1, strikes(20, 40).reactionSpeed());
-        assertEquals(5, strikes(20, 14).reactionSpeed());
+        assertEquals(0, strikes(20, 40).reactionSpeed());
+        assertEquals(4, strikes(20, 14).reactionSpeed(), "a neutral 5 still leans a little toward 0");
     }
 
     @Test
     void aRateNotAVolumeLongLivesDoNotDrift() {
-        // The same average reflex over 10x the fights scores (almost) the same.
-        assertEquals(strikes(200, 14).reactionSpeed(), strikes(20, 14).reactionSpeed());
+        // Twice the fights at the same average reflex score the same.
+        assertEquals(strikes(400, 14).reactionSpeed(), strikes(200, 14).reactionSpeed());
     }
 
     @Test
@@ -61,7 +61,7 @@ class ReflexTallyTest {
         double plain = ReflexTally.EMPTY.withFirstHit(false).rawScore();
         double clean = ReflexTally.EMPTY.withFirstHit(true).rawScore();
         assertTrue(clean > plain);
-        assertTrue(plain > 5.0, "any first hit beats no evidence");
+        assertTrue(plain > 0.0, "any first hit beats no evidence");
         assertEquals(1, ReflexTally.EMPTY.withFirstHit(true).cleanFirstHits());
         assertEquals(0, ReflexTally.EMPTY.withFirstHit(true).firstHits());
     }
@@ -105,9 +105,9 @@ class ReflexTallyTest {
 
     @Test
     void moveBonusCapsAtOneAndAHalf() {
-        assertEquals(5.3, ReflexTally.EMPTY.withBridgeBlocks(3).rawScore(), EPS);
+        assertEquals(0.3, ReflexTally.EMPTY.withBridgeBlocks(3).rawScore(), EPS);
         ReflexTally lots = ReflexTally.EMPTY.withBridgeBlocks(100).withJumpBlocks(100);
-        assertEquals(6.5, lots.rawScore(), EPS);
+        assertEquals(1.5, lots.rawScore(), EPS);
     }
 
     @Test

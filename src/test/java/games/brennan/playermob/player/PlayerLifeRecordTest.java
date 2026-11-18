@@ -560,13 +560,13 @@ class PlayerLifeRecordTest {
     }
 
     @Test
-    void legacyTagWithoutReflexesReadsNeutralReactionSpeed() {
+    void legacyTagWithoutReflexesReadsZeroReactionSpeed() {
         CompoundTag tag = new CompoundTag();
         PlayerLifeRecord.EMPTY.credit(Signal.ATTACK, 50F).save(tag);
         tag.remove(ReflexTally.TAG);
         PlayerLifeRecord loaded = PlayerLifeRecord.load(tag);
         assertTrue(loaded.reflexes().isEmpty());
-        assertEquals(DispositionTraits.DEFAULT, loaded.toTraits().reactionSpeed());
+        assertEquals(0, loaded.toTraits().reactionSpeed(), "no reflex evidence recorded => 0");
     }
 
     @Test
