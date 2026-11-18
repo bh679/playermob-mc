@@ -1370,6 +1370,22 @@
       "released": true,
       "released_in": "v0.125.0",
       "released_at": "2026-11-18T04:57:55Z"
+    },
+    {
+      "id": "echo-reaction-zero-default",
+      "version": "0.126.0",
+      "type": "feat",
+      "title": "Echoes are slow at what you never did",
+      "summary": "An echo is now only quick at the things you actually did quickly in that life. Anything you never did, it does slowly, and a few lucky moments aren't enough to make it sharp. Echoes from lives before echoes learned your reflexes now come back with a reaction speed of their own instead of an average one.",
+      "highlights": [
+        "A skill you never used leaves your echo at its slowest",
+        "Older echoes each get their own reflexes, different every time they return"
+      ],
+      "pr": 260,
+      "date": "2026-11-18",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
