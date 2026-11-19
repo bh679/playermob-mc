@@ -281,6 +281,7 @@ public final class PlayerReincarnation {
             // pure defensiveness. Fall back to a traits-only snapshot.
             CompoundTag tag = new CompoundTag();
             record.toTraits().save(tag);
+            tag.putInt(ReadingTally.TRAIT_TAG, record.reading().score());
             return tag;
         }
 
@@ -292,6 +293,8 @@ public final class PlayerReincarnation {
         // entity already wrote the trait keys, so this is the single authoritative
         // write of FightFlight/Friendliness/ReactionSpeed.
         record.toTraits().save(snapshot);
+        // The Reading trait rides beside the disposition traits under its own key (0–10).
+        snapshot.putInt(ReadingTally.TRAIT_TAG, record.reading().score());
         // A spawn egg's ENTITY_DATA must name its entity type, or ItemStack encoding
         // throws "Missing id for entity" the moment the egg is saved in an inventory.
         snapshot.putString("id", PlayerMobRegistry.PLAYER_MOB_ID.toString());

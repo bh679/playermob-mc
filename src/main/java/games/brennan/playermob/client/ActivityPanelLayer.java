@@ -96,7 +96,8 @@ public final class ActivityPanelLayer
         return switch (activity) {
             case CONTAINER -> CONTAINER_TEXTURE;
             case INVENTORY -> INVENTORY_TEXTURE;
-            case NONE -> null;
+            // Reading shows the book in hand, not a floating panel.
+            case READING, NONE -> null;
         };
     }
 

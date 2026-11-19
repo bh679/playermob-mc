@@ -55,4 +55,26 @@ class ActivityPoseTest {
         assertEquals(5.0F, ActivityPose.lerp(0.5F, 0.0F, 10.0F), EPSILON);
         assertEquals(10.0F, ActivityPose.lerp(2.0F, 0.0F, 10.0F), EPSILON);
     }
+
+    @Test
+    void readingPoseBowsTheHeadAndHoldsTheBookInFront() {
+        assertEquals(ActivityPose.READ_HEAD_PITCH, ActivityPose.readHeadPitch(1.0F, 0.0F), 1e-6);
+        assertEquals(ActivityPose.READ_BOOK_ARM_PITCH, ActivityPose.readBookArmPitch(1.0F, 0.0F), 1e-6);
+        assertEquals(0.3F, ActivityPose.readBookArmPitch(0.0F, 0.3F), 1e-6); // untouched at blend 0
+        // Both arms angle inward toward the chest, mirrored by side.
+        assertTrue(ActivityPose.readBookArmYaw(1.0F, 0.0F, true) < 0.0F);
+        assertTrue(ActivityPose.readBookArmYaw(1.0F, 0.0F, false) > 0.0F);
+        assertTrue(ActivityPose.readPageArmYaw(1.0F, 0.0F, true) < 0.0F);
+    }
+
+    @Test
+    void pageHandRestsThenLiftsOncePerPage() {
+        assertEquals(0.0F, ActivityPose.pageTurn(0.0F), 1e-6);
+        float mid = ActivityPose.READ_PAGE_TICKS * ActivityPose.READ_TURN_SHARE / 2.0F;
+        assertEquals(1.0F, ActivityPose.pageTurn(mid), 1e-4);
+        assertEquals(0.0F, ActivityPose.pageTurn(ActivityPose.READ_PAGE_TICKS * 0.5F), 1e-6);
+        // At the top of a turn the page hand is raised above its resting pitch.
+        assertTrue(ActivityPose.readPageArmPitch(1.0F, 0.0F, mid)
+            < ActivityPose.readPageArmPitch(1.0F, 0.0F, 0.0F));
+    }
 }

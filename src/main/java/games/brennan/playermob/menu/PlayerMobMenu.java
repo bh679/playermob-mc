@@ -111,6 +111,16 @@ public class PlayerMobMenu extends AbstractContainerMenu {
         addDataSlots(candidateData);
         if (mob != null && !mob.level().isClientSide()) {
             rescanCandidates();
+            // A read in progress ends now, so the viewer never sees (or takes) a borrowed book.
+            mob.onMenuViewer(true);
+        }
+    }
+
+    @Override
+    public void removed(Player player) {
+        super.removed(player);
+        if (mob != null && !mob.level().isClientSide()) {
+            mob.onMenuViewer(false);
         }
     }
 

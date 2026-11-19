@@ -13,7 +13,9 @@ public enum MobActivity {
     /** A chest, barrel or shulker box is open in front of the mob. */
     CONTAINER,
     /** The mob is going through its own gear — a loadout change or an idle bag-check. */
-    INVENTORY;
+    INVENTORY,
+    /** The mob is reading a book it took off a shelf (appended — ordinals are the wire value). */
+    READING;
 
     private static final MobActivity[] VALUES = values();
 
@@ -33,12 +35,15 @@ public enum MobActivity {
      * @param inCombat         the mob has an attack target
      * @param loadoutPulseTicks ticks left on the gear-change pulse
      * @param idleBrowsing     the idle bag-check goal is running
+     * @param reading          the reading goal is in its reading phase
      */
     public static MobActivity resolve(boolean enabled, boolean alive, boolean containerOpen,
-                                      boolean inCombat, int loadoutPulseTicks, boolean idleBrowsing) {
+                                      boolean inCombat, int loadoutPulseTicks, boolean idleBrowsing,
+                                      boolean reading) {
         if (!enabled || !alive) return NONE;
         if (containerOpen) return CONTAINER;
         if (inCombat) return NONE;
-        return loadoutPulseTicks > 0 || idleBrowsing ? INVENTORY : NONE;
+        if (loadoutPulseTicks > 0 || idleBrowsing) return INVENTORY;
+        return reading ? READING : NONE;
     }
 }

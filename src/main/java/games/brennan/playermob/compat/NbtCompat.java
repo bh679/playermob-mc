@@ -161,6 +161,15 @@ public final class NbtCompat {
         //?}
     }
 
+    /** {@code key}'s int array, or an empty array if absent. */
+    public static int[] getIntArrayOrEmpty(CompoundTag tag, String key) {
+        //? if >=26 {
+        /*return tag.getIntArray(key).orElse(new int[0]);
+        *///?} else {
+        return tag.getIntArray(key);
+        //?}
+    }
+
     /** The compound under {@code key}, or an empty compound if absent. */
     public static CompoundTag getCompoundOrEmpty(CompoundTag tag, String key) {
         //? if >=26 {

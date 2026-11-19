@@ -1564,6 +1564,8 @@ public final class ReincarnateCommand {
         // windows (the last <=20 s of actions and pace) are not in it until they flush.
         String reflexes = "Reflexes — " + tally.reflexes().breakdown();
         source.sendSuccess(() -> Component.literal(reflexes), false);
+        String reading = "Reading — " + tally.reading().breakdown();
+        source.sendSuccess(() -> Component.literal(reading), false);
         return 1;
     }
 
