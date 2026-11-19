@@ -1386,6 +1386,25 @@
       "released": true,
       "released_in": "v0.126.0",
       "released_at": "2026-11-18T05:44:58Z"
+    },
+    {
+      "id": "echo-shopping-stat",
+      "version": "0.127.0",
+      "type": "feat",
+      "title": "Echoes go shopping",
+      "summary": "Your echo now remembers how much you liked to trade. Of the villagers with a job (and wandering traders) you came across in a life, the share you actually traded with becomes your echo's Shopping score. Echoes that liked shopping walk over to nearby villagers, sell the junk they've picked up for emeralds, and, once they're keen enough, buy armour, weapons and tools that beat what they're carrying and put them on. They only ever use the villager's real offers and stock, and never while they're fighting.",
+      "highlights": [
+        "New Shopping score (0-10) carried from your life to your echo: the share of villagers you met that you traded with",
+        "Late in a long run, walking past villagers counts for less, so marathon runs aren't punished for trading less",
+        "Echoes sell junk to villagers for emeralds; keen shoppers also buy and wear better gear",
+        "Trades use the villager's real prices and stock, and level the villager up like a player trade would",
+        "Wild PlayerMobs and older echoes get a random Shopping score"
+      ],
+      "pr": 263,
+      "date": "2026-11-19",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
