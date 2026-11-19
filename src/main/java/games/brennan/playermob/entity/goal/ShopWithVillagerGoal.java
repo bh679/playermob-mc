@@ -42,7 +42,8 @@ public final class ShopWithVillagerGoal extends Goal implements DescribableGoal 
     private final PlayerMobEntity mob;
     private final double speed;
 
-    private int cooldown = -1; // -1 = not yet rolled (first canUse rolls a staggered start)
+    /** Game time the next trip may start; -1 until the first check rolls a staggered start. */
+    private long nextTripAt = -1L;
     private AbstractVillager merchant;
     private Phase phase = Phase.WALKING;
     private int phaseTicks;
@@ -72,20 +73,21 @@ public final class ShopWithVillagerGoal extends Goal implements DescribableGoal 
     public boolean canUse() {
         int score = mob.shopping();
         if (!ShoppingPolicy.trades(score) || !calm()) return false;
-        if (cooldown < 0) {
-            cooldown = ShoppingPolicy.cooldownTicks(score, mob.getRandom().nextDouble());
+        // Goal checks don't run every tick, so the cooldown is a game-time deadline, not a counter.
+        long now = mob.level().getGameTime();
+        if (nextTripAt < 0) {
+            // First check: start somewhere inside one cooldown, so mobs spawned together don't
+            // all set off at once.
+            nextTripAt = now + (long) (ShoppingPolicy.cooldownTicks(score, 0.5) * mob.getRandom().nextDouble());
         }
-        if (cooldown > 0) {
-            cooldown--;
-            return false;
-        }
+        if (now < nextTripAt) return false;
         if (mob.getRandom().nextDouble() >= ShoppingPolicy.tripChance(score)) {
-            cooldown = ShoppingPolicy.cooldownTicks(score, mob.getRandom().nextDouble());
+            nextTripAt = now + ShoppingPolicy.cooldownTicks(score, mob.getRandom().nextDouble());
             return false;
         }
         merchant = findMerchant(ShoppingPolicy.buysGear(score));
         if (merchant == null) {
-            cooldown = ShoppingPolicy.RETRY_TICKS;
+            nextTripAt = now + ShoppingPolicy.RETRY_TICKS;
             return false;
         }
         return true;
@@ -111,7 +113,8 @@ public final class ShopWithVillagerGoal extends Goal implements DescribableGoal 
     public void stop() {
         mob.getNavigation().stop();
         merchant = null;
-        cooldown = ShoppingPolicy.cooldownTicks(mob.shopping(), mob.getRandom().nextDouble());
+        nextTripAt = mob.level().getGameTime()
+            + ShoppingPolicy.cooldownTicks(mob.shopping(), mob.getRandom().nextDouble());
     }
 
     @Override
