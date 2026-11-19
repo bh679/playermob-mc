@@ -32,7 +32,7 @@ import java.util.List;
  */
 public final class ShopWithVillagerGoal extends Goal implements DescribableGoal {
 
-    private static final double SCAN_RADIUS = 16.0;
+    private static final double SCAN_RADIUS = 24.0;
     private static final double TRADE_REACH_SQR = 3.0 * 3.0;
     private static final int PATH_TIMEOUT_TICKS = 200; // 10s to reach the villager
     private static final int REPATH_TICKS = 20;
