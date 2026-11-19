@@ -60,6 +60,8 @@ public final class ReadBookGoal extends Goal implements DescribableGoal {
     private static final int HANDLE_PAUSE_TICKS = 10;
     /** No reading with an attacker or a feared entity this close. */
     private static final double THREAT_RANGE = 12.0;
+    /** After finding a threat nearby, wait this long before looking again. */
+    private static final int THREAT_RETRY_TICKS = 100;
     /** Chiseled bookshelf slot count. */
     private static final int CHISELED_SLOTS = 6;
 
@@ -112,7 +114,11 @@ public final class ReadBookGoal extends Goal implements DescribableGoal {
             schedule(ReadingPolicy.gapTicks(mob.readingTrait(), mob.getRandom().nextDouble()));
             return false;
         }
-        if (mob.tickCount < nextAtTick || !isCalm() || isThreatened()) return false;
+        if (mob.tickCount < nextAtTick || !isCalm()) return false;
+        if (isThreatened()) {
+            schedule(THREAT_RETRY_TICKS); // don't rescan for threats on every evaluation
+            return false;
+        }
         BlockPos found = findShelf();
         if (found == null) {
             schedule(ReadingPolicy.NO_SHELF_RETRY_TICKS);

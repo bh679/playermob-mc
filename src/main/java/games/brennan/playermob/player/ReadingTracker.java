@@ -35,6 +35,11 @@ public final class ReadingTracker {
     static final float LOOK_EPSILON = 0.01F;
     /** Position change (blocks) that means the player moved. */
     static final double MOVE_EPSILON = 0.01;
+    /**
+     * A swing this soon after opening a book is the open's own: a successful book use makes the
+     * client swing its arm, so a swing packet follows the use packet. Only that one is excused.
+     */
+    static final int OPEN_SWING_TICKS = 2;
 
     /** Where the player's book is, as seen in one sample. */
     public enum Hand { MAIN, OFF }
@@ -49,6 +54,8 @@ public final class ReadingTracker {
     private double heldX, heldY, heldZ;
     private int heldSeconds;
     private boolean heldCredited;
+    private int heldOpenTick;
+    private boolean openSwingSeen;
 
     // Lectern session.
     private boolean lecternOpen;
@@ -67,9 +74,12 @@ public final class ReadingTracker {
 
     // ---- Held books -------------------------------------------------------
 
-    /** The player just used the book with content hash {@code hash} from {@code hand}. */
-    public void onOpenHeldBook(int hash, Hand hand, float yaw, float pitch, double x, double y, double z) {
+    /** The player just used the book with content hash {@code hash} from {@code hand} at {@code tick}. */
+    public void onOpenHeldBook(int hash, Hand hand, float yaw, float pitch, double x, double y, double z,
+                               int tick) {
         heldOpen = true;
+        heldOpenTick = tick;
+        openSwingSeen = false;
         heldHash = hash;
         heldHand = hand;
         heldYaw = yaw;
@@ -81,8 +91,15 @@ public final class ReadingTracker {
         heldCredited = false;
     }
 
-    /** Any deliberate input: a held-book screen can't be open, so that session is over. */
-    public void onAction() {
+    /**
+     * A deliberate input at {@code tick}: a held-book screen can't be open, so that session is
+     * over — except for the single arm swing that accompanies the book's own opening.
+     */
+    public void onAction(boolean swing, int tick) {
+        if (heldOpen && swing && !openSwingSeen && tick - heldOpenTick <= OPEN_SWING_TICKS) {
+            openSwingSeen = true;
+            return;
+        }
         heldOpen = false;
     }
 

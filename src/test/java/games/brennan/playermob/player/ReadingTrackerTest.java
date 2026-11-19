@@ -21,7 +21,7 @@ class ReadingTrackerTest {
     }
 
     private void open(int hash) {
-        tracker.onOpenHeldBook(hash, MAIN, 10F, 20F, 1, 64, 1);
+        tracker.onOpenHeldBook(hash, MAIN, 10F, 20F, 1, 64, 1, 100);
     }
 
     private void still(int hash, int seconds) {
@@ -71,7 +71,7 @@ class ReadingTrackerTest {
     void anyActionEndsTheSession() {
         open(5);
         still(5, 1);
-        tracker.onAction();
+        tracker.onAction(false, 140);
         still(5, 5);
         assertEquals(1F, tally.seconds(), 1e-6);
     }
@@ -123,5 +123,30 @@ class ReadingTrackerTest {
             tracker.sampleLectern(null);
         }
         assertEquals(0, tally.books());
+    }
+
+    @Test
+    void theSwingThatOpensTheBookDoesNotCloseIt() {
+        open(5);                       // the use packet, tick 100
+        tracker.onAction(true, 100);   // the client's swing for that same use
+        assertTrue(tracker.isHeldOpen());
+        still(5, 3);
+        assertEquals(3F, tally.seconds(), 1e-6);
+    }
+
+    @Test
+    void onlyOneOpeningSwingIsExcused() {
+        open(5);
+        tracker.onAction(true, 100);
+        tracker.onAction(true, 101);   // a second swing is a real input
+        assertFalse(tracker.isHeldOpen());
+    }
+
+    @Test
+    void aLaterSwingClosesTheBook() {
+        open(5);
+        still(5, 2);
+        tracker.onAction(true, 100 + ReadingTracker.OPEN_SWING_TICKS + 1);
+        assertFalse(tracker.isHeldOpen());
     }
 }

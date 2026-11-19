@@ -45,6 +45,11 @@ public final class ReadingHooks {
         return e instanceof ServerPlayer sp && !sp.isCreative() && !sp.isSpectator() && sp.isAlive();
     }
 
+    private static int tick(ServerPlayer player) {
+        MinecraftServer server = player.level().getServer();
+        return server == null ? 0 : server.getTickCount();
+    }
+
     private static synchronized ReadingTracker tracker(ServerPlayer player) {
         MinecraftServer server = player.level().getServer();
         if (server != owner) {
@@ -114,7 +119,8 @@ public final class ReadingHooks {
         try {
             ServerPlayer player = (ServerPlayer) actor;
             ReadingTracker t = tracker(player);
-            t.onAction();
+            int tick = tick(player);
+            t.onAction(kind == ReflexTracker.ActionKind.SWING, tick);
             if (kind != ReflexTracker.ActionKind.USE) {
                 return;
             }
@@ -126,7 +132,7 @@ public final class ReadingHooks {
             if (hand != null) {
                 ItemStack book = hand == ReadingTracker.Hand.MAIN ? main : player.getOffhandItem();
                 t.onOpenHeldBook(bookHash(book), hand, player.getYRot(), player.getXRot(),
-                    player.getX(), player.getY(), player.getZ());
+                    player.getX(), player.getY(), player.getZ(), tick);
             }
         } catch (RuntimeException e) {
             LOGGER.error("[playermob] reading action hook failed", e);
