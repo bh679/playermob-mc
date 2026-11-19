@@ -12,6 +12,8 @@
     "AbstractHorseTameMixin",
     "AnimalFeedMixin",
     "AbstractHorseFeedMixin",
+    "AnimalBreedMixin",
+    "ContainerLockAccessor",
     "OwnableEntityOwnerMixin",
     "EntityRemovalPetLedgerMixin",
     "RaiderTargetsPlayerMobMixin",

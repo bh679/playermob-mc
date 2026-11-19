@@ -42,6 +42,8 @@ public final class DispositionTraits {
     public static final String TAG_REACTION_SPEED = "ReactionSpeed";
     /** Per-channel reaction speeds (see {@link ReactionChannel}); absent on wild mobs and old saves. */
     public static final String TAG_REACTION_SPEEDS = "ReactionSpeeds";
+    /** The Taming hobby (0–10); absent on wild mobs and saves from before it existed ⇒ 0. */
+    public static final String TAG_TAMING = "Taming";
 
     public static final int MIN = 0;
     public static final int MAX = 10;
@@ -53,6 +55,13 @@ public final class DispositionTraits {
     private boolean fightFlightExplicit = false;
     private boolean friendlinessExplicit = false;
     private boolean reactionSpeedExplicit = false;
+    /**
+     * The Taming <em>hobby</em> — how drawn this mob is to feeding animals (see
+     * {@code FeedAnimalsGoal}). Unlike the three traits above it is never rolled: a wild mob has no
+     * hobby (0) and behaves exactly as it did before hobbies existed; an echo carries its player's
+     * score, and {@code /summon … {Taming:n}} sets one by hand.
+     */
+    private int taming = 0;
     /** Channels with a value of their own; any channel missing here reads the overall trait. */
     private final Map<ReactionChannel, Integer> channelSpeeds = new EnumMap<>(ReactionChannel.class);
 
@@ -66,6 +75,16 @@ public final class DispositionTraits {
 
     public int reactionSpeed() {
         return reactionSpeed;
+    }
+
+    /** The Taming hobby, {@code [0, 10]}; 0 means the mob never feeds animals. */
+    public int taming() {
+        return taming;
+    }
+
+    /** Set the Taming hobby (clamped to [0,10]). */
+    public void setTaming(int value) {
+        taming = clamp(value);
     }
 
     /**
@@ -154,6 +173,7 @@ public final class DispositionTraits {
         tag.putInt(TAG_FIGHT_FLIGHT, fightFlight);
         tag.putInt(TAG_FRIENDLINESS, friendliness);
         tag.putInt(TAG_REACTION_SPEED, reactionSpeed);
+        tag.putInt(TAG_TAMING, taming);
         if (!channelSpeeds.isEmpty()) {
             CompoundTag channels = new CompoundTag();
             channelSpeeds.forEach((channel, value) -> channels.putInt(channel.key(), value));
@@ -177,6 +197,9 @@ public final class DispositionTraits {
         }
         if (tag.contains(TAG_REACTION_SPEED)) {
             setReactionSpeed(NbtCompat.getIntOr(tag, TAG_REACTION_SPEED, DEFAULT));
+        }
+        if (tag.contains(TAG_TAMING)) {
+            setTaming(NbtCompat.getIntOr(tag, TAG_TAMING, 0));
         }
         // Per-channel values: absent on wild mobs and saves from before channels — every channel
         // then follows the overall trait, exactly as before.

@@ -2,6 +2,7 @@ package games.brennan.playermob.mixin;
 
 import games.brennan.playermob.player.PlayerLifeRecord;
 import games.brennan.playermob.player.PlayerLifeStore;
+import games.brennan.playermob.player.TamingTally;
 import net.minecraft.server.level.ServerPlayer;
 //? if >=26 {
 /*import net.minecraft.world.entity.animal.equine.AbstractHorse;
@@ -29,6 +30,7 @@ public abstract class AbstractHorseFeedMixin {
                                       CallbackInfoReturnable<Boolean> cir) {
         if (cir.getReturnValueZ() && player instanceof ServerPlayer serverPlayer) {
             PlayerLifeStore.record(serverPlayer, PlayerLifeRecord.Signal.FEED, 1.0F);
+            PlayerLifeStore.recordTaming(serverPlayer, TamingTally::withFeed);
         }
     }
 }

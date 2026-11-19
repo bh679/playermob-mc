@@ -12,6 +12,7 @@ import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.goal.AdvanceCarriageGoal;
 import games.brennan.playermob.entity.goal.AttackOrder;
 import games.brennan.playermob.entity.goal.BlockArrowsGoal;
+import games.brennan.playermob.entity.goal.FeedAnimalsGoal;
 import games.brennan.playermob.entity.goal.CollectFloorItemsGoal;
 import games.brennan.playermob.entity.goal.CommandedActionGoal;
 import games.brennan.playermob.entity.goal.IdleInventoryGoal;
@@ -1047,6 +1048,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // nothing more urgent (combat 2, raid/eat/collect 3) to do. Hunting is
         // NOT here — it runs as a target goal so the priority-2 attack goal does
         // the killing (see below).
+        // The Taming hobby: feed animals (fetching food from a chest if need be). Only a mob with a
+        // Taming score (an echo, or /summon {Taming:n}) ever does; combat and raiding preempt it.
+        this.goalSelector.addGoal(5, new FeedAnimalsGoal(this, /* speed */ 0.9));
         this.goalSelector.addGoal(6, new HarvestCropsGoal(this, /* speed */ 0.9, /* radius */ 8));
         // On a Dungeon Train, once the current carriage room is clear (combat 2,
         // raid/collect 3, harvest 6 all preempt this), march to the next room.
@@ -2250,6 +2254,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
 
     public int reactionSpeed() {
         return traits.reactionSpeed();
+    }
+
+    /** The Taming hobby, {@code [0, 10]} — see {@link DispositionTraits#taming()}; 0 never feeds animals. */
+    public int taming() {
+        return traits.taming();
     }
 
     /** This mob's reaction speed for one kind of action — see {@link DispositionTraits#reactionSpeed(ReactionChannel)}. */

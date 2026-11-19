@@ -115,6 +115,8 @@ public final class ForagePolicy {
     public static boolean isHuntableFoodAnimal(Entity entity) {
         if (!(entity instanceof Animal animal)) return false;
         if (animal.isBaby()) return false;
+        // An animal in love is being bred — maybe by this very mob's Taming hobby. Don't eat it.
+        if (animal.isInLove()) return false;
         // Cow subsumes MushroomCow (mooshroom extends Cow).
         return animal instanceof Cow
             || animal instanceof Pig

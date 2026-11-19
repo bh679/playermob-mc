@@ -2,6 +2,7 @@ package games.brennan.playermob.mixin;
 
 import games.brennan.playermob.player.PlayerLifeRecord;
 import games.brennan.playermob.player.PlayerLifeStore;
+import games.brennan.playermob.player.TamingTally;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.TamableAnimal;
 import net.minecraft.world.entity.player.Player;
@@ -29,6 +30,7 @@ public abstract class TamableAnimalTameMixin {
     private void playermob$creditTame(Player player, CallbackInfo ci) {
         if (player instanceof ServerPlayer serverPlayer) {
             PlayerLifeStore.record(serverPlayer, PlayerLifeRecord.Signal.TAME, 0);
+            PlayerLifeStore.recordTaming(serverPlayer, TamingTally::withTame);
             // Remember the animal itself, so an echo of this life can return with it wherever it is.
             PlayerLifeStore.recordPet(serverPlayer, (TamableAnimal) (Object) this);
         }

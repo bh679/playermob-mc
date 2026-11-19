@@ -157,6 +157,21 @@ public final class PlayerLifeStore extends SavedData {
         setDirty();
     }
 
+    /** Apply one animal-handling act to the player's live record (see {@link TamingTally}). */
+    public static void recordTaming(ServerPlayer player,
+                                    java.util.function.UnaryOperator<TamingTally> update) {
+        //? if >=26 {
+        /*get(player.level()).creditTaming(player.getUUID(), update);
+        *///?} else {
+        get(player.serverLevel()).creditTaming(player.getUUID(), update);
+        //?}
+    }
+
+    public void creditTaming(UUID id, java.util.function.UnaryOperator<TamingTally> update) {
+        current.put(id, current(id).withTaming(update));
+        setDirty();
+    }
+
     public void credit(UUID id, PlayerLifeRecord.Signal signal, float magnitude) {
         credit(id, signal, magnitude, false);
     }

@@ -2,6 +2,7 @@ package games.brennan.playermob.mixin;
 
 import games.brennan.playermob.player.PlayerLifeRecord;
 import games.brennan.playermob.player.PlayerLifeStore;
+import games.brennan.playermob.player.TamingTally;
 import net.minecraft.server.level.ServerPlayer;
 //? if >=26 {
 /*import net.minecraft.world.entity.animal.equine.AbstractHorse;
@@ -32,6 +33,7 @@ public abstract class AbstractHorseTameMixin {
     private void playermob$creditTame(Player player, CallbackInfoReturnable<Boolean> cir) {
         if (player instanceof ServerPlayer serverPlayer) {
             PlayerLifeStore.record(serverPlayer, PlayerLifeRecord.Signal.TAME, 0);
+            PlayerLifeStore.recordTaming(serverPlayer, TamingTally::withTame);
             // Remember the animal itself, so an echo of this life can return with it wherever it is.
             PlayerLifeStore.recordPet(serverPlayer, (AbstractHorse) (Object) this);
         }

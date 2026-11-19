@@ -2,6 +2,7 @@ package games.brennan.playermob.mixin;
 
 import games.brennan.playermob.player.PlayerLifeRecord;
 import games.brennan.playermob.player.PlayerLifeStore;
+import games.brennan.playermob.player.TamingTally;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 //? if >=26 {
@@ -43,6 +44,7 @@ public abstract class AnimalFeedMixin {
                                       CallbackInfo ci) {
         if ((Object) this instanceof Animal && player instanceof ServerPlayer serverPlayer) {
             PlayerLifeStore.record(serverPlayer, PlayerLifeRecord.Signal.FEED, 1.0F);
+            PlayerLifeStore.recordTaming(serverPlayer, TamingTally::withFeed);
         }
     }
 }

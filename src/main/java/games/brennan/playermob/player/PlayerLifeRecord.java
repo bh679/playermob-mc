@@ -108,7 +108,8 @@ public final class PlayerLifeRecord {
 
     /** A fresh life — no conduct recorded yet. */
     public static final PlayerLifeRecord EMPTY =
-        new PlayerLifeRecord(0.0F, 0, 0.0F, 0, 0, 0.0F, 0, 0.0F, 0.0F, 0.0F, ReflexTally.EMPTY);
+        new PlayerLifeRecord(0.0F, 0, 0.0F, 0, 0, 0.0F, 0, 0.0F, 0.0F, 0.0F, ReflexTally.EMPTY,
+            TamingTally.EMPTY);
 
     private final float damageDealt;
     private final int kills;
@@ -127,10 +128,12 @@ public final class PlayerLifeRecord {
     private final float fed;
     /** Evidence of the player's reflexes — distilled into reaction speed. */
     private final ReflexTally reflexes;
+    /** Animals this life tamed, bred and fed — distilled into the echo's Taming hobby. */
+    private final TamingTally taming;
 
     PlayerLifeRecord(float damageDealt, int kills, float kindness, int harms, int attacks,
                      float defensiveDamage, int defensiveKills, float timidity, float sabotage,
-                     float fed, ReflexTally reflexes) {
+                     float fed, ReflexTally reflexes, TamingTally taming) {
         this.damageDealt = damageDealt;
         this.kills = kills;
         this.kindness = kindness;
@@ -142,6 +145,7 @@ public final class PlayerLifeRecord {
         this.sabotage = Math.max(0.0F, sabotage);
         this.fed = Math.max(0.0F, fed);
         this.reflexes = reflexes == null ? ReflexTally.EMPTY : reflexes;
+        this.taming = taming == null ? TamingTally.EMPTY : taming;
     }
 
     public float damageDealt() { return damageDealt; }
@@ -161,11 +165,14 @@ public final class PlayerLifeRecord {
     public float fed() { return fed; }
     /** This life's reflex evidence (see {@link ReflexTally}). */
     public ReflexTally reflexes() { return reflexes; }
+    /** This life's animal-handling evidence (see {@link TamingTally}). */
+    public TamingTally taming() { return taming; }
 
     /** True for a life with no recorded conduct (used to skip empty saves). */
     public boolean isEmpty() {
         return damageDealt == 0.0F && kills == 0 && kindness == 0.0F && harms == 0 && attacks == 0
-            && timidity == 0.0F && sabotage == 0.0F && fed == 0.0F && reflexes.isEmpty();
+            && timidity == 0.0F && sabotage == 0.0F && fed == 0.0F && reflexes.isEmpty()
+            && taming.isEmpty();
     }
 
     /** The kind of player→mob action being credited; routes a magnitude to the right tally. */
@@ -194,40 +201,46 @@ public final class PlayerLifeRecord {
                 float dealt = Math.max(0.0F, magnitude);
                 yield new PlayerLifeRecord(damageDealt + dealt, kills, kindness, harms, attacks + 1,
                     defensive ? defensiveDamage + dealt : defensiveDamage, defensiveKills, timidity,
-                    sabotage, fed, reflexes);
+                    sabotage, fed, reflexes, taming);
             }
             case KILL   -> new PlayerLifeRecord(damageDealt, kills + 1, kindness, harms, attacks,
                                defensiveDamage, defensive ? defensiveKills + 1 : defensiveKills,
-                               timidity, sabotage, fed, reflexes);
+                               timidity, sabotage, fed, reflexes, taming);
             case CROUCH -> withKindness(CROUCH_KINDNESS);
             case TRAVEL -> withKindness(TRAVEL_KINDNESS);
             case DEFEND -> withKindness(DEFEND_KINDNESS);
             case TAME   -> withKindness(TAME_KINDNESS);
             case GIFT   -> withKindness(Math.max(0.0F, magnitude));
             case HARM   -> new PlayerLifeRecord(damageDealt, kills, kindness, harms + 1, attacks,
-                               defensiveDamage, defensiveKills, timidity, sabotage, fed, reflexes);
+                               defensiveDamage, defensiveKills, timidity, sabotage, fed, reflexes, taming);
             // Signed: a negative magnitude is a mob handing back what it had banked, once the
             // player finally hit it. The constructor floors the tally at 0.
             case FLEE   -> new PlayerLifeRecord(damageDealt, kills, kindness, harms, attacks,
-                               defensiveDamage, defensiveKills, timidity + magnitude, sabotage, fed, reflexes);
+                               defensiveDamage, defensiveKills, timidity + magnitude, sabotage, fed, reflexes, taming);
             case SABOTAGE -> new PlayerLifeRecord(damageDealt, kills, kindness, harms, attacks,
                                defensiveDamage, defensiveKills, timidity,
-                               sabotage + Math.max(0.0F, magnitude), fed, reflexes);
+                               sabotage + Math.max(0.0F, magnitude), fed, reflexes, taming);
             case FEED   -> new PlayerLifeRecord(damageDealt, kills, kindness, harms, attacks,
                                defensiveDamage, defensiveKills, timidity, sabotage,
-                               fed + Math.max(0.0F, magnitude), reflexes);
+                               fed + Math.max(0.0F, magnitude), reflexes, taming);
         };
     }
 
     /** Return a fresh record with {@code update} applied to the reflex tally. */
     public PlayerLifeRecord withReflexes(UnaryOperator<ReflexTally> update) {
         return new PlayerLifeRecord(damageDealt, kills, kindness, harms, attacks,
-            defensiveDamage, defensiveKills, timidity, sabotage, fed, update.apply(reflexes));
+            defensiveDamage, defensiveKills, timidity, sabotage, fed, update.apply(reflexes), taming);
+    }
+
+    /** Return a fresh record with {@code update} applied to the taming tally. */
+    public PlayerLifeRecord withTaming(UnaryOperator<TamingTally> update) {
+        return new PlayerLifeRecord(damageDealt, kills, kindness, harms, attacks,
+            defensiveDamage, defensiveKills, timidity, sabotage, fed, reflexes, update.apply(taming));
     }
 
     private PlayerLifeRecord withKindness(float delta) {
         return new PlayerLifeRecord(damageDealt, kills, kindness + delta, harms, attacks,
-            defensiveDamage, defensiveKills, timidity, sabotage, fed, reflexes);
+            defensiveDamage, defensiveKills, timidity, sabotage, fed, reflexes, taming);
     }
 
     /**
@@ -286,6 +299,8 @@ public final class PlayerLifeRecord {
         traits.setReactionSpeed(reflexes.reactionSpeed());
         // …and one per kind of action, each leaning on that overall score (see ReflexTally).
         reflexes.channelSpeeds().forEach(traits::setReactionSpeed);
+        // Taming is a hobby, scored from what the life did with animals — never from conduct.
+        traits.setTaming(taming.score());
         return traits;
     }
 
@@ -309,6 +324,9 @@ public final class PlayerLifeRecord {
         tag.putFloat(TAG_FED, fed);
         if (!reflexes.isEmpty()) {
             tag.put(ReflexTally.TAG, reflexes.save());
+        }
+        if (!taming.isEmpty()) {
+            tag.put(TamingTally.TAG, taming.save());
         }
     }
 
@@ -334,6 +352,8 @@ public final class PlayerLifeRecord {
             NbtCompat.getFloatOr(tag, TAG_FED, 0f),
             // Missing on saves from before reflexes were scored ⇒ EMPTY ⇒ reaction speed 5,
             // exactly what every echo carried on the build that wrote it.
-            ReflexTally.load(NbtCompat.getCompoundOrEmpty(tag, ReflexTally.TAG)));
+            ReflexTally.load(NbtCompat.getCompoundOrEmpty(tag, ReflexTally.TAG)),
+            // Missing on saves from before taming was scored ⇒ EMPTY ⇒ Taming 0.
+            TamingTally.load(NbtCompat.getCompoundOrEmpty(tag, TamingTally.TAG)));
     }
 }
