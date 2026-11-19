@@ -1,12 +1,16 @@
 package games.brennan.playermob.player;
 
+import java.util.HashSet;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.UnaryOperator;
 
 /**
- * One player's live reading sessions — the clocked part of the Reading signal that can't live
- * in the saved {@link ReadingTally}. Each second of reading and each finished book is handed to
- * {@code sink} as a tally update; nothing here is persisted.
+ * One player's live reading bookkeeping — the clocked part of the Reading signal that can't live
+ * in the saved {@link ReadingTally}. It reports three things to {@code sink} as tally updates:
+ * each book <b>opened</b>, each reading <b>session's length</b> when it ends, and each book that
+ * <b>left the inventory</b> (to the floor, the fire, the void — anywhere but a container).
+ * Nothing here is persisted.
  *
  * <p><b>How the server knows someone is reading.</b> Book screens are client-side, so this works
  * from what the server can see, without a packet the client could forge:</p>
@@ -21,14 +25,11 @@ import java.util.function.UnaryOperator;
  *       {@link #MAX_HELD_SECONDS}.</li>
  * </ul>
  *
- * <p>A session that lasts {@link #MIN_BOOK_SECONDS} counts its book once (the tally ignores a
- * book this life already read). Pure: every input is a primitive, so the rules unit-test
- * without a world — see {@code ReadingTrackerTest}.</p>
+ * <p>Pure: every input is a primitive, so the rules unit-test without a world — see
+ * {@code ReadingTrackerTest}.</p>
  */
 public final class ReadingTracker {
 
-    /** Seconds one session must last before its book counts as read. */
-    static final int MIN_BOOK_SECONDS = 8;
     /** Longest a held-book session may run — bounds a player idling after closing the screen. */
     static final int MAX_HELD_SECONDS = 600;
     /** Look-direction change (degrees) that means the mouse moved, i.e. no screen is open. */
@@ -53,7 +54,6 @@ public final class ReadingTracker {
     private float heldYaw, heldPitch;
     private double heldX, heldY, heldZ;
     private int heldSeconds;
-    private boolean heldCredited;
     private int heldOpenTick;
     private boolean openSwingSeen;
 
@@ -61,7 +61,9 @@ public final class ReadingTracker {
     private boolean lecternOpen;
     private int lecternHash;
     private int lecternSeconds;
-    private boolean lecternCredited;
+
+    /** Readable books carried at the last inventory sample; {@code null} before the first. */
+    private Set<Integer> carried;
 
     public ReadingTracker(Consumer<UnaryOperator<ReadingTally>> sink) {
         this.sink = sink;
@@ -77,6 +79,7 @@ public final class ReadingTracker {
     /** The player just used the book with content hash {@code hash} from {@code hand} at {@code tick}. */
     public void onOpenHeldBook(int hash, Hand hand, float yaw, float pitch, double x, double y, double z,
                                int tick) {
+        endHeld();
         heldOpen = true;
         heldOpenTick = tick;
         openSwingSeen = false;
@@ -88,7 +91,7 @@ public final class ReadingTracker {
         heldY = y;
         heldZ = z;
         heldSeconds = 0;
-        heldCredited = false;
+        sink.accept(t -> t.withOpened(hash));
     }
 
     /**
@@ -100,7 +103,7 @@ public final class ReadingTracker {
             openSwingSeen = true;
             return;
         }
-        heldOpen = false;
+        endHeld();
     }
 
     /**
@@ -119,16 +122,18 @@ public final class ReadingTracker {
             && (!checkPosition || (Math.abs(x - heldX) <= MOVE_EPSILON
                 && Math.abs(y - heldY) <= MOVE_EPSILON && Math.abs(z - heldZ) <= MOVE_EPSILON));
         if (!still || heldSeconds >= MAX_HELD_SECONDS) {
-            heldOpen = false;
+            endHeld();
             return;
         }
         heldSeconds++;
-        sink.accept(t -> t.withSeconds(1F));
-        if (!heldCredited && heldSeconds >= MIN_BOOK_SECONDS) {
-            heldCredited = true;
-            int hash = heldHash;
-            sink.accept(t -> t.withBook(hash));
-        }
+    }
+
+    /** Close the held-book session, reporting how long it lasted. */
+    private void endHeld() {
+        if (!heldOpen) return;
+        heldOpen = false;
+        int seconds = heldSeconds;
+        sink.accept(t -> t.withSession(seconds));
     }
 
     // ---- Lecterns ---------------------------------------------------------
@@ -138,22 +143,50 @@ public final class ReadingTracker {
      * {@code null} when no lectern menu is open.
      */
     public void sampleLectern(Integer bookHash) {
-        if (bookHash == null) {
-            lecternOpen = false;
-            return;
+        if (lecternOpen && (bookHash == null || bookHash != lecternHash)) {
+            endLectern();
         }
-        if (!lecternOpen || bookHash != lecternHash) {
+        if (bookHash == null) return;
+        if (!lecternOpen) {
             lecternOpen = true;
             lecternHash = bookHash;
             lecternSeconds = 0;
-            lecternCredited = false;
+            int hash = bookHash;
+            sink.accept(t -> t.withOpened(hash));
         }
         lecternSeconds++;
-        sink.accept(t -> t.withSeconds(1F));
-        if (!lecternCredited && lecternSeconds >= MIN_BOOK_SECONDS) {
-            lecternCredited = true;
-            int hash = lecternHash;
-            sink.accept(t -> t.withBook(hash));
+    }
+
+    private void endLectern() {
+        lecternOpen = false;
+        int seconds = lecternSeconds;
+        sink.accept(t -> t.withSession(seconds));
+    }
+
+    // ---- Inventory ----------------------------------------------------------
+
+    /**
+     * One second sample of the readable books the player carries. A book carried last second and
+     * gone now left them — unless a container was open, in which case it was put away, which says
+     * nothing about the player. Whether it left <em>unread</em> is judged by the tally at scoring
+     * time, so reading it later (say, on a lectern) still clears it.
+     */
+    public void sampleInventory(Set<Integer> nowCarried, boolean containerOpen) {
+        if (carried != null && !containerOpen) {
+            for (int hash : carried) {
+                if (!nowCarried.contains(hash)) {
+                    sink.accept(t -> t.withLeft(hash));
+                }
+            }
+        }
+        carried = new HashSet<>(nowCarried);
+    }
+
+    /** Close every open session — the player died; report what they were in the middle of. */
+    public void endAll() {
+        endHeld();
+        if (lecternOpen) {
+            endLectern();
         }
     }
 }

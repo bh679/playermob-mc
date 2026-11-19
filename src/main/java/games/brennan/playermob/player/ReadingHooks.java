@@ -5,6 +5,7 @@ import games.brennan.playermob.compat.TrainConfinement;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.LecternMenu;
 import net.minecraft.world.item.ItemStack;
@@ -19,7 +20,9 @@ import net.minecraft.world.item.component.WrittenBookContent;
 //?}
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -164,15 +167,46 @@ public final class ReadingHooks {
             boolean checkPosition = TrainConfinement.carriageIndex(player) == ReflexTracker.NO_CARRIAGE;
             t.sampleHeld(heldBook, hand, otherMenu || lecternBook != null, player.getYRot(), player.getXRot(),
                 player.getX(), player.getY(), player.getZ(), checkPosition);
+            // Books that left: put away into any open menu (a chest, a lectern) doesn't count.
+            t.sampleInventory(carriedBooks(player), player.containerMenu != player.inventoryMenu);
         } catch (RuntimeException e) {
             LOGGER.error("[playermob] reading tick hook failed", e);
         }
     }
 
-    /** The player died: drop their live sessions (every second read is already credited). */
+    /**
+     * Hashes of every book worth reading the player carries — inventory, offhand and the stack on
+     * their cursor (a book mid-move in the inventory screen hasn't left them). A blank book &amp;
+     * quill has nothing to read, so leaving it behind says nothing.
+     */
+    static Set<Integer> carriedBooks(ServerPlayer player) {
+        Set<Integer> out = new HashSet<>();
+        Inventory inv = player.getInventory();
+        for (int i = 0; i < inv.getContainerSize(); i++) {
+            addIfBook(out, inv.getItem(i));
+        }
+        addIfBook(out, player.containerMenu.getCarried());
+        return out;
+    }
+
+    private static void addIfBook(Set<Integer> out, ItemStack stack) {
+        if (stack.is(Items.WRITTEN_BOOK) || DraftBooks.isDraft(stack)) {
+            out.add(bookHash(stack));
+        }
+    }
+
+    /** The player died: close any session they were in the middle of, then forget them. */
     public static void onPlayerDeath(ServerPlayer player) {
+        ReadingTracker t;
         synchronized (ReadingHooks.class) {
-            TRACKERS.remove(player.getUUID());
+            t = TRACKERS.remove(player.getUUID());
+        }
+        if (t != null) {
+            try {
+                t.endAll();
+            } catch (RuntimeException e) {
+                LOGGER.error("[playermob] reading death flush failed", e);
+            }
         }
     }
 }

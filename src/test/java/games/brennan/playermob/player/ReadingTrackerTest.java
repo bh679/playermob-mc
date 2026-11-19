@@ -3,6 +3,8 @@ package games.brennan.playermob.player;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.Set;
+
 import static games.brennan.playermob.player.ReadingTracker.Hand.MAIN;
 import static games.brennan.playermob.player.ReadingTracker.Hand.OFF;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -30,20 +32,31 @@ class ReadingTrackerTest {
         }
     }
 
+    // ---- held books -------------------------------------------------------
+
     @Test
-    void heldBookAccruesWhileThePlayerHoldsStill() {
+    void openingABookCountsItAsOpenedAtOnce() {
         open(5);
-        still(5, 3);
-        assertEquals(3F, tally.seconds(), 1e-6);
-        assertEquals(0, tally.books(), "too short to count the book");
+        assertEquals(1, tally.opened());
+        assertEquals(0, tally.sessions(), "the session only reports when it ends");
     }
 
     @Test
-    void bookCountsOnceAfterTheMinimum() {
+    void aSessionReportsItsLengthWhenItEnds() {
         open(5);
-        still(5, ReadingTracker.MIN_BOOK_SECONDS + 5);
-        assertEquals(1, tally.books());
-        assertEquals(ReadingTracker.MIN_BOOK_SECONDS + 5, tally.seconds(), 1e-6);
+        still(5, 30);
+        tracker.onAction(false, 900);
+        assertEquals(1, tally.sessions());
+        assertEquals(30.0, tally.averageSessionSeconds(), 1e-6);
+    }
+
+    @Test
+    void aFlickShutIsASkim() {
+        open(5);
+        tracker.onAction(false, 140); // closed before the first one-second sample
+        assertEquals(1, tally.sessions());
+        assertEquals(0.0, tally.averageSessionSeconds(), 1e-6);
+        assertEquals(0, tally.focusScore());
     }
 
     @Test
@@ -52,8 +65,7 @@ class ReadingTrackerTest {
         still(5, 2);
         tracker.sampleHeld(5, MAIN, false, 11F, 20F, 1, 64, 1, true); // mouse moved
         assertFalse(tracker.isHeldOpen());
-        still(5, 10);
-        assertEquals(2F, tally.seconds(), 1e-6);
+        assertEquals(2.0, tally.averageSessionSeconds(), 1e-6);
     }
 
     @Test
@@ -61,19 +73,9 @@ class ReadingTrackerTest {
         open(5);
         tracker.sampleHeld(5, MAIN, false, 10F, 20F, 2, 64, 1, true);
         assertFalse(tracker.isHeldOpen());
-
         open(5);
         tracker.sampleHeld(5, MAIN, false, 10F, 20F, 9, 64, 1, false); // carried by the train
         assertTrue(tracker.isHeldOpen());
-    }
-
-    @Test
-    void anyActionEndsTheSession() {
-        open(5);
-        still(5, 1);
-        tracker.onAction(false, 140);
-        still(5, 5);
-        assertEquals(1F, tally.seconds(), 1e-6);
     }
 
     @Test
@@ -90,55 +92,41 @@ class ReadingTrackerTest {
         open(5);
         tracker.sampleHeld(5, MAIN, true, 10F, 20F, 1, 64, 1, true);
         assertFalse(tracker.isHeldOpen());
-        assertEquals(0F, tally.seconds(), 1e-6);
+        assertEquals(4, tally.sessions());
+    }
+
+    @Test
+    void reopeningEndsThePreviousSessionFirst() {
+        open(5);
+        still(5, 10);
+        open(6);
+        assertEquals(1, tally.sessions());
+        assertEquals(2, tally.opened());
     }
 
     @Test
     void heldSessionIsCapped() {
         open(5);
         still(5, ReadingTracker.MAX_HELD_SECONDS + 100);
-        assertEquals(ReadingTracker.MAX_HELD_SECONDS, tally.seconds(), 1e-6);
-    }
-
-    @Test
-    void noSessionNoCredit() {
-        still(5, 20);
-        assertTrue(tally.isEmpty());
-    }
-
-    @Test
-    void lecternAccruesAndCountsTheBookOnce() {
-        for (int i = 0; i < ReadingTracker.MIN_BOOK_SECONDS * 2; i++) tracker.sampleLectern(77);
-        assertEquals(1, tally.books());
-        tracker.sampleLectern(null);
-        for (int i = 0; i < ReadingTracker.MIN_BOOK_SECONDS; i++) tracker.sampleLectern(77);
-        assertEquals(1, tally.books(), "re-reading the same book doesn't add one");
-        assertEquals(ReadingTracker.MIN_BOOK_SECONDS * 3, tally.seconds(), 1e-6);
-    }
-
-    @Test
-    void lecternShortVisitsDoNotCountABook() {
-        for (int r = 0; r < 5; r++) {
-            for (int i = 0; i < ReadingTracker.MIN_BOOK_SECONDS - 1; i++) tracker.sampleLectern(88);
-            tracker.sampleLectern(null);
-        }
-        assertEquals(0, tally.books());
+        assertFalse(tracker.isHeldOpen());
+        assertEquals(1, tally.sessions());
+        assertEquals(ReadingTally.MAX_SESSION_SECONDS, tally.averageSessionSeconds(), 1e-6);
     }
 
     @Test
     void theSwingThatOpensTheBookDoesNotCloseIt() {
-        open(5);                       // the use packet, tick 100
-        tracker.onAction(true, 100);   // the client's swing for that same use
+        open(5);
+        tracker.onAction(true, 100);
         assertTrue(tracker.isHeldOpen());
         still(5, 3);
-        assertEquals(3F, tally.seconds(), 1e-6);
+        assertTrue(tracker.isHeldOpen());
     }
 
     @Test
     void onlyOneOpeningSwingIsExcused() {
         open(5);
         tracker.onAction(true, 100);
-        tracker.onAction(true, 101);   // a second swing is a real input
+        tracker.onAction(true, 101);
         assertFalse(tracker.isHeldOpen());
     }
 
@@ -148,5 +136,70 @@ class ReadingTrackerTest {
         still(5, 2);
         tracker.onAction(true, 100 + ReadingTracker.OPEN_SWING_TICKS + 1);
         assertFalse(tracker.isHeldOpen());
+    }
+
+    // ---- lecterns ---------------------------------------------------------
+
+    @Test
+    void lecternOpensOnceAndReportsTheSessionOnClose() {
+        for (int i = 0; i < 25; i++) tracker.sampleLectern(77);
+        assertEquals(1, tally.opened());
+        assertEquals(0, tally.sessions());
+        tracker.sampleLectern(null);
+        assertEquals(1, tally.sessions());
+        assertEquals(25.0, tally.averageSessionSeconds(), 1e-6);
+        for (int i = 0; i < 5; i++) tracker.sampleLectern(77);
+        tracker.sampleLectern(null);
+        assertEquals(1, tally.opened(), "the same book again isn't a new book");
+        assertEquals(2, tally.sessions());
+    }
+
+    @Test
+    void switchingLecternBooksSplitsTheSession() {
+        for (int i = 0; i < 4; i++) tracker.sampleLectern(1);
+        for (int i = 0; i < 4; i++) tracker.sampleLectern(2);
+        assertEquals(2, tally.opened());
+        assertEquals(1, tally.sessions());
+    }
+
+    // ---- inventory ----------------------------------------------------------
+
+    @Test
+    void aBookThatLeavesUnreadIsIgnored() {
+        tracker.sampleInventory(Set.of(1, 2), false);
+        tracker.sampleInventory(Set.of(2), false); // dropped / burned
+        assertEquals(1, tally.ignored());
+    }
+
+    @Test
+    void puttingABookAwayIsNeutral() {
+        tracker.sampleInventory(Set.of(1), false);
+        tracker.sampleInventory(Set.of(), true); // into a chest
+        assertEquals(0, tally.ignored());
+        assertTrue(tally.isEmpty());
+    }
+
+    @Test
+    void aBookReadThenDroppedIsNotIgnored() {
+        tracker.sampleInventory(Set.of(3), false);
+        open(3);
+        tracker.onAction(false, 200);
+        tracker.sampleInventory(Set.of(), false);
+        assertEquals(0, tally.ignored());
+    }
+
+    @Test
+    void theFirstSampleOnlyRemembers() {
+        tracker.sampleInventory(Set.of(1, 2, 3), false);
+        assertTrue(tally.isEmpty());
+    }
+
+    @Test
+    void deathClosesOpenSessions() {
+        open(5);
+        still(5, 12);
+        for (int i = 0; i < 3; i++) tracker.sampleLectern(9);
+        tracker.endAll();
+        assertEquals(2, tally.sessions());
     }
 }

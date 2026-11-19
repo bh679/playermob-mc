@@ -449,6 +449,13 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private int reading = DispositionTraits.DEFAULT;
     /** Whether {@link #reading} was set deliberately (save, snapshot, egg) — the spawn roll skips it. */
     private boolean readingExplicit;
+    /**
+     * The Reading-focus trait (0–10): how long this mob stays with a book once it has one open. An
+     * echo carries its player's score; any other mob rolls it. Saved under
+     * {@link games.brennan.playermob.player.ReadingTally#FOCUS_TAG}.
+     */
+    private int readingFocus = DispositionTraits.DEFAULT;
+    private boolean readingFocusExplicit;
     /** Server: the reading goal is in its reading phase — shows {@link MobActivity#READING}. */
     private boolean readingBook;
     /** Server: the book in hand while reading, and the offhand item set aside for it. */
@@ -1245,6 +1252,17 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     public void setReadingTrait(int value) {
         this.reading = Math.max(DispositionTraits.MIN, Math.min(DispositionTraits.MAX, value));
         this.readingExplicit = true;
+    }
+
+    /** The Reading-focus trait, 0–10 — how long a read lasts. */
+    public int readingFocusTrait() {
+        return readingFocus;
+    }
+
+    /** Pin the Reading-focus trait (clamped 0–10); the spawn roll then leaves it alone. */
+    public void setReadingFocusTrait(int value) {
+        this.readingFocus = Math.max(DispositionTraits.MIN, Math.min(DispositionTraits.MAX, value));
+        this.readingFocusExplicit = true;
     }
 
     /** Server: the held book while reading — see {@link ReadingHands}. */
@@ -2046,6 +2064,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (!readingExplicit) {
             // A wild mob, or an echo from before Reading was recorded: any level of bookishness.
             this.reading = random.nextInt(DispositionTraits.MAX + 1);
+        }
+        if (!readingFocusExplicit) {
+            this.readingFocus = random.nextInt(DispositionTraits.MAX + 1);
         }
         pushDispositionToClient();
         // Roll the door-closing personality (~50% close behind, ~50% leave open),
@@ -4428,6 +4449,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private void writeCustomTag(CompoundTag tag) {
         traits.save(tag);
         tag.putInt(games.brennan.playermob.player.ReadingTally.TRAIT_TAG, this.reading);
+        tag.putInt(games.brennan.playermob.player.ReadingTally.FOCUS_TAG, this.readingFocus);
         feelings.save(tag);
         tag.putInt(TAG_SKIN_INDEX, getSkinIndex());
         // Persist the arm model for bundled mobs too (previously URL-only). Additive:
@@ -4511,6 +4533,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // the neutral default for a mob loaded from an old save).
         if (tag.contains(games.brennan.playermob.player.ReadingTally.TRAIT_TAG)) {
             setReadingTrait(NbtCompat.getIntOr(tag, games.brennan.playermob.player.ReadingTally.TRAIT_TAG,
+                DispositionTraits.DEFAULT));
+        }
+        if (tag.contains(games.brennan.playermob.player.ReadingTally.FOCUS_TAG)) {
+            setReadingFocusTrait(NbtCompat.getIntOr(tag, games.brennan.playermob.player.ReadingTally.FOCUS_TAG,
                 DispositionTraits.DEFAULT));
         }
         feelings.load(tag);

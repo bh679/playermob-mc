@@ -33,15 +33,22 @@ class ReadingPolicyTest {
     }
 
     @Test
-    void readLengthStaysInRangeAndGrowsWithTheTrait() {
-        for (int reading = 0; reading <= 10; reading++) {
-            for (double roll : new double[] {0.0, 0.5, 1.0}) {
-                int t = ReadingPolicy.readTicks(reading, roll);
-                assertTrue(t >= ReadingPolicy.MIN_READ_TICKS && t <= ReadingPolicy.MAX_READ_TICKS);
-            }
+    void readLengthFollowsFocus() {
+        assertEquals(ReadingPolicy.MIN_READ_TICKS, ReadingPolicy.readTicks(0, 0.5));
+        assertEquals(ReadingPolicy.MAX_READ_TICKS, ReadingPolicy.readTicks(10, 0.5));
+        int prev = -1;
+        for (int focus = 0; focus <= 10; focus++) {
+            int t = ReadingPolicy.readTicks(focus, 0.5);
+            assertTrue(t > prev, "longer reads as focus rises");
+            prev = t;
         }
-        assertTrue(ReadingPolicy.readTicks(10, 0.5) > ReadingPolicy.readTicks(1, 0.5));
-        assertEquals(ReadingPolicy.MIN_READ_TICKS, ReadingPolicy.readTicks(0, 0.0));
-        assertEquals(ReadingPolicy.MAX_READ_TICKS, ReadingPolicy.readTicks(10, 1.0));
+    }
+
+    @Test
+    void chanceSpreadsAReadByAQuarter() {
+        int mean = ReadingPolicy.readTicks(10, 0.5);
+        assertEquals(Math.round(mean * 0.75), ReadingPolicy.readTicks(10, 0.0));
+        assertEquals(Math.round(mean * 1.25), ReadingPolicy.readTicks(10, 1.0));
+        assertTrue(ReadingPolicy.readTicks(0, 0.0) > 0);
     }
 }

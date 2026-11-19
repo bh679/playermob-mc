@@ -10,104 +10,156 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ReadingTallyTest {
 
-    private static ReadingTally minutes(double m) {
-        return ReadingTally.EMPTY.withSeconds((float) (m * 60.0));
-    }
-
-    private static ReadingTally books(int n) {
+    private static ReadingTally opened(int n) {
         ReadingTally t = ReadingTally.EMPTY;
-        for (int i = 0; i < n; i++) {
-            t = t.withBook(1000 + i);
-        }
+        for (int i = 0; i < n; i++) t = t.withOpened(1000 + i);
         return t;
     }
 
+    private static ReadingTally sessions(ReadingTally t, int count, int seconds) {
+        for (int i = 0; i < count; i++) t = t.withSession(seconds);
+        return t;
+    }
+
+    // ---- chance -----------------------------------------------------------
+
     @Test
-    void noReadingScoresZero() {
-        assertEquals(0, ReadingTally.EMPTY.score());
+    void noBooksScoresZeroOnBoth() {
+        assertEquals(0, ReadingTally.EMPTY.chanceScore());
+        assertEquals(0, ReadingTally.EMPTY.focusScore());
         assertTrue(ReadingTally.EMPTY.isEmpty());
     }
 
     @Test
-    void oneShortReadIsALowScoreNotNeutral() {
-        ReadingTally t = minutes(0.5).withBook(1);
-        assertTrue(t.score() >= 0 && t.score() <= 2, "got " + t.score());
-    }
-
-    @Test
-    void scoreRisesWithTimeAndBooksAndSaturates() {
+    void chanceRisesWithEveryBookOpened() {
+        assertEquals(3, opened(1).chanceScore());   // 10·1/3
+        assertEquals(6, opened(3).chanceScore());   // 10·3/5
+        assertEquals(8, opened(10).chanceScore());  // 10·10/12
         int prev = -1;
-        for (double m : new double[] {0, 5, 15, 30, 60, 120, 600}) {
-            int s = minutes(m).score();
-            assertTrue(s >= prev, "monotone in time");
+        for (int n = 0; n <= 40; n++) {
+            int s = opened(n).chanceScore();
+            assertTrue(s >= prev && s <= 10);
             prev = s;
         }
-        assertTrue(minutes(10_000).withSeconds(1F).score() <= 10);
-        // A very bookish life reaches the top of the scale.
-        ReadingTally avid = minutes(300);
-        for (int i = 0; i < 40; i++) avid = avid.withBook(i);
-        assertEquals(10, avid.score());
     }
 
     @Test
-    void curvesHitTheirDocumentedPoints() {
-        assertEquals(10.0 * (1 - Math.exp(-1)), minutes(ReadingTally.MINUTES_SCALE).timeScore(), 1e-6);
-        assertEquals(10.0 * (1 - Math.exp(-1)), books((int) ReadingTally.BOOKS_SCALE).bookScore(), 1e-6);
-        // Half an hour and six books: both curves at ~6.3 ⇒ 6.
-        ReadingTally t = minutes(30);
-        for (int i = 0; i < 6; i++) t = t.withBook(i);
-        assertEquals(6, t.score());
+    void booksLeftUnreadPullChanceDown() {
+        ReadingTally reader = opened(3);
+        ReadingTally ditcher = reader;
+        for (int i = 0; i < 8; i++) ditcher = ditcher.withLeft(5000 + i);
+        assertEquals(8, ditcher.ignored());
+        assertTrue(ditcher.chanceScore() < reader.chanceScore(), "skipping books lowers the chance");
+        assertEquals(2, ditcher.chanceScore()); // 10·3/13
     }
 
     @Test
-    void theSameBookCountsOnce() {
-        ReadingTally once = ReadingTally.EMPTY.withBook(42);
-        assertSame(once, once.withBook(42));
-        assertEquals(1, once.books());
-        assertTrue(once.hasRead(42));
-        assertFalse(once.hasRead(43));
+    void chanceRecoversByReadingAgain() {
+        ReadingTally t = ReadingTally.EMPTY;
+        for (int i = 0; i < 6; i++) t = t.withLeft(5000 + i);
+        int low = t.chanceScore();
+        for (int i = 0; i < 20; i++) t = t.withOpened(1000 + i);
+        assertTrue(t.chanceScore() > low + 3);
     }
 
     @Test
-    void bookCountStopsAtTheMemoryCap() {
-        ReadingTally t = books(ReadingTally.MAX_REMEMBERED_BOOKS);
-        assertEquals(ReadingTally.MAX_REMEMBERED_BOOKS, t.books());
-        assertSame(t, t.withBook(-1));
+    void aBookReadLaterIsNotCountedAsIgnored() {
+        // Put on a lectern (it left the inventory unread), then read there.
+        ReadingTally t = ReadingTally.EMPTY.withLeft(42).withOpened(42);
+        assertEquals(0, t.ignored());
+        assertEquals(1, t.opened());
     }
 
     @Test
-    void nonPositiveSecondsAreIgnored() {
-        assertSame(ReadingTally.EMPTY, ReadingTally.EMPTY.withSeconds(0F));
-        assertSame(ReadingTally.EMPTY, ReadingTally.EMPTY.withSeconds(-5F));
+    void eachBookCountsOnce() {
+        ReadingTally once = ReadingTally.EMPTY.withOpened(7);
+        assertSame(once, once.withOpened(7));
+        ReadingTally left = ReadingTally.EMPTY.withLeft(9);
+        assertSame(left, left.withLeft(9));
+        assertEquals(1, left.ignored());
     }
+
+    @Test
+    void rememberedBooksAreCapped() {
+        ReadingTally t = opened(ReadingTally.MAX_REMEMBERED_BOOKS);
+        assertSame(t, t.withOpened(-1));
+        assertEquals(ReadingTally.MAX_REMEMBERED_BOOKS, t.opened());
+    }
+
+    // ---- focus ------------------------------------------------------------
+
+    @Test
+    void sessionLengthScoreHitsItsAnchors() {
+        assertEquals(0.0, ReadingTally.sessionLengthScore(0), 1e-9);
+        assertEquals(0.0, ReadingTally.sessionLengthScore(2), 1e-9);
+        assertEquals(5.0, ReadingTally.sessionLengthScore(20), 1e-9);
+        assertEquals(10.0, ReadingTally.sessionLengthScore(60), 1e-9);
+        assertEquals(10.0, ReadingTally.sessionLengthScore(500), 1e-9);
+        assertEquals(7.5, ReadingTally.sessionLengthScore(40), 1e-9);
+    }
+
+    @Test
+    void focusRisesWithLongReads() {
+        assertEquals(3, sessions(ReadingTally.EMPTY, 1, 60).focusScore()); // 10/3
+        assertEquals(8, sessions(ReadingTally.EMPTY, 10, 60).focusScore()); // 100/12
+        assertTrue(sessions(ReadingTally.EMPTY, 40, 90).focusScore() >= 9);
+    }
+
+    @Test
+    void skimmingDragsFocusDown() {
+        ReadingTally deep = sessions(ReadingTally.EMPTY, 6, 60);
+        ReadingTally skimmed = sessions(deep, 12, 1);
+        assertTrue(skimmed.focusScore() < deep.focusScore(), "flicking books open and shut lowers focus");
+        assertEquals(3, skimmed.focusScore()); // 60/20
+        assertEquals(0, sessions(ReadingTally.EMPTY, 30, 2).focusScore());
+    }
+
+    @Test
+    void anIdleSessionCountsNoMoreThanTheCap() {
+        ReadingTally idle = ReadingTally.EMPTY.withSession(10_000);
+        assertEquals(ReadingTally.MAX_SESSION_SECONDS, idle.averageSessionSeconds(), 1e-6);
+    }
+
+    @Test
+    void theTwoScoresAreIndependent() {
+        // Opens everything, reads nothing for long: eager but shallow.
+        ReadingTally skimmer = sessions(opened(12), 12, 1);
+        assertTrue(skimmer.chanceScore() >= 8);
+        assertEquals(0, skimmer.focusScore());
+        // Rarely opens a book (ditches most), but settles in when they do.
+        ReadingTally rare = sessions(opened(2), 6, 90);
+        for (int i = 0; i < 10; i++) rare = rare.withLeft(7000 + i);
+        assertTrue(rare.chanceScore() <= 2);
+        assertTrue(rare.focusScore() >= 7);
+    }
+
+    // ---- persistence ------------------------------------------------------
 
     @Test
     void roundTripsThroughNbt() {
-        ReadingTally t = minutes(12.5).withBook(7).withBook(9);
+        ReadingTally t = sessions(opened(3).withLeft(9).withLeft(1000), 4, 30);
         ReadingTally back = ReadingTally.load(t.save());
-        assertEquals(t.seconds(), back.seconds(), 1e-6);
-        assertEquals(2, back.books());
-        assertTrue(back.hasRead(7) && back.hasRead(9));
-        assertEquals(t.score(), back.score());
+        assertEquals(t.opened(), back.opened());
+        assertEquals(t.ignored(), back.ignored());
+        assertEquals(t.sessions(), back.sessions());
+        assertEquals(t.chanceScore(), back.chanceScore());
+        assertEquals(t.focusScore(), back.focusScore());
     }
 
     @Test
     void missingTagLoadsEmpty() {
-        ReadingTally back = ReadingTally.load(new CompoundTag());
-        assertTrue(back.isEmpty());
-        assertEquals(0, back.score());
+        assertTrue(ReadingTally.load(new CompoundTag()).isEmpty());
     }
 
     @Test
     void lifeRecordCarriesReadingIntoSaveAndEmptiness() {
-        PlayerLifeRecord r = PlayerLifeRecord.EMPTY.withReading(t -> t.withSeconds(60F).withBook(3));
+        PlayerLifeRecord r = PlayerLifeRecord.EMPTY.withReading(t -> t.withOpened(3).withSession(30));
         assertFalse(r.isEmpty(), "a reading-only life must still be saved");
         CompoundTag tag = new CompoundTag();
         r.save(tag);
         PlayerLifeRecord back = PlayerLifeRecord.load(tag);
-        assertEquals(1, back.reading().books());
-        assertEquals(60F, back.reading().seconds(), 1e-6);
-        // Reading never leaks into the disposition traits.
+        assertEquals(1, back.reading().opened());
+        assertEquals(1, back.reading().sessions());
         assertEquals(PlayerLifeRecord.EMPTY.toTraits().fightFlight(), back.toTraits().fightFlight());
         assertEquals(PlayerLifeRecord.EMPTY.toTraits().friendliness(), back.toTraits().friendliness());
     }

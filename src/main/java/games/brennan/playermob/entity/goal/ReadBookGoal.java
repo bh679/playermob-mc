@@ -29,8 +29,9 @@ import java.util.List;
 /**
  * A bookish PlayerMob — its Reading trait, which an echo inherits from how much its player read —
  * now and then walks to a nearby shelf, takes a book, stands reading it for a while and puts it
- * back. How often is set by the trait ({@link ReadingPolicy}); how quickly it reaches for and
- * returns the book by its {@link ReactionChannel#ITEMS} reaction speed.
+ * back. How often is set by its Reading trait, how long it reads by its Reading-focus trait
+ * ({@link ReadingPolicy}), and how quickly it reaches for and returns the book by its
+ * {@link ReactionChannel#ITEMS} reaction speed.
  *
  * <p><b>Shelves.</b> A plain bookshelf (the common case in Dungeon Train's library carriages), a
  * chiseled bookshelf with a book in it, or a lectern holding a book. A lectern whose book hasn't
@@ -206,7 +207,7 @@ public final class ReadBookGoal extends Goal implements DescribableGoal {
         mob.swing(InteractionHand.OFF_HAND);
         mob.readingHands().begin(mob, book, takenSlot < 0);
         mob.setReadingBook(true);
-        readTicks = ReadingPolicy.readTicks(mob.readingTrait(), mob.getRandom().nextDouble());
+        readTicks = ReadingPolicy.readTicks(mob.readingFocusTrait(), mob.getRandom().nextDouble());
         enter(Phase.READ);
     }
 

@@ -5,9 +5,10 @@ package games.brennan.playermob.entity;
  * Reading trait goes looking for a book, and how long it reads. Pure maths over primitives so the
  * curve is unit-tested without a world — see {@code ReadingPolicyTest}.
  *
- * <p>The trait sets the <em>rate</em>: a Reading-10 mob reaches for a book about every
- * {@link #GAP_SECONDS_AT_MAX} seconds; the gap grows as {@code MAX / reading}, so a Reading-1 mob
- * does it ten times less often, and Reading 0 never. Bookish mobs also read for longer.</p>
+ * <p>Two traits: <b>Reading</b> sets the <em>rate</em> — a Reading-10 mob reaches for a book about
+ * every {@link #GAP_SECONDS_AT_MAX} seconds; the gap grows as {@code MAX / reading}, so a Reading-1
+ * mob does it ten times less often, and Reading 0 never. <b>Reading focus</b> sets how long each
+ * read lasts ({@link #readTicks}).</p>
  */
 public final class ReadingPolicy {
 
@@ -18,9 +19,11 @@ public final class ReadingPolicy {
     /** Gap after a search that found no shelf — try again a little later, not at the full gap. */
     public static final int NO_SHELF_RETRY_TICKS = 200;
 
-    /** Shortest read, in ticks (5 s), and the longest (15 s). */
-    public static final int MIN_READ_TICKS = 100;
-    public static final int MAX_READ_TICKS = 300;
+    /** Mean read at Reading focus 0 (2 s — a flick through) and at focus 10 (30 s). */
+    public static final int MIN_READ_TICKS = 40;
+    public static final int MAX_READ_TICKS = 600;
+    /** How far chance stretches or shortens one read around its mean (±25%). */
+    public static final double READ_SPREAD = 0.25;
 
     /** Returned by {@link #gapTicks} for a mob that never reads. */
     public static final int NEVER = -1;
@@ -45,15 +48,17 @@ public final class ReadingPolicy {
     }
 
     /**
-     * How long one read lasts, in ticks: half set by the trait (a bookish mob lingers), half by
-     * chance, within {@link #MIN_READ_TICKS}–{@link #MAX_READ_TICKS}.
+     * How long one read lasts, in ticks: set by the Reading-focus trait — a mean from
+     * {@link #MIN_READ_TICKS} at focus 0 (a skimmer flicks through and shelves it) to
+     * {@link #MAX_READ_TICKS} at 10 — stretched or shortened by up to {@link #READ_SPREAD} by chance.
      *
-     * @param reading the mob's Reading trait (0–10)
-     * @param roll    a uniform random in {@code [0, 1)}
+     * @param focus the mob's Reading-focus trait (0–10)
+     * @param roll  a uniform random in {@code [0, 1)}
      */
-    public static int readTicks(int reading, double roll) {
-        double trait = Math.max(0, Math.min(DispositionTraits.MAX, reading)) / (double) DispositionTraits.MAX;
+    public static int readTicks(int focus, double roll) {
+        double trait = Math.max(0, Math.min(DispositionTraits.MAX, focus)) / (double) DispositionTraits.MAX;
         double chance = Math.max(0.0, Math.min(1.0, roll));
-        return MIN_READ_TICKS + (int) Math.round((MAX_READ_TICKS - MIN_READ_TICKS) * (0.5 * trait + 0.5 * chance));
+        double mean = MIN_READ_TICKS + (MAX_READ_TICKS - MIN_READ_TICKS) * trait;
+        return (int) Math.round(mean * (1.0 - READ_SPREAD + 2.0 * READ_SPREAD * chance));
     }
 }
