@@ -475,6 +475,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      */
     private boolean naturalOrigin = true;
 
+    /** Transient: {@code FeedAnimalsGoal} is running (see {@link #isTendingAnimals()}). */
+    private boolean tendingAnimals = false;
+
     /**
      * True once {@link #finalizeSpawn} has classified this spawn — transient, never persisted. A spawn
      * egg's {@code entity_data} is merged <em>after</em> {@code finalizeSpawn} (see the note there), so
@@ -2259,6 +2262,16 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     /** The Taming hobby, {@code [0, 10]} — see {@link DispositionTraits#taming()}; 0 never feeds animals. */
     public int taming() {
         return traits.taming();
+    }
+
+    /** True while {@code FeedAnimalsGoal} is fetching food for, or feeding, an animal. */
+    public boolean isTendingAnimals() {
+        return tendingAnimals;
+    }
+
+    /** Set by {@code FeedAnimalsGoal} on start/stop; greeting leaves animals alone meanwhile. Transient. */
+    public void setTendingAnimals(boolean tending) {
+        this.tendingAnimals = tending;
     }
 
     /** This mob's reaction speed for one kind of action — see {@link DispositionTraits#reactionSpeed(ReactionChannel)}. */

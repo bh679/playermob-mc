@@ -9,6 +9,7 @@ import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.entity.Reaction;
 import games.brennan.playermob.entity.ReactionChannel;
 import games.brennan.playermob.entity.TamingPolicy;
+import games.brennan.playermob.mixin.AnimalLoveCauseAccessor;
 import games.brennan.playermob.mixin.ContainerLockAccessor;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleTypes;
@@ -78,6 +79,8 @@ public final class FeedAnimalsGoal extends Goal implements DescribableGoal {
     private static final double REACH_CONTAINER_SQR = 4.0;
     private static final double REACH_ANIMAL_SQR = 6.25;   // 2.5 blocks
     private static final double FEAR_RANGE = 16.0;
+    /** Re-scan for a feared entity every 0.5s while feeding — the scan isn't free. */
+    private static final int FEAR_CHECK_INTERVAL = 10;
     /** How long a container searched for food (and found wanting) is skipped: 60s. */
     private static final int SEARCHED_TTL_TICKS = 1200;
 
@@ -100,6 +103,10 @@ public final class FeedAnimalsGoal extends Goal implements DescribableGoal {
      * still hold wheat, and a food search must not hold the raider off a chest either. Transient.
      */
     private final Map<Long, Integer> searched = new HashMap<>();
+    private int fearCheckTicks = 0;
+    /** Ticks spent walking to the animal across re-approaches, so a wandering animal can't loop us. */
+    private int approachTicks = 0;
+    private boolean feared = false;
 
     public FeedAnimalsGoal(PlayerMobEntity mob, double moveSpeed) {
         this.mob = mob;
@@ -133,13 +140,14 @@ public final class FeedAnimalsGoal extends Goal implements DescribableGoal {
         }
         scanCooldown = mob.reactTicks(ReactionChannel.ITEMS, SCAN_COOLDOWN);
         int taming = mob.taming();
-        if (taming <= 0 || !calm()) return false;
+        if (taming <= 0) return false;
+        fearCheckTicks = 0; // scans are seconds apart: always look afresh before starting
+        if (!calm()) return false;
         boolean finishingPair = preferType != null && mob.tickCount < preferUntil;
         if (!finishingPair && !TamingPolicy.rollsToAct(taming, mob.getRandom().nextDouble())) {
             return false;
         }
         Animal found = findAnimal(finishingPair ? preferType : null);
-        if (found == null) return false;
         animal = found;
         containerTries = 0;
         containerPos = null;
@@ -157,7 +165,9 @@ public final class FeedAnimalsGoal extends Goal implements DescribableGoal {
 
     @Override
     public void start() {
+        mob.setTendingAnimals(true);
         phaseTicks = 0;
+        approachTicks = 0;
         if (containerPos != null) {
             phase = Phase.TO_CONTAINER;
             moveToContainer();
@@ -169,6 +179,7 @@ public final class FeedAnimalsGoal extends Goal implements DescribableGoal {
 
     @Override
     public void stop() {
+        mob.setTendingAnimals(false);
         mob.closeOpenedContainer();
         mob.getNavigation().stop();
         containerPos = null;
@@ -195,9 +206,14 @@ public final class FeedAnimalsGoal extends Goal implements DescribableGoal {
         }
     }
 
-    /** Never while fighting, or with something it fears nearby. */
+    /** Never while fighting, or with something it fears nearby (that scan throttled, as in raiding). */
     private boolean calm() {
-        return mob.getTarget() == null && mob.nearestWhereReaction(Reaction.FLEE, FEAR_RANGE) == null;
+        if (mob.getTarget() != null) return false;
+        if (--fearCheckTicks <= 0) {
+            fearCheckTicks = mob.reactTicks(ReactionChannel.ITEMS, FEAR_CHECK_INTERVAL);
+            feared = mob.nearestWhereReaction(Reaction.FLEE, FEAR_RANGE) != null;
+        }
+        return !feared;
     }
 
     // ---- fetch ----------------------------------------------------------------
@@ -275,8 +291,9 @@ public final class FeedAnimalsGoal extends Goal implements DescribableGoal {
             mob.getNavigation().stop();
             mob.getLookControl().setLookAt(animal);
             phase = Phase.FEEDING;
+            approachTicks += phaseTicks;
             phaseTicks = 0;
-        } else if (phaseTicks > PATH_TIMEOUT_TICKS) {
+        } else if (approachTicks + phaseTicks > PATH_TIMEOUT_TICKS) {
             stop();
         } else if (phaseTicks % REPATH_INTERVAL == 0) {
             mob.getNavigation().moveTo(animal, moveSpeed);
@@ -285,20 +302,22 @@ public final class FeedAnimalsGoal extends Goal implements DescribableGoal {
 
     private void tickFeeding() {
         mob.getLookControl().setLookAt(animal);
+        if (mob.distanceToSqr(animal) >= REACH_ANIMAL_SQR * 2) {
+            // It wandered off mid-windup — follow it rather than give up (path timeout still applies).
+            phase = Phase.TO_ANIMAL;
+            phaseTicks = 0;
+            mob.getNavigation().moveTo(animal, moveSpeed);
+            return;
+        }
         if (phaseTicks == 1) {
             mob.swing(InteractionHand.MAIN_HAND);
         }
         if (phaseTicks < mob.reactTicks(ReactionChannel.ITEMS, FEED_WINDUP_TICKS)) return;
-        if (feeds(animal)) {
+        // Re-check at the moment of feeding: it may have grown, or been fed by someone else.
+        if (mayFeed(animal) && findFood(animal) != null) {
             feed(animal);
         }
         stop();
-    }
-
-    /** Re-check at the moment of feeding: the animal may have grown, been fed, or wandered off. */
-    private boolean feeds(Animal target) {
-        return mob.distanceToSqr(target) < REACH_ANIMAL_SQR * 2 && mayFeed(target)
-            && findFood(target) != null;
     }
 
     private void feed(Animal target) {
@@ -313,8 +332,11 @@ public final class FeedAnimalsGoal extends Goal implements DescribableGoal {
                     target.getZ(), 6, 0.3, 0.3, 0.3, 0.0);
             }
         } else {
-            // A null cause: the mob is not a player, so the eventual baby credits nobody.
+            // The mob is not a player: put it in love with no cause, and clear any cause left over
+            // from a player who fed it once before (setInLove(null) keeps it), so the eventual baby
+            // credits nobody — no stat, advancement or Taming breed for a bystander.
             target.setInLove(null);
+            ((AnimalLoveCauseAccessor) target).playermob$setLoveCause(null);
             preferType = target.getType();
             preferUntil = mob.tickCount + PAIR_WINDOW;
         }

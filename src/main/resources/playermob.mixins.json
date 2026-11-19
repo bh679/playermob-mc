@@ -13,6 +13,7 @@
     "AnimalFeedMixin",
     "AbstractHorseFeedMixin",
     "AnimalBreedMixin",
+    "AnimalLoveCauseAccessor",
     "ContainerLockAccessor",
     "OwnableEntityOwnerMixin",
     "EntityRemovalPetLedgerMixin",

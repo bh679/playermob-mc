@@ -93,6 +93,8 @@ public final class FriendlyGreetGoal extends Goal implements DescribableGoal {
         if (mob.getTarget() != null) return false;
         LivingEntity candidate = mob.nearestWhereReaction(Reaction.GREET, range);
         if (candidate == null) return false;
+        // Feeding an animal is attention enough: don't break off the Taming hobby to bow to one.
+        if (mob.isTendingAnimals() && candidate instanceof net.minecraft.world.entity.animal.Animal) return false;
         this.friend = candidate;
         return true;
     }
