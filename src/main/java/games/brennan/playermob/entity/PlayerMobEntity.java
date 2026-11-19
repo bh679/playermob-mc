@@ -1260,8 +1260,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
 
     /**
      * Server: end any read in progress on the spot — the set-aside offhand item comes back, a prop
-     * book vanishes and a real one goes to the backpack. Called on death, before a save, and when a
-     * player opens the mob's inventory, so a held book never leaks or gets lost.
+     * book vanishes and a real one goes to the backpack. Called on death and when a player opens
+     * the mob's inventory, so a held book never leaks or gets lost. (A save doesn't end the read —
+     * see {@link ReadingHands#presentForSave}.)
      */
     public void settleReading() {
         if (level().isClientSide()) return;
@@ -4339,12 +4340,17 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     //? if >=26 {
     /*@Override
     public void addAdditionalSaveData(net.minecraft.world.level.storage.ValueOutput out) {
-        settleReading(); // the hand must hold its own item when equipment is written
-        super.addAdditionalSaveData(out);
-        CompoundTag custom = new CompoundTag();
-        writeCustomTag(custom);
-        out.store(TAG_CUSTOM, CompoundTag.CODEC, custom);
-        writeInventoryToTag(out);
+        // Save the mob as if it weren't mid-read, without interrupting the read (see ReadingHands).
+        Runnable resumeReading = readingHands.presentForSave(this);
+        try {
+            super.addAdditionalSaveData(out);
+            CompoundTag custom = new CompoundTag();
+            writeCustomTag(custom);
+            out.store(TAG_CUSTOM, CompoundTag.CODEC, custom);
+            writeInventoryToTag(out);
+        } finally {
+            resumeReading.run();
+        }
     }
 
     @Override
@@ -4356,16 +4362,21 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     *///?} else {
     @Override
     public void addAdditionalSaveData(CompoundTag tag) {
-        settleReading(); // the hand must hold its own item when equipment is written
-        super.addAdditionalSaveData(tag);
-        writeCustomTag(tag);
-        // Inventory persistence — InventoryCarrier helper handles slot encoding.
-        // registryAccess() is a HolderLookup.Provider on Entity in 1.21.1+; the
-        // 1.20.1 overload takes no provider.
-        //? if >=1.21.1 {
-        writeInventoryToTag(tag, this.registryAccess());
-        //?} else {
-        /*writeInventoryToTag(tag);*///?}
+        // Save the mob as if it weren't mid-read, without interrupting the read (see ReadingHands).
+        Runnable resumeReading = readingHands.presentForSave(this);
+        try {
+            super.addAdditionalSaveData(tag);
+            writeCustomTag(tag);
+            // Inventory persistence — InventoryCarrier helper handles slot encoding.
+            // registryAccess() is a HolderLookup.Provider on Entity in 1.21.1+; the
+            // 1.20.1 overload takes no provider.
+            //? if >=1.21.1 {
+            writeInventoryToTag(tag, this.registryAccess());
+            //?} else {
+            /*writeInventoryToTag(tag);*///?}
+        } finally {
+            resumeReading.run();
+        }
     }
 
     @Override

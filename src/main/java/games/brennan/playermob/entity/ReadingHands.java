@@ -6,8 +6,8 @@ import net.minecraft.world.item.ItemStack;
 /**
  * The book a PlayerMob holds while it reads (see {@code ReadBookGoal}), and the offhand item it
  * set aside to hold it — owned by the entity, not the goal, so every way a read can end (finish,
- * interruption, death, a save, a player opening the mob's inventory) restores the hand the same
- * way.
+ * interruption, death, a player opening the mob's inventory) restores the hand the same way, and a
+ * save mid-read records the mob as it would be without the book ({@link #presentForSave}).
  *
  * <p>Two kinds of book:</p>
  * <ul>
@@ -87,6 +87,43 @@ public final class ReadingHands {
         if (!real.isEmpty()) {
             stow(mob, real);
         }
+    }
+
+    /**
+     * Make the mob look, to a save, as if it weren't reading — without ending the read. Anything
+     * that serialises the entity (an autosave, a chunk unloading, {@code /data get}, a mod
+     * snapshotting it) must not interrupt a book or move it, so instead of {@link #settle} the save
+     * sees the set-aside offhand item back in hand and a real book in a free backpack slot — where
+     * it would belong if the mob were unloaded mid-read. Run the returned action right after the
+     * save to put everything back exactly as it was.
+     */
+    public Runnable presentForSave(PlayerMobEntity mob) {
+        if (!stillHeld(mob)) {
+            return () -> { };
+        }
+        int slot = -1;
+        if (!prop) {
+            for (int i = 0; i < mob.getInventory().getContainerSize(); i++) {
+                if (mob.getInventory().getItem(i).isEmpty()) {
+                    slot = i;
+                    break;
+                }
+            }
+            if (slot < 0) {
+                // No room to record the real book anywhere else: save it in hand, as it is.
+                return () -> { };
+            }
+            mob.getInventory().setItem(slot, held);
+        }
+        ItemStack book = held;
+        int bookSlot = slot;
+        mob.setItemSlot(EquipmentSlot.OFFHAND, stash);
+        return () -> {
+            if (bookSlot >= 0 && mob.getInventory().getItem(bookSlot) == book) {
+                mob.getInventory().setItem(bookSlot, ItemStack.EMPTY);
+            }
+            mob.setItemSlot(EquipmentSlot.OFFHAND, book);
+        };
     }
 
     private static void stow(PlayerMobEntity mob, ItemStack stack) {
