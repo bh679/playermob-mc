@@ -460,6 +460,8 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private boolean readingBook;
     /** Server: the book in hand while reading, and the offhand item set aside for it. */
     private final ReadingHands readingHands = new ReadingHands();
+    /** Server: books this mob finished reading, burning where it dropped them. */
+    private final BookBurner bookBurner = new BookBurner();
     /** Server: players with this mob's inventory menu open — reading waits until it's closed. */
     private int menuViewers;
 
@@ -1270,6 +1272,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         return readingHands;
     }
 
+    /**
+     * Server: drop a book this mob has finished reading, alight — it burns away like a player's
+     * book does in Dungeon Train (see {@link BookBurner}).
+     */
+    public void burnFinishedBook(ItemStack book) {
+        bookBurner.dropBurning(this, book);
+    }
+
     /** Server: flag the reading pose on/off — called by the reading goal. */
     public void setReadingBook(boolean reading) {
         this.readingBook = reading;
@@ -1461,6 +1471,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
 
         if (loadoutPulseTicks > 0) {
             loadoutPulseTicks--;
+        }
+        if (!level().isClientSide()) {
+            bookBurner.tick();
         }
         refreshActivity();
 

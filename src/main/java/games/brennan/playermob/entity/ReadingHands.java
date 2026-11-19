@@ -79,6 +79,23 @@ public final class ReadingHands {
     }
 
     /**
+     * Finish the read: restore the set-aside offhand item and hand back the book that was being
+     * read — prop or real — for the caller to drop and burn. {@link ItemStack#EMPTY} when the book
+     * is no longer in hand (something took it) or nothing was active.
+     */
+    public ItemStack finish(PlayerMobEntity mob) {
+        if (!stillHeld(mob)) {
+            end(mob);
+            return ItemStack.EMPTY;
+        }
+        ItemStack book = held;
+        boolean wasProp = prop;
+        prop = false; // so end() hands the book back instead of deleting it
+        ItemStack out = end(mob);
+        return wasProp ? book : out;
+    }
+
+    /**
      * End the read wherever the mob is — death, a save, an opened inventory: a real book goes into
      * the backpack (the goal only takes one when there is room), or, failing that, to the ground.
      */

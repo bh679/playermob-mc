@@ -2,6 +2,7 @@ package games.brennan.playermob.entity.goal;
 
 import games.brennan.playermob.compat.GameRuleCompat;
 import games.brennan.playermob.compat.TrainConfinement;
+import games.brennan.playermob.entity.BookBurner;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.entity.Reaction;
 import games.brennan.playermob.entity.ReactionChannel;
@@ -28,8 +29,8 @@ import java.util.List;
 
 /**
  * A bookish PlayerMob — its Reading trait, which an echo inherits from how much its player read —
- * now and then walks to a nearby shelf, takes a book, stands reading it for a while and puts it
- * back. How often is set by its Reading trait, how long it reads by its Reading-focus trait
+ * now and then walks to a nearby shelf, takes a book, stands reading it for a while, then drops it
+ * and it burns. How often is set by its Reading trait, how long it reads by its Reading-focus trait
  * ({@link ReadingPolicy}), and how quickly it reaches for and returns the book by its
  * {@link ReactionChannel#ITEMS} reaction speed.
  *
@@ -38,11 +39,14 @@ import java.util.List;
  * been chosen yet (Dungeon Train's narrative lectern before a player first opens it) is skipped,
  * so a mob never advances a player's story.</p>
  *
- * <p><b>What it holds.</b> See {@link ReadingHands}: a plain shelf or a lectern lends a prop that
- * only ever exists in the mob's hand; a chiseled shelf gives up its real book, which goes back in
- * a free slot when the read finishes, or is dropped if the read is interrupted. A real book is only
- * taken when the {@code mobGriefing} rule allows and the backpack has room to stow it should the
- * mob die or be saved mid-read; otherwise the mob reads a copy.</p>
+ * <p><b>What it holds.</b> See {@link ReadingHands}: a plain shelf or a lectern lends a copy (the
+ * lectern keeps its own); a chiseled shelf gives up its real book. A real book is only taken when the
+ * {@code mobGriefing} rule allows and the backpack has room to stow it should the mob die or be
+ * saved mid-read; otherwise the mob reads a copy.</p>
+ *
+ * <p><b>When it's done</b> it drops the book and the book burns away ({@link BookBurner}) — the way a
+ * player's book does in Dungeon Train — so a chiseled shelf it read from is one book lighter. A read
+ * cut short is different: a copy simply vanishes and a real book falls to the floor intact.</p>
  *
  * <p><b>Never mid-fight.</b> It won't start with a target, while hurt, fleeing, digging, crossing a
  * gap, at a door, or with anyone nearby it would attack or flee; any of those ends a read. Priority
@@ -81,7 +85,7 @@ public final class ReadBookGoal extends Goal implements DescribableGoal {
     private Phase phase = Phase.DONE;
     private int phaseTicks;
     private int readTicks;
-    /** The chiseled slot the real book came out of, or -1. */
+    /** The chiseled slot the real book came out of, or -1 (the book in hand is then a copy). */
     private int takenSlot = -1;
 
     public ReadBookGoal(PlayerMobEntity mob, double speed) {
@@ -101,7 +105,7 @@ public final class ReadBookGoal extends Goal implements DescribableGoal {
             case WALK -> "finding a book";
             case TAKE -> "taking a book";
             case READ -> "reading";
-            case RETURN -> "putting it back";
+            case RETURN -> "burning it";
             case DONE -> null;
         };
     }
@@ -221,13 +225,10 @@ public final class ReadBookGoal extends Goal implements DescribableGoal {
         }
     }
 
+    /** Done with the book: drop it, and it burns away — the way a player's book does. */
     private void tickReturn() {
-        lookAtShelf();
         if (phaseTicks < mob.reactTicks(ReactionChannel.ITEMS, HANDLE_PAUSE_TICKS)) return;
-        ItemStack real = mob.readingHands().end(mob);
-        if (!real.isEmpty() && !putBack(real)) {
-            mob.dropAtLocation(real); // shelf gone or full — leave it on the floor
-        }
+        mob.burnFinishedBook(mob.readingHands().finish(mob));
         mob.swing(InteractionHand.OFF_HAND);
         phase = Phase.DONE;
     }
@@ -270,24 +271,6 @@ public final class ReadBookGoal extends Goal implements DescribableGoal {
                 takenSlot = slot;
                 return chiseled.removeItem(slot, 1);
         }
-    }
-
-    /** Put a real book back: its own slot if still free, else any free one. */
-    private boolean putBack(ItemStack book) {
-        if (!(mob.level().getBlockEntity(shelf) instanceof ChiseledBookShelfBlockEntity chiseled)) {
-            return false;
-        }
-        if (takenSlot >= 0 && chiseled.getItem(takenSlot).isEmpty()) {
-            chiseled.setItem(takenSlot, book);
-            return true;
-        }
-        for (int slot = 0; slot < CHISELED_SLOTS; slot++) {
-            if (chiseled.getItem(slot).isEmpty()) {
-                chiseled.setItem(slot, book);
-                return true;
-            }
-        }
-        return false;
     }
 
     /** What kind of shelf {@code pos} is, or {@code null} if it has no book to offer. */
