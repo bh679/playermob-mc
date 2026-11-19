@@ -38,7 +38,7 @@ public final class VillagerTrading {
     public record Result(Kind kind, ItemStack item) {}
 
     /** The two stacks a deal pays with — {@code payB} is empty when the offer has no second cost. */
-    private record Payment(ItemStack payA, ItemStack payB) {}
+    record Payment(ItemStack payA, ItemStack payB) {}
 
     /** True when {@code merchant} can be traded with right now: alive, grown, awake, not busy with a player. */
     public static boolean canTradeWith(AbstractVillager merchant) {
@@ -63,53 +63,62 @@ public final class VillagerTrading {
         if (deal == null) return null;
 
         MerchantOffer offer = deal.offer();
-        SimpleContainer pack = mob.getInventory();
-        int costA = offer.getCostA().getCount();
-        int costB = offer.getCostB().isEmpty() ? 0 : offer.getCostB().getCount();
-        remove(pack, deal.payment().payA(), costA);
-        if (costB > 0) remove(pack, deal.payment().payB(), costB);
-
-        offer.increaseUses();
+        ItemStack bought = settle(mob.getInventory(), offer, deal.payment());
         ((AbstractVillagerTradeInvoker) merchant).playermob$rewardTradeXp(offer);
         merchant.playSound(merchant.getNotifyTradeSound(), 1.0F, 1.0F);
         merchant.getLookControl().setLookAt(mob);
 
-        ItemStack bought = offer.assemble();
         if (deal.kind() == Kind.SELL) {
-            ItemStack leftover = EquipmentEvaluator.addToContainer(pack, bought);
+            ItemStack leftover = EquipmentEvaluator.addToContainer(mob.getInventory(), bought);
             if (!leftover.isEmpty()) mob.dropAtLocation(leftover);
         }
         return new Result(deal.kind(), bought);
     }
 
+    /**
+     * The world-free core of one trade: take exactly the offer's current price out of {@code pack}
+     * (across stacks), use up one of the offer's stock, and return a copy of its result. The caller
+     * gives the result a home and rewards the villager.
+     */
+    static ItemStack settle(SimpleContainer pack, MerchantOffer offer, Payment payment) {
+        remove(pack, payment.payA(), offer.getCostA().getCount());
+        if (!offer.getCostB().isEmpty()) {
+            remove(pack, payment.payB(), offer.getCostB().getCount());
+        }
+        offer.increaseUses();
+        return offer.assemble();
+    }
+
     private record Deal(MerchantOffer offer, Kind kind, Payment payment) {}
 
     private static Deal findOffer(PlayerMobEntity mob, AbstractVillager merchant, boolean buyGear) {
+        SimpleContainer pack = mob.getInventory();
+        boolean ownsRanged = mob.ownsRangedWeapon();
         if (buyGear) {
             for (MerchantOffer offer : merchant.getOffers()) {
                 if (offer.isOutOfStock() || !mob.wantsBoughtGear(offer.getResult())) continue;
-                Payment pay = payment(mob, offer, true);
+                Payment pay = payment(pack, offer, true, ownsRanged);
                 if (pay != null) return new Deal(offer, Kind.BUY, pay);
             }
         }
         for (MerchantOffer offer : merchant.getOffers()) {
             if (offer.isOutOfStock() || ShoppingPolicy.emeraldValue(offer.getResult()) <= 0) continue;
-            Payment pay = payment(mob, offer, false);
+            Payment pay = payment(pack, offer, false, ownsRanged);
             if (pay != null) return new Deal(offer, Kind.SELL, pay);
         }
         return null;
     }
 
     /**
-     * Stacks from the backpack that pay {@code offer}, merged per kind so a price split across
-     * several stacks still counts, or {@code null} when the mob can't pay. Selling pays only with
-     * junk; buying may also spend money. Matching is the offer's own {@code satisfiedBy}.
+     * Stacks from {@code pack} that pay {@code offer}, merged per kind so a price split across
+     * several stacks still counts, or {@code null} when it can't be paid. Selling pays only with
+     * junk; buying ({@code mayUseMoney}) may also spend emeralds. Matching is the offer's own
+     * {@code satisfiedBy}, so the price is what a player would pay right now.
      */
-    private static Payment payment(PlayerMobEntity mob, MerchantOffer offer, boolean mayUseMoney) {
-        SimpleContainer pack = mob.getInventory();
+    static Payment payment(SimpleContainer pack, MerchantOffer offer, boolean mayUseMoney, boolean ownsRanged) {
         Predicate<ItemStack> usable = stack -> ShoppingPolicy.emeraldValue(stack) > 0
             ? mayUseMoney
-            : isJunk(mob, stack, offer);
+            : isJunk(pack, stack, offer, ownsRanged);
         boolean needsB = !offer.getCostB().isEmpty();
         for (int i = 0; i < pack.getContainerSize(); i++) {
             ItemStack a = merged(pack, pack.getItem(i), usable);
@@ -128,14 +137,17 @@ public final class VillagerTrading {
         return null;
     }
 
-    /** True when {@code stack} is junk the mob would part with to pay {@code offer}. */
-    private static boolean isJunk(PlayerMobEntity mob, ItemStack stack, MerchantOffer offer) {
+    /**
+     * True when {@code stack} is junk the mob would part with to pay {@code offer}: not gear, not
+     * arrows while it owns a bow or crossbow ({@code ownsRanged}), and never into its food or
+     * building-block reserves.
+     */
+    static boolean isJunk(SimpleContainer pack, ItemStack stack, MerchantOffer offer, boolean ownsRanged) {
         boolean inUse = ItemPickupPolicy.weaponCategory(stack) != null
             || ItemPickupPolicy.isArmorOrShield(stack)
-            || (ItemPickupPolicy.isAmmo(stack) && mob.ownsRangedWeapon());
+            || (ItemPickupPolicy.isAmmo(stack) && ownsRanged);
         int sell = ItemDataCompat.isSameItemSameData(stack, offer.getCostA())
             ? offer.getCostA().getCount() : offer.getCostB().getCount();
-        SimpleContainer pack = mob.getInventory();
         if (ItemDataCompat.isFood(stack)) {
             return ShoppingPolicy.isJunk(stack, inUse, count(pack, ItemDataCompat::isFood),
                 ShoppingPolicy.FOOD_KEEP_COUNT, sell);
@@ -146,7 +158,6 @@ public final class VillagerTrading {
         }
         return ShoppingPolicy.isJunk(stack, inUse, stack.getCount(), 0, 0);
     }
-
     /** {@code template} with the count of every usable backpack stack of the same item and data, or empty. */
     private static ItemStack merged(SimpleContainer pack, ItemStack template, Predicate<ItemStack> usable) {
         if (template.isEmpty() || !usable.test(template)) return ItemStack.EMPTY;

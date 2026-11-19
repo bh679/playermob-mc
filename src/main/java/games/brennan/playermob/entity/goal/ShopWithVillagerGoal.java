@@ -1,6 +1,7 @@
 package games.brennan.playermob.entity.goal;
 
 import games.brennan.playermob.entity.PlayerMobEntity;
+import games.brennan.playermob.entity.Reaction;
 import games.brennan.playermob.entity.ReactionChannel;
 import games.brennan.playermob.entity.ShoppingPolicy;
 import games.brennan.playermob.entity.VillagerTrading;
@@ -21,9 +22,9 @@ import java.util.List;
  * at {@link ShoppingPolicy#BUY_MIN_SCORE}+, buy armour, weapons and tools that beat what the mob
  * has, then equip them.
  *
- * <p>How often is the mob's {@code Shopping} score: a trip starts with chance {@code score / 10}
- * once its cooldown runs out, and the cooldown shrinks as the score rises
- * ({@link ShoppingPolicy#cooldownTicks}). Score 0 never shops. The pace between trades follows the
+ * <p>How often is the mob's {@code Shopping} score: the wait between trips shrinks from about
+ * five minutes at score 1 to about one at score 10 ({@link ShoppingPolicy#cooldownTicks}), and a
+ * trip only happens with a trader in reach. Score 0 never shops. The pace between trades follows the
  * mob's {@link ReactionChannel#ITEMS} reaction speed.</p>
  *
  * <p>Never while hostile or fighting: it won't start with a target, while aggressive or just hurt,
@@ -81,10 +82,6 @@ public final class ShopWithVillagerGoal extends Goal implements DescribableGoal 
             nextTripAt = now + (long) (ShoppingPolicy.cooldownTicks(score, 0.5) * mob.getRandom().nextDouble());
         }
         if (now < nextTripAt) return false;
-        if (mob.getRandom().nextDouble() >= ShoppingPolicy.tripChance(score)) {
-            nextTripAt = now + ShoppingPolicy.cooldownTicks(score, mob.getRandom().nextDouble());
-            return false;
-        }
         merchant = findMerchant(ShoppingPolicy.buysGear(score));
         if (merchant == null) {
             nextTripAt = now + ShoppingPolicy.RETRY_TICKS;
@@ -95,7 +92,7 @@ public final class ShopWithVillagerGoal extends Goal implements DescribableGoal 
 
     @Override
     public boolean canContinueToUse() {
-        return merchant != null && calm() && VillagerTrading.canTradeWith(merchant)
+        return merchant != null && calm() && VillagerTrading.canTradeWith(merchant) && peaceful(merchant)
             && trades < ShoppingPolicy.MAX_TRADES_PER_TRIP
             && !(phase == Phase.WALKING && phaseTicks > PATH_TIMEOUT_TICKS);
     }
@@ -167,11 +164,21 @@ public final class ShopWithVillagerGoal extends Goal implements DescribableGoal 
         return mob.getTarget() == null && !mob.isAggressive() && mob.hurtTime == 0;
     }
 
+    /**
+     * True when this mob's disposition toward {@code merchant} is neither to fight nor to flee it
+     * ({@link games.brennan.playermob.entity.DispositionResolver}). Villagers resolve to greet or
+     * ignore, but a merchant that has turned on the mob is reclassified hostile — never trade with that.
+     */
+    private boolean peaceful(AbstractVillager merchant) {
+        Reaction reaction = mob.reactionToward(merchant);
+        return reaction != Reaction.FIGHT && reaction != Reaction.FLEE;
+    }
+
     /** Nearest merchant within {@link #SCAN_RADIUS} that has a deal for this mob right now. */
     private AbstractVillager findMerchant(boolean buyGear) {
         AABB box = mob.getBoundingBox().inflate(SCAN_RADIUS);
         List<AbstractVillager> nearby = mob.level().getEntitiesOfClass(AbstractVillager.class, box,
-            v -> VillagerTrading.hasDeal(mob, v, buyGear));
+            v -> peaceful(v) && VillagerTrading.hasDeal(mob, v, buyGear));
         AbstractVillager best = null;
         double bestDist = Double.MAX_VALUE;
         for (AbstractVillager v : nearby) {

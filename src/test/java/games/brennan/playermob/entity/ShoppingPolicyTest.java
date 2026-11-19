@@ -13,7 +13,6 @@ class ShoppingPolicyTest {
     @Test
     void scoreZeroNeverTrades() {
         assertFalse(ShoppingPolicy.trades(0));
-        assertEquals(0.0, ShoppingPolicy.tripChance(0));
         assertTrue(ShoppingPolicy.trades(1));
     }
 
@@ -22,13 +21,6 @@ class ShoppingPolicyTest {
         assertFalse(ShoppingPolicy.buysGear(4));
         assertTrue(ShoppingPolicy.buysGear(5));
         assertTrue(ShoppingPolicy.buysGear(10));
-    }
-
-    @Test
-    void tripChanceIsScoreOverTen() {
-        assertEquals(0.3, ShoppingPolicy.tripChance(3), 1e-9);
-        assertEquals(1.0, ShoppingPolicy.tripChance(10), 1e-9);
-        assertEquals(1.0, ShoppingPolicy.tripChance(99), 1e-9);
     }
 
     @Test

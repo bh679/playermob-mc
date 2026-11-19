@@ -53,11 +53,6 @@ public final class ShoppingPolicy {
         return score >= BUY_MIN_SCORE;
     }
 
-    /** Chance that a trip starts when its cooldown has run out: {@code score / 10}. */
-    public static double tripChance(int score) {
-        return Math.max(0, Math.min(DispositionTraits.MAX, score)) / (double) DispositionTraits.MAX;
-    }
-
     /**
      * Ticks to wait before the next trip: {@value #COOLDOWN_AT_MIN} at score 1 falling to
      * {@value #COOLDOWN_AT_MAX} at 10, scaled by {@code roll} in {@code [0, 1)} to ±25%.
