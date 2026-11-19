@@ -24,7 +24,8 @@
     "ServerPlayerTickReflexMixin",
     "WorldGenRegionMixin",
     "AbstractVillagerTradeInvoker",
-    "VillagerTradeShoppingMixin"
+    "VillagerTradeShoppingMixin",
+    "ServerPlayerTickShoppingMixin"
   ],
   "client": [],
   "server": [],

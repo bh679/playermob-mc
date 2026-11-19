@@ -1,7 +1,6 @@
 package games.brennan.playermob.mixin;
 
-import games.brennan.playermob.entity.ShoppingPolicy;
-import games.brennan.playermob.player.PlayerLifeStore;
+import games.brennan.playermob.player.ShoppingHooks;
 import net.minecraft.server.level.ServerPlayer;
 //? if >=26 {
 /*import net.minecraft.world.entity.npc.villager.AbstractVillager;
@@ -15,8 +14,8 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * Credits the trading player's current life with one villager trade — the evidence behind the
- * echo's {@code Shopping} score (see {@code ShoppingTally}).
+ * Credits the trading player's current life with one trade with this villager — the hits in the
+ * echo's {@code Shopping} rate (see {@code ShoppingTally}, {@link ShoppingHooks}).
  *
  * <p>{@code notifyTrade} runs once per trade a player takes from the merchant screen (shift-click
  * included — once per result), on villagers and wandering traders alike, on every loader. It is
@@ -30,17 +29,9 @@ public abstract class VillagerTradeShoppingMixin {
 
     @Inject(method = "notifyTrade", at = @At("HEAD"))
     private void playermob$creditShopping(MerchantOffer offer, CallbackInfo ci) {
-        try {
-            if (((AbstractVillager) (Object) this).getTradingPlayer() instanceof ServerPlayer player
-                    && !player.isCreative() && !player.isSpectator()) {
-                int spent = ShoppingPolicy.emeraldValue(offer.getCostA())
-                    + ShoppingPolicy.emeraldValue(offer.getCostB());
-                int earned = ShoppingPolicy.emeraldValue(offer.getResult());
-                PlayerLifeStore.recordTrade(player, spent, earned);
-            }
-        } catch (RuntimeException e) {
-            // Never break a trade over a stat.
-            com.mojang.logging.LogUtils.getLogger().warn("[playermob] Failed to read a trade for shopping", e);
+        AbstractVillager self = (AbstractVillager) (Object) this;
+        if (self.getTradingPlayer() instanceof ServerPlayer player) {
+            ShoppingHooks.onTrade(player, self, offer);
         }
     }
 }

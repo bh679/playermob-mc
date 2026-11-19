@@ -167,26 +167,23 @@ public final class PlayerLifeStore extends SavedData {
         setDirty();
     }
 
-    /**
-     * Credit {@code player}'s current life with one villager trade that paid {@code spent} emeralds
-     * and returned {@code earned}. Called from {@code VillagerTradeShoppingMixin}; never throws
-     * into the trade flow.
-     */
-    public static void recordTrade(ServerPlayer player, int spent, int earned) {
-        try {
-            //? if >=26 {
-            /*get(player.level()).creditTrade(player.getUUID(), spent, earned);
-            *///?} else {
-            get(player.serverLevel()).creditTrade(player.getUUID(), spent, earned);
-            //?}
-        } catch (RuntimeException e) {
-            LOGGER.warn("[playermob] Failed to record a villager trade", e);
-        }
+    /** Apply {@code update} to a survival player's live shopping tally (see {@link ShoppingHooks}). */
+    public static void recordShopping(ServerPlayer player,
+                                      java.util.function.UnaryOperator<ShoppingTally> update) {
+        //? if >=26 {
+        /*get(player.level()).creditShopping(player.getUUID(), update);
+        *///?} else {
+        get(player.serverLevel()).creditShopping(player.getUUID(), update);
+        //?}
     }
 
-    public void creditTrade(UUID id, int spent, int earned) {
-        shopping.put(id, shopping(id).withTrade(spent, earned));
-        setDirty();
+    public void creditShopping(UUID id, java.util.function.UnaryOperator<ShoppingTally> update) {
+        ShoppingTally before = shopping(id);
+        ShoppingTally after = update.apply(before);
+        if (after != before) {
+            shopping.put(id, after);
+            setDirty();
+        }
     }
 
     public void credit(UUID id, PlayerLifeRecord.Signal signal, float magnitude) {
