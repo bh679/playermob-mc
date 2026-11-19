@@ -29,7 +29,8 @@ import java.util.UUID;
  * Game-side glue for the Reading signal: turns item uses, inputs and the per-player tick into
  * {@link ReadingTracker} calls, and routes the tracker's updates into the player's live
  * {@link PlayerLifeRecord} via {@link PlayerLifeStore#creditReading}. Called from
- * {@link ReflexHooks}, which already owns those hooks, so reading adds no mixin of its own.
+ * {@link ReflexHooks} (inputs, the per-player tick, death) and from the reflex packet mixin's
+ * use-in-air hook ({@link #onUseItem}), so reading adds no mixin of its own.
  *
  * <p>Server-side and survival-only, like the reflex hooks. Failure-isolated: a bug here must never
  * break item use or the player tick, so each entry point catches and logs.</p>
@@ -111,22 +112,30 @@ public final class ReadingHooks {
 
     // ---- hooks ------------------------------------------------------------
 
-    /**
-     * One deliberate input from the player. Any input ends a held-book session (the screen can't be
-     * open); a {@code use} with a readable book in hand opens a new one.
-     */
+    /** One deliberate input from the player: a held-book screen can't be open, so that session ends. */
     public static void onAction(Player actor, ReflexTracker.ActionKind kind) {
         if (!counts(actor)) {
             return;
         }
         try {
             ServerPlayer player = (ServerPlayer) actor;
-            ReadingTracker t = tracker(player);
-            int tick = tick(player);
-            t.onAction(kind == ReflexTracker.ActionKind.SWING, tick);
-            if (kind != ReflexTracker.ActionKind.USE) {
-                return;
-            }
+            tracker(player).onAction(kind == ReflexTracker.ActionKind.SWING, tick(player));
+        } catch (RuntimeException e) {
+            LOGGER.error("[playermob] reading action hook failed", e);
+        }
+    }
+
+    /**
+     * The player used the item in hand in the air — the packet that opens a written book or book
+     * &amp; quill. With a readable book in the used hand, that opens a held-book session. (A use on a
+     * block never comes here: right-clicking a chest with a book in hand isn't reading it.)
+     */
+    public static void onUseItem(Player actor) {
+        if (!counts(actor)) {
+            return;
+        }
+        try {
+            ServerPlayer player = (ServerPlayer) actor;
             // The main hand is used first; the offhand book only opens when the main hand is empty.
             ItemStack main = player.getMainHandItem();
             ReadingTracker.Hand hand = isReadable(main) ? ReadingTracker.Hand.MAIN
@@ -134,11 +143,11 @@ public final class ReadingHooks {
                 : null;
             if (hand != null) {
                 ItemStack book = hand == ReadingTracker.Hand.MAIN ? main : player.getOffhandItem();
-                t.onOpenHeldBook(bookHash(book), hand, player.getYRot(), player.getXRot(),
-                    player.getX(), player.getY(), player.getZ(), tick);
+                tracker(player).onOpenHeldBook(bookHash(book), hand, player.getYRot(), player.getXRot(),
+                    player.getX(), player.getY(), player.getZ(), tick(player));
             }
         } catch (RuntimeException e) {
-            LOGGER.error("[playermob] reading action hook failed", e);
+            LOGGER.error("[playermob] reading use hook failed", e);
         }
     }
 
