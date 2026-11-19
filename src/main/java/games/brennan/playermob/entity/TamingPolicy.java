@@ -61,6 +61,18 @@ public final class TamingPolicy {
     }
 
     /**
+     * Smallest herd a mob with any Taming will hunt from — it always leaves a breeding pair plus
+     * one. Below this a hungry animal-lover looks for food elsewhere rather than eat the stock it
+     * would breed. A mob with Taming 0 hunts as it always has.
+     */
+    public static final int MIN_HUNTABLE_HERD = 4;
+
+    /** Whether a mob with this Taming may hunt one animal out of a herd of {@code herdSize}. */
+    public static boolean mayHunt(int taming, int herdSize) {
+        return taming <= DispositionTraits.MIN || herdSize >= MIN_HUNTABLE_HERD;
+    }
+
+    /**
      * Whether another adult can complete a pair: same kind, adult, not a wild tamable, and either
      * already in love or ready to be fed into it.
      */

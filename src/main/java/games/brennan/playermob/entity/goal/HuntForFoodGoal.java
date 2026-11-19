@@ -3,6 +3,7 @@ package games.brennan.playermob.entity.goal;
 import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.ForagePolicy;
+import games.brennan.playermob.entity.TamingPolicy;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.world.entity.ai.goal.target.NearestAttackableTargetGoal;
 import net.minecraft.world.entity.animal.Animal;
@@ -44,12 +45,27 @@ public final class HuntForFoodGoal extends NearestAttackableTargetGoal<Animal> {
         super(mob, Animal.class, 10, true, false,
             //? if >=26 {
             /*(candidate, serverLevel) -> ForagePolicy.isHuntableFoodAnimal(candidate)
-                && TrainConfinement.allowsTarget(mob, candidate));
+                && TrainConfinement.allowsTarget(mob, candidate)
+                && sparesBreedingStock(mob, candidate));
             *///?} else {
             candidate -> ForagePolicy.isHuntableFoodAnimal(candidate)
-                && TrainConfinement.allowsTarget(mob, candidate));
+                && TrainConfinement.allowsTarget(mob, candidate)
+                && sparesBreedingStock(mob, candidate));
             //?}
         this.playerMob = mob;
+    }
+
+    /**
+     * The Taming hobby's restraint: a mob that tends animals won't hunt one out of a herd too small
+     * to keep breeding ({@link TamingPolicy#mayHunt}). A mob with no Taming hunts as before.
+     */
+    private static boolean sparesBreedingStock(PlayerMobEntity mob, net.minecraft.world.entity.LivingEntity candidate) {
+        int taming = mob.taming();
+        if (taming <= 0) return true;
+        int herd = candidate.level().getEntitiesOfClass(Animal.class,
+            candidate.getBoundingBox().inflate(TamingPolicy.HERD_RADIUS),
+            a -> a.isAlive() && a.getType() == candidate.getType()).size();
+        return TamingPolicy.mayHunt(taming, herd);
     }
 
     @Override

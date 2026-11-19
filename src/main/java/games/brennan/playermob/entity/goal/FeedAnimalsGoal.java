@@ -36,7 +36,9 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * The <b>Taming</b> hobby: walk up to an animal and feed it the food it breeds (or, for a baby,
@@ -54,7 +56,8 @@ import java.util.List;
  *
  * <p><b>Containers</b> obey exactly {@link RaidContainersGoal}'s rules — {@code mobGriefing},
  * the {@code searchContainers} scavenge mode, same-train confinement, line of sight, chests/barrels/
- * shulkers only, the explored-block cooldown — plus a vanilla container lock. No slot is read until
+ * shulkers only — plus a vanilla container lock, and a 60s memory of chests it already searched for
+ * food (its own, not the raid's explored map). No slot is read until
  * the lid is open.</p>
  *
  * <p>Registered at priority 5: combat (2) and raiding/eating (3) preempt it, and it stops the moment
@@ -75,6 +78,8 @@ public final class FeedAnimalsGoal extends Goal implements DescribableGoal {
     private static final double REACH_CONTAINER_SQR = 4.0;
     private static final double REACH_ANIMAL_SQR = 6.25;   // 2.5 blocks
     private static final double FEAR_RANGE = 16.0;
+    /** How long a container searched for food (and found wanting) is skipped: 60s. */
+    private static final int SEARCHED_TTL_TICKS = 1200;
 
     private enum Phase { IDLE, TO_CONTAINER, OPENING, CLOSING, TO_ANIMAL, FEEDING }
 
@@ -89,6 +94,12 @@ public final class FeedAnimalsGoal extends Goal implements DescribableGoal {
     private int containerTries = 0;
     private EntityType<?> preferType;
     private int preferUntil = 0;
+    /**
+     * Containers this goal already searched for food, by packed position → tick searched. Kept
+     * apart from the entity's raid "explored" memory on purpose: a chest just raided for gear may
+     * still hold wheat, and a food search must not hold the raider off a chest either. Transient.
+     */
+    private final Map<Long, Integer> searched = new HashMap<>();
 
     public FeedAnimalsGoal(PlayerMobEntity mob, double moveSpeed) {
         this.mob = mob;
@@ -160,9 +171,6 @@ public final class FeedAnimalsGoal extends Goal implements DescribableGoal {
     public void stop() {
         mob.closeOpenedContainer();
         mob.getNavigation().stop();
-        if (containerPos != null) {
-            mob.markBlockExplored(containerPos);
-        }
         containerPos = null;
         animal = null;
         phase = Phase.IDLE;
@@ -223,7 +231,7 @@ public final class FeedAnimalsGoal extends Goal implements DescribableGoal {
 
     private void tickClosing() {
         if (phaseTicks < mob.reactTicks(ReactionChannel.ITEMS, CLOSE_PAUSE_TICKS)) return;
-        mob.markBlockExplored(containerPos);
+        searched.put(containerPos.asLong(), mob.tickCount);
         if (findFood(animal) != null) {
             containerPos = null;
             phase = Phase.TO_ANIMAL;
@@ -377,7 +385,8 @@ public final class FeedAnimalsGoal extends Goal implements DescribableGoal {
         if (!mob.allowsScavenging(PlayerMobConfig.searchContainers())) return null;
         BlockPos origin = mob.blockPosition();
         Vec3 eye = mob.getEyePosition();
-        long now = mob.tickCount;
+        int now = mob.tickCount;
+        searched.values().removeIf(at -> now - at >= SEARCHED_TTL_TICKS);
         BlockPos closest = null;
         double closestDist = Double.MAX_VALUE;
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
@@ -390,7 +399,7 @@ public final class FeedAnimalsGoal extends Goal implements DescribableGoal {
                     if (!isTakeableContainer(be)) continue;
                     double dist = origin.distSqr(cursor);
                     if (dist >= closestDist) continue;
-                    if (mob.isBlockExplored(cursor, now)) continue;
+                    if (searched.containsKey(cursor.asLong())) continue;
                     if (!TrainConfinement.allowsTarget(mob, cursor)) continue;
                     BlockPos candidate = cursor.immutable();
                     if (!canSee(level, eye, candidate)) continue;

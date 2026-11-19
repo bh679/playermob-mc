@@ -51,6 +51,14 @@ class TamingPolicyTest {
     }
 
     @Test
+    void anAnimalLoverSparesASmallHerd() {
+        assertTrue(TamingPolicy.mayHunt(0, 1), "no hobby hunts as before");
+        assertFalse(TamingPolicy.mayHunt(1, 2));
+        assertFalse(TamingPolicy.mayHunt(10, TamingPolicy.MIN_HUNTABLE_HERD - 1));
+        assertTrue(TamingPolicy.mayHunt(10, TamingPolicy.MIN_HUNTABLE_HERD));
+    }
+
+    @Test
     void partnerIsAnAdultInLoveOrReady() {
         assertTrue(TamingPolicy.isPartner(false, 0, true, false, false));
         assertTrue(TamingPolicy.isPartner(false, 0, false, true, false));
