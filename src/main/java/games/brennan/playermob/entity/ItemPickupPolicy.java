@@ -224,9 +224,13 @@ public final class ItemPickupPolicy {
      * selecting, or placing a shulker as fungible building filler (bridging,
      * train recovery, etc.); {@link #isShulkerBox} routes them to a carry-only
      * pickup instead.
+     *
+     * <p>String is excluded too: it is a {@link BlockItem} only because it places tripwire, which
+     * is no use as a bridge or a wall. Left out, it is neither hoarded nor placed as filler, and
+     * an echo will sell it to a fletcher (see {@code VillagerTrading}).</p>
      */
     public static boolean isBuildingBlock(ItemStack stack) {
-        return stack.getItem() instanceof BlockItem && !isShulkerBox(stack);
+        return stack.getItem() instanceof BlockItem && !isShulkerBox(stack) && !stack.is(Items.STRING);
     }
 
     /**

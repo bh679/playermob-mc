@@ -137,6 +137,12 @@ class VillagerTradingTest {
     }
 
     @Test
+    void stringSellsWithoutABlockReserve() {
+        SimpleContainer pack = pack(new ItemStack(Items.STRING, 14));
+        assertNotNull(VillagerTrading.payment(pack, sale(Items.STRING, 14), false, false));
+    }
+
+    @Test
     void theFoodReserveIsKept() {
         int keep = ShoppingPolicy.FOOD_KEEP_COUNT;
         MerchantOffer offer = sale(Items.CARROT, 22);
