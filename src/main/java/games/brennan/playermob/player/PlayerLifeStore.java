@@ -60,10 +60,15 @@ public final class PlayerLifeStore extends SavedData {
     private static final String TAG_SNAPSHOT = "Snapshot";
     private static final String TAG_PETS = "Pets";
     private static final String TAG_LEDGER = "Ledger";
+    private static final String TAG_SHOPPING = "Shopping";
+    private static final String TAG_TALLY = "Tally";
 
     private final Map<UUID, PlayerLifeRecord> current = new HashMap<>();
     // Every animal each player's current life has tamed — see PetLedger. Reset with the life.
     private final Map<UUID, PetLedger> pets = new HashMap<>();
+    // Each player's current life's villager trades — see ShoppingTally. Kept apart from the
+    // conduct record so the shopping stat stays self-contained. Reset with the life.
+    private final Map<UUID, ShoppingTally> shopping = new HashMap<>();
     // Legacy per-world last-life snapshots from builds before GlobalLifeStore existed.
     // Retained only until the global store imports them via drainLegacyLastLives().
     private final Map<UUID, CompoundTag> legacyLastLife = new HashMap<>();
@@ -116,6 +121,11 @@ public final class PlayerLifeStore extends SavedData {
         return pets.getOrDefault(id, PetLedger.EMPTY);
     }
 
+    /** The player's current life's shopping tally, or {@link ShoppingTally#EMPTY}. */
+    public ShoppingTally shopping(UUID id) {
+        return shopping.getOrDefault(id, ShoppingTally.EMPTY);
+    }
+
     // ---- writes -----------------------------------------------------------
 
     /**
@@ -157,6 +167,28 @@ public final class PlayerLifeStore extends SavedData {
         setDirty();
     }
 
+    /**
+     * Credit {@code player}'s current life with one villager trade that paid {@code spent} emeralds
+     * and returned {@code earned}. Called from {@code VillagerTradeShoppingMixin}; never throws
+     * into the trade flow.
+     */
+    public static void recordTrade(ServerPlayer player, int spent, int earned) {
+        try {
+            //? if >=26 {
+            /*get(player.level()).creditTrade(player.getUUID(), spent, earned);
+            *///?} else {
+            get(player.serverLevel()).creditTrade(player.getUUID(), spent, earned);
+            //?}
+        } catch (RuntimeException e) {
+            LOGGER.warn("[playermob] Failed to record a villager trade", e);
+        }
+    }
+
+    public void creditTrade(UUID id, int spent, int earned) {
+        shopping.put(id, shopping(id).withTrade(spent, earned));
+        setDirty();
+    }
+
     public void credit(UUID id, PlayerLifeRecord.Signal signal, float magnitude) {
         credit(id, signal, magnitude, false);
     }
@@ -173,6 +205,7 @@ public final class PlayerLifeStore extends SavedData {
     public void resetCurrent(UUID id) {
         boolean changed = current.remove(id) != null;
         changed |= pets.remove(id) != null; // a new life starts with no pets of its own
+        changed |= shopping.remove(id) != null; // …and no trades
         if (changed) {
             setDirty();
         }
@@ -299,6 +332,18 @@ public final class PlayerLifeStore extends SavedData {
         }
         tag.put(TAG_PETS, petList);
 
+        ListTag shoppingList = new ListTag();
+        for (Map.Entry<UUID, ShoppingTally> e : shopping.entrySet()) {
+            if (e.getValue().isEmpty()) {
+                continue;
+            }
+            CompoundTag entry = new CompoundTag();
+            NbtCompat.putUUID(entry, TAG_UUID, e.getKey());
+            entry.put(TAG_TALLY, e.getValue().save());
+            shoppingList.add(entry);
+        }
+        tag.put(TAG_SHOPPING, shoppingList);
+
         // Retain un-migrated legacy snapshots so a pre-update world keeps them until the
         // global store imports them; drops away once drainLegacyLastLives() has run.
         if (!legacyLastLife.isEmpty()) {
@@ -348,6 +393,16 @@ public final class PlayerLifeStore extends SavedData {
             if (NbtCompat.hasUUID(entry, TAG_UUID)) {
                 store.pets.put(NbtCompat.getUUID(entry, TAG_UUID),
                     PetLedger.load(NbtCompat.getListOfType(entry, TAG_LEDGER, Tag.TAG_COMPOUND)));
+            }
+        }
+
+        // Missing on saves from before lives recorded trades ⇒ every tally starts empty.
+        ListTag shoppingList = NbtCompat.getListOfType(tag, TAG_SHOPPING, Tag.TAG_COMPOUND);
+        for (int i = 0; i < shoppingList.size(); i++) {
+            CompoundTag entry = NbtCompat.compoundAt(shoppingList, i);
+            if (NbtCompat.hasUUID(entry, TAG_UUID)) {
+                store.shopping.put(NbtCompat.getUUID(entry, TAG_UUID),
+                    ShoppingTally.load(NbtCompat.getCompoundOrEmpty(entry, TAG_TALLY)));
             }
         }
 

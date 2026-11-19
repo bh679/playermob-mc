@@ -281,6 +281,7 @@ public final class PlayerReincarnation {
             // pure defensiveness. Fall back to a traits-only snapshot.
             CompoundTag tag = new CompoundTag();
             record.toTraits().save(tag);
+            saveShopping(level, player, tag);
             return tag;
         }
 
@@ -292,12 +293,23 @@ public final class PlayerReincarnation {
         // entity already wrote the trait keys, so this is the single authoritative
         // write of FightFlight/Friendliness/ReactionSpeed.
         record.toTraits().save(snapshot);
+        // …and the shopping score, from its own tally (kept apart from the conduct record).
+        saveShopping(level, player, snapshot);
         // A spawn egg's ENTITY_DATA must name its entity type, or ItemStack encoding
         // throws "Missing id for entity" the moment the egg is saved in an inventory.
         snapshot.putString("id", PlayerMobRegistry.PLAYER_MOB_ID.toString());
 
         ghost.discard();
         return snapshot;
+    }
+
+    /**
+     * Write the life's {@code Shopping} score (0–10, see {@link ShoppingTally}). Always written, so a
+     * life that never traded makes an echo with 0 rather than one that rolls a random score.
+     */
+    private static void saveShopping(ServerLevel level, ServerPlayer player, CompoundTag snapshot) {
+        snapshot.putInt(PlayerMobEntity.TAG_SHOPPING,
+            PlayerLifeStore.get(level).shopping(player.getUUID()).score());
     }
 
     /**
