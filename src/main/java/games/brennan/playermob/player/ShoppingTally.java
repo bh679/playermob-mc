@@ -61,11 +61,14 @@ public final class ShoppingTally {
     static final String TAG_ID = "Id";
     static final String TAG_WEIGHT = "Weight";
     static final String TAG_TRADED = "Traded";
+    static final String TAG_VISITS = "Visits";
+    static final String TAG_VISIT_TICKS = "VisitTicks";
+    private static final double TICKS_PER_SECOND = 20.0;
 
     /** One trader met this life: how much skipping it weighs, and whether the player traded with it. */
     record Met(float missWeight, boolean traded) {}
 
-    public static final ShoppingTally EMPTY = new ShoppingTally(0, 0, 0, 0, 0F, new LinkedHashMap<>());
+    public static final ShoppingTally EMPTY = new ShoppingTally(0, 0, 0, 0, 0F, new LinkedHashMap<>(), 0, 0L);
 
     private final int trades;
     private final int emeraldsSpent;
@@ -76,20 +79,34 @@ public final class ShoppingTally {
     private final float archivedMissed;
     /** Traders met this life, oldest first. Never mutated after construction. */
     private final Map<UUID, Met> met;
+    /** Trading screens the player opened this life, and the ticks they were open in total. */
+    private final int visits;
+    private final long visitTicks;
 
     private ShoppingTally(int trades, int emeraldsSpent, int emeraldsEarned, int archivedTraded,
-                          float archivedMissed, LinkedHashMap<UUID, Met> met) {
+                          float archivedMissed, LinkedHashMap<UUID, Met> met, int visits, long visitTicks) {
         this.trades = Math.max(0, trades);
         this.emeraldsSpent = Math.max(0, emeraldsSpent);
         this.emeraldsEarned = Math.max(0, emeraldsEarned);
         this.archivedTraded = Math.max(0, archivedTraded);
         this.archivedMissed = Math.max(0F, archivedMissed);
         this.met = Collections.unmodifiableMap(met);
+        this.visits = Math.max(0, visits);
+        this.visitTicks = Math.max(0L, visitTicks);
     }
 
     public int trades() { return trades; }
     public int emeraldsSpent() { return emeraldsSpent; }
     public int emeraldsEarned() { return emeraldsEarned; }
+    public int visits() { return visits; }
+
+    /**
+     * Average time the player kept a trading screen open, in seconds — how long the echo lingers at
+     * a trader. 0 when the player never opened one (the echo then rolls its own).
+     */
+    public double averageVisitSeconds() {
+        return visits == 0 ? 0.0 : visitTicks / (double) visits / TICKS_PER_SECOND;
+    }
 
     /** Traders traded with this life. */
     public int tradedCount() {
@@ -111,7 +128,7 @@ public final class ShoppingTally {
 
     public boolean isEmpty() {
         return trades == 0 && emeraldsSpent == 0 && emeraldsEarned == 0 && archivedTraded == 0
-            && archivedMissed == 0F && met.isEmpty();
+            && archivedMissed == 0F && met.isEmpty() && visits == 0 && visitTicks == 0L;
     }
 
     /** How much skipping a trader met {@code lifeMinutes} into the life weighs (1 → {@value #LATE_MISS_WEIGHT}). */
@@ -146,6 +163,12 @@ public final class ShoppingTally {
         return fold(trades + 1, emeraldsSpent + Math.max(0, spent), emeraldsEarned + Math.max(0, earned), next);
     }
 
+    /** One trading screen the player had open for {@code ticks}. */
+    public ShoppingTally withVisit(long ticks) {
+        return new ShoppingTally(trades, emeraldsSpent, emeraldsEarned, archivedTraded, archivedMissed,
+            new LinkedHashMap<>(met), visits + 1, visitTicks + Math.max(0L, ticks));
+    }
+
     /** Build a tally from {@code next}, folding the oldest entries past {@link #MAX_REMEMBERED} into the archive. */
     private ShoppingTally fold(int trades, int spent, int earned, LinkedHashMap<UUID, Met> next) {
         int foldedTraded = archivedTraded;
@@ -157,7 +180,7 @@ public final class ShoppingTally {
             else foldedMissed += m.missWeight();
             oldest.remove();
         }
-        return new ShoppingTally(trades, spent, earned, foldedTraded, foldedMissed, next);
+        return new ShoppingTally(trades, spent, earned, foldedTraded, foldedMissed, next, visits, visitTicks);
     }
 
     // ---- Scoring ----------------------------------------------------------
@@ -183,9 +206,9 @@ public final class ShoppingTally {
     public String breakdown() {
         return String.format(Locale.ROOT,
             "shopping %d (raw %.2f) | traded with %d of %d traders met (missed weight %.2f)"
-                + " | trades %d | emeralds spent %d earned %d",
+                + " | avg visit %.1fs (%d visits) | trades %d | emeralds spent %d earned %d",
             score(), rawScore(), tradedCount(), met.size() + archivedTraded + archivedMissedCount(),
-            missedWeight(), trades, emeraldsSpent, emeraldsEarned);
+            missedWeight(), averageVisitSeconds(), visits, trades, emeraldsSpent, emeraldsEarned);
     }
 
     // ---- NBT --------------------------------------------------------------
@@ -206,6 +229,8 @@ public final class ShoppingTally {
             list.add(entry);
         }
         tag.put(TAG_MET, list);
+        tag.putInt(TAG_VISITS, visits);
+        tag.putLong(TAG_VISIT_TICKS, visitTicks);
         return tag;
     }
 
@@ -227,6 +252,8 @@ public final class ShoppingTally {
             NbtCompat.getIntOr(tag, TAG_EARNED, 0),
             NbtCompat.getIntOr(tag, TAG_ARCHIVED_TRADED, 0),
             NbtCompat.getFloatOr(tag, TAG_ARCHIVED_MISSED, 0F),
-            met);
+            met,
+            NbtCompat.getIntOr(tag, TAG_VISITS, 0),
+            NbtCompat.getLongOr(tag, TAG_VISIT_TICKS, 0L));
     }
 }

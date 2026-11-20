@@ -304,12 +304,16 @@ public final class PlayerReincarnation {
     }
 
     /**
-     * Write the life's {@code Shopping} score (0–10, see {@link ShoppingTally}). Always written, so a
-     * life that never traded makes an echo with 0 rather than one that rolls a random score.
+     * Write the life's {@code Shopping} score (0–10, see {@link ShoppingTally}) and its
+     * {@code ShoppingSeconds}. The score is always written, so a life that never traded makes an echo
+     * with 0 rather than one that rolls a random score.
      */
     private static void saveShopping(ServerLevel level, ServerPlayer player, CompoundTag snapshot) {
-        snapshot.putInt(PlayerMobEntity.TAG_SHOPPING,
-            PlayerLifeStore.get(level).shopping(player.getUUID()).score());
+        ShoppingTally tally = PlayerLifeStore.get(level).shopping(player.getUUID());
+        snapshot.putInt(PlayerMobEntity.TAG_SHOPPING, tally.score());
+        // How long they kept a trading screen open, on average — 0 when they never opened one,
+        // which the echo reads as "unknown" and rolls its own.
+        snapshot.putInt(PlayerMobEntity.TAG_SHOPPING_SECONDS, (int) Math.round(tally.averageVisitSeconds()));
     }
 
     /**

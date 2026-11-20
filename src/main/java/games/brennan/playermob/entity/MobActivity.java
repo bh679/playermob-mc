@@ -13,7 +13,9 @@ public enum MobActivity {
     /** A chest, barrel or shulker box is open in front of the mob. */
     CONTAINER,
     /** The mob is going through its own gear — a loadout change or an idle bag-check. */
-    INVENTORY;
+    INVENTORY,
+    /** The mob is at a villager or wandering trader, going through its trades. */
+    TRADING;
 
     private static final MobActivity[] VALUES = values();
 
@@ -36,8 +38,19 @@ public enum MobActivity {
      */
     public static MobActivity resolve(boolean enabled, boolean alive, boolean containerOpen,
                                       boolean inCombat, int loadoutPulseTicks, boolean idleBrowsing) {
+        return resolve(enabled, alive, containerOpen, false, inCombat, loadoutPulseTicks, idleBrowsing);
+    }
+
+    /**
+     * As above, with {@code trading}: the mob is visiting a trader (see {@code ShopWithVillagerGoal}).
+     * A trade screen shows like an open container — ahead of everything but a container itself.
+     */
+    public static MobActivity resolve(boolean enabled, boolean alive, boolean containerOpen,
+                                      boolean trading, boolean inCombat, int loadoutPulseTicks,
+                                      boolean idleBrowsing) {
         if (!enabled || !alive) return NONE;
         if (containerOpen) return CONTAINER;
+        if (trading) return TRADING;
         if (inCombat) return NONE;
         return loadoutPulseTicks > 0 || idleBrowsing ? INVENTORY : NONE;
     }

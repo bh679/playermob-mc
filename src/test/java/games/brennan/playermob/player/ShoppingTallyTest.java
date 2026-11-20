@@ -122,6 +122,25 @@ class ShoppingTallyTest {
     }
 
     @Test
+    void averageVisitIsMeanScreenTime() {
+        assertEquals(0.0, ShoppingTally.EMPTY.averageVisitSeconds(), 1e-9);
+        ShoppingTally t = ShoppingTally.EMPTY.withVisit(200).withVisit(400); // 10 s and 20 s
+        assertEquals(2, t.visits());
+        assertEquals(15.0, t.averageVisitSeconds(), 1e-9);
+        assertEquals(0, t.score()); // opening screens alone doesn't score
+    }
+
+    @Test
+    void visitsSurviveTradesAndNbt() {
+        UUID id = new UUID(0L, 9L);
+        ShoppingTally t = ShoppingTally.EMPTY.withVisit(100).withMet(id, 5).withTrade(id, 5, 3, 0);
+        assertEquals(1, t.visits());
+        ShoppingTally back = ShoppingTally.load(t.save());
+        assertEquals(t.averageVisitSeconds(), back.averageVisitSeconds(), 1e-9);
+        assertEquals(1, back.visits());
+    }
+
+    @Test
     void missingTagLoadsEmpty() {
         assertTrue(ShoppingTally.load(new CompoundTag()).isEmpty());
     }

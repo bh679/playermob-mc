@@ -46,6 +46,14 @@ public final class VillagerTrading {
             && !merchant.isTrading() && !merchant.getOffers().isEmpty();
     }
 
+    /**
+     * A trader worth noticing: alive, grown and with offers — a villager with a job or a wandering
+     * trader. Unemployed villagers and nitwits have no offers, so they never count.
+     */
+    public static boolean isTrader(AbstractVillager merchant) {
+        return merchant.isAlive() && !merchant.isBaby() && !merchant.getOffers().isEmpty();
+    }
+
     /** True when the mob has a deal it would take with {@code merchant} right now. */
     public static boolean hasDeal(PlayerMobEntity mob, AbstractVillager merchant, boolean buyGear) {
         return canTradeWith(merchant) && findOffer(mob, merchant, buyGear) != null;

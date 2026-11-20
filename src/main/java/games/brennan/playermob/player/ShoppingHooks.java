@@ -2,6 +2,7 @@ package games.brennan.playermob.player;
 
 import com.mojang.logging.LogUtils;
 import games.brennan.playermob.entity.ShoppingPolicy;
+import games.brennan.playermob.entity.VillagerTrading;
 import net.minecraft.server.level.ServerPlayer;
 //? if >=26 {
 /*import net.minecraft.world.entity.npc.villager.AbstractVillager;
@@ -13,9 +14,10 @@ import net.minecraft.world.item.trading.MerchantOffer;
 import org.slf4j.Logger;
 
 /**
- * Feeds a survival player's {@link ShoppingTally}: which traders they came across, and which of
- * those they traded with. Called from {@code ServerPlayerTickShoppingMixin} (once a second) and
- * {@code VillagerTradeShoppingMixin} (each trade). Never throws into the tick or the trade.
+ * Feeds a survival player's {@link ShoppingTally}: which traders they came across, which of those
+ * they traded with, and how long they kept trading screens open. Called from
+ * {@code ServerPlayerTickShoppingMixin} (once a second), {@code VillagerTradeShoppingMixin} (each
+ * trade) and {@code VillagerTradingSessionMixin} (each screen closed). Never throws into the game.
  */
 public final class ShoppingHooks {
 
@@ -39,20 +41,12 @@ public final class ShoppingHooks {
         return player.getStats().getValue(Stats.CUSTOM.get(Stats.TIME_SINCE_DEATH)) / TICKS_PER_MINUTE;
     }
 
-    /**
-     * A trader with something to trade: alive, grown and with offers — a villager with a job, or a
-     * wandering trader. Unemployed villagers and nitwits have no offers, so they never count.
-     */
-    static boolean isTrader(AbstractVillager merchant) {
-        return merchant.isAlive() && !merchant.isBaby() && !merchant.getOffers().isEmpty();
-    }
-
     /** Once a second: every trader within {@link #MEET_RADIUS} counts as met (once per life). */
     public static void onPlayerTick(ServerPlayer player) {
         if (player.tickCount % SCAN_TICKS != 0 || !counts(player)) return;
         try {
             var nearby = player.level().getEntitiesOfClass(AbstractVillager.class,
-                player.getBoundingBox().inflate(MEET_RADIUS), ShoppingHooks::isTrader);
+                player.getBoundingBox().inflate(MEET_RADIUS), VillagerTrading::isTrader);
             if (nearby.isEmpty()) return;
             double minutes = lifeMinutes(player);
             PlayerLifeStore.recordShopping(player, tally -> {
@@ -64,6 +58,23 @@ public final class ShoppingHooks {
             });
         } catch (RuntimeException e) {
             LOGGER.warn("[playermob] Failed to record traders met", e);
+        }
+    }
+
+    /**
+     * Longest a single trading screen counts for: a screen left open while the player is away
+     * shouldn't teach the echo to stand at a villager for ten minutes.
+     */
+    static final long MAX_VISIT_TICKS = 6000L; // 5 minutes
+
+    /** The player closed a trading screen they had open for {@code ticks}. */
+    public static void onVisitEnd(ServerPlayer player, long ticks) {
+        if (!counts(player) || ticks <= 0L) return;
+        try {
+            long counted = Math.min(ticks, MAX_VISIT_TICKS);
+            PlayerLifeStore.recordShopping(player, tally -> tally.withVisit(counted));
+        } catch (RuntimeException e) {
+            LOGGER.warn("[playermob] Failed to record a trading visit", e);
         }
     }
 

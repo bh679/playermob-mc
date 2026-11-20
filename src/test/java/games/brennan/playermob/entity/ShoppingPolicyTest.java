@@ -24,17 +24,25 @@ class ShoppingPolicyTest {
     }
 
     @Test
-    void cooldownShrinksAsScoreRises() {
-        assertEquals(ShoppingPolicy.COOLDOWN_AT_MIN, ShoppingPolicy.cooldownTicks(1, 0.5));
-        assertEquals(ShoppingPolicy.COOLDOWN_AT_MAX, ShoppingPolicy.cooldownTicks(10, 0.5));
-        assertTrue(ShoppingPolicy.cooldownTicks(5, 0.5) < ShoppingPolicy.cooldownTicks(4, 0.5));
+    void noticeRadiusGrowsWithScore() {
+        assertEquals(4.0, ShoppingPolicy.noticeRadius(0), 1e-9);
+        assertEquals(6.5, ShoppingPolicy.noticeRadius(5), 1e-9);
+        assertEquals(9.0, ShoppingPolicy.noticeRadius(10), 1e-9);
+        assertEquals(9.0, ShoppingPolicy.noticeRadius(40), 1e-9);
     }
 
     @Test
-    void cooldownJitterStaysWithinAQuarter() {
-        int base = ShoppingPolicy.cooldownTicks(10, 0.5);
-        assertEquals(Math.round(base * 0.75), ShoppingPolicy.cooldownTicks(10, 0.0));
-        assertTrue(ShoppingPolicy.cooldownTicks(10, 0.999) <= Math.round(base * 1.25));
+    void stopChanceIsScoreOverTen() {
+        assertEquals(0.0, ShoppingPolicy.stopChance(0), 1e-9);
+        assertEquals(0.7, ShoppingPolicy.stopChance(7), 1e-9);
+        assertEquals(1.0, ShoppingPolicy.stopChance(10), 1e-9);
+    }
+
+    @Test
+    void visitLengthIsClamped() {
+        assertEquals(40, ShoppingPolicy.visitTicks(0));
+        assertEquals(200, ShoppingPolicy.visitTicks(10));
+        assertEquals(1200, ShoppingPolicy.visitTicks(600));
     }
 
     @Test

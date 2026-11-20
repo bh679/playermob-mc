@@ -26,6 +26,14 @@ class MobActivityTest {
     }
 
     @Test
+    void tradingShowsTheTradePanelBelowAnOpenContainer() {
+        assertEquals(MobActivity.TRADING, resolve(true, true, false, true, false, 0, false));
+        assertEquals(MobActivity.TRADING, resolve(true, true, false, true, false, 20, true));
+        assertEquals(CONTAINER, resolve(true, true, true, true, false, 0, false));
+        assertEquals(NONE, resolve(false, true, false, true, false, 0, false)); // animations off
+    }
+
+    @Test
     void gearChangePulseAndIdleCheckShowInventory() {
         assertEquals(INVENTORY, resolve(true, true, false, false, 1, false));
         assertEquals(INVENTORY, resolve(true, true, false, false, 0, true));

@@ -25,7 +25,8 @@
     "WorldGenRegionMixin",
     "AbstractVillagerTradeInvoker",
     "VillagerTradeShoppingMixin",
-    "ServerPlayerTickShoppingMixin"
+    "ServerPlayerTickShoppingMixin",
+    "VillagerTradingSessionMixin"
   ],
   "client": [],
   "server": [],

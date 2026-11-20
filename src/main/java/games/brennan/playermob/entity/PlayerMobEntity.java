@@ -389,6 +389,18 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      */
     private int shopping = SHOPPING_UNSET;
 
+    /** NBT key of {@link #shoppingSeconds} — the same key the death snapshot writes. */
+    public static final String TAG_SHOPPING_SECONDS = "ShoppingSeconds";
+    /**
+     * How long this mob lingers at a trader, in seconds — its player's average time with a trading
+     * screen open. 0 or less means unknown (a wild mob, an older echo, a life that never opened a
+     * trading screen): it rolls {@link ShoppingPolicy#ROLL_VISIT_MIN_SECONDS}–
+     * {@link ShoppingPolicy#ROLL_VISIT_MAX_SECONDS} the first time it is read, and keeps it.
+     */
+    private int shoppingSeconds = SHOPPING_UNSET;
+    /** Server: visiting a trader right now (drives the Trading activity panel). Never saved. */
+    private boolean trading;
+
     /**
      * Evolving per-individual feelings toward players and other PlayerMobs.
      * Server-side only; persisted to NBT. Phase A only decreases them (on attack).
@@ -1251,7 +1263,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private void refreshActivity() {
         if (level().isClientSide()) return;
         MobActivity next = MobActivity.resolve(PlayerMobConfig.activityAnimations(), isAlive(),
-            openContainerPos != null, getTarget() != null, loadoutPulseTicks, idleBrowsing);
+            openContainerPos != null, trading, getTarget() != null, loadoutPulseTicks, idleBrowsing);
         byte wire = (byte) next.ordinal();
         if (this.entityData.get(DATA_ACTIVITY) != wire) {
             this.entityData.set(DATA_ACTIVITY, wire);
@@ -2267,6 +2279,21 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             shopping = getRandom().nextInt(DispositionTraits.MAX + 1);
         }
         return shopping;
+    }
+
+    /** Seconds this mob lingers at a trader, rolling one on first read if it has none. */
+    public int shoppingSeconds() {
+        if (shoppingSeconds <= 0) {
+            shoppingSeconds = ShoppingPolicy.ROLL_VISIT_MIN_SECONDS + getRandom().nextInt(
+                ShoppingPolicy.ROLL_VISIT_MAX_SECONDS - ShoppingPolicy.ROLL_VISIT_MIN_SECONDS + 1);
+        }
+        return shoppingSeconds;
+    }
+
+    /** Server: flag a trader visit on/off — called by {@link ShopWithVillagerGoal}. */
+    public void setTrading(boolean trading) {
+        this.trading = trading;
+        refreshActivity();
     }
 
     /** Pin the shopping score (clamped to 0–10). */
@@ -4403,6 +4430,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (shopping != SHOPPING_UNSET) {
             tag.putInt(TAG_SHOPPING, shopping);
         }
+        if (shoppingSeconds > 0) {
+            tag.putInt(TAG_SHOPPING_SECONDS, shoppingSeconds);
+        }
         feelings.save(tag);
         tag.putInt(TAG_SKIN_INDEX, getSkinIndex());
         // Persist the arm model for bundled mobs too (previously URL-only). Additive:
@@ -4486,6 +4516,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // Missing (wild mobs, pre-shopping snapshots and saves) ⇒ keep what it has; unset rolls on use.
         if (NbtCompat.contains(tag, TAG_SHOPPING)) {
             setShopping(NbtCompat.getIntOr(tag, TAG_SHOPPING, 0));
+        }
+        // 0 (a life that never opened a trading screen) stays unknown and rolls on first use.
+        if (NbtCompat.contains(tag, TAG_SHOPPING_SECONDS)) {
+            shoppingSeconds = NbtCompat.getIntOr(tag, TAG_SHOPPING_SECONDS, 0);
         }
         // Draft shelf — missing key (every pre-draft save, every non-echo) ⇒ empty shelf. Replaces
         // rather than appends so applyCustomData on a reused mob can't double up.

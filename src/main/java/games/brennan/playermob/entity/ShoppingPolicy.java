@@ -12,7 +12,8 @@ import net.minecraft.world.item.Items;
  *
  * <ul>
  *   <li><b>Score 0</b> never trades.</li>
- *   <li><b>Any score</b> sells junk for emeralds — more often the higher it is.</li>
+ *   <li><b>Any score</b> sells junk for emeralds. It stops at a trader it notices with chance
+ *       {@code score / 10} and notices them from further away the higher the score.</li>
  *   <li><b>{@value #BUY_MIN_SCORE}+</b> also buys gear that beats what it wears.</li>
  * </ul>
  */
@@ -23,13 +24,21 @@ public final class ShoppingPolicy {
     /** Score at/above which the mob buys gear, not just sells junk. */
     public static final int BUY_MIN_SCORE = 5;
 
-    /** Ticks between trips at score 1 and at score 10 (linear between), before the ±25% jitter. */
-    static final int COOLDOWN_AT_MIN = 6000; // 5 minutes
-    static final int COOLDOWN_AT_MAX = 1200; // 1 minute
-    static final double COOLDOWN_JITTER = 0.25;
+    /** Blocks within which a mob notices a trader at score 0; each score point adds half a block. */
+    static final double NOTICE_BASE_BLOCKS = 4.0;
+    static final double NOTICE_BLOCKS_PER_POINT = 0.5;
 
-    /** Wait before looking again when a search found no villager worth visiting. */
-    public static final int RETRY_TICKS = 200;
+    /** How long the mob remembers its stop/skip decision for one trader before deciding again. */
+    public static final int DECISION_MEMORY_TICKS = 12000; // 10 minutes
+    /** Most trader decisions remembered at once; the oldest is forgotten first. */
+    public static final int DECISION_MEMORY_CAP = 64;
+
+    /** Shortest and longest visit, in seconds, whatever the player's own habit was. */
+    static final int MIN_VISIT_SECONDS = 2;
+    static final int MAX_VISIT_SECONDS = 60;
+    /** Range a mob with no recorded visit length rolls from, in seconds. */
+    public static final int ROLL_VISIT_MIN_SECONDS = 3;
+    public static final int ROLL_VISIT_MAX_SECONDS = 20;
 
     /** Most trades in one visit; the villager's own stock is the other limit. */
     public static final int MAX_TRADES_PER_TRIP = 6;
@@ -54,15 +63,29 @@ public final class ShoppingPolicy {
     }
 
     /**
-     * Ticks to wait before the next trip: {@value #COOLDOWN_AT_MIN} at score 1 falling to
-     * {@value #COOLDOWN_AT_MAX} at 10, scaled by {@code roll} in {@code [0, 1)} to ±25%.
+     * How far away (blocks) a mob notices a trader: {@value #NOTICE_BASE_BLOCKS} at score 0 plus
+     * half a block per point — 9 at score 10. A keen shopper spots traders from further off.
      */
-    public static int cooldownTicks(int score, double roll) {
-        int clamped = Math.max(1, Math.min(DispositionTraits.MAX, score));
-        double t = (clamped - 1) / (double) (DispositionTraits.MAX - 1);
-        double base = COOLDOWN_AT_MIN + (COOLDOWN_AT_MAX - COOLDOWN_AT_MIN) * t;
-        double jitter = 1.0 + COOLDOWN_JITTER * (2.0 * roll - 1.0);
-        return (int) Math.round(base * jitter);
+    public static double noticeRadius(int score) {
+        return NOTICE_BASE_BLOCKS + NOTICE_BLOCKS_PER_POINT * clampScore(score);
+    }
+
+    /**
+     * Chance the mob stops at a trader it has just noticed: {@code score / 10}, the same share of
+     * traders its player stopped to trade with. Rolled once per trader (see
+     * {@link #DECISION_MEMORY_TICKS}).
+     */
+    public static double stopChance(int score) {
+        return clampScore(score) / (double) DispositionTraits.MAX;
+    }
+
+    /** Ticks a visit lasts: {@code seconds} clamped to {@value #MIN_VISIT_SECONDS}–{@value #MAX_VISIT_SECONDS} s. */
+    public static int visitTicks(int seconds) {
+        return Math.max(MIN_VISIT_SECONDS, Math.min(MAX_VISIT_SECONDS, seconds)) * 20;
+    }
+
+    private static int clampScore(int score) {
+        return Math.max(DispositionTraits.MIN, Math.min(DispositionTraits.MAX, score));
     }
 
     /** Emeralds a stack is worth as money: emeralds count one, emerald blocks nine, anything else 0. */

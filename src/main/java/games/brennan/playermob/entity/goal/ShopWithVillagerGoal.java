@@ -5,6 +5,7 @@ import games.brennan.playermob.entity.Reaction;
 import games.brennan.playermob.entity.ReactionChannel;
 import games.brennan.playermob.entity.ShoppingPolicy;
 import games.brennan.playermob.entity.VillagerTrading;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.ai.goal.Goal;
 //? if >=26 {
 /*import net.minecraft.world.entity.npc.villager.AbstractVillager;
@@ -14,42 +15,57 @@ import net.minecraft.world.entity.npc.AbstractVillager;
 import net.minecraft.world.phys.AABB;
 
 import java.util.EnumSet;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 /**
- * The <b>Shopping</b> errand: walk to a nearby villager or wandering trader and trade with it
- * through its real offers ({@link VillagerTrading}) — sell junk from the backpack for emeralds and,
- * at {@link ShoppingPolicy#BUY_MIN_SCORE}+, buy armour, weapons and tools that beat what the mob
- * has, then equip them.
+ * The <b>Shopping</b> errand, played the way the mob's player played: notice a trader (a villager
+ * with a job, or a wandering trader), decide once whether to stop, and if so walk over and spend
+ * about as long at it as the player used to spend in a trading screen — selling junk from the
+ * backpack and, at {@link ShoppingPolicy#BUY_MIN_SCORE}+, buying armour, weapons and tools that beat
+ * what it has, through the trader's real offers ({@link VillagerTrading}).
  *
- * <p>How often is the mob's {@code Shopping} score: the wait between trips shrinks from about
- * five minutes at score 1 to about one at score 10 ({@link ShoppingPolicy#cooldownTicks}), and a
- * trip only happens with a trader in reach. Score 0 never shops. The pace between trades follows the
- * mob's {@link ReactionChannel#ITEMS} reaction speed.</p>
+ * <ul>
+ *   <li><b>Noticing:</b> traders within {@link ShoppingPolicy#noticeRadius} — further the keener.</li>
+ *   <li><b>Stopping:</b> one roll per trader at {@link ShoppingPolicy#stopChance} ({@code score / 10}),
+ *       the share of traders its player traded with; stop or skip is remembered for
+ *       {@link ShoppingPolicy#DECISION_MEMORY_TICKS} so a skipped trader stays skipped.</li>
+ *   <li><b>Visiting:</b> stands at the trader for {@code ShoppingSeconds} (clamped by
+ *       {@link ShoppingPolicy#visitTicks}), holding up its Trading panel; trades are paced by its
+ *       {@link ReactionChannel#ITEMS} reaction speed. A visit with nothing to trade is still a visit —
+ *       the player opened screens they bought nothing from too.</li>
+ * </ul>
  *
  * <p>Never while hostile or fighting: it won't start with a target, while aggressive or just hurt,
- * and stands down the moment any of those turn up. Registered at priority 3 so greeting,
- * following, defending and every combat goal outrank it.</p>
+ * or toward a trader it would fight or flee, and it stands down the moment any of those change.
+ * Registered at priority 3, so greeting, following, defending and every combat goal outrank it.</p>
  */
 public final class ShopWithVillagerGoal extends Goal implements DescribableGoal {
 
-    private static final double SCAN_RADIUS = 24.0;
     private static final double TRADE_REACH_SQR = 3.0 * 3.0;
-    private static final int PATH_TIMEOUT_TICKS = 200; // 10s to reach the villager
+    private static final int PATH_TIMEOUT_TICKS = 200; // 10s to reach the trader
     private static final int REPATH_TICKS = 20;
+    /** Goal checks between looks for traders it hasn't decided about yet (checks run every other tick). */
+    private static final int NOTICE_EVERY_CHECKS = 5;
 
-    private enum Phase { WALKING, TRADING }
+    private enum Phase { WALKING, VISITING }
 
     private final PlayerMobEntity mob;
     private final double speed;
+    /** Trader → game time its stop/skip decision expires. Transient; oldest first. */
+    private final Map<UUID, Long> decided = new LinkedHashMap<>();
 
-    /** Game time the next trip may start; -1 until the first check rolls a staggered start. */
-    private long nextTripAt = -1L;
+    private int checksUntilLook;
     private AbstractVillager merchant;
     private Phase phase = Phase.WALKING;
     private int phaseTicks;
+    private int visitTicks;
     private int beatTicks;
     private int trades;
+    private boolean nothingLeft;
     private VillagerTrading.Kind lastKind;
 
     public ShopWithVillagerGoal(PlayerMobEntity mob, double speed) {
@@ -74,27 +90,20 @@ public final class ShopWithVillagerGoal extends Goal implements DescribableGoal 
     public boolean canUse() {
         int score = mob.shopping();
         if (!ShoppingPolicy.trades(score) || !calm()) return false;
-        // Goal checks don't run every tick, so the cooldown is a game-time deadline, not a counter.
+        if (--checksUntilLook > 0) return false;
+        checksUntilLook = NOTICE_EVERY_CHECKS;
         long now = mob.level().getGameTime();
-        if (nextTripAt < 0) {
-            // First check: start somewhere inside one cooldown, so mobs spawned together don't
-            // all set off at once.
-            nextTripAt = now + (long) (ShoppingPolicy.cooldownTicks(score, 0.5) * mob.getRandom().nextDouble());
-        }
-        if (now < nextTripAt) return false;
-        merchant = findMerchant(ShoppingPolicy.buysGear(score));
-        if (merchant == null) {
-            nextTripAt = now + ShoppingPolicy.RETRY_TICKS;
-            return false;
-        }
-        return true;
+        forgetExpired(now);
+        merchant = decideOnNewTraders(score, now);
+        return merchant != null;
     }
 
     @Override
     public boolean canContinueToUse() {
-        return merchant != null && calm() && VillagerTrading.canTradeWith(merchant) && peaceful(merchant)
-            && trades < ShoppingPolicy.MAX_TRADES_PER_TRIP
-            && !(phase == Phase.WALKING && phaseTicks > PATH_TIMEOUT_TICKS);
+        if (merchant == null || !calm() || !peaceful(merchant) || !VillagerTrading.canTradeWith(merchant)) {
+            return false;
+        }
+        return phase == Phase.WALKING ? phaseTicks <= PATH_TIMEOUT_TICKS : phaseTicks < visitTicks;
     }
 
     @Override
@@ -102,6 +111,7 @@ public final class ShopWithVillagerGoal extends Goal implements DescribableGoal 
         phase = Phase.WALKING;
         phaseTicks = 0;
         trades = 0;
+        nothingLeft = false;
         lastKind = null;
         mob.getNavigation().moveTo(merchant, speed);
     }
@@ -109,9 +119,8 @@ public final class ShopWithVillagerGoal extends Goal implements DescribableGoal 
     @Override
     public void stop() {
         mob.getNavigation().stop();
+        mob.setTrading(false);
         merchant = null;
-        nextTripAt = mob.level().getGameTime()
-            + ShoppingPolicy.cooldownTicks(mob.shopping(), mob.getRandom().nextDouble());
     }
 
     @Override
@@ -124,33 +133,45 @@ public final class ShopWithVillagerGoal extends Goal implements DescribableGoal 
         phaseTicks++;
         mob.getLookControl().setLookAt(merchant, 30.0F, 30.0F);
         if (phase == Phase.WALKING) {
-            if (mob.distanceToSqr(merchant) <= TRADE_REACH_SQR) {
-                mob.getNavigation().stop();
-                phase = Phase.TRADING;
-                phaseTicks = 0;
-                beatTicks = nextBeat();
-            } else if (phaseTicks % REPATH_TICKS == 0) {
-                mob.getNavigation().moveTo(merchant, speed);
-            }
-            return;
+            tickWalking();
+        } else {
+            tickVisiting();
         }
-        if (mob.distanceToSqr(merchant) > TRADE_REACH_SQR * 2) {
-            phase = Phase.WALKING; // it wandered off — follow it
+    }
+
+    private void tickWalking() {
+        if (mob.distanceToSqr(merchant) <= TRADE_REACH_SQR) {
+            mob.getNavigation().stop();
+            phase = Phase.VISITING;
             phaseTicks = 0;
-            return;
+            visitTicks = ShoppingPolicy.visitTicks(mob.shoppingSeconds());
+            beatTicks = nextBeat();
+            mob.setTrading(true);
+        } else if (phaseTicks % REPATH_TICKS == 0) {
+            mob.getNavigation().moveTo(merchant, speed);
         }
-        if (--beatTicks > 0) return;
+    }
+
+    private void tickVisiting() {
+        if (mob.distanceToSqr(merchant) > TRADE_REACH_SQR * 2) {
+            mob.getNavigation().moveTo(merchant, speed); // it shuffled off — step after it
+        } else {
+            mob.getNavigation().stop();
+        }
+        if (nothingLeft || trades >= ShoppingPolicy.MAX_TRADES_PER_TRIP || --beatTicks > 0) {
+            return; // browsing out the rest of the visit
+        }
         VillagerTrading.Result result =
             VillagerTrading.tradeOnce(mob, merchant, ShoppingPolicy.buysGear(mob.shopping()));
         if (result == null) {
-            trades = ShoppingPolicy.MAX_TRADES_PER_TRIP; // nothing left to do here
+            nothingLeft = true;
             return;
         }
         lastKind = result.kind();
         if (result.kind() == VillagerTrading.Kind.BUY) {
             mob.acceptBoughtGear(result.item());
         }
-        mob.swing(net.minecraft.world.InteractionHand.MAIN_HAND);
+        mob.swing(InteractionHand.MAIN_HAND);
         trades++;
         beatTicks = nextBeat();
     }
@@ -174,20 +195,37 @@ public final class ShopWithVillagerGoal extends Goal implements DescribableGoal 
         return reaction != Reaction.FIGHT && reaction != Reaction.FLEE;
     }
 
-    /** Nearest merchant within {@link #SCAN_RADIUS} that has a deal for this mob right now. */
-    private AbstractVillager findMerchant(boolean buyGear) {
-        AABB box = mob.getBoundingBox().inflate(SCAN_RADIUS);
+    /**
+     * Roll for traders within the notice radius this mob hasn't decided about yet, nearest first,
+     * and return the first it chooses to stop at (or {@code null}). Each roll — stop or skip — is
+     * remembered, so walking past a trader it skipped doesn't roll again; traders beyond the one it
+     * stops at stay undecided until a later look.
+     */
+    private AbstractVillager decideOnNewTraders(int score, long now) {
+        AABB box = mob.getBoundingBox().inflate(ShoppingPolicy.noticeRadius(score));
         List<AbstractVillager> nearby = mob.level().getEntitiesOfClass(AbstractVillager.class, box,
-            v -> peaceful(v) && VillagerTrading.hasDeal(mob, v, buyGear));
-        AbstractVillager best = null;
-        double bestDist = Double.MAX_VALUE;
+            v -> !decided.containsKey(v.getUUID()) && VillagerTrading.isTrader(v));
+        nearby.sort(java.util.Comparator.comparingDouble(mob::distanceToSqr));
         for (AbstractVillager v : nearby) {
-            double d = mob.distanceToSqr(v);
-            if (d < bestDist) {
-                bestDist = d;
-                best = v;
+            remember(v.getUUID(), now);
+            if (mob.getRandom().nextDouble() < ShoppingPolicy.stopChance(score)
+                    && VillagerTrading.canTradeWith(v) && peaceful(v)) {
+                return v;
             }
         }
-        return best;
+        return null;
+    }
+
+    private void remember(UUID id, long now) {
+        decided.put(id, now + ShoppingPolicy.DECISION_MEMORY_TICKS);
+        Iterator<UUID> oldest = decided.keySet().iterator();
+        while (decided.size() > ShoppingPolicy.DECISION_MEMORY_CAP && oldest.hasNext()) {
+            oldest.next();
+            oldest.remove();
+        }
+    }
+
+    private void forgetExpired(long now) {
+        decided.values().removeIf(expiry -> expiry <= now);
     }
 }
