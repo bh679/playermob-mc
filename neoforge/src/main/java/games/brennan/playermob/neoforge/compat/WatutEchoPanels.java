@@ -53,6 +53,11 @@ public final class WatutEchoPanels {
 
     /** WATUT's own panel size for its book and sign panels. */
     private static final float PANEL_SIZE = 0.7F;
+    /**
+     * Pitch used to place the panel. WATUT follows a player's look pitch, but a reading echo looks
+     * down at its book, which would sink the panel to its chest; keep it level instead.
+     */
+    private static final float LEVEL = 0.0F;
     /** WATUT's own backward tilt for a screen panel, in degrees. */
     private static final float PANEL_PITCH = 20.0F;
 
@@ -115,7 +120,7 @@ public final class WatutEchoPanels {
         SpriteInfo book = ParticleRegistry.book;
         TextureAtlasSprite sprite = book == null ? null : book.getSprite();
         if (sprite == null) return null;
-        double[] p = EchoPanelPlacement.position(mob.getX(), mob.getY(), mob.getZ(), mob.getXRot(), mob.yBodyRot);
+        double[] p = EchoPanelPlacement.position(mob.getX(), mob.getY(), mob.getZ(), LEVEL, mob.yBodyRot);
         ParticleStatic panel = new ParticleStatic(level, p[0], p[1], p[2], sprite, PANEL_SIZE);
         PlayerStatusManagerClient.getParticleEngine().add(panel);
         return panel;
@@ -123,9 +128,9 @@ public final class WatutEchoPanels {
 
     /** Keep the panel alive, in front of the echo and turned with it — as WATUT does for players. */
     private static void follow(ParticleStatic panel, PlayerMobEntity mob) {
-        double[] p = EchoPanelPlacement.position(mob.getX(), mob.getY(), mob.getZ(), mob.getXRot(), mob.yBodyRot);
+        double[] p = EchoPanelPlacement.position(mob.getX(), mob.getY(), mob.getZ(), LEVEL, mob.yBodyRot);
         // Last tick's spot, from the echo's own previous position, so WATUT interpolates smoothly.
-        double[] prev = EchoPanelPlacement.position(mob.xo, mob.yo, mob.zo, mob.xRotO, mob.yBodyRotO);
+        double[] prev = EchoPanelPlacement.position(mob.xo, mob.yo, mob.zo, LEVEL, mob.yBodyRotO);
         panel.keepAlive();
         panel.setPos(p[0], p[1], p[2]);
         panel.setPosPrev(prev[0], prev[1], prev[2]);
