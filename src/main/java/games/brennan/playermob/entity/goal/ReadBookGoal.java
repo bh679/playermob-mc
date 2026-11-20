@@ -96,11 +96,12 @@ public final class ReadBookGoal extends Goal implements DescribableGoal {
 
     @Override
     public String subObjective() {
+        boolean lectern = kind == Kind.LECTERN;
         return switch (phase) {
-            case WALK -> "finding a book";
-            case TAKE -> "taking a book";
-            case READ -> "reading";
-            case RETURN -> "burning it";
+            case WALK -> lectern ? "going to a lectern" : "finding a book";
+            case TAKE -> lectern ? "opening the lectern" : "taking a book";
+            case READ -> lectern ? "reading the lectern" : "reading";
+            case RETURN -> lectern ? "stepping away" : "burning it";
             case DONE -> null;
         };
     }
