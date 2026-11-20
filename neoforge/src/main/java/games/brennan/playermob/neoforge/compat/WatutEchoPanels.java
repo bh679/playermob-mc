@@ -53,6 +53,8 @@ public final class WatutEchoPanels {
 
     /** WATUT's own panel size for its book and sign panels. */
     private static final float PANEL_SIZE = 0.7F;
+    /** WATUT's own backward tilt for a screen panel, in degrees. */
+    private static final float PANEL_PITCH = 20.0F;
 
     /** Live panel per echo, keyed by entity id. */
     private static final Map<Integer, ParticleStatic> PANELS = new HashMap<>();
@@ -127,8 +129,12 @@ public final class WatutEchoPanels {
         panel.keepAlive();
         panel.setPos(p[0], p[1], p[2]);
         panel.setPosPrev(prev[0], prev[1], prev[2]);
-        panel.prevRotationYaw = panel.rotationYaw;
-        panel.rotationYaw = mob.yBodyRot;
+        // WATUT's own convention for a player's screen panel: yaw is the body yaw negated, tilted
+        // back 20 degrees (from its tickOtherPlayerClient).
+        panel.prevRotationYaw = -mob.yBodyRotO;
+        panel.rotationYaw = -mob.yBodyRot;
+        panel.prevRotationPitch = PANEL_PITCH;
+        panel.rotationPitch = PANEL_PITCH;
     }
 
     private static void removeAll() {
