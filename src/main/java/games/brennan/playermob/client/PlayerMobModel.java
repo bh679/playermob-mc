@@ -91,6 +91,18 @@ public final class PlayerMobModel<T extends LivingEntity> extends PlayerModel<T>
                                    float ageInTicks, boolean rightHanded) {
         ModelPart mainArm = rightHanded ? this.rightArm : this.leftArm;
         ModelPart offArm = rightHanded ? this.leftArm : this.rightArm;
+        if (activity == games.brennan.playermob.entity.MobActivity.WRITING) {
+            // The book &amp; quill is in the off hand; the main hand writes on the page.
+            this.head.xRot = ActivityPose.readHeadPitch(blend, this.head.xRot);
+            this.head.yRot = ActivityPose.headYaw(blend, this.head.yRot);
+            offArm.xRot = ActivityPose.readBookArmPitch(blend, offArm.xRot);
+            offArm.yRot = ActivityPose.readBookArmYaw(blend, offArm.yRot, !rightHanded);
+            offArm.zRot = ActivityPose.lerp(blend, offArm.zRot, 0.0F);
+            mainArm.xRot = ActivityPose.writeArmPitch(blend, mainArm.xRot, ageInTicks);
+            mainArm.yRot = ActivityPose.writeArmYaw(blend, mainArm.yRot, ageInTicks, rightHanded);
+            mainArm.zRot = ActivityPose.lerp(blend, mainArm.zRot, 0.0F);
+            return;
+        }
         if (activity == games.brennan.playermob.entity.MobActivity.READING) {
             // The book is in the off hand; the main hand turns its pages.
             this.head.xRot = ActivityPose.readHeadPitch(blend, this.head.xRot);

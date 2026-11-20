@@ -456,6 +456,17 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      */
     private int readingFocus = DispositionTraits.DEFAULT;
     private boolean readingFocusExplicit;
+    /**
+     * The Writing trait (0–10): how likely this mob is to pick up a book &amp; quill it passes, and to
+     * stop and write in one it carries
+     * ({@link games.brennan.playermob.entity.goal.WriteBookGoal}). An echo carries its player's
+     * score ({@link games.brennan.playermob.player.WritingTally}); any other mob rolls it. Saved
+     * under {@link games.brennan.playermob.player.WritingTally#TRAIT_TAG}.
+     */
+    private int writing = DispositionTraits.DEFAULT;
+    private boolean writingExplicit;
+    /** Server: the writing goal is in a writing session — shows {@link MobActivity#WRITING}. */
+    private boolean writingBook;
     /** Server: the reading goal is in its reading phase — shows {@link MobActivity#READING}. */
     private boolean readingBook;
     /** Server: the book in hand while reading, and the offhand item set aside for it. */
@@ -1076,6 +1087,8 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // A bookish mob (Reading trait) now and then pulls a book off a nearby shelf and reads it.
         // Above the train march (7) so a reader pauses to read; below every real objective.
         this.goalSelector.addGoal(6, new games.brennan.playermob.entity.goal.ReadBookGoal(this, /* speed */ 0.9));
+        // A writer (Writing trait) picks up a book & quill it passes and stops now and then to write.
+        this.goalSelector.addGoal(6, new games.brennan.playermob.entity.goal.WriteBookGoal(this, /* speed */ 0.9));
         // On a Dungeon Train, once the current carriage room is clear (combat 2,
         // raid/collect 3, harvest 6 all preempt this), march to the next room.
         // No-op off a train (the seam reports "not confined"). Below harvest so
@@ -1267,6 +1280,23 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         this.readingFocusExplicit = true;
     }
 
+    /** The Writing trait, 0–10. */
+    public int writingTrait() {
+        return writing;
+    }
+
+    /** Pin the Writing trait (clamped 0–10); the spawn roll then leaves it alone. */
+    public void setWritingTrait(int value) {
+        this.writing = Math.max(DispositionTraits.MIN, Math.min(DispositionTraits.MAX, value));
+        this.writingExplicit = true;
+    }
+
+    /** Server: flag the writing pose on/off — called by the writing goal. */
+    public void setWritingBook(boolean writing) {
+        this.writingBook = writing;
+        refreshActivity();
+    }
+
     /** Server: the held book while reading — see {@link ReadingHands}. */
     public ReadingHands readingHands() {
         return readingHands;
@@ -1297,6 +1327,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         readingHands.settle(this);
         if (readingBook) {
             setReadingBook(false);
+        }
+        if (writingBook) {
+            setWritingBook(false);
         }
     }
 
@@ -1334,7 +1367,8 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private void refreshActivity() {
         if (level().isClientSide()) return;
         MobActivity next = MobActivity.resolve(PlayerMobConfig.activityAnimations(), isAlive(),
-            openContainerPos != null, getTarget() != null, loadoutPulseTicks, idleBrowsing, readingBook);
+            openContainerPos != null, getTarget() != null, loadoutPulseTicks, idleBrowsing, readingBook,
+            writingBook);
         byte wire = (byte) next.ordinal();
         if (this.entityData.get(DATA_ACTIVITY) != wire) {
             this.entityData.set(DATA_ACTIVITY, wire);
@@ -2080,6 +2114,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         }
         if (!readingFocusExplicit) {
             this.readingFocus = random.nextInt(DispositionTraits.MAX + 1);
+        }
+        if (!writingExplicit) {
+            this.writing = random.nextInt(DispositionTraits.MAX + 1);
         }
         pushDispositionToClient();
         // Roll the door-closing personality (~50% close behind, ~50% leave open),
@@ -4463,6 +4500,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         traits.save(tag);
         tag.putInt(games.brennan.playermob.player.ReadingTally.TRAIT_TAG, this.reading);
         tag.putInt(games.brennan.playermob.player.ReadingTally.FOCUS_TAG, this.readingFocus);
+        tag.putInt(games.brennan.playermob.player.WritingTally.TRAIT_TAG, this.writing);
         feelings.save(tag);
         tag.putInt(TAG_SKIN_INDEX, getSkinIndex());
         // Persist the arm model for bundled mobs too (previously URL-only). Additive:
@@ -4546,6 +4584,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // the neutral default for a mob loaded from an old save).
         if (tag.contains(games.brennan.playermob.player.ReadingTally.TRAIT_TAG)) {
             setReadingTrait(NbtCompat.getIntOr(tag, games.brennan.playermob.player.ReadingTally.TRAIT_TAG,
+                DispositionTraits.DEFAULT));
+        }
+        if (tag.contains(games.brennan.playermob.player.WritingTally.TRAIT_TAG)) {
+            setWritingTrait(NbtCompat.getIntOr(tag, games.brennan.playermob.player.WritingTally.TRAIT_TAG,
                 DispositionTraits.DEFAULT));
         }
         if (tag.contains(games.brennan.playermob.player.ReadingTally.FOCUS_TAG)) {

@@ -124,4 +124,29 @@ public final class ActivityPose {
     public static float readPageArmYaw(float blend, float current, boolean rightArm) {
         return lerp(blend, current, rightArm ? -READ_PAGE_ARM_INWARD : READ_PAGE_ARM_INWARD);
     }
+
+    // ---- Writing (MobActivity.WRITING) ------------------------------------
+    // Same book arm and bowed head as reading; the main hand rests on the page and scribbles —
+    // quick small strokes, drifting across the line and back.
+
+    /** Writing-hand pitch: low over the page. */
+    static final float WRITE_ARM_PITCH = -0.85F;
+    /** Amplitude and speed (radians per tick) of the pen strokes. */
+    static final float WRITE_STROKE = 0.05F;
+    static final float WRITE_STROKE_SPEED = 1.3F;
+    /** Writing-hand yaw: angled in to the page, drifting along the line. */
+    static final float WRITE_ARM_INWARD = 0.45F;
+    static final float WRITE_LINE_DRIFT = 0.12F;
+    static final float WRITE_LINE_SPEED = 0.15F;
+
+    public static float writeArmPitch(float blend, float current, float ageInTicks) {
+        return lerp(blend, current, WRITE_ARM_PITCH + WRITE_STROKE * (float) Math.sin(ageInTicks * WRITE_STROKE_SPEED));
+    }
+
+    /** @param rightArm whether the writing arm is the model's right arm (flips the inward direction) */
+    public static float writeArmYaw(float blend, float current, float ageInTicks, boolean rightArm) {
+        float drift = WRITE_LINE_DRIFT * (float) Math.sin(ageInTicks * WRITE_LINE_SPEED);
+        float target = rightArm ? -WRITE_ARM_INWARD + drift : WRITE_ARM_INWARD + drift;
+        return lerp(blend, current, target);
+    }
 }

@@ -15,7 +15,9 @@ public enum MobActivity {
     /** The mob is going through its own gear — a loadout change or an idle bag-check. */
     INVENTORY,
     /** The mob is reading a book it took off a shelf — an open-book panel (appended: ordinals are the wire value). */
-    READING;
+    READING,
+    /** The mob is writing in a book &amp; quill — an open book with a quill (appended, ordinal 4). */
+    WRITING;
 
     private static final MobActivity[] VALUES = values();
 
@@ -36,14 +38,16 @@ public enum MobActivity {
      * @param loadoutPulseTicks ticks left on the gear-change pulse
      * @param idleBrowsing     the idle bag-check goal is running
      * @param reading          the reading goal is in its reading phase
+     * @param writing          the writing goal is in a writing session
      */
     public static MobActivity resolve(boolean enabled, boolean alive, boolean containerOpen,
                                       boolean inCombat, int loadoutPulseTicks, boolean idleBrowsing,
-                                      boolean reading) {
+                                      boolean reading, boolean writing) {
         if (!enabled || !alive) return NONE;
         if (containerOpen) return CONTAINER;
         if (inCombat) return NONE;
         if (loadoutPulseTicks > 0 || idleBrowsing) return INVENTORY;
+        if (writing) return WRITING;
         return reading ? READING : NONE;
     }
 }

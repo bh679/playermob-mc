@@ -1566,6 +1566,8 @@ public final class ReincarnateCommand {
         source.sendSuccess(() -> Component.literal(reflexes), false);
         String reading = "Reading — " + tally.reading().breakdown();
         source.sendSuccess(() -> Component.literal(reading), false);
+        String writing = "Writing — " + tally.writing().breakdown();
+        source.sendSuccess(() -> Component.literal(writing), false);
         return 1;
     }
 

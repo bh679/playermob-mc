@@ -178,6 +178,7 @@ public final class ReadingHooks {
                 player.getX(), player.getY(), player.getZ(), checkPosition);
             // Books that left: put away into any open menu (a chest, a lectern) doesn't count.
             t.sampleInventory(carriedBooks(player), player.containerMenu != player.inventoryMenu);
+            WritingHooks.onSecond(player);
         } catch (RuntimeException e) {
             LOGGER.error("[playermob] reading tick hook failed", e);
         }
@@ -206,6 +207,7 @@ public final class ReadingHooks {
 
     /** The player died: close any session they were in the middle of, then forget them. */
     public static void onPlayerDeath(ServerPlayer player) {
+        WritingHooks.onPlayerDeath(player);
         ReadingTracker t;
         synchronized (ReadingHooks.class) {
             t = TRACKERS.remove(player.getUUID());

@@ -283,6 +283,7 @@ public final class PlayerReincarnation {
             record.toTraits().save(tag);
             tag.putInt(ReadingTally.TRAIT_TAG, record.reading().chanceScore());
             tag.putInt(ReadingTally.FOCUS_TAG, record.reading().focusScore());
+            tag.putInt(WritingTally.TRAIT_TAG, record.writing().score());
             return tag;
         }
 
@@ -298,6 +299,7 @@ public final class PlayerReincarnation {
         // how likely the echo is to open a book, and how long it stays with one.
         snapshot.putInt(ReadingTally.TRAIT_TAG, record.reading().chanceScore());
         snapshot.putInt(ReadingTally.FOCUS_TAG, record.reading().focusScore());
+        snapshot.putInt(WritingTally.TRAIT_TAG, record.writing().score());
         // A spawn egg's ENTITY_DATA must name its entity type, or ItemStack encoding
         // throws "Missing id for entity" the moment the egg is saved in an inventory.
         snapshot.putString("id", PlayerMobRegistry.PLAYER_MOB_ID.toString());

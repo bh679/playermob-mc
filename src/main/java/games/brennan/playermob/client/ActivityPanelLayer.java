@@ -29,7 +29,8 @@ import net.minecraft.resources.ResourceLocation;
 
 /**
  * Draws the small floating panel a PlayerMob is "looking at" while it has a container open, is
- * going through its gear, or is reading a book (an open-book panel) — the screen its arms are
+ * going through its gear, reading a book (an open book) or writing in one (an open book with a
+ * quill) — the screen its arms are
  * working at (see {@link ActivityPose}).
  * A single full-bright textured quad at arm's reach in front of the chest; it rides the body's
  * model space, so it turns with the mob, and scales in and out with the activity blend.
@@ -41,6 +42,7 @@ import net.minecraft.resources.ResourceLocation;
     private static final Identifier CONTAINER_TEXTURE = texture("container");
     private static final Identifier INVENTORY_TEXTURE = texture("inventory");
     private static final Identifier BOOK_TEXTURE = texture("book");
+    private static final Identifier WRITING_TEXTURE = texture("writing");
     private static final int FULL_BRIGHT = LightCoordsUtil.FULL_BRIGHT;
 
     public ActivityPanelLayer(RenderLayerParent<AvatarRenderState, PlayerModel> parent) {
@@ -73,6 +75,7 @@ public final class ActivityPanelLayer
     private static final ResourceLocation CONTAINER_TEXTURE = texture("container");
     private static final ResourceLocation INVENTORY_TEXTURE = texture("inventory");
     private static final ResourceLocation BOOK_TEXTURE = texture("book");
+    private static final ResourceLocation WRITING_TEXTURE = texture("writing");
     private static final int FULL_BRIGHT = LightTexture.FULL_BRIGHT;
 
     public ActivityPanelLayer(RenderLayerParent<PlayerMobEntity, PlayerModel<PlayerMobEntity>> parent) {
@@ -100,6 +103,7 @@ public final class ActivityPanelLayer
             case CONTAINER -> CONTAINER_TEXTURE;
             case INVENTORY -> INVENTORY_TEXTURE;
             case READING -> BOOK_TEXTURE;
+            case WRITING -> WRITING_TEXTURE;
             case NONE -> null;
         };
     }

@@ -6,6 +6,7 @@ import static games.brennan.playermob.entity.MobActivity.CONTAINER;
 import static games.brennan.playermob.entity.MobActivity.INVENTORY;
 import static games.brennan.playermob.entity.MobActivity.NONE;
 import static games.brennan.playermob.entity.MobActivity.READING;
+import static games.brennan.playermob.entity.MobActivity.WRITING;
 import static games.brennan.playermob.entity.MobActivity.resolve;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -17,31 +18,31 @@ class MobActivityTest {
 
     @Test
     void nothingToShowAtRest() {
-        assertEquals(NONE, resolve(true, true, false, false, 0, false, false));
+        assertEquals(NONE, resolve(true, true, false, false, 0, false, false, false));
     }
 
     @Test
     void openContainerWinsOverEverything() {
-        assertEquals(CONTAINER, resolve(true, true, true, false, 0, false, false));
-        assertEquals(CONTAINER, resolve(true, true, true, true, 20, true, false)); // even mid-fight
+        assertEquals(CONTAINER, resolve(true, true, true, false, 0, false, false, false));
+        assertEquals(CONTAINER, resolve(true, true, true, true, 20, true, false, false)); // even mid-fight
     }
 
     @Test
     void gearChangePulseAndIdleCheckShowInventory() {
-        assertEquals(INVENTORY, resolve(true, true, false, false, 1, false, false));
-        assertEquals(INVENTORY, resolve(true, true, false, false, 0, true, false));
+        assertEquals(INVENTORY, resolve(true, true, false, false, 1, false, false, false));
+        assertEquals(INVENTORY, resolve(true, true, false, false, 0, true, false, false));
     }
 
     @Test
     void combatSuppressesTheInventoryLook() {
-        assertEquals(NONE, resolve(true, true, false, true, 30, false, false));
-        assertEquals(NONE, resolve(true, true, false, true, 0, true, false));
+        assertEquals(NONE, resolve(true, true, false, true, 30, false, false, false));
+        assertEquals(NONE, resolve(true, true, false, true, 0, true, false, false));
     }
 
     @Test
     void disabledOrDeadShowsNothing() {
-        assertEquals(NONE, resolve(false, true, true, false, 30, true, false));
-        assertEquals(NONE, resolve(true, false, true, false, 30, true, false));
+        assertEquals(NONE, resolve(false, true, true, false, 30, true, false, false));
+        assertEquals(NONE, resolve(true, false, true, false, 30, true, false, false));
     }
 
     @Test
@@ -63,16 +64,26 @@ class MobActivityTest {
 
     @Test
     void readingShowsOnlyWhenNothingElseIsGoingOn() {
-        assertEquals(READING, resolve(true, true, false, false, 0, false, true));
-        assertEquals(INVENTORY, resolve(true, true, false, false, 5, false, true));
-        assertEquals(CONTAINER, resolve(true, true, true, false, 0, false, true));
-        assertEquals(NONE, resolve(true, true, false, true, 0, false, true)); // fighting
-        assertEquals(NONE, resolve(false, true, false, false, 0, false, true)); // setting off
+        assertEquals(READING, resolve(true, true, false, false, 0, false, true, false));
+        assertEquals(INVENTORY, resolve(true, true, false, false, 5, false, true, false));
+        assertEquals(CONTAINER, resolve(true, true, true, false, 0, false, true, false));
+        assertEquals(NONE, resolve(true, true, false, true, 0, false, true, false)); // fighting
+        assertEquals(NONE, resolve(false, true, false, false, 0, false, true, false)); // setting off
     }
 
     @Test
     void readingIsAppendedSoOldOrdinalsKeepTheirMeaning() {
         assertEquals(3, READING.ordinal());
         assertEquals(READING, MobActivity.fromOrdinal(3));
+    }
+
+    @Test
+    void writingShowsLikeReadingAndWinsOverIt() {
+        assertEquals(WRITING, resolve(true, true, false, false, 0, false, false, true));
+        assertEquals(WRITING, resolve(true, true, false, false, 0, false, true, true));
+        assertEquals(NONE, resolve(true, true, false, true, 0, false, false, true)); // fighting
+        assertEquals(CONTAINER, resolve(true, true, true, false, 0, false, false, true));
+        assertEquals(4, WRITING.ordinal());
+        assertEquals(WRITING, MobActivity.fromOrdinal(4));
     }
 }

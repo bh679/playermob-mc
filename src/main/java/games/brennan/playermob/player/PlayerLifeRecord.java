@@ -109,7 +109,7 @@ public final class PlayerLifeRecord {
     /** A fresh life — no conduct recorded yet. */
     public static final PlayerLifeRecord EMPTY =
         new PlayerLifeRecord(0.0F, 0, 0.0F, 0, 0, 0.0F, 0, 0.0F, 0.0F, 0.0F, ReflexTally.EMPTY,
-            ReadingTally.EMPTY);
+            ReadingTally.EMPTY, WritingTally.EMPTY);
 
     private final float damageDealt;
     private final int kills;
@@ -130,10 +130,13 @@ public final class PlayerLifeRecord {
     private final ReflexTally reflexes;
     /** Evidence of the player's reading — distilled into the echo's Reading trait. */
     private final ReadingTally reading;
+    /** Evidence of the player's writing — distilled into the echo's Writing trait. */
+    private final WritingTally writing;
 
     PlayerLifeRecord(float damageDealt, int kills, float kindness, int harms, int attacks,
                      float defensiveDamage, int defensiveKills, float timidity, float sabotage,
-                     float fed, ReflexTally reflexes, ReadingTally reading) {
+                     float fed, ReflexTally reflexes, ReadingTally reading,
+                     WritingTally writing) {
         this.damageDealt = damageDealt;
         this.kills = kills;
         this.kindness = kindness;
@@ -146,6 +149,7 @@ public final class PlayerLifeRecord {
         this.fed = Math.max(0.0F, fed);
         this.reflexes = reflexes == null ? ReflexTally.EMPTY : reflexes;
         this.reading = reading == null ? ReadingTally.EMPTY : reading;
+        this.writing = writing == null ? WritingTally.EMPTY : writing;
     }
 
     public float damageDealt() { return damageDealt; }
@@ -167,12 +171,15 @@ public final class PlayerLifeRecord {
     public ReflexTally reflexes() { return reflexes; }
     /** This life's reading evidence (see {@link ReadingTally}). */
     public ReadingTally reading() { return reading; }
+    /** This life's writing evidence (see {@link WritingTally}). */
+    public WritingTally writing() { return writing; }
 
     /** True for a life with no recorded conduct (used to skip empty saves). */
     public boolean isEmpty() {
         return damageDealt == 0.0F && kills == 0 && kindness == 0.0F && harms == 0 && attacks == 0
             && timidity == 0.0F && sabotage == 0.0F && fed == 0.0F && reflexes.isEmpty()
-            && reading.isEmpty();
+            && reading.isEmpty()
+            && writing.isEmpty();
     }
 
     /** The kind of player→mob action being credited; routes a magnitude to the right tally. */
@@ -201,46 +208,52 @@ public final class PlayerLifeRecord {
                 float dealt = Math.max(0.0F, magnitude);
                 yield new PlayerLifeRecord(damageDealt + dealt, kills, kindness, harms, attacks + 1,
                     defensive ? defensiveDamage + dealt : defensiveDamage, defensiveKills, timidity,
-                    sabotage, fed, reflexes, reading);
+                    sabotage, fed, reflexes, reading, writing);
             }
             case KILL   -> new PlayerLifeRecord(damageDealt, kills + 1, kindness, harms, attacks,
                                defensiveDamage, defensive ? defensiveKills + 1 : defensiveKills,
-                               timidity, sabotage, fed, reflexes, reading);
+                               timidity, sabotage, fed, reflexes, reading, writing);
             case CROUCH -> withKindness(CROUCH_KINDNESS);
             case TRAVEL -> withKindness(TRAVEL_KINDNESS);
             case DEFEND -> withKindness(DEFEND_KINDNESS);
             case TAME   -> withKindness(TAME_KINDNESS);
             case GIFT   -> withKindness(Math.max(0.0F, magnitude));
             case HARM   -> new PlayerLifeRecord(damageDealt, kills, kindness, harms + 1, attacks,
-                               defensiveDamage, defensiveKills, timidity, sabotage, fed, reflexes, reading);
+                               defensiveDamage, defensiveKills, timidity, sabotage, fed, reflexes, reading, writing);
             // Signed: a negative magnitude is a mob handing back what it had banked, once the
             // player finally hit it. The constructor floors the tally at 0.
             case FLEE   -> new PlayerLifeRecord(damageDealt, kills, kindness, harms, attacks,
-                               defensiveDamage, defensiveKills, timidity + magnitude, sabotage, fed, reflexes, reading);
+                               defensiveDamage, defensiveKills, timidity + magnitude, sabotage, fed, reflexes, reading, writing);
             case SABOTAGE -> new PlayerLifeRecord(damageDealt, kills, kindness, harms, attacks,
                                defensiveDamage, defensiveKills, timidity,
-                               sabotage + Math.max(0.0F, magnitude), fed, reflexes, reading);
+                               sabotage + Math.max(0.0F, magnitude), fed, reflexes, reading, writing);
             case FEED   -> new PlayerLifeRecord(damageDealt, kills, kindness, harms, attacks,
                                defensiveDamage, defensiveKills, timidity, sabotage,
-                               fed + Math.max(0.0F, magnitude), reflexes, reading);
+                               fed + Math.max(0.0F, magnitude), reflexes, reading, writing);
         };
     }
 
     /** Return a fresh record with {@code update} applied to the reflex tally. */
     public PlayerLifeRecord withReflexes(UnaryOperator<ReflexTally> update) {
         return new PlayerLifeRecord(damageDealt, kills, kindness, harms, attacks,
-            defensiveDamage, defensiveKills, timidity, sabotage, fed, update.apply(reflexes), reading);
+            defensiveDamage, defensiveKills, timidity, sabotage, fed, update.apply(reflexes), reading, writing);
     }
 
     /** Return a fresh record with {@code update} applied to the reading tally. */
     public PlayerLifeRecord withReading(UnaryOperator<ReadingTally> update) {
         return new PlayerLifeRecord(damageDealt, kills, kindness, harms, attacks,
-            defensiveDamage, defensiveKills, timidity, sabotage, fed, reflexes, update.apply(reading));
+            defensiveDamage, defensiveKills, timidity, sabotage, fed, reflexes, update.apply(reading), writing);
+    }
+
+    /** Return a fresh record with {@code update} applied to the writing tally. */
+    public PlayerLifeRecord withWriting(UnaryOperator<WritingTally> update) {
+        return new PlayerLifeRecord(damageDealt, kills, kindness, harms, attacks,
+            defensiveDamage, defensiveKills, timidity, sabotage, fed, reflexes, reading, update.apply(writing));
     }
 
     private PlayerLifeRecord withKindness(float delta) {
         return new PlayerLifeRecord(damageDealt, kills, kindness + delta, harms, attacks,
-            defensiveDamage, defensiveKills, timidity, sabotage, fed, reflexes, reading);
+            defensiveDamage, defensiveKills, timidity, sabotage, fed, reflexes, reading, writing);
     }
 
     /**
@@ -326,6 +339,9 @@ public final class PlayerLifeRecord {
         if (!reading.isEmpty()) {
             tag.put(ReadingTally.TAG, reading.save());
         }
+        if (!writing.isEmpty()) {
+            tag.put(WritingTally.TAG, writing.save());
+        }
     }
 
     /** Read a record back; missing keys default to zero (forward/backward compatible). */
@@ -352,6 +368,8 @@ public final class PlayerLifeRecord {
             // exactly what every echo carried on the build that wrote it.
             ReflexTally.load(NbtCompat.getCompoundOrEmpty(tag, ReflexTally.TAG)),
             // Missing on saves from before reading was scored ⇒ EMPTY ⇒ Reading 0.
-            ReadingTally.load(NbtCompat.getCompoundOrEmpty(tag, ReadingTally.TAG)));
+            ReadingTally.load(NbtCompat.getCompoundOrEmpty(tag, ReadingTally.TAG)),
+            // Missing on saves from before writing was scored ⇒ EMPTY ⇒ Writing 0.
+            WritingTally.load(NbtCompat.getCompoundOrEmpty(tag, WritingTally.TAG)));
     }
 }

@@ -4,7 +4,6 @@ import games.brennan.playermob.compat.GameRuleCompat;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.BookBurner;
 import games.brennan.playermob.entity.PlayerMobEntity;
-import games.brennan.playermob.entity.Reaction;
 import games.brennan.playermob.entity.ReactionChannel;
 import games.brennan.playermob.entity.ReadingHands;
 import games.brennan.playermob.entity.ReadingPolicy;
@@ -13,31 +12,31 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.ChiseledBookShelfBlockEntity;
 import net.minecraft.world.level.block.entity.LecternBlockEntity;
-import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
-import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 
 /**
  * A bookish PlayerMob — its Reading trait, which an echo inherits from how much its player read —
- * now and then walks to a nearby shelf, takes a book, stands reading it for a while, then drops it
- * and it burns. How often is set by its Reading trait, how long it reads by its Reading-focus trait
- * ({@link ReadingPolicy}), and how quickly it reaches for and returns the book by its
- * {@link ReactionChannel#ITEMS} reaction speed.
+ * may stop at a shelf it walks past, take a book, stand reading it for a while, then drop it and
+ * it burns.
+ *
+ * <p><b>Chance, not a timer.</b> Each shelf the mob passes (within
+ * {@value BookGoalSupport#PASS_RADIUS} blocks, in sight) gets one roll per pass, at
+ * {@link ReadingPolicy#passChance} — from 0% at Reading 0 up to 50% at Reading 10. Its Reading-focus
+ * trait sets how long it reads ({@link ReadingPolicy#readTicks}), and its {@link ReactionChannel#ITEMS}
+ * reaction speed how quickly it reaches for and drops the book.</p>
  *
  * <p><b>Shelves.</b> A plain bookshelf (the common case in Dungeon Train's library carriages), a
- * chiseled bookshelf with a book in it, or a lectern holding a book. A lectern whose book hasn't
- * been chosen yet (Dungeon Train's narrative lectern before a player first opens it) is skipped,
- * so a mob never advances a player's story.</p>
+ * chiseled bookshelf with a book in it (a book &amp; quill there is for {@link WriteBookGoal}), or a
+ * lectern holding a book. A lectern whose book hasn't been chosen yet (Dungeon Train's narrative
+ * lectern before a player first opens it) is skipped, so a mob never advances a player's story.</p>
  *
  * <p><b>What it holds.</b> See {@link ReadingHands}: a plain shelf or a lectern lends a copy (the
  * lectern keeps its own); a chiseled shelf gives up its real book. A real book is only taken when the
@@ -54,31 +53,26 @@ import java.util.List;
  */
 public final class ReadBookGoal extends Goal implements DescribableGoal {
 
-    /** Horizontal and vertical reach of the shelf search. */
-    static final int SCAN_RADIUS = 8;
-    static final int SCAN_HEIGHT = 3;
     /** Squared distance from the shelf's centre at which the mob can take a book. */
     private static final double REACH_DISTANCE_SQR = 2.5 * 2.5;
     /** Give up walking to a shelf after this long. */
     private static final int PATH_TIMEOUT_TICKS = 200;
-    /** Pause before taking the book and before putting it back, at neutral reaction speed. */
+    /** Pause before taking the book and before dropping it, at neutral reaction speed. */
     private static final int HANDLE_PAUSE_TICKS = 10;
-    /** No reading with an attacker or a feared entity this close. */
-    private static final double THREAT_RANGE = 12.0;
+    /** How often to look for shelves being passed (the scan isn't free). */
+    private static final int PASS_SCAN_TICKS = 10;
     /** After finding a threat nearby, wait this long before looking again. */
     private static final int THREAT_RETRY_TICKS = 100;
-    /** Chiseled bookshelf slot count. */
-    private static final int CHISELED_SLOTS = 6;
 
-    private enum Phase { WALK, TAKE, READ, RETURN, DONE }
+    enum Phase { WALK, TAKE, READ, RETURN, DONE }
 
-    private enum Kind { PLAIN, CHISELED, LECTERN }
+    enum Kind { PLAIN, CHISELED, LECTERN }
 
     private final PlayerMobEntity mob;
     private final double speed;
-
-    /** {@code mob.tickCount} at which the next read may start; {@code -1} = not scheduled yet. */
-    private int nextAtTick = -1;
+    /** Shelves walked past recently — one roll each per pass. */
+    private final PassMemory passed = new PassMemory();
+    private int scanCooldown;
 
     private BlockPos shelf;
     private Kind kind;
@@ -114,29 +108,31 @@ public final class ReadBookGoal extends Goal implements DescribableGoal {
 
     @Override
     public boolean canUse() {
-        if (mob.readingTrait() <= 0) return false;
-        if (nextAtTick < 0) {
-            schedule(ReadingPolicy.gapTicks(mob.readingTrait(), mob.getRandom().nextDouble()));
+        int reading = mob.readingTrait();
+        if (reading <= 0 || --scanCooldown > 0) return false;
+        scanCooldown = PASS_SCAN_TICKS;
+        if (!BookGoalSupport.isCalm(mob)) return false;
+        List<BlockPos> shelves = BookGoalSupport.newlyPassed(mob, passed, (level, pos) -> kindOf(level, pos) != null);
+        if (shelves.isEmpty()) return false;
+        if (BookGoalSupport.isThreatened(mob)) {
+            scanCooldown = THREAT_RETRY_TICKS;
             return false;
         }
-        if (mob.tickCount < nextAtTick || !isCalm()) return false;
-        if (isThreatened()) {
-            schedule(THREAT_RETRY_TICKS); // don't rescan for threats on every evaluation
-            return false;
+        // One roll per shelf passed; the first that comes up is the one it reads.
+        double chance = ReadingPolicy.passChance(reading);
+        for (BlockPos pos : shelves) {
+            if (mob.getRandom().nextDouble() < chance) {
+                shelf = pos;
+                kind = kindOf(mob.level(), pos);
+                return kind != null;
+            }
         }
-        BlockPos found = findShelf();
-        if (found == null) {
-            schedule(ReadingPolicy.NO_SHELF_RETRY_TICKS);
-            return false;
-        }
-        shelf = found;
-        kind = kindOf(mob.level(), found);
-        return kind != null;
+        return false;
     }
 
     @Override
     public boolean canContinueToUse() {
-        if (phase == Phase.DONE || shelf == null || !isCalm()) return false;
+        if (phase == Phase.DONE || shelf == null || !BookGoalSupport.isCalm(mob)) return false;
         if (phase == Phase.WALK && (phaseTicks > PATH_TIMEOUT_TICKS || !TrainConfinement.allowsTarget(mob, shelf))) {
             return false;
         }
@@ -162,14 +158,10 @@ public final class ReadBookGoal extends Goal implements DescribableGoal {
             mob.dropAtLocation(real);
         }
         mob.getNavigation().stop();
-        if (shelf != null) {
-            mob.markBlockExplored(shelf);
-        }
         shelf = null;
         kind = null;
         phase = Phase.DONE;
         takenSlot = -1;
-        schedule(ReadingPolicy.gapTicks(mob.readingTrait(), mob.getRandom().nextDouble()));
     }
 
     @Override
@@ -216,9 +208,7 @@ public final class ReadBookGoal extends Goal implements DescribableGoal {
     }
 
     private void tickRead() {
-        // Eyes on the book: a point just ahead of and below the face.
-        Vec3 look = mob.getLookAngle();
-        mob.getLookControl().setLookAt(mob.getX() + look.x, mob.getEyeY() - 0.6, mob.getZ() + look.z);
+        BookGoalSupport.lookAtHeldBook(mob);
         if (phaseTicks >= readTicks) {
             mob.setReadingBook(false);
             enter(Phase.RETURN);
@@ -258,10 +248,7 @@ public final class ReadBookGoal extends Goal implements DescribableGoal {
             case CHISELED:
             default:
                 ChiseledBookShelfBlockEntity chiseled = (ChiseledBookShelfBlockEntity) be;
-                List<Integer> filled = new ArrayList<>();
-                for (int slot = 0; slot < CHISELED_SLOTS; slot++) {
-                    if (!chiseled.getItem(slot).isEmpty()) filled.add(slot);
-                }
+                List<Integer> filled = BookGoalSupport.slotsMatching(chiseled, ReadBookGoal::isReadingBook);
                 if (filled.isEmpty()) return ItemStack.EMPTY;
                 int slot = filled.get(mob.getRandom().nextInt(filled.size()));
                 ItemStack inShelf = chiseled.getItem(slot);
@@ -273,82 +260,22 @@ public final class ReadBookGoal extends Goal implements DescribableGoal {
         }
     }
 
+    /** A book to read — a book &amp; quill on a shelf is one to write in ({@link WriteBookGoal}). */
+    static boolean isReadingBook(ItemStack stack) {
+        return !stack.is(Items.WRITABLE_BOOK);
+    }
+
     /** What kind of shelf {@code pos} is, or {@code null} if it has no book to offer. */
-    private static Kind kindOf(Level level, BlockPos pos) {
+    static Kind kindOf(Level level, BlockPos pos) {
         if (level.getBlockState(pos).is(Blocks.BOOKSHELF)) return Kind.PLAIN;
         BlockEntity be = level.getBlockEntity(pos);
         if (be instanceof ChiseledBookShelfBlockEntity chiseled) {
-            for (int slot = 0; slot < CHISELED_SLOTS; slot++) {
-                if (!chiseled.getItem(slot).isEmpty()) return Kind.CHISELED;
-            }
-            return null;
+            return BookGoalSupport.slotsMatching(chiseled, ReadBookGoal::isReadingBook).isEmpty()
+                ? null : Kind.CHISELED;
         }
         if (be instanceof LecternBlockEntity lectern && !lectern.getBook().isEmpty()) {
             return Kind.LECTERN;
         }
         return null;
-    }
-
-    /** The nearest visible, reachable shelf with a book that the mob hasn't read from lately. */
-    private BlockPos findShelf() {
-        Level level = mob.level();
-        BlockPos origin = mob.blockPosition();
-        Vec3 eye = mob.getEyePosition();
-        long now = mob.tickCount;
-        BlockPos best = null;
-        double bestDistSq = Double.MAX_VALUE;
-        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
-        for (int dx = -SCAN_RADIUS; dx <= SCAN_RADIUS; dx++) {
-            for (int dy = -SCAN_HEIGHT; dy <= SCAN_HEIGHT; dy++) {
-                for (int dz = -SCAN_RADIUS; dz <= SCAN_RADIUS; dz++) {
-                    cursor.set(origin.getX() + dx, origin.getY() + dy, origin.getZ() + dz);
-                    double distSq = origin.distSqr(cursor);
-                    if (distSq >= bestDistSq) continue;
-                    if (kindOf(level, cursor) == null) continue;
-                    if (mob.isBlockExplored(cursor, now)) continue;
-                    if (!TrainConfinement.allowsTarget(mob, cursor)) continue;
-                    BlockPos candidate = cursor.immutable();
-                    if (!canSee(level, eye, candidate)) continue;
-                    bestDistSq = distSq;
-                    best = candidate;
-                }
-            }
-        }
-        return best;
-    }
-
-    /** Line of sight to the shelf's face, as {@code RaidContainersGoal} judges a chest. */
-    private boolean canSee(Level level, Vec3 eye, BlockPos pos) {
-        Vec3 center = Vec3.atCenterOf(pos);
-        BlockHitResult hit = level.clip(new ClipContext(
-            eye, center, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mob));
-        return hit.getType() == HitResult.Type.MISS
-            || hit.getBlockPos().equals(pos)
-            || hit.getLocation().distanceToSqr(eye) + 1.0e-4 >= center.distanceToSqr(eye);
-    }
-
-    // ---- gating -----------------------------------------------------------
-
-    /** Nothing more pressing going on: no fight, no hurt, no flight, no digging, gap or door. */
-    private boolean isCalm() {
-        return mob.isAlive()
-            && mob.getTarget() == null
-            && mob.hurtTime == 0
-            && !mob.isFleeing()
-            && !mob.isDigging()
-            && !mob.isCrossingGap()
-            && !mob.isOperatingDoor()
-            && !mob.isRecovering()
-            && !mob.hasMenuViewers();
-    }
-
-    /** Someone nearby it would fight or flee — no time for a book. */
-    private boolean isThreatened() {
-        return mob.nearestWhereReaction(Reaction.FIGHT, THREAT_RANGE) != null
-            || mob.nearestWhereReaction(Reaction.FLEE, THREAT_RANGE) != null;
-    }
-
-    private void schedule(int gapTicks) {
-        nextAtTick = gapTicks == ReadingPolicy.NEVER ? Integer.MAX_VALUE : mob.tickCount + gapTicks;
     }
 }

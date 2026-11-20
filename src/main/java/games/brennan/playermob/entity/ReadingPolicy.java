@@ -1,56 +1,52 @@
 package games.brennan.playermob.entity;
 
 /**
- * Timing rules for a PlayerMob reading ({@code goal/ReadBookGoal}): how often a mob with a given
- * Reading trait goes looking for a book, and how long it reads. Pure maths over primitives so the
- * curve is unit-tested without a world — see {@code ReadingPolicyTest}.
+ * The odds and timings behind a PlayerMob's books ({@code goal/ReadBookGoal},
+ * {@code goal/WriteBookGoal}). Pure maths over primitives so the curves unit-test without a world —
+ * see {@code ReadingPolicyTest}.
  *
- * <p>Two traits: <b>Reading</b> sets the <em>rate</em> — a Reading-10 mob reaches for a book about
- * every {@link #GAP_SECONDS_AT_MAX} seconds; the gap grows as {@code MAX / reading}, so a Reading-1
- * mob does it ten times less often, and Reading 0 never. <b>Reading focus</b> sets how long each
- * read lasts ({@link #readTicks}).</p>
+ * <ul>
+ *   <li><b>Reading</b> and <b>Writing</b> are chances, not timers: each shelf a mob walks past gets
+ *       one roll at {@link #passChance} — 0% at trait 0, {@link #MAX_PASS_CHANCE} at 10. A mob
+ *       carrying a book &amp; quill rolls the same Writing chance every {@link #WRITE_CHECK_TICKS}
+ *       while at rest to stop and write in it.</li>
+ *   <li><b>Reading focus</b> sets how long a read or a writing session lasts ({@link #readTicks}).</li>
+ *   <li>After each writing session it signs the book with {@link #SIGN_CHANCE}.</li>
+ * </ul>
  */
 public final class ReadingPolicy {
 
-    private static final int TICKS_PER_SECOND = 20;
+    /** The chance at trait 10 — even the most bookish mob walks past half the shelves. */
+    public static final double MAX_PASS_CHANCE = 0.5;
 
-    /** Mean seconds between reads for a Reading-10 mob. */
-    public static final int GAP_SECONDS_AT_MAX = 45;
-    /** Gap after a search that found no shelf — try again a little later, not at the full gap. */
-    public static final int NO_SHELF_RETRY_TICKS = 200;
+    /** How often a mob carrying a book &amp; quill, at rest, considers writing in it (20 s). */
+    public static final int WRITE_CHECK_TICKS = 400;
+    /** Chance a writing session ends with the book signed (then dropped and burned). */
+    public static final double SIGN_CHANCE = 0.25;
 
-    /** Mean read at Reading focus 0 (2 s — a flick through) and at focus 10 (30 s). */
+    /** Mean session at Reading focus 0 (2 s — a flick through) and at focus 10 (30 s). */
     public static final int MIN_READ_TICKS = 40;
     public static final int MAX_READ_TICKS = 600;
-    /** How far chance stretches or shortens one read around its mean (±25%). */
+    /** How far chance stretches or shortens one session around its mean (±25%). */
     public static final double READ_SPREAD = 0.25;
-
-    /** Returned by {@link #gapTicks} for a mob that never reads. */
-    public static final int NEVER = -1;
 
     private ReadingPolicy() {}
 
     /**
-     * Ticks to wait before the next read: uniform over 0.5×–1.5× the mean, which is
-     * {@link #GAP_SECONDS_AT_MAX} × {@code 10 / reading}. Spread so a room of readers doesn't
-     * reach for the shelves in unison.
+     * The chance a mob stops at one shelf it is walking past (or, for Writing, sits down to write):
+     * linear from 0 at trait 0 to {@link #MAX_PASS_CHANCE} at 10.
      *
-     * @param reading the mob's Reading trait (0–10); 0 never reads
-     * @param roll    a uniform random in {@code [0, 1)}
-     * @return the gap in ticks, or {@link #NEVER}
+     * @param trait the mob's Reading or Writing trait (0–10)
      */
-    public static int gapTicks(int reading, double roll) {
-        if (reading <= 0) return NEVER;
-        int clampedReading = Math.min(DispositionTraits.MAX, reading);
-        double mean = GAP_SECONDS_AT_MAX * TICKS_PER_SECOND * (double) DispositionTraits.MAX / clampedReading;
-        double clamped = Math.max(0.0, Math.min(1.0, roll));
-        return (int) Math.round(mean * (0.5 + clamped));
+    public static double passChance(int trait) {
+        int clamped = Math.max(DispositionTraits.MIN, Math.min(DispositionTraits.MAX, trait));
+        return MAX_PASS_CHANCE * clamped / DispositionTraits.MAX;
     }
 
     /**
-     * How long one read lasts, in ticks: set by the Reading-focus trait — a mean from
-     * {@link #MIN_READ_TICKS} at focus 0 (a skimmer flicks through and shelves it) to
-     * {@link #MAX_READ_TICKS} at 10 — stretched or shortened by up to {@link #READ_SPREAD} by chance.
+     * How long one read or writing session lasts, in ticks: set by the Reading-focus trait — a mean
+     * from {@link #MIN_READ_TICKS} at focus 0 (a skimmer flicks through) to {@link #MAX_READ_TICKS}
+     * at 10 — stretched or shortened by up to {@link #READ_SPREAD} by chance.
      *
      * @param focus the mob's Reading-focus trait (0–10)
      * @param roll  a uniform random in {@code [0, 1)}

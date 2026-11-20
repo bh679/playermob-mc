@@ -157,6 +157,12 @@ public final class PlayerLifeStore extends SavedData {
         setDirty();
     }
 
+    /** Apply one writing update to a player's live record (see {@link WritingTally}). */
+    public void creditWriting(UUID id, java.util.function.UnaryOperator<WritingTally> update) {
+        current.put(id, current(id).withWriting(update));
+        setDirty();
+    }
+
     /** Apply one reading update to a player's live record (see {@link ReadingTally}). */
     public void creditReading(UUID id, java.util.function.UnaryOperator<ReadingTally> update) {
         current.put(id, current(id).withReading(update));

@@ -77,4 +77,15 @@ class ActivityPoseTest {
         assertTrue(ActivityPose.readPageArmPitch(1.0F, 0.0F, mid)
             < ActivityPose.readPageArmPitch(1.0F, 0.0F, 0.0F));
     }
+
+    @Test
+    void writingHandScribblesLowOverThePage() {
+        float a = ActivityPose.writeArmPitch(1.0F, 0.0F, 0.0F);
+        float b = ActivityPose.writeArmPitch(1.0F, 0.0F, 1.2F);
+        assertTrue(Math.abs(a - ActivityPose.WRITE_ARM_PITCH) <= ActivityPose.WRITE_STROKE + 1e-6);
+        assertTrue(a != b, "the pen moves");
+        assertTrue(ActivityPose.writeArmYaw(1.0F, 0.0F, 0.0F, true) < 0.0F);
+        assertTrue(ActivityPose.writeArmYaw(1.0F, 0.0F, 0.0F, false) > 0.0F);
+        assertEquals(0.4F, ActivityPose.writeArmPitch(0.0F, 0.4F, 7.0F), 1e-6);
+    }
 }
