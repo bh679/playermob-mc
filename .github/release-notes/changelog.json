@@ -1410,8 +1410,25 @@
       "released_at": "2026-11-20T01:34:02Z"
     },
     {
-      "id": "echo-reading-writing",
+      "id": "echo-gift-shopping",
       "version": "0.128.0",
+      "type": "feat",
+      "title": "Echoes buy you gifts",
+      "summary": "An echo that loves the player it came from now shops for them too. While visiting a trader, if you're nearby, it buys you a piece of armour, a weapon or a tool that beats everything of that kind you own, then walks over and throws it to you. It pays with its own emeralds and junk through the villager's real offers, buys at most one gift a visit, and keeps the gift if you wander off. Echoes trading with villagers now hold up the real villager trading screen.",
+      "highlights": [
+        "Echoes that love you buy you gear that beats what you own and throw it to you",
+        "One gift per visit, paid from the echo's own emeralds and junk at real villager prices",
+        "Echoes now hold up the vanilla villager trading screen while they trade"
+      ],
+      "pr": 266,
+      "date": "2026-11-20",
+      "released": true,
+      "released_in": "v0.128.0",
+      "released_at": "2026-11-20T03:29:06Z"
+    },
+    {
+      "id": "echo-reading-writing",
+      "version": "0.129.0",
       "type": "feat",
       "title": "Echoes read and write like you did",
       "summary": "Your echo now picks up your habits with books. Reading books (from your hand or a lectern) and writing in a book & quill shape how often your echo stops at a chiseled bookshelf or lectern to read, how long it stays with a book, and whether it carries a book & quill around to write in. When it finishes a book it drops it and the book burns away.",

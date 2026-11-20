@@ -29,9 +29,9 @@ import net.minecraft.resources.ResourceLocation;
 
 /**
  * Draws the small floating panel a PlayerMob is "looking at" while it has a container open, is
- * going through its gear, or is trading — the screen its arms are working at (see
- * {@link ActivityPose}). Reading and writing have no panel here; WATUT's book panel covers them
- * when installed.
+ * going through its gear, or is trading with a villager — the screen its raised arm is picking
+ * through (see {@link ActivityPose}). The trading panel is vanilla's villager trading screen.
+ * Reading and writing have no panel here; WATUT's book panel covers them when installed.
  * A single full-bright textured quad at arm's reach in front of the chest; it rides the body's
  * model space, so it turns with the mob, and scales in and out with the activity blend.
  */
@@ -41,7 +41,7 @@ import net.minecraft.resources.ResourceLocation;
 
     private static final Identifier CONTAINER_TEXTURE = texture("container");
     private static final Identifier INVENTORY_TEXTURE = texture("inventory");
-    private static final Identifier TRADING_TEXTURE = texture("trading");
+    private static final Identifier TRADING_TEXTURE = vanillaTradingScreen();
     private static final int FULL_BRIGHT = LightCoordsUtil.FULL_BRIGHT;
 
     public ActivityPanelLayer(RenderLayerParent<AvatarRenderState, PlayerModel> parent) {
@@ -54,7 +54,8 @@ import net.minecraft.resources.ResourceLocation;
         if (!(state instanceof PlayerMobModel.State mobState)) {
             return;
         }
-        Identifier texture = textureFor(mobState.shownActivity);
+        MobActivity activity = mobState.shownActivity;
+        Identifier texture = textureFor(activity);
         float blend = mobState.activityBlend;
         if (texture == null || blend <= 0.0F) {
             return;
@@ -62,7 +63,7 @@ import net.minecraft.resources.ResourceLocation;
         poseStack.pushPose();
         positionPanel(poseStack, blend);
         collector.submitCustomGeometry(poseStack, RenderTypes.entityCutout(texture),
-            (pose, consumer) -> drawQuad(pose, consumer));
+            (pose, consumer) -> drawQuad(pose, consumer, activity));
         poseStack.popPose();
     }
 
@@ -73,7 +74,7 @@ public final class ActivityPanelLayer
 
     private static final ResourceLocation CONTAINER_TEXTURE = texture("container");
     private static final ResourceLocation INVENTORY_TEXTURE = texture("inventory");
-    private static final ResourceLocation TRADING_TEXTURE = texture("trading");
+    private static final ResourceLocation TRADING_TEXTURE = vanillaTradingScreen();
     private static final int FULL_BRIGHT = LightTexture.FULL_BRIGHT;
 
     public ActivityPanelLayer(RenderLayerParent<PlayerMobEntity, PlayerModel<PlayerMobEntity>> parent) {
@@ -84,14 +85,15 @@ public final class ActivityPanelLayer
     public void render(PoseStack poseStack, MultiBufferSource buffer, int packedLight,
                        PlayerMobEntity mob, float limbSwing, float limbSwingAmount,
                        float partialTick, float ageInTicks, float netHeadYaw, float headPitch) {
-        ResourceLocation texture = textureFor(mob.getShownActivity());
+        MobActivity activity = mob.getShownActivity();
+        ResourceLocation texture = textureFor(activity);
         float blend = mob.getActivityBlend(partialTick);
         if (texture == null || blend <= 0.0F) {
             return;
         }
         poseStack.pushPose();
         positionPanel(poseStack, blend);
-        drawQuad(poseStack.last(), buffer.getBuffer(RenderType.entityCutoutNoCull(texture)));
+        drawQuad(poseStack.last(), buffer.getBuffer(RenderType.entityCutoutNoCull(texture)), activity);
         poseStack.popPose();
     }
 
@@ -126,13 +128,30 @@ public final class ActivityPanelLayer
         poseStack.scale(blend, blend, blend);
     }
 
-    private static void drawQuad(PoseStack.Pose pose, VertexConsumer consumer) {
-        float s = PANEL_HALF_SIZE;
+    // The vanilla trading screen: the 276x166 screen in the top-left of a 512x256 GUI texture.
+    private static final float TRADING_U = 276.0F / 512.0F;
+    private static final float TRADING_V = 166.0F / 256.0F;
+    /** The trading screen is wider than tall; it keeps its proportions, a little wider than the square panels. */
+    private static final float TRADING_HALF_WIDTH = PANEL_HALF_SIZE * 1.25F;
+    private static final float TRADING_HALF_HEIGHT = TRADING_HALF_WIDTH * (166.0F / 276.0F);
+
+    private static void drawQuad(PoseStack.Pose pose, VertexConsumer consumer, MobActivity activity) {
+        if (activity == MobActivity.TRADING) {
+            drawQuad(pose, consumer, TRADING_HALF_WIDTH, TRADING_HALF_HEIGHT, TRADING_U, TRADING_V);
+        } else {
+            drawQuad(pose, consumer, PANEL_HALF_SIZE, PANEL_HALF_SIZE, 1.0F, 1.0F);
+        }
+    }
+
+    private static void drawQuad(PoseStack.Pose pose, VertexConsumer consumer,
+                                 float halfWidth, float halfHeight, float uMax, float vMax) {
+        float w = halfWidth;
+        float h = halfHeight;
         // +X is the mob's left; U runs left-to-right as the mob sees its own panel.
-        vertex(pose, consumer, s, -s, 0.0F, 0.0F);
-        vertex(pose, consumer, s, s, 0.0F, 1.0F);
-        vertex(pose, consumer, -s, s, 1.0F, 1.0F);
-        vertex(pose, consumer, -s, -s, 1.0F, 0.0F);
+        vertex(pose, consumer, w, -h, 0.0F, 0.0F);
+        vertex(pose, consumer, w, h, 0.0F, vMax);
+        vertex(pose, consumer, -w, h, uMax, vMax);
+        vertex(pose, consumer, -w, -h, uMax, 0.0F);
     }
 
     private static void vertex(PoseStack.Pose pose, VertexConsumer consumer,
@@ -161,5 +180,22 @@ public final class ActivityPanelLayer
     private static ResourceLocation texture(String name) {
     //?}
         return RegistryCompat.id(PlayerMob.MOD_ID, "textures/entity/activity/" + name + ".png");
+    }
+
+    /**
+     * Vanilla's own villager trading screen — the same screen What Are They Up To shows over a
+     * trading player — so an echo at a trader holds up the real thing. Present in every client;
+     * 1.20.1 named it {@code villager2.png}.
+     */
+    //? if >=26 {
+    /*private static Identifier vanillaTradingScreen() {
+    *///?} else {
+    private static ResourceLocation vanillaTradingScreen() {
+    //?}
+        //? if >=1.21.1 {
+        return RegistryCompat.id("minecraft", "textures/gui/container/villager.png");
+        //?} else {
+        /*return RegistryCompat.id("minecraft", "textures/gui/container/villager2.png");*/
+        //?}
     }
 }

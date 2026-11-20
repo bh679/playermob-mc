@@ -1,10 +1,12 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.entity.GiftShopping;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.entity.Reaction;
 import games.brennan.playermob.entity.ReactionChannel;
 import games.brennan.playermob.entity.ShoppingPolicy;
 import games.brennan.playermob.entity.VillagerTrading;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.ai.goal.Goal;
 //? if >=26 {
@@ -12,6 +14,7 @@ import net.minecraft.world.entity.ai.goal.Goal;
 *///?} else {
 import net.minecraft.world.entity.npc.AbstractVillager;
 //?}
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.AABB;
 
 import java.util.EnumSet;
@@ -39,6 +42,12 @@ import java.util.UUID;
  *       the player opened screens they bought nothing from too.</li>
  * </ul>
  *
+ * <p><b>Gifts:</b> an echo that loves the player it came from ({@link PlayerMobEntity#belovedSourcePlayer})
+ * and is keen enough to buy gear first buys that player one piece that beats what they own
+ * ({@link GiftShopping}) — at most one a visit — then, once the visit is over, walks to them and
+ * throws it ({@code tossGift}). If they wander off or it gets pulled into a fight, the gift stays in
+ * its backpack.</p>
+ *
  * <p>Never while hostile or fighting: it won't start with a target, while aggressive or just hurt,
  * or toward a trader it would fight or flee, and it stands down the moment any of those change.
  * Registered at priority 3, so greeting, following, defending and every combat goal outrank it.</p>
@@ -51,7 +60,11 @@ public final class ShopWithVillagerGoal extends Goal implements DescribableGoal 
     /** Goal checks between looks for traders it hasn't decided about yet (checks run every other tick). */
     private static final int NOTICE_EVERY_CHECKS = 5;
 
-    private enum Phase { WALKING, VISITING }
+    /** Ticks to reach the loved player with a gift before giving up (it stays in the backpack). */
+    private static final int DELIVER_TIMEOUT_TICKS = 300; // 15s
+    private static final double TOSS_REACH_SQR = 3.0 * 3.0;
+
+    private enum Phase { WALKING, VISITING, DELIVERING }
 
     private final PlayerMobEntity mob;
     private final double speed;
@@ -67,6 +80,9 @@ public final class ShopWithVillagerGoal extends Goal implements DescribableGoal 
     private int trades;
     private boolean nothingLeft;
     private VillagerTrading.Kind lastKind;
+    /** The gift bought this visit, still to be thrown to {@link #recipient}; empty if none. */
+    private ItemStack pendingGift = ItemStack.EMPTY;
+    private ServerPlayer recipient;
 
     public ShopWithVillagerGoal(PlayerMobEntity mob, double speed) {
         this.mob = mob;
@@ -82,6 +98,8 @@ public final class ShopWithVillagerGoal extends Goal implements DescribableGoal 
     @Override
     public String subObjective() {
         if (phase == Phase.WALKING) return "heading to a trader";
+        if (phase == Phase.DELIVERING) return "bringing a gift";
+        if (lastKind == VillagerTrading.Kind.GIFT) return "buying a gift";
         if (lastKind == VillagerTrading.Kind.BUY) return "buying gear";
         return lastKind == VillagerTrading.Kind.SELL ? "selling junk" : "browsing";
     }
@@ -100,10 +118,17 @@ public final class ShopWithVillagerGoal extends Goal implements DescribableGoal 
 
     @Override
     public boolean canContinueToUse() {
-        if (merchant == null || !calm() || !peaceful(merchant) || !VillagerTrading.canTradeWith(merchant)) {
+        if (!calm()) return false;
+        if (phase == Phase.DELIVERING) {
+            return !pendingGift.isEmpty() && recipient != null && recipient.isAlive()
+                && recipient.level() == mob.level() && phaseTicks <= DELIVER_TIMEOUT_TICKS
+                && mob.distanceToSqr(recipient) <= GiftShopping.GIFT_RANGE * GiftShopping.GIFT_RANGE * 2;
+        }
+        if (merchant == null || !peaceful(merchant) || !VillagerTrading.canTradeWith(merchant)) {
             return false;
         }
-        return phase == Phase.WALKING ? phaseTicks <= PATH_TIMEOUT_TICKS : phaseTicks < visitTicks;
+        if (phase == Phase.WALKING) return phaseTicks <= PATH_TIMEOUT_TICKS;
+        return phaseTicks < visitTicks || !pendingGift.isEmpty(); // a bought gift still goes out
     }
 
     @Override
@@ -113,6 +138,8 @@ public final class ShopWithVillagerGoal extends Goal implements DescribableGoal 
         trades = 0;
         nothingLeft = false;
         lastKind = null;
+        pendingGift = ItemStack.EMPTY;
+        recipient = null;
         mob.getNavigation().moveTo(merchant, speed);
     }
 
@@ -121,6 +148,9 @@ public final class ShopWithVillagerGoal extends Goal implements DescribableGoal 
         mob.getNavigation().stop();
         mob.setTrading(false);
         merchant = null;
+        // An undelivered gift simply stays in the backpack; a later greeting may still hand it over.
+        pendingGift = ItemStack.EMPTY;
+        recipient = null;
     }
 
     @Override
@@ -131,11 +161,10 @@ public final class ShopWithVillagerGoal extends Goal implements DescribableGoal 
     @Override
     public void tick() {
         phaseTicks++;
-        mob.getLookControl().setLookAt(merchant, 30.0F, 30.0F);
-        if (phase == Phase.WALKING) {
-            tickWalking();
-        } else {
-            tickVisiting();
+        switch (phase) {
+            case WALKING -> { mob.getLookControl().setLookAt(merchant, 30.0F, 30.0F); tickWalking(); }
+            case VISITING -> { mob.getLookControl().setLookAt(merchant, 30.0F, 30.0F); tickVisiting(); }
+            case DELIVERING -> tickDelivering();
         }
     }
 
@@ -153,6 +182,13 @@ public final class ShopWithVillagerGoal extends Goal implements DescribableGoal 
     }
 
     private void tickVisiting() {
+        if (phaseTicks >= visitTicks && !pendingGift.isEmpty()) {
+            phase = Phase.DELIVERING;
+            phaseTicks = 0;
+            mob.setTrading(false);
+            mob.getNavigation().moveTo(recipient, speed);
+            return;
+        }
         if (mob.distanceToSqr(merchant) > TRADE_REACH_SQR * 2) {
             mob.getNavigation().moveTo(merchant, speed); // it shuffled off — step after it
         } else {
@@ -161,8 +197,13 @@ public final class ShopWithVillagerGoal extends Goal implements DescribableGoal 
         if (nothingLeft || trades >= ShoppingPolicy.MAX_TRADES_PER_TRIP || --beatTicks > 0) {
             return; // browsing out the rest of the visit
         }
-        VillagerTrading.Result result =
-            VillagerTrading.tradeOnce(mob, merchant, ShoppingPolicy.buysGear(mob.shopping()));
+        boolean buysGear = ShoppingPolicy.buysGear(mob.shopping());
+        if (buysGear && pendingGift.isEmpty() && tryBuyGift()) {
+            trades++;
+            beatTicks = nextBeat();
+            return;
+        }
+        VillagerTrading.Result result = VillagerTrading.tradeOnce(mob, merchant, buysGear);
         if (result == null) {
             nothingLeft = true;
             return;
@@ -174,6 +215,39 @@ public final class ShopWithVillagerGoal extends Goal implements DescribableGoal 
         mob.swing(InteractionHand.MAIN_HAND);
         trades++;
         beatTicks = nextBeat();
+    }
+
+    /**
+     * If this echo loves the player it came from and they are nearby, buy them one piece of gear that
+     * beats what they own — at most one gift a visit, before anything for itself.
+     */
+    private boolean tryBuyGift() {
+        ServerPlayer beloved = mob.belovedSourcePlayer(GiftShopping.GIFT_RANGE);
+        if (beloved == null) return false;
+        VillagerTrading.Result gift = VillagerTrading.tradeGift(mob, merchant,
+            GiftShopping.ownedBy(beloved, ItemStack.EMPTY));
+        if (gift == null) return false;
+        pendingGift = gift.item().copyWithCount(1);
+        recipient = beloved;
+        lastKind = gift.kind();
+        mob.swing(InteractionHand.MAIN_HAND);
+        return true;
+    }
+
+    /** Walk to the loved player and throw them the gift. */
+    private void tickDelivering() {
+        mob.getLookControl().setLookAt(recipient, 30.0F, 30.0F);
+        if (mob.distanceToSqr(recipient) <= TOSS_REACH_SQR) {
+            mob.getNavigation().stop();
+            ItemStack gift = mob.takeOneMatching(pendingGift);
+            if (!gift.isEmpty()) {
+                mob.tossGift(recipient, gift);
+                mob.swing(InteractionHand.MAIN_HAND);
+            }
+            pendingGift = ItemStack.EMPTY; // delivered (or no longer carried) — the goal ends
+        } else if (phaseTicks % REPATH_TICKS == 1) {
+            mob.getNavigation().moveTo(recipient, speed);
+        }
     }
 
     private int nextBeat() {

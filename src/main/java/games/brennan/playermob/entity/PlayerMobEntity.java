@@ -3389,6 +3389,49 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         }
     }
 
+    /**
+     * The player this echo embodies, if it loves them and they are here to shop for: online,
+     * alive, in survival, in this level and within {@code range} blocks, with a feeling of at least
+     * {@link DispositionResolver#FEELING_LOVE}. Identity is the reincarnation ref in the skin field
+     * ({@link SourceProfileSkin}), as for the draft shelf; a fresh mob, or an echo whose player is
+     * away, has none ({@code null}).
+     */
+    public ServerPlayer belovedSourcePlayer(double range) {
+        if (level().isClientSide()) return null;
+        UUID source = SourceProfileSkin.decode(getSkinTextureUrl()).map(SourceProfileSkin.Ref::uuid).orElse(null);
+        if (source == null) return null;
+        if (!(level().getPlayerByUUID(source) instanceof ServerPlayer player)) return null;
+        if (!player.isAlive() || player.isSpectator() || player.isCreative()) return null;
+        if (distanceToSqr(player) > range * range) return null;
+        return feelingToward(player) >= DispositionResolver.FEELING_LOVE ? player : null;
+    }
+
+    /**
+     * Remove and return one item matching {@code like} (same item and data) — from the backpack
+     * first, else from the hands or armour slots. {@link ItemStack#EMPTY} if the mob no longer has
+     * it. Used to hand over a gift it bought, wherever it ended up.
+     */
+    public ItemStack takeOneMatching(ItemStack like) {
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            ItemStack stack = inventory.getItem(i);
+            if (!stack.isEmpty() && ItemDataCompat.isSameItemSameData(stack, like)) {
+                ItemStack one = stack.split(1);
+                inventory.setChanged();
+                return one;
+            }
+        }
+        for (EquipmentSlot slot : EquipmentSlot.values()) {
+            ItemStack worn = getItemBySlot(slot);
+            if (!worn.isEmpty() && ItemDataCompat.isSameItemSameData(worn, like)) {
+                ItemStack one = worn.split(1);
+                if (worn.isEmpty()) setItemSlot(slot, ItemStack.EMPTY);
+                notifyLoadoutChanged();
+                return one;
+            }
+        }
+        return ItemStack.EMPTY;
+    }
+
     /** A flower — the last-resort gift when the pack is empty and nothing's nearby to fetch. */
     public ItemStack trinketGift() {
         return new ItemStack(getRandom().nextBoolean() ? Items.POPPY : Items.DANDELION);
