@@ -95,6 +95,8 @@ class ItemPickupPolicyTest {
         assertTrue(ItemPickupPolicy.isBuildingBlock(new ItemStack(Items.OAK_PLANKS)), "planks");
         assertFalse(ItemPickupPolicy.isBuildingBlock(new ItemStack(Items.DIAMOND)), "diamond is not a block");
         assertFalse(ItemPickupPolicy.isBuildingBlock(new ItemStack(Items.ARROW)), "arrow is not a block");
+        assertFalse(ItemPickupPolicy.isBuildingBlock(new ItemStack(Items.STRING)), "string only places tripwire");
+        assertTrue(ItemPickupPolicy.isBuildingBlock(new ItemStack(Items.MELON)), "a melon block still is");
     }
 
     @Test

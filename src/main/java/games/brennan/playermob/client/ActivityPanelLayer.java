@@ -39,6 +39,7 @@ import net.minecraft.resources.ResourceLocation;
 
     private static final Identifier CONTAINER_TEXTURE = texture("container");
     private static final Identifier INVENTORY_TEXTURE = texture("inventory");
+    private static final Identifier TRADING_TEXTURE = texture("trading");
     private static final int FULL_BRIGHT = LightCoordsUtil.FULL_BRIGHT;
 
     public ActivityPanelLayer(RenderLayerParent<AvatarRenderState, PlayerModel> parent) {
@@ -70,6 +71,7 @@ public final class ActivityPanelLayer
 
     private static final ResourceLocation CONTAINER_TEXTURE = texture("container");
     private static final ResourceLocation INVENTORY_TEXTURE = texture("inventory");
+    private static final ResourceLocation TRADING_TEXTURE = texture("trading");
     private static final int FULL_BRIGHT = LightTexture.FULL_BRIGHT;
 
     public ActivityPanelLayer(RenderLayerParent<PlayerMobEntity, PlayerModel<PlayerMobEntity>> parent) {
@@ -96,6 +98,7 @@ public final class ActivityPanelLayer
         return switch (activity) {
             case CONTAINER -> CONTAINER_TEXTURE;
             case INVENTORY -> INVENTORY_TEXTURE;
+            case TRADING -> TRADING_TEXTURE;
             case NONE -> null;
         };
     }

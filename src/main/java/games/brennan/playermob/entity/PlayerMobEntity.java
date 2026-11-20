@@ -33,6 +33,7 @@ import games.brennan.playermob.entity.goal.PlayerMobDoorGoal;
 import games.brennan.playermob.entity.goal.RaidArmorStandsGoal;
 import games.brennan.playermob.entity.goal.RaidContainersGoal;
 import games.brennan.playermob.entity.goal.SeekAmmoGoal;
+import games.brennan.playermob.entity.goal.ShopWithVillagerGoal;
 import games.brennan.playermob.entity.goal.SkepticalWatchGoal;
 import games.brennan.playermob.entity.goal.StayNearGoal;
 import games.brennan.playermob.entity.goal.EndCrystalCombatGoal;
@@ -375,6 +376,30 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * only. Rolled at spawn, set by spawn eggs / {@code /summon}, persisted to NBT.
      */
     private final DispositionTraits traits = new DispositionTraits();
+
+    /** NBT key of {@link #shopping} — the same key the death snapshot writes (see {@code ShoppingTally}). */
+    public static final String TAG_SHOPPING = "Shopping";
+    /** No shopping score yet: rolled on first use. */
+    private static final int SHOPPING_UNSET = -1;
+    /**
+     * How keen this mob is to trade with villagers (0–10, see {@link ShoppingPolicy}). An echo
+     * carries its player's score from the death snapshot; any mob without one — a wild PlayerMob,
+     * an echo of a life captured before shopping was scored, a mob saved before this build — rolls
+     * 0–10 the first time it is read, and keeps it.
+     */
+    private int shopping = SHOPPING_UNSET;
+
+    /** NBT key of {@link #shoppingSeconds} — the same key the death snapshot writes. */
+    public static final String TAG_SHOPPING_SECONDS = "ShoppingSeconds";
+    /**
+     * How long this mob lingers at a trader, in seconds — its player's average time with a trading
+     * screen open. 0 or less means unknown (a wild mob, an older echo, a life that never opened a
+     * trading screen): it rolls {@link ShoppingPolicy#ROLL_VISIT_MIN_SECONDS}–
+     * {@link ShoppingPolicy#ROLL_VISIT_MAX_SECONDS} the first time it is read, and keeps it.
+     */
+    private int shoppingSeconds = SHOPPING_UNSET;
+    /** Server: visiting a trader right now (drives the Trading activity panel). Never saved. */
+    private boolean trading;
 
     /**
      * Evolving per-individual feelings toward players and other PlayerMobs.
@@ -1043,6 +1068,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         this.goalSelector.addGoal(3, new RaidContainersGoal(this, /* speed */ 0.9, /* radius */ 12));
         this.goalSelector.addGoal(3, new RaidArmorStandsGoal(this, /* speed */ 0.9, /* radius */ 12.0));
         this.goalSelector.addGoal(3, new CollectFloorItemsGoal(this, /* speed */ 0.9, /* radius */ 8.0));
+        // Shopping: visit a villager to sell junk and (at higher scores) buy better gear, through the
+        // villager's real offers. Priority 3 with the other errands, so greeting, following and every
+        // fight outrank it; it also stands down itself the moment there's a target.
+        this.goalSelector.addGoal(3, new ShopWithVillagerGoal(this, /* speed */ 0.9));
         // Low-priority idle forage drive: only farms ripe crops when there's
         // nothing more urgent (combat 2, raid/eat/collect 3) to do. Hunting is
         // NOT here — it runs as a target goal so the priority-2 attack goal does
@@ -1234,7 +1263,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private void refreshActivity() {
         if (level().isClientSide()) return;
         MobActivity next = MobActivity.resolve(PlayerMobConfig.activityAnimations(), isAlive(),
-            openContainerPos != null, getTarget() != null, loadoutPulseTicks, idleBrowsing);
+            openContainerPos != null, trading, getTarget() != null, loadoutPulseTicks, idleBrowsing);
         byte wire = (byte) next.ordinal();
         if (this.entityData.get(DATA_ACTIVITY) != wire) {
             this.entityData.set(DATA_ACTIVITY, wire);
@@ -2242,6 +2271,39 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
 
     public int fightFlight() {
         return traits.fightFlight();
+    }
+
+    /** This mob's shopping score (0–10), rolling one on first read if it has none — see {@link #shopping}. */
+    public int shopping() {
+        if (shopping == SHOPPING_UNSET) {
+            shopping = getRandom().nextInt(DispositionTraits.MAX + 1);
+        }
+        return shopping;
+    }
+
+    /** Seconds this mob lingers at a trader, rolling one on first read if it has none. */
+    public int shoppingSeconds() {
+        if (shoppingSeconds <= 0) {
+            shoppingSeconds = ShoppingPolicy.ROLL_VISIT_MIN_SECONDS + getRandom().nextInt(
+                ShoppingPolicy.ROLL_VISIT_MAX_SECONDS - ShoppingPolicy.ROLL_VISIT_MIN_SECONDS + 1);
+        }
+        return shoppingSeconds;
+    }
+
+    /** Server: true while visiting a trader (see {@link ShopWithVillagerGoal}). */
+    public boolean isTrading() {
+        return trading;
+    }
+
+    /** Server: flag a trader visit on/off — called by {@link ShopWithVillagerGoal}. */
+    public void setTrading(boolean trading) {
+        this.trading = trading;
+        refreshActivity();
+    }
+
+    /** Pin the shopping score (clamped to 0–10). */
+    public void setShopping(int value) {
+        shopping = Math.max(DispositionTraits.MIN, Math.min(DispositionTraits.MAX, value));
     }
 
     public int friendliness() {
@@ -3894,6 +3956,37 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      *
      * @return 1 if equipped, 0 if it turned out not to be an upgrade
      */
+    /**
+     * True when this mob would take {@code stack} as gear — the pickup path's own test: armour or a
+     * shield that beats the piece worn in its slot, or a weapon/tool strictly better than the best
+     * of its kind it carries. Used to decide what to buy from a villager.
+     */
+    public boolean wantsBoughtGear(ItemStack stack) {
+        if (stack.isEmpty()) return false;
+        if (ItemPickupPolicy.isArmorOrShield(stack)) return wouldEquipArmor(stack);
+        ItemPickupPolicy.WeaponCategory cat = ItemPickupPolicy.weaponCategory(stack);
+        if (cat == null) return false;
+        Located best = bestOfCategory(cat);
+        return best == null || ItemPickupPolicy.compareQuality(stack, best.stack()) > 0;
+    }
+
+    /**
+     * Take gear just bought from a villager: armour and shields are worn (the displaced piece goes
+     * to the backpack), a weapon or tool joins the toolkit in the backpack — the old one stays
+     * there too — and, when idle, the best melee weapon goes to hand. Whatever doesn't fit is dropped.
+     */
+    public void acceptBoughtGear(ItemStack stack) {
+        if (ItemPickupPolicy.isArmorOrShield(stack) && equipArmorUpgrade(stack) == 1) {
+            return;
+        }
+        ItemStack leftover = EquipmentEvaluator.addToContainer(this.inventory, stack.copy());
+        if (!leftover.isEmpty()) dropAtLocation(leftover);
+        if (getTarget() == null || getMainHandItem().isEmpty()) {
+            equipBestMeleeInHand();
+        }
+        notifyLoadoutChanged();
+    }
+
     private int equipArmorUpgrade(ItemStack found) {
         EquipmentSlot slot = getEquipmentSlotForItem(found);
         ItemStack current = getItemBySlot(slot);
@@ -4339,6 +4432,12 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     /** Write every PlayerMob custom field to {@code tag}. Version-agnostic (CompoundTag + NbtCompat). */
     private void writeCustomTag(CompoundTag tag) {
         traits.save(tag);
+        if (shopping != SHOPPING_UNSET) {
+            tag.putInt(TAG_SHOPPING, shopping);
+        }
+        if (shoppingSeconds > 0) {
+            tag.putInt(TAG_SHOPPING_SECONDS, shoppingSeconds);
+        }
         feelings.save(tag);
         tag.putInt(TAG_SKIN_INDEX, getSkinIndex());
         // Persist the arm model for bundled mobs too (previously URL-only). Additive:
@@ -4419,6 +4518,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // Traits + feelings; missing keys keep defaults. Legacy *Personality keys ignored.
         traits.load(tag);
         feelings.load(tag);
+        // Missing (wild mobs, pre-shopping snapshots and saves) ⇒ keep what it has; unset rolls on use.
+        if (NbtCompat.contains(tag, TAG_SHOPPING)) {
+            setShopping(NbtCompat.getIntOr(tag, TAG_SHOPPING, 0));
+        }
+        // 0 (a life that never opened a trading screen) stays unknown and rolls on first use.
+        if (NbtCompat.contains(tag, TAG_SHOPPING_SECONDS)) {
+            shoppingSeconds = NbtCompat.getIntOr(tag, TAG_SHOPPING_SECONDS, 0);
+        }
         // Draft shelf — missing key (every pre-draft save, every non-echo) ⇒ empty shelf. Replaces
         // rather than appends so applyCustomData on a reused mob can't double up.
         draftShelf.clear();
