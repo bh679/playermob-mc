@@ -83,6 +83,20 @@ public final class PlayerMobNeoForgeClient {
         if (ModList.get().isLoaded("dungeontrain")) {
             installDungeonTrainHudOffset();
         }
+        if (ModList.get().isLoaded("watut")) {
+            installWatutEchoPanels();
+        }
+    }
+
+    /**
+     * Optional What Are They Up To integration: reading/writing echoes show WATUT's own book panel.
+     * Isolated so {@code WatutEchoPanels} and its WATUT imports are only classloaded when
+     * {@code watut} is present. WATUT is wired at compile time on the 1.21.1 node only.
+     */
+    private static void installWatutEchoPanels() {
+        //? if <26 {
+        games.brennan.playermob.neoforge.compat.WatutEchoPanels.install();
+        //?}
     }
 
     /**

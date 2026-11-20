@@ -101,6 +101,19 @@ dependencies {
         compileOnly("org.joml:joml:1.10.5")
         compileOnly("org.joml:joml-primitives:1.10.0")
 
+        // --- Optional What Are They Up To (WATUT) integration (mod id `watut`) ---
+        // Compile-only: NOT bundled, NOT required. Gated at runtime by ModList.isLoaded("watut");
+        // reading/writing echoes then show WATUT's own book panel (compat/WatutEchoPanels).
+        // `uWr2aTW9` = the exact Modrinth version id for WATUT 1.21.0-1.2.7 NeoForge (1.21/1.21.1).
+        "modCompileOnly"("maven.modrinth:what-are-they-up-to:uWr2aTW9") { isTransitive = false }
+    }
+
+    // --- Opt-in WATUT compat test: load WATUT (+ its required CoroUtil) into the dev client ---
+    //   ./gradlew :neoforge:1.21.1:runClient -PwatutCompatTest
+    // Dev RUNTIME only; never in the published jar. `H2YXCYUY` = CoroUtil 1.21.0-1.3.8 NeoForge.
+    if (mc == "1.21.1" && project.hasProperty("watutCompatTest")) {
+        "modRuntimeOnly"("maven.modrinth:what-are-they-up-to:uWr2aTW9")
+        "modRuntimeOnly"("maven.modrinth:coroutil:H2YXCYUY")
     }
 
     // --- Opt-in MusketMod compat test (see the Fabric build for the full note) ---
