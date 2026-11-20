@@ -53,6 +53,17 @@ class ReadingPolicyTest {
     }
 
     @Test
+    void noReadOrWritingSessionEverRunsPastTwentySeconds() {
+        int longest = 0;
+        for (int focus = 0; focus <= 10; focus++) {
+            for (double roll : new double[] {0.0, 0.5, 0.999999, 1.0}) {
+                longest = Math.max(longest, ReadingPolicy.readTicks(focus, roll));
+            }
+        }
+        assertEquals(400, longest, "focus 10, longest roll: 20 s");
+    }
+
+    @Test
     void chanceSpreadsAReadByAQuarter() {
         int mean = ReadingPolicy.readTicks(10, 0.5);
         assertEquals(Math.round(mean * 0.75), ReadingPolicy.readTicks(10, 0.0));
