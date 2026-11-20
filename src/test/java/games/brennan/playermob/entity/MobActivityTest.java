@@ -18,31 +18,39 @@ class MobActivityTest {
 
     @Test
     void nothingToShowAtRest() {
-        assertEquals(NONE, resolve(true, true, false, false, 0, false, false, false));
+        assertEquals(NONE, resolve(true, true, false, false, false, 0, false, false, false));
     }
 
     @Test
     void openContainerWinsOverEverything() {
-        assertEquals(CONTAINER, resolve(true, true, true, false, 0, false, false, false));
-        assertEquals(CONTAINER, resolve(true, true, true, true, 20, true, false, false)); // even mid-fight
+        assertEquals(CONTAINER, resolve(true, true, true, false, false, 0, false, false, false));
+        assertEquals(CONTAINER, resolve(true, true, true, false, true, 20, true, false, false)); // even mid-fight
+    }
+
+    @Test
+    void tradingShowsTheTradePanelBelowAnOpenContainer() {
+        assertEquals(MobActivity.TRADING, resolve(true, true, false, true, false, 0, false));
+        assertEquals(MobActivity.TRADING, resolve(true, true, false, true, false, 20, true));
+        assertEquals(CONTAINER, resolve(true, true, true, true, false, 0, false));
+        assertEquals(NONE, resolve(false, true, false, true, false, 0, false)); // animations off
     }
 
     @Test
     void gearChangePulseAndIdleCheckShowInventory() {
-        assertEquals(INVENTORY, resolve(true, true, false, false, 1, false, false, false));
-        assertEquals(INVENTORY, resolve(true, true, false, false, 0, true, false, false));
+        assertEquals(INVENTORY, resolve(true, true, false, false, false, 1, false, false, false));
+        assertEquals(INVENTORY, resolve(true, true, false, false, false, 0, true, false, false));
     }
 
     @Test
     void combatSuppressesTheInventoryLook() {
-        assertEquals(NONE, resolve(true, true, false, true, 30, false, false, false));
-        assertEquals(NONE, resolve(true, true, false, true, 0, true, false, false));
+        assertEquals(NONE, resolve(true, true, false, false, true, 30, false, false, false));
+        assertEquals(NONE, resolve(true, true, false, false, true, 0, true, false, false));
     }
 
     @Test
     void disabledOrDeadShowsNothing() {
-        assertEquals(NONE, resolve(false, true, true, false, 30, true, false, false));
-        assertEquals(NONE, resolve(true, false, true, false, 30, true, false, false));
+        assertEquals(NONE, resolve(false, true, true, false, false, 30, true, false, false));
+        assertEquals(NONE, resolve(true, false, true, false, false, 30, true, false, false));
     }
 
     @Test
@@ -64,26 +72,27 @@ class MobActivityTest {
 
     @Test
     void readingShowsOnlyWhenNothingElseIsGoingOn() {
-        assertEquals(READING, resolve(true, true, false, false, 0, false, true, false));
-        assertEquals(INVENTORY, resolve(true, true, false, false, 5, false, true, false));
-        assertEquals(CONTAINER, resolve(true, true, true, false, 0, false, true, false));
-        assertEquals(NONE, resolve(true, true, false, true, 0, false, true, false)); // fighting
-        assertEquals(NONE, resolve(false, true, false, false, 0, false, true, false)); // setting off
+        assertEquals(READING, resolve(true, true, false, false, false, 0, false, true, false));
+        assertEquals(INVENTORY, resolve(true, true, false, false, false, 5, false, true, false));
+        assertEquals(CONTAINER, resolve(true, true, true, false, false, 0, false, true, false));
+        assertEquals(NONE, resolve(true, true, false, false, true, 0, false, true, false)); // fighting
+        assertEquals(NONE, resolve(false, true, false, false, false, 0, false, true, false)); // setting off
     }
 
     @Test
     void readingIsAppendedSoOldOrdinalsKeepTheirMeaning() {
-        assertEquals(3, READING.ordinal());
-        assertEquals(READING, MobActivity.fromOrdinal(3));
+        assertEquals(3, MobActivity.TRADING.ordinal(), "trading keeps the ordinal it shipped with");
+        assertEquals(4, READING.ordinal());
+        assertEquals(READING, MobActivity.fromOrdinal(4));
     }
 
     @Test
     void writingShowsLikeReadingAndWinsOverIt() {
-        assertEquals(WRITING, resolve(true, true, false, false, 0, false, false, true));
-        assertEquals(WRITING, resolve(true, true, false, false, 0, false, true, true));
-        assertEquals(NONE, resolve(true, true, false, true, 0, false, false, true)); // fighting
-        assertEquals(CONTAINER, resolve(true, true, true, false, 0, false, false, true));
-        assertEquals(4, WRITING.ordinal());
-        assertEquals(WRITING, MobActivity.fromOrdinal(4));
+        assertEquals(WRITING, resolve(true, true, false, false, false, 0, false, false, true));
+        assertEquals(WRITING, resolve(true, true, false, false, false, 0, false, true, true));
+        assertEquals(NONE, resolve(true, true, false, false, true, 0, false, false, true)); // fighting
+        assertEquals(CONTAINER, resolve(true, true, true, false, false, 0, false, false, true));
+        assertEquals(5, WRITING.ordinal());
+        assertEquals(WRITING, MobActivity.fromOrdinal(5));
     }
 }

@@ -14,9 +14,11 @@ public enum MobActivity {
     CONTAINER,
     /** The mob is going through its own gear — a loadout change or an idle bag-check. */
     INVENTORY,
-    /** The mob is reading a book it took off a shelf — an open-book panel (appended: ordinals are the wire value). */
+    /** The mob is at a villager or wandering trader, going through its trades. */
+    TRADING,
+    /** The mob is reading a book — at a chiseled shelf or a lectern (appended: ordinal 4). */
     READING,
-    /** The mob is writing in a book &amp; quill — an open book with a quill (appended, ordinal 4). */
+    /** The mob is writing in a book &amp; quill (appended: ordinal 5). */
     WRITING;
 
     private static final MobActivity[] VALUES = values();
@@ -37,14 +39,34 @@ public enum MobActivity {
      * @param inCombat         the mob has an attack target
      * @param loadoutPulseTicks ticks left on the gear-change pulse
      * @param idleBrowsing     the idle bag-check goal is running
-     * @param reading          the reading goal is in its reading phase
-     * @param writing          the writing goal is in a writing session
      */
     public static MobActivity resolve(boolean enabled, boolean alive, boolean containerOpen,
-                                      boolean inCombat, int loadoutPulseTicks, boolean idleBrowsing,
-                                      boolean reading, boolean writing) {
+                                      boolean inCombat, int loadoutPulseTicks, boolean idleBrowsing) {
+        return resolve(enabled, alive, containerOpen, false, inCombat, loadoutPulseTicks, idleBrowsing);
+    }
+
+    /**
+     * As above, with {@code trading}: the mob is visiting a trader (see {@code ShopWithVillagerGoal}).
+     * A trade screen shows like an open container — ahead of everything but a container itself.
+     */
+    public static MobActivity resolve(boolean enabled, boolean alive, boolean containerOpen,
+                                      boolean trading, boolean inCombat, int loadoutPulseTicks,
+                                      boolean idleBrowsing) {
+        return resolve(enabled, alive, containerOpen, trading, inCombat, loadoutPulseTicks, idleBrowsing,
+            false, false);
+    }
+
+    /**
+     * As above, with the book goals: {@code reading} — the reading goal is in its reading phase;
+     * {@code writing} — the writing goal is in a writing session. Both show only when nothing else
+     * is going on (and never mid-fight); writing wins over reading.
+     */
+    public static MobActivity resolve(boolean enabled, boolean alive, boolean containerOpen,
+                                      boolean trading, boolean inCombat, int loadoutPulseTicks,
+                                      boolean idleBrowsing, boolean reading, boolean writing) {
         if (!enabled || !alive) return NONE;
         if (containerOpen) return CONTAINER;
+        if (trading) return TRADING;
         if (inCombat) return NONE;
         if (loadoutPulseTicks > 0 || idleBrowsing) return INVENTORY;
         if (writing) return WRITING;

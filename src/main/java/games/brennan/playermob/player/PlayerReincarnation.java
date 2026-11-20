@@ -284,6 +284,7 @@ public final class PlayerReincarnation {
             tag.putInt(ReadingTally.TRAIT_TAG, record.reading().chanceScore());
             tag.putInt(ReadingTally.FOCUS_TAG, record.reading().focusScore());
             tag.putInt(WritingTally.TRAIT_TAG, record.writing().score());
+            saveShopping(level, player, tag);
             return tag;
         }
 
@@ -300,12 +301,27 @@ public final class PlayerReincarnation {
         snapshot.putInt(ReadingTally.TRAIT_TAG, record.reading().chanceScore());
         snapshot.putInt(ReadingTally.FOCUS_TAG, record.reading().focusScore());
         snapshot.putInt(WritingTally.TRAIT_TAG, record.writing().score());
+        // …and the shopping score, from its own tally (kept apart from the conduct record).
+        saveShopping(level, player, snapshot);
         // A spawn egg's ENTITY_DATA must name its entity type, or ItemStack encoding
         // throws "Missing id for entity" the moment the egg is saved in an inventory.
         snapshot.putString("id", PlayerMobRegistry.PLAYER_MOB_ID.toString());
 
         ghost.discard();
         return snapshot;
+    }
+
+    /**
+     * Write the life's {@code Shopping} score (0–10, see {@link ShoppingTally}) and its
+     * {@code ShoppingSeconds}. The score is always written, so a life that never traded makes an echo
+     * with 0 rather than one that rolls a random score.
+     */
+    private static void saveShopping(ServerLevel level, ServerPlayer player, CompoundTag snapshot) {
+        ShoppingTally tally = PlayerLifeStore.get(level).shopping(player.getUUID());
+        snapshot.putInt(PlayerMobEntity.TAG_SHOPPING, tally.score());
+        // How long they kept a trading screen open, on average — 0 when they never opened one,
+        // which the echo reads as "unknown" and rolls its own.
+        snapshot.putInt(PlayerMobEntity.TAG_SHOPPING_SECONDS, (int) Math.round(tally.averageVisitSeconds()));
     }
 
     /**

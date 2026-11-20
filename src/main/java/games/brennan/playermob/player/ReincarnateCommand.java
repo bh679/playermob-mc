@@ -1568,6 +1568,9 @@ public final class ReincarnateCommand {
         source.sendSuccess(() -> Component.literal(reading), false);
         String writing = "Writing — " + tally.writing().breakdown();
         source.sendSuccess(() -> Component.literal(writing), false);
+        String shopping = "Shopping — "
+            + PlayerLifeStore.get(source.getLevel()).shopping(idOf(profile)).breakdown();
+        source.sendSuccess(() -> Component.literal(shopping), false);
         return 1;
     }
 

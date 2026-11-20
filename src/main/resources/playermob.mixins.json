@@ -23,7 +23,11 @@
     "ServerGamePacketReflexMixin",
     "PlayerJumpReflexMixin",
     "ServerPlayerTickReflexMixin",
-    "WorldGenRegionMixin"
+    "WorldGenRegionMixin",
+    "AbstractVillagerTradeInvoker",
+    "VillagerTradeShoppingMixin",
+    "ServerPlayerTickShoppingMixin",
+    "VillagerTradingSessionMixin"
   ],
   "client": [],
   "server": [],

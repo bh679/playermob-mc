@@ -1388,8 +1388,30 @@
       "released_at": "2026-11-18T05:44:58Z"
     },
     {
-      "id": "echo-reading-writing",
+      "id": "echo-shopping-stat",
       "version": "0.127.0",
+      "type": "feat",
+      "title": "Echoes go shopping",
+      "summary": "Your echo now shops the way you did. Of the villagers with a job (and wandering traders) you came across in a life, the share you actually traded with becomes your echo's Shopping score, and how long you kept trading screens open becomes how long it lingers. An echo stops at about that share of the traders it walks past, holds up a little trading screen while it sells the junk it has picked up for emeralds, and, once it is keen enough, buys armour, weapons and tools that beat what it is carrying and puts them on. It only ever uses the villager's real offers and stock, and never while it is fighting.",
+      "highlights": [
+        "New Shopping score (0-10) carried from your life to your echo: the share of villagers you met that you traded with",
+        "Late in a long run, walking past villagers counts for less, so marathon runs aren't punished for trading less",
+        "Echoes stop at about that share of the traders they pass, and notice traders from further away the keener they are",
+        "Echoes linger at a trader about as long as you kept trading screens open, holding up a trading screen of their own",
+        "Echoes sell junk to villagers for emeralds; keen shoppers also buy and wear better gear",
+        "Trades use the villager's real prices and stock, and level the villager up like a player trade would",
+        "Wild PlayerMobs and older echoes get a random Shopping score and visit length",
+        "PlayerMobs no longer hoard string as a building block; echoes sell it to fletchers instead"
+      ],
+      "pr": 263,
+      "date": "2026-11-19",
+      "released": true,
+      "released_in": "v0.127.0",
+      "released_at": "2026-11-20T01:34:02Z"
+    },
+    {
+      "id": "echo-reading-writing",
+      "version": "0.128.0",
       "type": "feat",
       "title": "Echoes read and write like you did",
       "summary": "Your echo now picks up your habits with books. Reading books (from your hand or a lectern) and writing in a book & quill shape how often your echo stops at a chiseled bookshelf or lectern to read, how long it stays with a book, and whether it carries a book & quill around to write in. When it finishes a book it drops it and the book burns away.",
@@ -1398,7 +1420,7 @@
         "Long reads give a patient echo; flicking books open and shut gives one that skims",
         "Writing and signing books makes a writer: it takes a book & quill from a chiseled bookshelf and stops now and then to write, sometimes signing it",
         "A bookish echo never walks past an open lectern: it stops and reads it there, and never takes the lectern's book",
-    "It reads from chiseled bookshelves and lecterns; even the most bookish echo walks past half the chiseled bookshelves, and it never reads in a fight"
+        "It reads from chiseled bookshelves and lecterns; even the most bookish echo walks past half the chiseled bookshelves, and it never reads in a fight"
       ],
       "pr": 264,
       "date": "2026-11-20",
