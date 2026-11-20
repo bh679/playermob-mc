@@ -7,7 +7,8 @@ package games.brennan.playermob.entity;
  *
  * <ul>
  *   <li><b>Reading</b> and <b>Writing</b> are chances, not timers: each shelf a mob walks past gets
- *       one roll at {@link #passChance} — 0% at trait 0, {@link #MAX_PASS_CHANCE} at 10. A mob
+ *       one roll at {@link #passChance} — 0% at trait 0, {@link #MAX_PASS_CHANCE} at 10 — except a
+ *       lectern, read in place at {@link #lecternChance} (up to 100%). A mob
  *       carrying a book &amp; quill rolls the same Writing chance every {@link #WRITE_CHECK_TICKS}
  *       while at rest to stop and write in it.</li>
  *   <li><b>Reading focus</b> sets how long a read or a writing session lasts ({@link #readTicks}).</li>
@@ -41,6 +42,15 @@ public final class ReadingPolicy {
     public static double passChance(int trait) {
         int clamped = Math.max(DispositionTraits.MIN, Math.min(DispositionTraits.MAX, trait));
         return MAX_PASS_CHANCE * clamped / DispositionTraits.MAX;
+    }
+
+    /**
+     * The chance a mob stops to read at a lectern it is walking past: linear from 0 at Reading 0 to
+     * certain (100%) at 10 — a lectern holds a book already open, so a bookish mob never walks by.
+     */
+    public static double lecternChance(int reading) {
+        int clamped = Math.max(DispositionTraits.MIN, Math.min(DispositionTraits.MAX, reading));
+        return (double) clamped / DispositionTraits.MAX;
     }
 
     /**

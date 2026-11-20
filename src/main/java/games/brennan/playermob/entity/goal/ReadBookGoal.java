@@ -29,7 +29,8 @@ import java.util.List;
  *
  * <p><b>Chance, not a timer.</b> Each shelf the mob passes (within
  * {@value BookGoalSupport#PASS_RADIUS} blocks, in sight) gets one roll per pass, at
- * {@link ReadingPolicy#passChance} — from 0% at Reading 0 up to 50% at Reading 10. Its Reading-focus
+ * {@link ReadingPolicy#passChance} — from 0% at Reading 0 up to 50% at Reading 10; a lectern, already
+ * open, invites more: {@link ReadingPolicy#lecternChance}, up to 100%. Its Reading-focus
  * trait sets how long it reads ({@link ReadingPolicy#readTicks}), and its {@link ReactionChannel#ITEMS}
  * reaction speed how quickly it reaches for and drops the book.</p>
  *
@@ -38,13 +39,15 @@ import java.util.List;
  * lectern holding a book. A lectern whose book hasn't been chosen yet (Dungeon Train's narrative
  * lectern before a player first opens it) is skipped, so a mob never advances a player's story.</p>
  *
- * <p><b>What it holds.</b> See {@link ReadingHands}: a plain shelf or a lectern lends a copy (the
- * lectern keeps its own); a chiseled shelf gives up its real book. A real book is only taken when the
+ * <p><b>What it holds.</b> See {@link ReadingHands}: a plain shelf lends a copy; a chiseled shelf
+ * gives up its real book. A <b>lectern's book is never taken</b>: the mob stands at the lectern and
+ * reads it there, empty-handed, and simply steps away when it's done. A real book is only taken when the
  * {@code mobGriefing} rule allows and the backpack has room to stow it should the mob die or be
  * saved mid-read; otherwise the mob reads a copy.</p>
  *
  * <p><b>When it's done</b> it drops the book and the book burns away ({@link BookBurner}) — the way a
- * player's book does in Dungeon Train — so a chiseled shelf it read from is one book lighter. A read
+ * player's book does in Dungeon Train — so a chiseled shelf it read from is one book lighter (a
+ * lectern read leaves nothing to drop). A read
  * cut short is different: a copy simply vanishes and a real book falls to the floor intact.</p>
  *
  * <p><b>Never mid-fight.</b> It won't start with a target, while hurt, fleeing, digging, crossing a
@@ -118,13 +121,16 @@ public final class ReadBookGoal extends Goal implements DescribableGoal {
             scanCooldown = THREAT_RETRY_TICKS;
             return false;
         }
-        // One roll per shelf passed; the first that comes up is the one it reads.
-        double chance = ReadingPolicy.passChance(reading);
+        // One roll per shelf passed; the first that comes up is the one it reads. A lectern is
+        // the most inviting — it's already open — so it gets its own, higher odds.
         for (BlockPos pos : shelves) {
-            if (mob.getRandom().nextDouble() < chance) {
+            Kind k = kindOf(mob.level(), pos);
+            double chance = k == Kind.LECTERN
+                ? ReadingPolicy.lecternChance(reading) : ReadingPolicy.passChance(reading);
+            if (k != null && mob.getRandom().nextDouble() < chance) {
                 shelf = pos;
-                kind = kindOf(mob.level(), pos);
-                return kind != null;
+                kind = k;
+                return true;
             }
         }
         return false;
@@ -136,8 +142,14 @@ public final class ReadBookGoal extends Goal implements DescribableGoal {
         if (phase == Phase.WALK && (phaseTicks > PATH_TIMEOUT_TICKS || !TrainConfinement.allowsTarget(mob, shelf))) {
             return false;
         }
+        if (phase.ordinal() < Phase.READ.ordinal()) return true;
+        // At a lectern it reads in place: the read lasts while the book is still there and it is.
+        if (kind == Kind.LECTERN) {
+            return kindOf(mob.level(), shelf) == Kind.LECTERN
+                && Vec3.atCenterOf(shelf).distanceToSqr(mob.position()) < REACH_DISTANCE_SQR * 1.5;
+        }
         // Once the book is in hand, anything taking it away ends the read.
-        return phase.ordinal() < Phase.READ.ordinal() || mob.readingHands().stillHeld(mob);
+        return mob.readingHands().stillHeld(mob);
     }
 
     @Override
@@ -195,6 +207,17 @@ public final class ReadBookGoal extends Goal implements DescribableGoal {
     private void tickTake() {
         lookAtShelf();
         if (phaseTicks < mob.reactTicks(ReactionChannel.ITEMS, HANDLE_PAUSE_TICKS)) return;
+        if (kind == Kind.LECTERN) {
+            // A lectern's book is never taken: the mob reads it where it lies.
+            if (kindOf(mob.level(), shelf) != Kind.LECTERN) {
+                phase = Phase.DONE;
+                return;
+            }
+            mob.setReadingBook(true);
+            readTicks = ReadingPolicy.readTicks(mob.readingFocusTrait(), mob.getRandom().nextDouble());
+            enter(Phase.READ);
+            return;
+        }
         ItemStack book = takeBook();
         if (book.isEmpty()) {
             phase = Phase.DONE; // the shelf emptied or changed on the way — nothing to read
@@ -208,7 +231,12 @@ public final class ReadBookGoal extends Goal implements DescribableGoal {
     }
 
     private void tickRead() {
-        BookGoalSupport.lookAtHeldBook(mob);
+        if (kind == Kind.LECTERN) {
+            // Eyes on the open book on the lectern's sloped top.
+            mob.getLookControl().setLookAt(shelf.getX() + 0.5, shelf.getY() + 0.9, shelf.getZ() + 0.5);
+        } else {
+            BookGoalSupport.lookAtHeldBook(mob);
+        }
         if (phaseTicks >= readTicks) {
             mob.setReadingBook(false);
             enter(Phase.RETURN);
@@ -218,6 +246,10 @@ public final class ReadBookGoal extends Goal implements DescribableGoal {
     /** Done with the book: drop it, and it burns away — the way a player's book does. */
     private void tickReturn() {
         if (phaseTicks < mob.reactTicks(ReactionChannel.ITEMS, HANDLE_PAUSE_TICKS)) return;
+        if (kind == Kind.LECTERN) {
+            phase = Phase.DONE; // nothing in hand: it just steps away from the lectern
+            return;
+        }
         mob.burnFinishedBook(mob.readingHands().finish(mob));
         mob.swing(InteractionHand.OFF_HAND);
         phase = Phase.DONE;
@@ -244,7 +276,7 @@ public final class ReadBookGoal extends Goal implements DescribableGoal {
             case PLAIN:
                 return new ItemStack(Items.BOOK);
             case LECTERN:
-                return ((LecternBlockEntity) be).getBook().copyWithCount(1);
+                return ItemStack.EMPTY; // never taken — a lectern is read in place (see tickTake)
             case CHISELED:
             default:
                 ChiseledBookShelfBlockEntity chiseled = (ChiseledBookShelfBlockEntity) be;

@@ -24,6 +24,18 @@ class ReadingPolicyTest {
     }
 
     @Test
+    void lecternChanceRunsFromZeroToCertain() {
+        assertEquals(0.0, ReadingPolicy.lecternChance(0), 1e-9);
+        assertEquals(0.5, ReadingPolicy.lecternChance(5), 1e-9);
+        assertEquals(1.0, ReadingPolicy.lecternChance(10), 1e-9);
+        assertEquals(1.0, ReadingPolicy.lecternChance(42), 1e-9);
+        assertEquals(0.0, ReadingPolicy.lecternChance(-1), 1e-9);
+        for (int t = 0; t <= 10; t++) {
+            assertTrue(ReadingPolicy.lecternChance(t) >= ReadingPolicy.passChance(t));
+        }
+    }
+
+    @Test
     void signingIsAnOccasionalOutcome() {
         assertTrue(ReadingPolicy.SIGN_CHANCE > 0 && ReadingPolicy.SIGN_CHANCE < 0.5);
     }
