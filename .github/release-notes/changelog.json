@@ -1420,7 +1420,8 @@
         "Long reads give a patient echo; flicking books open and shut gives one that skims",
         "Writing and signing books makes a writer: it takes a book & quill from a chiseled bookshelf and stops now and then to write, sometimes signing it",
         "A bookish echo never walks past an open lectern: it stops and reads it there, and never takes the lectern's book",
-        "It reads from chiseled bookshelves and lecterns; even the most bookish echo walks past half the chiseled bookshelves, and it never reads in a fight"
+        "It reads from chiseled bookshelves and lecterns; even the most bookish echo walks past half the chiseled bookshelves, and it never reads in a fight",
+        "With What Are They Up To installed, a reading or writing echo shows its book panel, just like a player with a book open"
       ],
       "pr": 264,
       "date": "2026-11-20",
