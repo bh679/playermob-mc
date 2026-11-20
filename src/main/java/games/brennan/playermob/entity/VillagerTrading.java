@@ -11,6 +11,7 @@ import net.minecraft.world.entity.npc.AbstractVillager;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.trading.MerchantOffer;
 
+import java.util.List;
 import java.util.function.Predicate;
 
 /**
@@ -32,7 +33,7 @@ public final class VillagerTrading {
     private VillagerTrading() {}
 
     /** What one trade did. */
-    public enum Kind { SELL, BUY }
+    public enum Kind { SELL, BUY, GIFT }
 
     /** A completed trade: what kind, and the item the mob now holds from it. */
     public record Result(Kind kind, ItemStack item) {}
@@ -72,15 +73,53 @@ public final class VillagerTrading {
 
         MerchantOffer offer = deal.offer();
         ItemStack bought = settle(mob.getInventory(), offer, deal.payment());
-        ((AbstractVillagerTradeInvoker) merchant).playermob$rewardTradeXp(offer);
-        merchant.playSound(merchant.getNotifyTradeSound(), 1.0F, 1.0F);
-        merchant.getLookControl().setLookAt(mob);
+        rewardMerchant(mob, merchant, offer);
 
         if (deal.kind() == Kind.SELL) {
             ItemStack leftover = EquipmentEvaluator.addToContainer(mob.getInventory(), bought);
             if (!leftover.isEmpty()) mob.dropAtLocation(leftover);
         }
         return new Result(deal.kind(), bought);
+    }
+
+    /**
+     * Buy a gift: the best gear on offer (highest {@link EquipmentEvaluator#score}) that
+     * {@link GiftShopping#upgrades} what its recipient owns ({@code owned}) and that the mob can pay
+     * for — emeralds and junk, never gear. The gift goes into the mob's backpack (or drops at its
+     * feet if full) for the caller to deliver. {@code null} when nothing on offer is worth buying.
+     */
+    public static Result tradeGift(PlayerMobEntity mob, AbstractVillager merchant, List<ItemStack> owned) {
+        if (!canTradeWith(merchant)) return null;
+        SimpleContainer pack = mob.getInventory();
+        boolean ownsRanged = mob.ownsRangedWeapon();
+        MerchantOffer best = null;
+        Payment bestPay = null;
+        double bestScore = Double.NEGATIVE_INFINITY;
+        for (MerchantOffer offer : merchant.getOffers()) {
+            ItemStack result = offer.getResult();
+            if (offer.isOutOfStock() || !GiftShopping.upgrades(result, owned)) continue;
+            double score = EquipmentEvaluator.score(result);
+            if (score <= bestScore) continue;
+            Payment pay = payment(pack, offer, true, ownsRanged);
+            if (pay != null) {
+                best = offer;
+                bestPay = pay;
+                bestScore = score;
+            }
+        }
+        if (best == null) return null;
+        ItemStack gift = settle(pack, best, bestPay);
+        rewardMerchant(mob, merchant, best);
+        ItemStack leftover = EquipmentEvaluator.addToContainer(pack, gift.copy());
+        if (!leftover.isEmpty()) mob.dropAtLocation(leftover);
+        return new Result(Kind.GIFT, gift);
+    }
+
+    /** The villager's side of any echo trade: its XP (and level-up), its "yes", its glance. */
+    private static void rewardMerchant(PlayerMobEntity mob, AbstractVillager merchant, MerchantOffer offer) {
+        ((AbstractVillagerTradeInvoker) merchant).playermob$rewardTradeXp(offer);
+        merchant.playSound(merchant.getNotifyTradeSound(), 1.0F, 1.0F);
+        merchant.getLookControl().setLookAt(mob);
     }
 
     /**
