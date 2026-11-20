@@ -64,6 +64,17 @@ class ReadingPolicyTest {
     }
 
     @Test
+    void theShortestSessionIsHalfASecond() {
+        int shortest = Integer.MAX_VALUE;
+        for (int focus = 0; focus <= 10; focus++) {
+            for (double roll : new double[] {0.0, 0.5, 1.0}) {
+                shortest = Math.min(shortest, ReadingPolicy.readTicks(focus, roll));
+            }
+        }
+        assertEquals(10, shortest, "focus 0, shortest roll: 0.5 s");
+    }
+
+    @Test
     void chanceSpreadsAReadByAQuarter() {
         int mean = ReadingPolicy.readTicks(10, 0.5);
         assertEquals(Math.round(mean * 0.75), ReadingPolicy.readTicks(10, 0.0));

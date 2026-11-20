@@ -26,10 +26,10 @@ public final class ReadingPolicy {
     public static final double SIGN_CHANCE = 0.25;
 
     /**
-     * Mean session at Reading focus 0 (2 s — a flick through) and at focus 10 (16 s). With the
-     * ±{@link #READ_SPREAD} chance, the longest any read or writing session runs is 20 s.
+     * Mean session at Reading focus 0 (0.65 s — a glance) and at focus 10 (16 s). With the
+     * ±{@link #READ_SPREAD} chance, sessions run from 0.5 s at the shortest to 20 s at the longest.
      */
-    public static final int MIN_READ_TICKS = 40;
+    public static final int MIN_READ_TICKS = 13;
     public static final int MAX_READ_TICKS = 320;
     /** How far chance stretches or shortens one session around its mean (±25%). */
     public static final double READ_SPREAD = 0.25;
