@@ -465,6 +465,42 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     /** Server: the idle bag-check goal is running — see {@link #setIdleBrowsing}. */
     private boolean idleBrowsing;
 
+    /**
+     * The Reading trait (0–10): how bookish this mob is — the chance it pulls a book off a shelf
+     * and reads it ({@link games.brennan.playermob.entity.goal.ReadBookGoal}). An echo carries its
+     * player's score ({@link games.brennan.playermob.player.ReadingTally}); any other mob rolls it at
+     * spawn. Server-only, saved under {@link games.brennan.playermob.player.ReadingTally#TRAIT_TAG}.
+     */
+    private int reading = DispositionTraits.DEFAULT;
+    /** Whether {@link #reading} was set deliberately (save, snapshot, egg) — the spawn roll skips it. */
+    private boolean readingExplicit;
+    /**
+     * The Reading-focus trait (0–10): how long this mob stays with a book once it has one open. An
+     * echo carries its player's score; any other mob rolls it. Saved under
+     * {@link games.brennan.playermob.player.ReadingTally#FOCUS_TAG}.
+     */
+    private int readingFocus = DispositionTraits.DEFAULT;
+    private boolean readingFocusExplicit;
+    /**
+     * The Writing trait (0–10): how likely this mob is to pick up a book &amp; quill it passes, and to
+     * stop and write in one it carries
+     * ({@link games.brennan.playermob.entity.goal.WriteBookGoal}). An echo carries its player's
+     * score ({@link games.brennan.playermob.player.WritingTally}); any other mob rolls it. Saved
+     * under {@link games.brennan.playermob.player.WritingTally#TRAIT_TAG}.
+     */
+    private int writing = DispositionTraits.DEFAULT;
+    private boolean writingExplicit;
+    /** Server: the writing goal is in a writing session — shows {@link MobActivity#WRITING}. */
+    private boolean writingBook;
+    /** Server: the reading goal is in its reading phase — shows {@link MobActivity#READING}. */
+    private boolean readingBook;
+    /** Server: the book in hand while reading, and the offhand item set aside for it. */
+    private final ReadingHands readingHands = new ReadingHands();
+    /** Server: books this mob finished reading, burning where it dropped them. */
+    private final BookBurner bookBurner = new BookBurner();
+    /** Server: players with this mob's inventory menu open — reading waits until it's closed. */
+    private int menuViewers;
+
     // Client: eased 0–1 weight of the activity pose, and the last activity that was showing (so
     // the panel can fade out with the right face after the synced state has dropped to NONE).
     private float activityBlend;
@@ -1077,6 +1113,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // NOT here — it runs as a target goal so the priority-2 attack goal does
         // the killing (see below).
         this.goalSelector.addGoal(6, new HarvestCropsGoal(this, /* speed */ 0.9, /* radius */ 8));
+        // A bookish mob (Reading trait) now and then pulls a book off a nearby shelf and reads it.
+        // Above the train march (7) so a reader pauses to read; below every real objective.
+        this.goalSelector.addGoal(6, new games.brennan.playermob.entity.goal.ReadBookGoal(this, /* speed */ 0.9));
+        // A writer (Writing trait) picks up a book & quill it passes and stops now and then to write.
+        this.goalSelector.addGoal(6, new games.brennan.playermob.entity.goal.WriteBookGoal(this, /* speed */ 0.9));
         // On a Dungeon Train, once the current carriage room is clear (combat 2,
         // raid/collect 3, harvest 6 all preempt this), march to the next room.
         // No-op off a train (the seam reports "not confined"). Below harvest so
@@ -1244,6 +1285,98 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         return activityBlendO + (activityBlend - activityBlendO) * partialTick;
     }
 
+    // ---- Reading ------------------------------------------------------------
+
+    /** The Reading trait, 0–10. */
+    public int readingTrait() {
+        return reading;
+    }
+
+    /** Pin the Reading trait (clamped 0–10); the spawn roll then leaves it alone. */
+    public void setReadingTrait(int value) {
+        this.reading = Math.max(DispositionTraits.MIN, Math.min(DispositionTraits.MAX, value));
+        this.readingExplicit = true;
+    }
+
+    /** The Reading-focus trait, 0–10 — how long a read lasts. */
+    public int readingFocusTrait() {
+        return readingFocus;
+    }
+
+    /** Pin the Reading-focus trait (clamped 0–10); the spawn roll then leaves it alone. */
+    public void setReadingFocusTrait(int value) {
+        this.readingFocus = Math.max(DispositionTraits.MIN, Math.min(DispositionTraits.MAX, value));
+        this.readingFocusExplicit = true;
+    }
+
+    /** The Writing trait, 0–10. */
+    public int writingTrait() {
+        return writing;
+    }
+
+    /** Pin the Writing trait (clamped 0–10); the spawn roll then leaves it alone. */
+    public void setWritingTrait(int value) {
+        this.writing = Math.max(DispositionTraits.MIN, Math.min(DispositionTraits.MAX, value));
+        this.writingExplicit = true;
+    }
+
+    /** Server: flag the writing pose on/off — called by the writing goal. */
+    public void setWritingBook(boolean writing) {
+        this.writingBook = writing;
+        refreshActivity();
+    }
+
+    /** Server: the held book while reading — see {@link ReadingHands}. */
+    public ReadingHands readingHands() {
+        return readingHands;
+    }
+
+    /**
+     * Server: drop a book this mob has finished reading, alight — it burns away like a player's
+     * book does in Dungeon Train (see {@link BookBurner}).
+     */
+    public void burnFinishedBook(ItemStack book) {
+        bookBurner.dropBurning(this, book);
+    }
+
+    /** Server: flag the reading pose on/off — called by the reading goal. */
+    public void setReadingBook(boolean reading) {
+        this.readingBook = reading;
+        refreshActivity();
+    }
+
+    /**
+     * Server: end any read in progress on the spot — the set-aside offhand item comes back, a prop
+     * book vanishes and a real one goes to the backpack. Called on death and when a player opens
+     * the mob's inventory, so a held book never leaks or gets lost. (A save doesn't end the read —
+     * see {@link ReadingHands#presentForSave}.)
+     */
+    public void settleReading() {
+        if (level().isClientSide()) return;
+        readingHands.settle(this);
+        if (readingBook) {
+            setReadingBook(false);
+        }
+        if (writingBook) {
+            setWritingBook(false);
+        }
+    }
+
+    /** Server: a player opened ({@code true}) or closed this mob's inventory menu. */
+    public void onMenuViewer(boolean opened) {
+        if (opened) {
+            menuViewers++;
+            settleReading();
+        } else {
+            menuViewers = Math.max(0, menuViewers - 1);
+        }
+    }
+
+    /** Server: whether a player has this mob's inventory menu open. */
+    public boolean hasMenuViewers() {
+        return menuViewers > 0;
+    }
+
     /** Server: flag the idle bag-check on/off — called by {@link IdleInventoryGoal}. */
     public void setIdleBrowsing(boolean browsing) {
         this.idleBrowsing = browsing;
@@ -1263,7 +1396,8 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private void refreshActivity() {
         if (level().isClientSide()) return;
         MobActivity next = MobActivity.resolve(PlayerMobConfig.activityAnimations(), isAlive(),
-            openContainerPos != null, trading, getTarget() != null, loadoutPulseTicks, idleBrowsing);
+            openContainerPos != null, trading, getTarget() != null, loadoutPulseTicks, idleBrowsing,
+            readingBook, writingBook);
         byte wire = (byte) next.ordinal();
         if (this.entityData.get(DATA_ACTIVITY) != wire) {
             this.entityData.set(DATA_ACTIVITY, wire);
@@ -1400,6 +1534,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
 
         if (loadoutPulseTicks > 0) {
             loadoutPulseTicks--;
+        }
+        if (!level().isClientSide()) {
+            bookBurner.tick();
         }
         refreshActivity();
 
@@ -2000,6 +2137,16 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // Roll any trait not pinned by a spawn egg's entity_data or /summon NBT
         // (an archetype egg / partial summon leaves the rest to chance).
         traits.rollIfUnset(random);
+        if (!readingExplicit) {
+            // A wild mob, or an echo from before Reading was recorded: any level of bookishness.
+            this.reading = random.nextInt(DispositionTraits.MAX + 1);
+        }
+        if (!readingFocusExplicit) {
+            this.readingFocus = random.nextInt(DispositionTraits.MAX + 1);
+        }
+        if (!writingExplicit) {
+            this.writing = random.nextInt(DispositionTraits.MAX + 1);
+        }
         pushDispositionToClient();
         // Roll the door-closing personality (~50% close behind, ~50% leave open),
         // unless a reincarnation already restored it from the past life's snapshot.
@@ -4400,11 +4547,17 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     //? if >=26 {
     /*@Override
     public void addAdditionalSaveData(net.minecraft.world.level.storage.ValueOutput out) {
-        super.addAdditionalSaveData(out);
-        CompoundTag custom = new CompoundTag();
-        writeCustomTag(custom);
-        out.store(TAG_CUSTOM, CompoundTag.CODEC, custom);
-        writeInventoryToTag(out);
+        // Save the mob as if it weren't mid-read, without interrupting the read (see ReadingHands).
+        Runnable resumeReading = readingHands.presentForSave(this);
+        try {
+            super.addAdditionalSaveData(out);
+            CompoundTag custom = new CompoundTag();
+            writeCustomTag(custom);
+            out.store(TAG_CUSTOM, CompoundTag.CODEC, custom);
+            writeInventoryToTag(out);
+        } finally {
+            resumeReading.run();
+        }
     }
 
     @Override
@@ -4416,15 +4569,21 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     *///?} else {
     @Override
     public void addAdditionalSaveData(CompoundTag tag) {
-        super.addAdditionalSaveData(tag);
-        writeCustomTag(tag);
-        // Inventory persistence — InventoryCarrier helper handles slot encoding.
-        // registryAccess() is a HolderLookup.Provider on Entity in 1.21.1+; the
-        // 1.20.1 overload takes no provider.
-        //? if >=1.21.1 {
-        writeInventoryToTag(tag, this.registryAccess());
-        //?} else {
-        /*writeInventoryToTag(tag);*///?}
+        // Save the mob as if it weren't mid-read, without interrupting the read (see ReadingHands).
+        Runnable resumeReading = readingHands.presentForSave(this);
+        try {
+            super.addAdditionalSaveData(tag);
+            writeCustomTag(tag);
+            // Inventory persistence — InventoryCarrier helper handles slot encoding.
+            // registryAccess() is a HolderLookup.Provider on Entity in 1.21.1+; the
+            // 1.20.1 overload takes no provider.
+            //? if >=1.21.1 {
+            writeInventoryToTag(tag, this.registryAccess());
+            //?} else {
+            /*writeInventoryToTag(tag);*///?}
+        } finally {
+            resumeReading.run();
+        }
     }
 
     @Override
@@ -4475,6 +4634,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     /** Write every PlayerMob custom field to {@code tag}. Version-agnostic (CompoundTag + NbtCompat). */
     private void writeCustomTag(CompoundTag tag) {
         traits.save(tag);
+        tag.putInt(games.brennan.playermob.player.ReadingTally.TRAIT_TAG, this.reading);
+        tag.putInt(games.brennan.playermob.player.ReadingTally.FOCUS_TAG, this.readingFocus);
+        tag.putInt(games.brennan.playermob.player.WritingTally.TRAIT_TAG, this.writing);
         if (shopping != SHOPPING_UNSET) {
             tag.putInt(TAG_SHOPPING, shopping);
         }
@@ -4560,6 +4722,20 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private void readCustomTag(CompoundTag tag) {
         // Traits + feelings; missing keys keep defaults. Legacy *Personality keys ignored.
         traits.load(tag);
+        // Reading — missing on saves from before it existed: keep the value (rolled at spawn, or
+        // the neutral default for a mob loaded from an old save).
+        if (tag.contains(games.brennan.playermob.player.ReadingTally.TRAIT_TAG)) {
+            setReadingTrait(NbtCompat.getIntOr(tag, games.brennan.playermob.player.ReadingTally.TRAIT_TAG,
+                DispositionTraits.DEFAULT));
+        }
+        if (tag.contains(games.brennan.playermob.player.WritingTally.TRAIT_TAG)) {
+            setWritingTrait(NbtCompat.getIntOr(tag, games.brennan.playermob.player.WritingTally.TRAIT_TAG,
+                DispositionTraits.DEFAULT));
+        }
+        if (tag.contains(games.brennan.playermob.player.ReadingTally.FOCUS_TAG)) {
+            setReadingFocusTrait(NbtCompat.getIntOr(tag, games.brennan.playermob.player.ReadingTally.FOCUS_TAG,
+                DispositionTraits.DEFAULT));
+        }
         feelings.load(tag);
         // Missing (wild mobs, pre-shopping snapshots and saves) ⇒ keep what it has; unset rolls on use.
         if (NbtCompat.contains(tag, TAG_SHOPPING)) {
@@ -4892,6 +5068,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     @Override
     public void die(DamageSource source) {
         closeOpenedContainer();
+        settleReading(); // before any drops: a prop book never drops, a real one drops with the backpack
         refreshActivity(); // a dead mob shows nothing — clears a pulse or bag-check too
         // Credit the real player who killed this mob with their lifetime aggression — discounted
         // when this mob was the aggressor (it hunted them, they finished it).

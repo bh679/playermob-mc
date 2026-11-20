@@ -167,6 +167,7 @@ public final class ReflexHooks {
 
     /** The player died: settle open windows into the record before it is snapshotted. */
     public static void onPlayerDeath(ServerPlayer player) {
+        ReadingHooks.onPlayerDeath(player);
         try {
             ReflexTracker t;
             synchronized (ReflexHooks.class) {
@@ -197,6 +198,7 @@ public final class ReflexHooks {
 
     /** One deliberate input from the player (swing, swap, toggle, jump, use, break). */
     public static void onAction(Player actor, ReflexTracker.ActionKind kind) {
+        ReadingHooks.onAction(actor, kind);
         if (!counts(actor)) {
             return;
         }
@@ -217,6 +219,7 @@ public final class ReflexHooks {
         if (tick % 20 != 0) {
             return;
         }
+        ReadingHooks.onSecond(player);
         try {
             ReflexTracker t = tracker(player);
             boolean excluded = player.isFallFlying() || player.getAbilities().flying

@@ -19,6 +19,7 @@
     "LivingDeathReflexMixin",
     "BlockItemPlaceReflexMixin",
     "ProjectileReflexMixin",
+    "ServerGameBookWritingMixin",
     "ServerGamePacketReflexMixin",
     "PlayerJumpReflexMixin",
     "ServerPlayerTickReflexMixin",

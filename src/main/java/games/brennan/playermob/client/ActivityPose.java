@@ -76,4 +76,77 @@ public final class ActivityPose {
     public static float offArmYaw(float blend, float current, boolean rightArm) {
         return lerp(blend, current, rightArm ? -OFF_ARM_INWARD : OFF_ARM_INWARD);
     }
+
+    // ---- Reading (MobActivity.READING) ------------------------------------
+    // Book held low in the off hand in front of the chest, head bowed over it, the main hand
+    // resting on the facing page and lifting now and then to turn it.
+
+    /** Head pitch while reading — bowed over the book, lower than the panel look. */
+    static final float READ_HEAD_PITCH = 0.6F;
+    /** Book arm: pitched forward, just below horizontal, angled in to the chest's centre. */
+    static final float READ_BOOK_ARM_PITCH = -0.95F;
+    static final float READ_BOOK_ARM_INWARD = 0.35F;
+    /** Page arm: lower than the book arm, angled further in so the hand meets the page. */
+    static final float READ_PAGE_ARM_PITCH = -0.8F;
+    static final float READ_PAGE_ARM_INWARD = 0.5F;
+    /** How far the page hand lifts at the top of a page turn. */
+    static final float READ_PAGE_TURN_LIFT = 0.25F;
+    /** Ticks per page: one turn every 3 seconds. */
+    static final float READ_PAGE_TICKS = 60.0F;
+    /** Share of each page cycle spent turning (the rest is still). */
+    static final float READ_TURN_SHARE = 0.2F;
+
+    public static float readHeadPitch(float blend, float current) {
+        return lerp(blend, current, READ_HEAD_PITCH);
+    }
+
+    /** 0 while the hand rests, rising to 1 and back once per page as the page turns. */
+    static float pageTurn(float ageInTicks) {
+        float phase = (ageInTicks % READ_PAGE_TICKS) / READ_PAGE_TICKS;
+        if (phase >= READ_TURN_SHARE) return 0.0F;
+        return (float) Math.sin(Math.PI * phase / READ_TURN_SHARE);
+    }
+
+    public static float readBookArmPitch(float blend, float current) {
+        return lerp(blend, current, READ_BOOK_ARM_PITCH);
+    }
+
+    /** @param rightArm whether the book arm is the model's right arm (flips the inward direction) */
+    public static float readBookArmYaw(float blend, float current, boolean rightArm) {
+        return lerp(blend, current, rightArm ? -READ_BOOK_ARM_INWARD : READ_BOOK_ARM_INWARD);
+    }
+
+    public static float readPageArmPitch(float blend, float current, float ageInTicks) {
+        return lerp(blend, current, READ_PAGE_ARM_PITCH - READ_PAGE_TURN_LIFT * pageTurn(ageInTicks));
+    }
+
+    /** @param rightArm whether the page arm is the model's right arm (flips the inward direction) */
+    public static float readPageArmYaw(float blend, float current, boolean rightArm) {
+        return lerp(blend, current, rightArm ? -READ_PAGE_ARM_INWARD : READ_PAGE_ARM_INWARD);
+    }
+
+    // ---- Writing (MobActivity.WRITING) ------------------------------------
+    // Same book arm and bowed head as reading; the main hand rests on the page and scribbles —
+    // quick small strokes, drifting across the line and back.
+
+    /** Writing-hand pitch: low over the page. */
+    static final float WRITE_ARM_PITCH = -0.85F;
+    /** Amplitude and speed (radians per tick) of the pen strokes. */
+    static final float WRITE_STROKE = 0.05F;
+    static final float WRITE_STROKE_SPEED = 1.3F;
+    /** Writing-hand yaw: angled in to the page, drifting along the line. */
+    static final float WRITE_ARM_INWARD = 0.45F;
+    static final float WRITE_LINE_DRIFT = 0.12F;
+    static final float WRITE_LINE_SPEED = 0.15F;
+
+    public static float writeArmPitch(float blend, float current, float ageInTicks) {
+        return lerp(blend, current, WRITE_ARM_PITCH + WRITE_STROKE * (float) Math.sin(ageInTicks * WRITE_STROKE_SPEED));
+    }
+
+    /** @param rightArm whether the writing arm is the model's right arm (flips the inward direction) */
+    public static float writeArmYaw(float blend, float current, float ageInTicks, boolean rightArm) {
+        float drift = WRITE_LINE_DRIFT * (float) Math.sin(ageInTicks * WRITE_LINE_SPEED);
+        float target = rightArm ? -WRITE_ARM_INWARD + drift : WRITE_ARM_INWARD + drift;
+        return lerp(blend, current, target);
+    }
 }

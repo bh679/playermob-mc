@@ -281,6 +281,9 @@ public final class PlayerReincarnation {
             // pure defensiveness. Fall back to a traits-only snapshot.
             CompoundTag tag = new CompoundTag();
             record.toTraits().save(tag);
+            tag.putInt(ReadingTally.TRAIT_TAG, record.reading().chanceScore());
+            tag.putInt(ReadingTally.FOCUS_TAG, record.reading().focusScore());
+            tag.putInt(WritingTally.TRAIT_TAG, record.writing().score());
             saveShopping(level, player, tag);
             return tag;
         }
@@ -293,6 +296,11 @@ public final class PlayerReincarnation {
         // entity already wrote the trait keys, so this is the single authoritative
         // write of FightFlight/Friendliness/ReactionSpeed.
         record.toTraits().save(snapshot);
+        // The two reading traits ride beside the disposition traits under their own keys (0–10):
+        // how likely the echo is to open a book, and how long it stays with one.
+        snapshot.putInt(ReadingTally.TRAIT_TAG, record.reading().chanceScore());
+        snapshot.putInt(ReadingTally.FOCUS_TAG, record.reading().focusScore());
+        snapshot.putInt(WritingTally.TRAIT_TAG, record.writing().score());
         // …and the shopping score, from its own tally (kept apart from the conduct record).
         saveShopping(level, player, snapshot);
         // A spawn egg's ENTITY_DATA must name its entity type, or ItemStack encoding

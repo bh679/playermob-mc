@@ -1564,6 +1564,10 @@ public final class ReincarnateCommand {
         // windows (the last <=20 s of actions and pace) are not in it until they flush.
         String reflexes = "Reflexes — " + tally.reflexes().breakdown();
         source.sendSuccess(() -> Component.literal(reflexes), false);
+        String reading = "Reading — " + tally.reading().breakdown();
+        source.sendSuccess(() -> Component.literal(reading), false);
+        String writing = "Writing — " + tally.writing().breakdown();
+        source.sendSuccess(() -> Component.literal(writing), false);
         String shopping = "Shopping — "
             + PlayerLifeStore.get(source.getLevel()).shopping(idOf(profile)).breakdown();
         source.sendSuccess(() -> Component.literal(shopping), false);

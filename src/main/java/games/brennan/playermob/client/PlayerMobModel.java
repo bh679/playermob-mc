@@ -55,7 +55,7 @@ import net.minecraft.world.entity.LivingEntity;
     public void setupAnim(AvatarRenderState state) {
         super.setupAnim(state);
         if (state instanceof State mobState && mobState.activityBlend > 0.0F) {
-            applyActivityPose(mobState.activityBlend, state.ageInTicks,
+            applyActivityPose(mobState.shownActivity, mobState.activityBlend, state.ageInTicks,
                 state.mainArm == HumanoidArm.RIGHT);
         }
     }
@@ -79,7 +79,7 @@ public final class PlayerMobModel<T extends LivingEntity> extends PlayerModel<T>
         if (blend <= 0.0F) {
             return;
         }
-        applyActivityPose(blend, ageInTicks, mob.getMainArm() == HumanoidArm.RIGHT);
+        applyActivityPose(mob.getShownActivity(), blend, ageInTicks, mob.getMainArm() == HumanoidArm.RIGHT);
         // Vanilla already copied the overlay parts from the base parts; re-copy what we moved.
         this.hat.copyFrom(this.head);
         this.rightSleeve.copyFrom(this.rightArm);
@@ -87,9 +87,34 @@ public final class PlayerMobModel<T extends LivingEntity> extends PlayerModel<T>
     }
 //?}
 
-    private void applyActivityPose(float blend, float ageInTicks, boolean rightHanded) {
+    private void applyActivityPose(games.brennan.playermob.entity.MobActivity activity, float blend,
+                                   float ageInTicks, boolean rightHanded) {
         ModelPart mainArm = rightHanded ? this.rightArm : this.leftArm;
         ModelPart offArm = rightHanded ? this.leftArm : this.rightArm;
+        if (activity == games.brennan.playermob.entity.MobActivity.WRITING) {
+            // The book &amp; quill is in the off hand; the main hand writes on the page.
+            this.head.xRot = ActivityPose.readHeadPitch(blend, this.head.xRot);
+            this.head.yRot = ActivityPose.headYaw(blend, this.head.yRot);
+            offArm.xRot = ActivityPose.readBookArmPitch(blend, offArm.xRot);
+            offArm.yRot = ActivityPose.readBookArmYaw(blend, offArm.yRot, !rightHanded);
+            offArm.zRot = ActivityPose.lerp(blend, offArm.zRot, 0.0F);
+            mainArm.xRot = ActivityPose.writeArmPitch(blend, mainArm.xRot, ageInTicks);
+            mainArm.yRot = ActivityPose.writeArmYaw(blend, mainArm.yRot, ageInTicks, rightHanded);
+            mainArm.zRot = ActivityPose.lerp(blend, mainArm.zRot, 0.0F);
+            return;
+        }
+        if (activity == games.brennan.playermob.entity.MobActivity.READING) {
+            // The book is in the off hand; the main hand turns its pages.
+            this.head.xRot = ActivityPose.readHeadPitch(blend, this.head.xRot);
+            this.head.yRot = ActivityPose.headYaw(blend, this.head.yRot);
+            offArm.xRot = ActivityPose.readBookArmPitch(blend, offArm.xRot);
+            offArm.yRot = ActivityPose.readBookArmYaw(blend, offArm.yRot, !rightHanded);
+            offArm.zRot = ActivityPose.lerp(blend, offArm.zRot, 0.0F);
+            mainArm.xRot = ActivityPose.readPageArmPitch(blend, mainArm.xRot, ageInTicks);
+            mainArm.yRot = ActivityPose.readPageArmYaw(blend, mainArm.yRot, rightHanded);
+            mainArm.zRot = ActivityPose.lerp(blend, mainArm.zRot, 0.0F);
+            return;
+        }
         this.head.xRot = ActivityPose.headPitch(blend, this.head.xRot);
         this.head.yRot = ActivityPose.headYaw(blend, this.head.yRot);
         mainArm.xRot = ActivityPose.mainArmPitch(blend, mainArm.xRot, ageInTicks);

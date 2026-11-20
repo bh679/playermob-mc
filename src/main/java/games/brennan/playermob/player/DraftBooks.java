@@ -61,23 +61,28 @@ public final class DraftBooks {
 
     /** True for an unsigned book &amp; quill that has writing on at least one page. */
     public static boolean isDraft(ItemStack stack) {
+        return stack.is(Items.WRITABLE_BOOK) && hasWriting(pagesOf(stack));
+    }
+
+    /** The raw text of a book &amp; quill's pages; empty for anything else or a blank book. */
+    public static List<String> pagesOf(ItemStack stack) {
         if (stack.isEmpty() || !stack.is(Items.WRITABLE_BOOK)) {
-            return false;
+            return List.of();
         }
         //? if >=1.21.1 {
         WritableBookContent content = stack.get(DataComponents.WRITABLE_BOOK_CONTENT);
-        return content != null && hasWriting(rawPages(content));
+        return content == null ? List.of() : rawPages(content);
         //?} else {
         /*CompoundTag tag = stack.getTag();
         if (tag == null || !NbtCompat.containsOfType(tag, "pages", Tag.TAG_LIST)) {
-            return false;
+            return List.of();
         }
         ListTag pages = tag.getList("pages", Tag.TAG_STRING);
         List<String> raw = new ArrayList<>(pages.size());
         for (int i = 0; i < pages.size(); i++) {
             raw.add(pages.getString(i));
         }
-        return hasWriting(raw);*/
+        return raw;*/
         //?}
     }
 

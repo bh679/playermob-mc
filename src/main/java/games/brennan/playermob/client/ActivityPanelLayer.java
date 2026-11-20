@@ -31,6 +31,7 @@ import net.minecraft.resources.ResourceLocation;
  * Draws the small floating panel a PlayerMob is "looking at" while it has a container open, is
  * going through its gear, or is trading with a villager — the screen its raised arm is picking
  * through (see {@link ActivityPose}). The trading panel is vanilla's villager trading screen.
+ * Reading and writing have no panel here; WATUT's book panel covers them when installed.
  * A single full-bright textured quad at arm's reach in front of the chest; it rides the body's
  * model space, so it turns with the mob, and scales in and out with the activity blend.
  */
@@ -102,7 +103,10 @@ public final class ActivityPanelLayer
             case CONTAINER -> CONTAINER_TEXTURE;
             case INVENTORY -> INVENTORY_TEXTURE;
             case TRADING -> TRADING_TEXTURE;
-            case NONE -> null;
+            // Reading and writing draw no panel of ours: with WATUT installed, its own book panel
+            // floats over the mob instead (neoforge compat WatutEchoPanels); otherwise the pose and
+            // the book in hand show it.
+            case READING, WRITING, NONE -> null;
         };
     }
 

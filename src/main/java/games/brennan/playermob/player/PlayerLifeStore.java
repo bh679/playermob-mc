@@ -167,6 +167,18 @@ public final class PlayerLifeStore extends SavedData {
         setDirty();
     }
 
+    /** Apply one writing update to a player's live record (see {@link WritingTally}). */
+    public void creditWriting(UUID id, java.util.function.UnaryOperator<WritingTally> update) {
+        current.put(id, current(id).withWriting(update));
+        setDirty();
+    }
+
+    /** Apply one reading update to a player's live record (see {@link ReadingTally}). */
+    public void creditReading(UUID id, java.util.function.UnaryOperator<ReadingTally> update) {
+        current.put(id, current(id).withReading(update));
+        setDirty();
+    }
+
     /** Apply {@code update} to a survival player's live shopping tally (see {@link ShoppingHooks}). */
     public static void recordShopping(ServerPlayer player,
                                       java.util.function.UnaryOperator<ShoppingTally> update) {

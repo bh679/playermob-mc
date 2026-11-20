@@ -1,5 +1,6 @@
 package games.brennan.playermob.mixin;
 
+import games.brennan.playermob.player.ReadingHooks;
 import games.brennan.playermob.player.ReflexHooks;
 import games.brennan.playermob.player.ReflexTracker.ActionKind;
 import net.minecraft.server.level.ServerPlayer;
@@ -28,8 +29,20 @@ public abstract class ServerGamePacketReflexMixin {
         ReflexHooks.onAction(player, ActionKind.SWING);
     }
 
-    @Inject(method = {"handleUseItem", "handleUseItemOn"}, at = @At("RETURN"))
-    private void playermob$countUse(CallbackInfo ci) {
+    /**
+     * A use in the air — the only packet that opens a held book's screen. Counted like any use, then
+     * offered to the Reading signal as a possible book open (after, so the count closes any book that
+     * was already open first).
+     */
+    @Inject(method = "handleUseItem", at = @At("RETURN"))
+    private void playermob$countUseItem(CallbackInfo ci) {
+        ReflexHooks.onAction(player, ActionKind.USE);
+        ReadingHooks.onUseItem(player);
+    }
+
+    /** A use on a block — a chest, a door, a lectern — never opens the book in hand. */
+    @Inject(method = "handleUseItemOn", at = @At("RETURN"))
+    private void playermob$countUseOn(CallbackInfo ci) {
         ReflexHooks.onAction(player, ActionKind.USE);
     }
 
