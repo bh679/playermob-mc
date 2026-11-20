@@ -42,7 +42,8 @@ class ShoppingPolicyTest {
     void visitLengthIsClamped() {
         assertEquals(40, ShoppingPolicy.visitTicks(0));
         assertEquals(200, ShoppingPolicy.visitTicks(10));
-        assertEquals(1200, ShoppingPolicy.visitTicks(600));
+        assertEquals(600, ShoppingPolicy.visitTicks(600));
+        assertEquals(600, ShoppingPolicy.visitTicks(30));
     }
 
     @Test

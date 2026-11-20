@@ -35,7 +35,7 @@ public final class ShoppingPolicy {
 
     /** Shortest and longest visit, in seconds, whatever the player's own habit was. */
     static final int MIN_VISIT_SECONDS = 2;
-    static final int MAX_VISIT_SECONDS = 60;
+    static final int MAX_VISIT_SECONDS = 30;
     /** Range a mob with no recorded visit length rolls from, in seconds. */
     public static final int ROLL_VISIT_MIN_SECONDS = 3;
     public static final int ROLL_VISIT_MAX_SECONDS = 20;
