@@ -11,7 +11,8 @@ import net.minecraft.world.item.ItemStack;
  *
  * <p>Two kinds of book:</p>
  * <ul>
- *   <li>A <b>prop</b> — a plain bookshelf's book, or a copy of a lectern's book. It exists only in
+ *   <li>A <b>prop</b> — a copy of a chiseled shelf's book, read when the mob may not take the real
+ *       one ({@code mobGriefing} off, or no room to stow it). It exists only in
  *       the mob's hand: ending the read deletes it, so reading can never mint items.</li>
  *   <li>A <b>real</b> book taken out of a chiseled bookshelf. Ending the read hands it back to the
  *       caller, which puts it back on the shelf or drops it.</li>

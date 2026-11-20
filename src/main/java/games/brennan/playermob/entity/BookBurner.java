@@ -20,7 +20,7 @@ import java.util.List;
  *
  * <p>The dropped book can never be picked up, and it is genuinely on fire, so if the mob dies or its
  * chunk unloads mid-burn, vanilla fire damage still destroys it a few seconds later: a read can
- * never leave a book behind for anyone to take (a plain bookshelf's book is conjured for the read).</p>
+ * never leave a book behind for anyone to take (a copy read in place of a shelf's book is conjured).</p>
  */
 public final class BookBurner {
 

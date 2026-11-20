@@ -13,7 +13,6 @@ import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.ChiseledBookShelfBlockEntity;
 import net.minecraft.world.level.block.entity.LecternBlockEntity;
@@ -34,13 +33,12 @@ import java.util.List;
  * trait sets how long it reads ({@link ReadingPolicy#readTicks}), and its {@link ReactionChannel#ITEMS}
  * reaction speed how quickly it reaches for and drops the book.</p>
  *
- * <p><b>Shelves.</b> A plain bookshelf (the common case in Dungeon Train's library carriages), a
- * chiseled bookshelf with a book in it (a book &amp; quill there is for {@link WriteBookGoal}), or a
- * lectern holding a book. A lectern whose book hasn't been chosen yet (Dungeon Train's narrative
+ * <p><b>Shelves.</b> Only a chiseled bookshelf with a book in it (a book &amp; quill there is for
+ * {@link WriteBookGoal}), or a lectern holding a book. A plain bookshelf is decoration: there is no
+ * book to take from it. A lectern whose book hasn't been chosen yet (Dungeon Train's narrative
  * lectern before a player first opens it) is skipped, so a mob never advances a player's story.</p>
  *
- * <p><b>What it holds.</b> See {@link ReadingHands}: a plain shelf lends a copy; a chiseled shelf
- * gives up its real book. A <b>lectern's book is never taken</b>: the mob stands at the lectern and
+ * <p><b>What it holds.</b> See {@link ReadingHands}: a chiseled shelf gives up its real book. A <b>lectern's book is never taken</b>: the mob stands at the lectern and
  * reads it there, empty-handed, and simply steps away when it's done. A real book is only taken when the
  * {@code mobGriefing} rule allows and the backpack has room to stow it should the mob die or be
  * saved mid-read; otherwise the mob reads a copy.</p>
@@ -69,7 +67,7 @@ public final class ReadBookGoal extends Goal implements DescribableGoal {
 
     enum Phase { WALK, TAKE, READ, RETURN, DONE }
 
-    enum Kind { PLAIN, CHISELED, LECTERN }
+    enum Kind { CHISELED, LECTERN }
 
     private final PlayerMobEntity mob;
     private final double speed;
@@ -273,8 +271,6 @@ public final class ReadBookGoal extends Goal implements DescribableGoal {
         Kind now = kindOf(level, shelf);
         if (now == null) return ItemStack.EMPTY;
         switch (now) {
-            case PLAIN:
-                return new ItemStack(Items.BOOK);
             case LECTERN:
                 return ItemStack.EMPTY; // never taken — a lectern is read in place (see tickTake)
             case CHISELED:
@@ -299,7 +295,6 @@ public final class ReadBookGoal extends Goal implements DescribableGoal {
 
     /** What kind of shelf {@code pos} is, or {@code null} if it has no book to offer. */
     static Kind kindOf(Level level, BlockPos pos) {
-        if (level.getBlockState(pos).is(Blocks.BOOKSHELF)) return Kind.PLAIN;
         BlockEntity be = level.getBlockEntity(pos);
         if (be instanceof ChiseledBookShelfBlockEntity chiseled) {
             return BookGoalSupport.slotsMatching(chiseled, ReadBookGoal::isReadingBook).isEmpty()
