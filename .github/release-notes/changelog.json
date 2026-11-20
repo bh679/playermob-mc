@@ -1397,7 +1397,8 @@
         "Every book you open makes your echo more likely to stop and read; books you pick up and ditch unread make it less likely",
         "Long reads give a patient echo; flicking books open and shut gives one that skims",
         "Writing and signing books makes a writer: it takes a book & quill from a chiseled bookshelf and stops now and then to write, sometimes signing it",
-        "Even the most bookish echo walks past half the shelves, and it never reads in a fight"
+        "A bookish echo never walks past an open lectern: it stops and reads it there, and never takes the lectern's book",
+    "Even the most bookish echo walks past half the bookshelves, and it never reads in a fight"
       ],
       "pr": 264,
       "date": "2026-11-20",
