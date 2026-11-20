@@ -1392,13 +1392,13 @@
       "version": "0.127.0",
       "type": "feat",
       "title": "Echoes read and write like you did",
-      "summary": "Your echo now picks up your habits with books. Reading books (from your hand or a lectern) and writing in a book & quill shape how often your echo stops at a shelf to read, how long it stays with a book, and whether it carries a book & quill around to write in. When it finishes a book it drops it and the book burns away.",
+      "summary": "Your echo now picks up your habits with books. Reading books (from your hand or a lectern) and writing in a book & quill shape how often your echo stops at a chiseled bookshelf or lectern to read, how long it stays with a book, and whether it carries a book & quill around to write in. When it finishes a book it drops it and the book burns away.",
       "highlights": [
         "Every book you open makes your echo more likely to stop and read; books you pick up and ditch unread make it less likely",
         "Long reads give a patient echo; flicking books open and shut gives one that skims",
         "Writing and signing books makes a writer: it takes a book & quill from a chiseled bookshelf and stops now and then to write, sometimes signing it",
         "A bookish echo never walks past an open lectern: it stops and reads it there, and never takes the lectern's book",
-    "Even the most bookish echo walks past half the bookshelves, and it never reads in a fight"
+    "It reads from chiseled bookshelves and lecterns; even the most bookish echo walks past half the chiseled bookshelves, and it never reads in a fight"
       ],
       "pr": 264,
       "date": "2026-11-20",

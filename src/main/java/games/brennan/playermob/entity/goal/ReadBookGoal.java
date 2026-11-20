@@ -114,12 +114,13 @@ public final class ReadBookGoal extends Goal implements DescribableGoal {
         if (reading <= 0 || --scanCooldown > 0) return false;
         scanCooldown = PASS_SCAN_TICKS;
         if (!BookGoalSupport.isCalm(mob)) return false;
-        List<BlockPos> shelves = BookGoalSupport.newlyPassed(mob, passed, (level, pos) -> kindOf(level, pos) != null);
-        if (shelves.isEmpty()) return false;
+        // Threats first: a shelf seen while threatened would be spent without a roll.
         if (BookGoalSupport.isThreatened(mob)) {
             scanCooldown = THREAT_RETRY_TICKS;
             return false;
         }
+        List<BlockPos> shelves = BookGoalSupport.newlyPassed(mob, passed, (level, pos) -> kindOf(level, pos) != null);
+        if (shelves.isEmpty()) return false;
         // One roll per shelf passed; the first that comes up is the one it reads. A lectern is
         // the most inviting — it's already open — so it gets its own, higher odds.
         for (BlockPos pos : shelves) {

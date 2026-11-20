@@ -112,12 +112,13 @@ public final class WriteBookGoal extends Goal implements DescribableGoal {
                 || !mob.getInventory().canAddItem(new ItemStack(Items.WRITABLE_BOOK))) {
             return false;
         }
-        List<BlockPos> shelves = BookGoalSupport.newlyPassed(mob, passed, WriteBookGoal::holdsQuill);
-        if (shelves.isEmpty()) return false;
+        // Threats first: a shelf seen while threatened would be spent without a roll.
         if (BookGoalSupport.isThreatened(mob)) {
             scanCooldown = THREAT_RETRY_TICKS;
             return false;
         }
+        List<BlockPos> shelves = BookGoalSupport.newlyPassed(mob, passed, WriteBookGoal::holdsQuill);
+        if (shelves.isEmpty()) return false;
         for (BlockPos pos : shelves) {
             if (mob.getRandom().nextDouble() < chance) {
                 shelf = pos;
