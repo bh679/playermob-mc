@@ -14,7 +14,7 @@ public enum MobActivity {
     CONTAINER,
     /** The mob is going through its own gear — a loadout change or an idle bag-check. */
     INVENTORY,
-    /** The mob is reading a book it took off a shelf (appended — ordinals are the wire value). */
+    /** The mob is reading a book it took off a shelf — an open-book panel (appended: ordinals are the wire value). */
     READING;
 
     private static final MobActivity[] VALUES = values();
