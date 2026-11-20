@@ -2290,6 +2290,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         return shoppingSeconds;
     }
 
+    /** Server: true while visiting a trader (see {@link ShopWithVillagerGoal}). */
+    public boolean isTrading() {
+        return trading;
+    }
+
     /** Server: flag a trader visit on/off — called by {@link ShopWithVillagerGoal}. */
     public void setTrading(boolean trading) {
         this.trading = trading;

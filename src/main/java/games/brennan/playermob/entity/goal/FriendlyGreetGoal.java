@@ -5,6 +5,11 @@ import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.entity.Reaction;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
+//? if >=26 {
+/*import net.minecraft.world.entity.npc.villager.AbstractVillager;
+*///?} else {
+import net.minecraft.world.entity.npc.AbstractVillager;
+//?}
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 
@@ -93,6 +98,9 @@ public final class FriendlyGreetGoal extends Goal implements DescribableGoal {
         if (mob.getTarget() != null) return false;
         LivingEntity candidate = mob.nearestWhereReaction(Reaction.GREET, range);
         if (candidate == null) return false;
+        // Mid-visit at a trader, a villager is someone it's shopping with, not greeting — bowing
+        // to one would cut the visit short. A player can still pull it away.
+        if (mob.isTrading() && candidate instanceof AbstractVillager) return false;
         this.friend = candidate;
         return true;
     }
