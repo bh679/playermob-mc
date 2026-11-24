@@ -1461,6 +1461,21 @@
       "released": true,
       "released_in": "v0.130.0",
       "released_at": "2026-11-24T13:11:52Z"
+    },
+    {
+      "id": "melee-hit-and-run",
+      "version": "0.131.0",
+      "type": "feat",
+      "title": "Skilled fighters hit and run",
+      "summary": "The best melee fighters among player mobs now fight like skilled players: they step in to strike when their swing is ready, then back out of your reach while it recharges. Clumsy fighters still stand and trade blows.",
+      "highlights": [
+        "Player mobs no longer stumble forward or slide sideways off ledges and trains when backing away."
+      ],
+      "pr": 272,
+      "date": "2026-11-24",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }

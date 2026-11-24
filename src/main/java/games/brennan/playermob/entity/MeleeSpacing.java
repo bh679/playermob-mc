@@ -29,6 +29,15 @@ public final class MeleeSpacing {
     public static final double BAND = 0.35;
     /** The mob always closes to at least this far inside reach, so it can still land a swing. */
     public static final double SWING_MARGIN = 0.15;
+    /** Roughly how far a vanilla mob's swing reaches, measured the same way (eye to hitbox). */
+    public static final double MOB_REACH = 1.0;
+    /** How far beyond the target's reach a mob backs off to while its swing recharges. */
+    public static final double OUT_OF_REACH_MARGIN = 0.5;
+    /** Fewest / most ticks ahead of a recharged swing the mob starts closing in. */
+    public static final int MIN_LEAD_TICKS = 4;
+    public static final int MAX_LEAD_TICKS = 15;
+    /** Lead-time slack on top of the walking time, so the mob arrives as the swing comes up. */
+    private static final int LEAD_SLACK_TICKS = 2;
 
     /** What the mob should do this tick. */
     public enum Move {
@@ -66,6 +75,50 @@ public final class MeleeSpacing {
         if (dist > advanceBeyond(skill)) return Move.ADVANCE;
         if (dist < retreatWithin(skill)) return Move.RETREAT;
         return Move.HOLD;
+    }
+
+    /**
+     * How strongly a mob fights hit-and-run, 0 to 1: a skilled fighter steps in when its swing is ready
+     * and backs out of the target's reach while it recharges; skill 0 does neither (it just holds).
+     */
+    public static double spacing(int skill) {
+        int s = Math.max(DispositionTraits.MIN, Math.min(DispositionTraits.MAX, skill));
+        return s / (double) DispositionTraits.MAX;
+    }
+
+    /**
+     * The distance the mob keeps while its swing recharges: from its hold distance out toward just
+     * beyond the target's reach ({@code targetReach}, eye to hitbox), as far as its skill takes it.
+     * Never closer than the hold distance.
+     */
+    public static double rechargeDistance(int skill, double targetReach) {
+        double hold = holdDistance(skill);
+        double out = Math.max(hold, targetReach + OUT_OF_REACH_MARGIN);
+        return hold + (out - hold) * spacing(skill);
+    }
+
+    /**
+     * What to do at eye-to-hitbox distance {@code dist}. While the swing is {@code ready} (or about to
+     * be) the mob closes to strike as before ({@link #move(int, double)}); while it recharges it keeps
+     * {@link #rechargeDistance}, so a skilled mob backs out of the target's reach between swings.
+     */
+    public static Move move(int skill, double dist, boolean ready, double targetReach) {
+        if (ready) return move(skill, dist);
+        double keep = rechargeDistance(skill, targetReach);
+        if (dist > keep + BAND) return Move.ADVANCE;
+        if (dist < keep - BAND) return Move.RETREAT;
+        return Move.HOLD;
+    }
+
+    /**
+     * Ticks before its swing recharges that a mob {@code gap} blocks short of its strike distance
+     * should start closing in, walking {@code blocksPerTick}: the walk plus a little slack, clamped.
+     */
+    public static int leadTicks(double gap, double blocksPerTick) {
+        if (gap <= 0.0) return MIN_LEAD_TICKS;
+        if (blocksPerTick <= 1.0E-4) return MAX_LEAD_TICKS;
+        int ticks = (int) Math.ceil(gap / blocksPerTick) + LEAD_SLACK_TICKS;
+        return Math.max(MIN_LEAD_TICKS, Math.min(MAX_LEAD_TICKS, ticks));
     }
 
     /** True if a swing from eye-to-hitbox distance {@code dist} connects. */
