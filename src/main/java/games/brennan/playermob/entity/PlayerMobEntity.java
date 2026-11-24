@@ -898,6 +898,8 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // shed the Enemy marker so iron golems ignore it — XP-on-kill is not part
         // of that intended change, so restore it explicitly.
         this.xpReward = 5;
+        // Strafes never flip into a forward charge, and stop sliding sideways when they end.
+        this.moveControl = new PlayerMobMoveControl(this);
         // Enable vanilla's passive proximity pickup (Mob.aiStep). The active
         // CollectFloorItemsGoal does the seeking; this catches items underfoot.
         this.setCanPickUpLoot(true);

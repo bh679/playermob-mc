@@ -8,6 +8,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.EntitySelector;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
@@ -37,6 +38,13 @@ public final class PlayerMobMeleeAttackGoal extends Goal {
     private static final double BACKSTEP_PROBE = 0.8;
     /** Back-step strafe speed (the bow goal's). */
     private static final float BACKSTEP_SPEED = -0.5F;
+    /** Sideways strafe speed of a fully skilled mob's back-step, so it backs off on an angle. */
+    private static final float SIDESTEP_SPEED = 0.5F;
+    /**
+     * Ground blocks per tick per point of {@code MOVEMENT_SPEED} at speed modifier 1: a PlayerMob
+     * (0.30) walks about 0.15 blocks a tick (measured: 8 blocks closed in ~2.5 s).
+     */
+    private static final double GROUND_SPEED_FACTOR = 0.5;
 
     private final PlayerMobEntity mob;
     private final double speed;
@@ -47,6 +55,8 @@ public final class PlayerMobMeleeAttackGoal extends Goal {
     private double pathedTargetX;
     private double pathedTargetY;
     private double pathedTargetZ;
+    /** Which side a skilled mob's next back-step angles to (+1 left, -1 right); flips every swing. */
+    private int stepSide = 1;
 
     public PlayerMobMeleeAttackGoal(PlayerMobEntity mob, double speed) {
         this.mob = mob;
@@ -107,16 +117,22 @@ public final class PlayerMobMeleeAttackGoal extends Goal {
 
         boolean sees = mob.getSensing().hasLineOfSight(target);
         // Unseen (a wall, door or partition between them) means no swing lands from here: keep pathing.
-        MeleeSpacing.Move move = sees ? MeleeSpacing.move(skill, reach) : MeleeSpacing.Move.ADVANCE;
+        // Hit-and-run: close in shortly before the swing recharges, keep out of the target's reach while
+        // it recharges. Skill sets how far out that is (skill 0 just holds, as it always did).
+        boolean ready = ticksUntilNextAttack <= leadTicks(skill, reach);
+        MeleeSpacing.Move move = sees
+            ? MeleeSpacing.move(skill, reach, ready, targetReach(target))
+            : MeleeSpacing.Move.ADVANCE;
         switch (move) {
             case ADVANCE -> advance(target);
             case HOLD -> mob.getNavigation().stop();
-            case RETREAT -> stepBack(target);
+            case RETREAT -> stepBack(target, skill);
         }
 
         ticksUntilNextAttack = Math.max(ticksUntilNextAttack - 1, 0);
         if (ticksUntilNextAttack <= 0 && sees && MeleeSpacing.inSwingReach(reach)) {
             ticksUntilNextAttack = ATTACK_INTERVAL_TICKS;
+            stepSide = -stepSide;
             mob.swing(InteractionHand.MAIN_HAND);
             //? if >=26 {
             /*mob.doHurtTarget((net.minecraft.server.level.ServerLevel) mob.level(), target);
@@ -149,20 +165,50 @@ public final class PlayerMobMeleeAttackGoal extends Goal {
         }
     }
 
-    /** Step straight back from the target, if there is open floor to step onto; otherwise stand. */
-    private void stepBack(LivingEntity target) {
+    /** How many ticks before its swing recharges the mob starts closing to strike distance. */
+    private int leadTicks(int skill, double reach) {
+        double gap = reach - MeleeSpacing.holdDistance(skill);
+        double blocksPerTick = mob.getAttributeValue(Attributes.MOVEMENT_SPEED) * speed * GROUND_SPEED_FACTOR;
+        return MeleeSpacing.leadTicks(gap, blocksPerTick);
+    }
+
+    /** How far {@code target}'s own swing reaches (eye to hitbox): a player's for players and PlayerMobs. */
+    private static double targetReach(LivingEntity target) {
+        return target instanceof Player || target instanceof PlayerMobEntity
+            ? MeleeSpacing.PLAYER_REACH : MeleeSpacing.MOB_REACH;
+    }
+
+    /**
+     * Step back from the target onto open floor; otherwise stand. A skilled mob backs off on an angle
+     * (alternating sides each swing), as a player circles; if that way has no floor it tries straight back.
+     */
+    private void stepBack(LivingEntity target, int skill) {
         mob.getNavigation().stop();
         Vec3 away = new Vec3(mob.getX() - target.getX(), 0.0, mob.getZ() - target.getZ());
         if (away.lengthSqr() < 1.0E-4) return;
-        Vec3 dir = away.normalize();
-        // The mob's far edge must land on floor too, not just its centre.
-        double far = BACKSTEP_PROBE + mob.getBbWidth() * 0.5;
-        if (!standable(mob.position().add(dir.scale(BACKSTEP_PROBE)))
-                || !standable(mob.position().add(dir.scale(far)))) {
-            return;
-        }
         mob.lookAt(target, 30.0F, 30.0F);
-        mob.getMoveControl().strafe(BACKSTEP_SPEED, 0.0F);
+        Vec3 back = away.normalize();
+        // Left of facing the target (the strafe "+x" side), from the yaw lookAt just set.
+        Vec3 facing = Vec3.directionFromRotation(0.0F, mob.getYRot());
+        Vec3 left = new Vec3(facing.z, 0.0, -facing.x);
+        float side = (float) (stepSide * SIDESTEP_SPEED * MeleeSpacing.spacing(skill));
+        if (side != 0.0F) {
+            Vec3 angled = back.scale(-BACKSTEP_SPEED).add(left.scale(side)).normalize();
+            if (clearToStep(angled)) {
+                mob.getMoveControl().strafe(BACKSTEP_SPEED, side);
+                return;
+            }
+        }
+        if (clearToStep(back)) {
+            mob.getMoveControl().strafe(BACKSTEP_SPEED, 0.0F);
+        }
+    }
+
+    /** True if both the probe point and the mob's far edge, one step along {@code dir}, are standable. */
+    private boolean clearToStep(Vec3 dir) {
+        double far = BACKSTEP_PROBE + mob.getBbWidth() * 0.5;
+        return standable(mob.position().add(dir.scale(BACKSTEP_PROBE)))
+            && standable(mob.position().add(dir.scale(far)));
     }
 
     /**
