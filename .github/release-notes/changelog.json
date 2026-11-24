@@ -1448,7 +1448,7 @@
     },
     {
       "id": "melee-reach-spacing",
-      "version": "0.129.0",
+      "version": "0.130.0",
       "type": "feat",
       "title": "Player mobs fight from reach distance",
       "summary": "Player mobs now swing from a player's reach instead of pushing right up against you. Skilled fighters keep near the edge of their reach; clumsy ones crowd in close.",
