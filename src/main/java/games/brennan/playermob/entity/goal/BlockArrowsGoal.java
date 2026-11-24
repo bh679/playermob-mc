@@ -1,5 +1,6 @@
 package games.brennan.playermob.entity.goal;
 
+import games.brennan.playermob.entity.MeleeSpacing;
 import games.brennan.playermob.entity.ReactionChannel;
 import games.brennan.playermob.compat.CrossbowCompat;
 import games.brennan.playermob.entity.AimCone;
@@ -183,9 +184,7 @@ public final class BlockArrowsGoal extends Goal {
     private boolean isAttackingInMelee() {
         LivingEntity target = mob.getTarget();
         if (target == null || !target.isAlive()) return false;
-        // Vanilla MeleeAttackGoal.getAttackReachSqr.
-        double reachSqr = mob.getBbWidth() * 2.0F * mob.getBbWidth() * 2.0F + target.getBbWidth();
-        return mob.distanceToSqr(target) <= reachSqr;
+        return MeleeSpacing.inSwingReach(MeleeSpacing.reach(mob, target));
     }
 
     /**

@@ -4,7 +4,6 @@ import games.brennan.playermob.PlayerMobConfig;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
-import net.minecraft.world.entity.ai.goal.MeleeAttackGoal;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
@@ -23,7 +22,7 @@ import java.util.EnumSet;
  * {@link #stop} it reverts to holding the best melee.</p>
  *
  * <p>Internally delegates to three goals — {@link PlayerMobCrossbowAttackGoal},
- * {@link PlayerMobBowAttackGoal}, {@link MeleeAttackGoal} — chosen per tick by
+ * {@link PlayerMobBowAttackGoal}, {@link PlayerMobMeleeAttackGoal} — chosen per tick by
  * inspecting the main-hand stack. When the held weapon changes mid-combat
  * (e.g. the mob's crossbow runs out of ammo and the operator swaps via
  * {@code /item replace}), this goal stops the previous delegate and starts
@@ -42,7 +41,7 @@ public final class WeaponAwareAttackGoal extends Goal implements DescribableGoal
     private final PlayerMobCrossbowAttackGoal crossbow;
     private final PlayerMobBowAttackGoal bow;
     private final ModdedRangedAttackGoal moddedRanged;
-    private final MeleeAttackGoal melee;
+    private final PlayerMobMeleeAttackGoal melee;
 
     /** The currently-running delegate, or {@code null} when nothing has started. */
     private Goal active;
@@ -63,7 +62,7 @@ public final class WeaponAwareAttackGoal extends Goal implements DescribableGoal
         this.crossbow = new PlayerMobCrossbowAttackGoal(mob, speed, rangedAttackRange);
         this.bow = new PlayerMobBowAttackGoal(mob, speed, rangedAttackRange);
         this.moddedRanged = new ModdedRangedAttackGoal(mob, speed, rangedAttackRange);
-        this.melee = new MeleeAttackGoal(mob, speed, true);
+        this.melee = new PlayerMobMeleeAttackGoal(mob, speed);
         // We claim every flag any delegate might need so the selector reserves
         // them for us. Inner-goal flags are irrelevant — they're not selector-managed.
         setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK, Flag.JUMP));
