@@ -1445,6 +1445,22 @@
       "released": true,
       "released_in": "v0.129.0",
       "released_at": "2026-11-20T05:18:27Z"
+    },
+    {
+      "id": "melee-reach-spacing",
+      "version": "0.130.0",
+      "type": "feat",
+      "title": "Player mobs fight from reach distance",
+      "summary": "Player mobs now swing from a player's reach instead of pushing right up against you. Skilled fighters keep near the edge of their reach; clumsy ones crowd in close.",
+      "highlights": [
+        "A crowded skilled fighter steps back, but never off a ledge or the train.",
+        "If you duck behind a wall, they walk around it to get back in reach."
+      ],
+      "pr": 270,
+      "date": "2026-11-24",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }

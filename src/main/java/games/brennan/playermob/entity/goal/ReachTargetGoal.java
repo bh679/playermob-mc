@@ -6,6 +6,7 @@ import games.brennan.playermob.compat.GameRuleCompat;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.BlockSourcePolicy;
 import games.brennan.playermob.entity.EquipmentEvaluator;
+import games.brennan.playermob.entity.MeleeSpacing;
 import games.brennan.playermob.entity.MiningMath;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.entity.ReachPolicy;
@@ -127,7 +128,8 @@ public final class ReachTargetGoal extends Goal implements DescribableGoal {
         Vec3 me = frame(mob.position());
         Vec3 them = frame(target.position());
         double dist = me.distanceTo(them);
-        if (dist > MAX_RANGE || ReachPolicy.inReach(them.x - me.x, them.y - me.y, them.z - me.z)) {
+        if (dist > MAX_RANGE || ReachPolicy.inReach(them.x - me.x, them.y - me.y, them.z - me.z)
+                || canSwingAt(target)) {
             resetStall(target);
             return false;
         }
@@ -160,7 +162,16 @@ public final class ReachTargetGoal extends Goal implements DescribableGoal {
         if (runTicks > 0 && runTicks % PATH_RECHECK_TICKS == 0 && (canStillShoot(target) || pathReaches(target))) {
             return false;
         }
-        return phase != ReachPolicy.Kind.IN_REACH;
+        return phase != ReachPolicy.Kind.IN_REACH && !canSwingAt(target);
+    }
+
+    /**
+     * True if a melee swing would land right now: in a player's reach and in sight. A mob holding its
+     * fighting distance ({@link MeleeSpacing}) stands still beyond {@link ReachPolicy#MELEE_RANGE}, which
+     * would otherwise read as stalled out of reach and start block-work mid-fight.
+     */
+    private boolean canSwingAt(LivingEntity target) {
+        return MeleeSpacing.inSwingReach(MeleeSpacing.reach(mob, target)) && mob.getSensing().hasLineOfSight(target);
     }
 
     @Override
