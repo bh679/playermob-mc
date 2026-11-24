@@ -27,11 +27,13 @@ public final class ReachPolicy {
     /** Horizontal distance (blocks) within which the mob builds straight up / digs straight down. */
     public static final double OVERHEAD_RANGE = 1.5;
     /**
-     * Horizontal distance (feet to feet) within which a target under {@link #MELEE_RISE} blocks of height
-     * is in reach: a player's swing reach plus a player-sized target's half-width, so a mob holding its
-     * melee distance ({@link MeleeSpacing}) never reads as stalled out of reach.
+     * Horizontal distance within which a target under {@link #MELEE_RISE} blocks of height is in reach.
+     * Deliberately shorter than a swing's reach ({@link MeleeSpacing}): this is pure geometry with no
+     * line-of-sight test, so a wider range would read a target behind a thin wall as reached and stop
+     * the mob digging to it. A mob holding its melee distance in the open never gets here anyway:
+     * {@code ReachTargetGoal} stands down while a path to the target exists.
      */
-    public static final double MELEE_RANGE = MeleeSpacing.PLAYER_REACH + 0.3;
+    public static final double MELEE_RANGE = 2.0;
     /** Height difference (blocks) a melee swing still covers. */
     public static final double MELEE_RISE = 1.5;
     /** How high a jump lifts the mob's feet (vanilla's ~1.25, less a margin). */

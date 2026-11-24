@@ -105,15 +105,17 @@ public final class PlayerMobMeleeAttackGoal extends Goal {
         int skill = mob.reactionSpeed(ReactionChannel.MELEE);
         ticksUntilNextPathRecalculation = Math.max(ticksUntilNextPathRecalculation - 1, 0);
 
-        switch (MeleeSpacing.move(skill, reach)) {
+        boolean sees = mob.getSensing().hasLineOfSight(target);
+        // Unseen (a wall, door or partition between them) means no swing lands from here: keep pathing.
+        MeleeSpacing.Move move = sees ? MeleeSpacing.move(skill, reach) : MeleeSpacing.Move.ADVANCE;
+        switch (move) {
             case ADVANCE -> advance(target);
             case HOLD -> mob.getNavigation().stop();
             case RETREAT -> stepBack(target);
         }
 
         ticksUntilNextAttack = Math.max(ticksUntilNextAttack - 1, 0);
-        if (ticksUntilNextAttack <= 0 && MeleeSpacing.inSwingReach(reach)
-                && mob.getSensing().hasLineOfSight(target)) {
+        if (ticksUntilNextAttack <= 0 && sees && MeleeSpacing.inSwingReach(reach)) {
             ticksUntilNextAttack = ATTACK_INTERVAL_TICKS;
             mob.swing(InteractionHand.MAIN_HAND);
             //? if >=26 {
@@ -124,13 +126,17 @@ public final class PlayerMobMeleeAttackGoal extends Goal {
         }
     }
 
-    /** Vanilla's re-path cadence, plus a fresh path whenever the mob has stopped (it held, then fell behind). */
+    /**
+     * Vanilla's re-path cadence (timer and failure penalty always apply), except that a mob whose
+     * navigation has stopped (it held, then the target stepped away) re-paths without waiting for the
+     * target to have moved a block.
+     */
     private void advance(LivingEntity target) {
+        if (ticksUntilNextPathRecalculation > 0) return;
         boolean stopped = mob.getNavigation().isDone();
         boolean targetMoved = target.distanceToSqr(pathedTargetX, pathedTargetY, pathedTargetZ) >= 1.0
             || mob.getRandom().nextFloat() < 0.05F;
-        if (!mob.getSensing().hasLineOfSight(target) && !stopped) return;
-        if (!stopped && (ticksUntilNextPathRecalculation > 0 || !targetMoved)) return;
+        if (!stopped && !targetMoved) return;
         pathedTargetX = target.getX();
         pathedTargetY = target.getY();
         pathedTargetZ = target.getZ();
@@ -143,22 +149,34 @@ public final class PlayerMobMeleeAttackGoal extends Goal {
         }
     }
 
-    /** Step straight back from the target, if there is floor to step onto; otherwise stand. */
+    /** Step straight back from the target, if there is open floor to step onto; otherwise stand. */
     private void stepBack(LivingEntity target) {
         mob.getNavigation().stop();
         Vec3 away = new Vec3(mob.getX() - target.getX(), 0.0, mob.getZ() - target.getZ());
-        if (away.lengthSqr() < 1.0E-4 || !floorAt(mob.position().add(away.normalize().scale(BACKSTEP_PROBE)))) {
+        if (away.lengthSqr() < 1.0E-4) return;
+        Vec3 dir = away.normalize();
+        // The mob's far edge must land on floor too, not just its centre.
+        double far = BACKSTEP_PROBE + mob.getBbWidth() * 0.5;
+        if (!standable(mob.position().add(dir.scale(BACKSTEP_PROBE)))
+                || !standable(mob.position().add(dir.scale(far)))) {
             return;
         }
         mob.lookAt(target, 30.0F, 30.0F);
         mob.getMoveControl().strafe(BACKSTEP_SPEED, 0.0F);
     }
 
-    /** True if the world point {@code feet} has a solid block under it, read in the mob's block frame (a carriage's own, on a train). */
-    private boolean floorAt(Vec3 feet) {
+    /**
+     * True if a mob could stand with its feet at the world point {@code feet}: a solid block under it and
+     * nothing solid at feet or head height. Read in the mob's block frame (a carriage's own, on a train).
+     */
+    private boolean standable(Vec3 feet) {
         Vec3 local = TrainConfinement.toBlockFrame(mob, feet);
-        BlockPos below = BlockPos.containing(local.x, local.y - 0.5, local.z);
+        BlockPos cell = BlockPos.containing(local.x, local.y + 0.1, local.z);
+        return solid(cell.below()) && !solid(cell) && !solid(cell.above());
+    }
+
+    private boolean solid(BlockPos pos) {
         Level level = mob.level();
-        return !level.getBlockState(below).getCollisionShape(level, below).isEmpty();
+        return !level.getBlockState(pos).getCollisionShape(level, pos).isEmpty();
     }
 }
