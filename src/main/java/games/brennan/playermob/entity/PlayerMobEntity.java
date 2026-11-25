@@ -5213,6 +5213,16 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     }
 
     //? if <1.21.1 {
+    /*// 1.20.1's EntityType.Builder has no eyeHeight(), so set a player's eye height here
+    // (the default would be 0.85 × the 1.8 hitbox = 1.53). See PlayerMobRegistry#EYE_HEIGHT.
+    @Override
+    protected float getStandingEyeHeight(net.minecraft.world.entity.Pose pose,
+                                         net.minecraft.world.entity.EntityDimensions dimensions) {
+        return games.brennan.playermob.PlayerMobRegistry.EYE_HEIGHT;
+    }
+    *///?}
+
+    //? if <1.21.1 {
     /*// CrossbowAttackMob declares shootCrossbowProjectile abstract in 1.20.1 (it became a
     // private helper inside performCrossbowAttack in 1.21.1, so the interface no longer
     // exposes it). Delegate to the interface's 5-arg default exactly as vanilla Monster /
