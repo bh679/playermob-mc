@@ -43,6 +43,26 @@ class TrainDigPolicyTest {
     }
 
     @Test
+    void snowLayersAndSnowBlocksAreDiggable() {
+        // A snowy room's drift 3+ layers deep beside a 2-high doorway leaves a player-sized mob too
+        // tall to pass, so the stuck mob shovels it. Every layer count is fill; 1-layer snow has no
+        // collision and the reflex skips it before asking this policy.
+        for (int layers = 1; layers <= 8; layers++) {
+            assertTrue(TrainDigPolicy.isDiggableObstruction(
+                    Blocks.SNOW.defaultBlockState().setValue(
+                        net.minecraft.world.level.block.SnowLayerBlock.LAYERS, layers)),
+                "snow with " + layers + " layers");
+        }
+        assertTrue(TrainDigPolicy.isDiggableObstruction(Blocks.SNOW_BLOCK.defaultBlockState()));
+    }
+
+    @Test
+    void powderSnowIsNotFill() {
+        // Powder snow is a trap block, not a drift: leave it alone.
+        assertFalse(TrainDigPolicy.isDiggableObstruction(Blocks.POWDER_SNOW.defaultBlockState()));
+    }
+
+    @Test
     void structuralAndUnrelatedBlocksAreNotDiggable() {
         // The stone-brick bed / rails and any structural wall must never be mined.
         assertFalse(TrainDigPolicy.isDiggableObstruction(Blocks.STONE_BRICKS.defaultBlockState()),

@@ -732,7 +732,7 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         return dir != 0 && nextCarriageTarget(self, dir) == null;
     }
 
-    // ---- Dig through a blocked carriage (pass through ice/dirt/mud/moss/log fill) ----
+    // ---- Dig through a blocked carriage (pass through ice/dirt/mud/moss/snow/log fill) ----
 
     /** Swing the arm roughly this often (ticks) while mining, so it reads as repeated digging. */
     private static final int DIG_SWING_INTERVAL = 4;
@@ -763,7 +763,7 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
     private static final Map<Entity, DigState> DIG_STATE = new WeakHashMap<>();
 
     /**
-     * Per-tick reflex: if the mob is stuck against soft fill (ice/dirt/mud/moss/log) packing the
+     * Per-tick reflex: if the mob is stuck against soft fill (ice/dirt/mud/moss/snow/log) packing the
      * carriage directly ahead of its march, mine it — auto-swapping to the best tool it owns and
      * pacing a realistic, hardness-scaled break — so it can pass through. Returns {@code true}
      * while digging. The carriage's blocks live in its sub-level coordinate space (not at the mob's

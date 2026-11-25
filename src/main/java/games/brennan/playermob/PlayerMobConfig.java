@@ -89,7 +89,7 @@ public final class PlayerMobConfig {
     public static final boolean DEFAULT_ECHO_DRAFT_BOOKS = true;
     /** Debug spawn logging ships off — when on it broadcasts a chat line on every DT auto-spawn. */
     public static final boolean DEFAULT_DEBUG_SPAWN_LOG = false;
-    /** PlayerMobs dig through fill (ice/dirt/mud/moss/logs) blocking a Dungeon-Train carriage; on by default. */
+    /** PlayerMobs dig through fill (ice/dirt/mud/moss/snow/logs) blocking a Dungeon-Train carriage; on by default. */
     public static final boolean DEFAULT_TRAIN_DIG_THROUGH = true;
     /** On a Dungeon Train, a PlayerMob that loves a player aboard heads to that player's carriage; on by default. */
     public static final boolean DEFAULT_TRAIN_FOLLOW_LOVED_PLAYER = true;
@@ -310,7 +310,7 @@ public final class PlayerMobConfig {
 
     /**
      * When true (default), a PlayerMob riding a Dungeon Train mines soft fill blocking its march —
-     * ice, dirt, mud, moss, logs — once it's stuck against it, to pass through a packed carriage.
+     * ice, dirt, mud, moss, snow, logs — once it's stuck against it, to pass through a packed carriage.
      * See {@code DungeonTrainEnvironment#digObstructingBlock}.
      */
     public static boolean trainDigThrough() {
@@ -1111,7 +1111,7 @@ public final class PlayerMobConfig {
             .append("#   on every Dungeon-Train PlayerMob auto-spawn — yellow=friend, purple=echo,\n")
             .append("#   green=echo+friend. Default false.\n")
             .append("# trainDigThrough: when true, a PlayerMob riding a Dungeon Train mines soft fill\n")
-            .append("#   (ice, dirt, mud, moss, logs) blocking its march once it's stuck against it, to\n")
+            .append("#   (ice, dirt, mud, moss, snow, logs) blocking its march once it's stuck against it, to\n")
             .append("#   pass through a packed carriage. Default true.\n")
             .append("# trainFollowLovedPlayer: when true, a PlayerMob on a Dungeon Train that loves a player\n")
             .append("#   aboard the same train abandons its fixed march to head to that player's carriage,\n")

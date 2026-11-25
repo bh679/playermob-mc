@@ -12,7 +12,7 @@ import java.util.Set;
  * carriage that's packed with fill (see {@code DungeonTrainEnvironment#digObstructingBlock}).
  *
  * <p>Deliberately narrow — only the soft "fill" materials a carriage is packed with (ice,
- * the dirt family, mud, moss) plus {@link BlockTags#LOGS} — so the dig reflex can tunnel
+ * the dirt family, mud, moss, snow) plus {@link BlockTags#LOGS} — so the dig reflex can tunnel
  * through a blocked carriage without chewing structural walls, glass, rails, or the
  * stone-brick bed. The bed/rails are additionally excluded by
  * {@link BlockSourcePolicy#isProtectedTrackBlock} at the call site, and the reflex only ever
@@ -27,9 +27,11 @@ public final class TrainDigPolicy {
     private TrainDigPolicy() {}
 
     /**
-     * The soft fill blocks a carriage may be packed with: ice, the dirt family, mud, and moss
-     * — the materials observed blocking carriages. Logs are covered separately via
-     * {@link BlockTags#LOGS} so every wood/stem type counts.
+     * The soft fill blocks a carriage may be packed with: ice, the dirt family, mud, moss, and snow
+     * — the materials observed blocking carriages. Snow layers count because a snowy room's drift
+     * 3+ layers deep (4/16 of a block or more) leaves a player-sized mob too tall for the 2-high
+     * doorway beside it; 1-layer snow has no collision, so the reflex never treats it as a wall.
+     * Logs are covered separately via {@link BlockTags#LOGS} so every wood/stem type counts.
      */
     private static final Set<Block> FILL = Set.of(
         // ice
@@ -40,11 +42,13 @@ public final class TrainDigPolicy {
         // mud
         Blocks.MUD, Blocks.MUDDY_MANGROVE_ROOTS,
         // moss
-        Blocks.MOSS_BLOCK, Blocks.MOSS_CARPET);
+        Blocks.MOSS_BLOCK, Blocks.MOSS_CARPET,
+        // snow
+        Blocks.SNOW, Blocks.SNOW_BLOCK);
 
     /**
      * True if {@code state} is a fill block the mob may mine to pass through a blocked carriage:
-     * ice, the dirt family, mud, moss, or any log/stem ({@link BlockTags#LOGS}).
+     * ice, the dirt family, mud, moss, snow, or any log/stem ({@link BlockTags#LOGS}).
      */
     public static boolean isDiggableObstruction(BlockState state) {
         return FILL.contains(state.getBlock()) || state.is(BlockTags.LOGS);

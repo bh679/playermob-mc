@@ -169,7 +169,7 @@ public interface TrainEnvironment {
     default void openBlockingDoor(Entity self) {}
 
     /**
-     * If {@code self} is on a train, stuck, and a soft fill block (ice/dirt/mud/moss/log)
+     * If {@code self} is on a train, stuck, and a soft fill block (ice/dirt/mud/moss/snow/log)
      * directly blocks its forward march, mine that block to clear the way and return
      * {@code true} (still mid-dig, or just broke one). A no-op default returning {@code false}
      * (off-train environments never dig); the Dungeon-Train impl resolves the carriage's
