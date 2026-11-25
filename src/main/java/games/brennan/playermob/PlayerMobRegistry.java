@@ -94,15 +94,30 @@ public final class PlayerMobRegistry {
      * The shared {@link EntityType.Builder} every loader uses. Centralised so
      * size, mob category, and tracking range stay consistent across loaders.
      *
-     * <p>Hitbox 0.6 × 1.95 matches the vanilla player hitbox so the
-     * player-shaped renderer fits cleanly inside the entity bounds.</p>
+     * <p>Hitbox and eye height are a vanilla player's ({@link #HITBOX_WIDTH} ×
+     * {@link #HITBOX_HEIGHT}, eyes at {@link #EYE_HEIGHT}), so a PlayerMob fits every gap a
+     * player fits. It used to be 1.95 tall (a zombie's), which stood a mob on carpet 2.0125
+     * blocks tall and wedged it in front of every 2-high doorway a player walks through.</p>
      */
     public static EntityType.Builder<PlayerMobEntity> entityTypeBuilder() {
         return EntityType.Builder
             .<PlayerMobEntity>of(PlayerMobEntity::new, MobCategory.MONSTER)
-            .sized(0.6F, 1.95F)
+            .sized(HITBOX_WIDTH, HITBOX_HEIGHT)
+            //? if >=1.21.1 {
+            .eyeHeight(EYE_HEIGHT)
+            //?}
             .clientTrackingRange(8);
     }
+
+    /** A vanilla player's hitbox width. */
+    public static final float HITBOX_WIDTH = 0.6F;
+    /** A vanilla player's standing hitbox height: on carpet (1/16) it still clears a 2-high gap. */
+    public static final float HITBOX_HEIGHT = 1.8F;
+    /**
+     * A vanilla player's standing eye height (the builder default would be 0.85 × height). On
+     * 1.20.1, which has no builder setting, {@code PlayerMobEntity#getStandingEyeHeight} returns it.
+     */
+    public static final float EYE_HEIGHT = 1.62F;
 
     // ---- Spawn eggs -------------------------------------------------------
 
