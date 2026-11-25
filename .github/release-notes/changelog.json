@@ -1489,6 +1489,19 @@
       "released": true,
       "released_in": "v0.132.0",
       "released_at": "2026-11-25T13:55:27Z"
+    },
+    {
+      "id": "playermob-player-sized-hitbox",
+      "version": "0.133.0",
+      "type": "fix",
+      "title": "PlayerMobs are player-sized",
+      "summary": "PlayerMobs are now exactly the size of a player, so they no longer get stuck on carpet in front of doorways.",
+      "highlights": [],
+      "pr": 275,
+      "date": "2026-11-25",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
