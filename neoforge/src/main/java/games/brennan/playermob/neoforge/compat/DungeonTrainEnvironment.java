@@ -34,6 +34,7 @@ import games.brennan.dungeontrain.ship.ManagedShip;
 import games.brennan.dungeontrain.ship.Shipyards;
 import games.brennan.dungeontrain.train.Trains;
 import games.brennan.playermob.PlayerMobConfig;
+import games.brennan.playermob.compat.PositionMemo;
 import games.brennan.playermob.compat.TrainEnvironment;
 import games.brennan.playermob.entity.BlockSourcePolicy;
 import games.brennan.playermob.entity.DoorObstruction;
@@ -962,16 +963,63 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         return c == null ? null : c.provider().getTrainId();
     }
 
+    /**
+     * Answers "which carriage holds this point?" for {@link #carriageAtPos}. Dungeon Train installs
+     * one at boot that reads its per-tick carriage index, so a lookup no longer walks every carriage
+     * (it is asked several times per mob per tick, which made the walk cost mobs x carriages).
+     * With none installed (an older Dungeon Train), the built-in walk answers, as before.
+     */
+    @FunctionalInterface
+    public interface CarriageLocator {
+        /**
+         * The carriage whose world box, grown by {@code margin} on every side, holds the point, or
+         * {@code null}. Where two overlap, the first in shipyard order.
+         */
+        Trains.Carriage at(ServerLevel level, double x, double y, double z, double margin);
+    }
+
+    /** Set once at boot by Dungeon Train; null means the built-in walk. */
+    private static volatile CarriageLocator locator;
+
+    /** Same mob, same tick, same spot: one lookup however many times a goal pass asks. */
+    private static final PositionMemo<Trains.Carriage> CARRIAGE_AT = new PositionMemo<>();
+
+    /**
+     * Install the carriage lookup {@link #carriageAtPos} uses, or {@code null} for the built-in walk.
+     * Called by Dungeon Train from its own {@code ModList.isLoaded("playermob")} guard.
+     */
+    public static void installCarriageLocator(CarriageLocator carriageLocator) {
+        locator = carriageLocator;
+        CARRIAGE_AT.clear();
+        LOGGER.info("[PlayerMob] Dungeon Train carriage lookups: {}",
+            carriageLocator == null ? "built-in walk" : "installed locator");
+    }
+
     /** The carriage group {@code self} is currently riding, or {@code null} if not on a train. */
     private static Trains.Carriage carriageAt(Entity self) {
         if (!(self.level() instanceof ServerLevel level)) {
             return null;
         }
-        return carriageAtPos(level, self.getX(), self.getY(), self.getZ());
+        if (!level.getServer().isSameThread()) {
+            return carriageAtPos(level, self.getX(), self.getY(), self.getZ());
+        }
+        double x = self.getX(), y = self.getY(), z = self.getZ();
+        long tick = level.getGameTime();
+        Object hit = CARRIAGE_AT.lookup(self, tick, x, y, z);
+        if (hit != PositionMemo.MISS) {
+            return (Trains.Carriage) hit;
+        }
+        Trains.Carriage c = carriageAtPos(level, x, y, z);
+        CARRIAGE_AT.put(self, tick, x, y, z, c);
+        return c;
     }
 
     /** The carriage whose current world box contains {@code (x,y,z)} (inflated by {@link #RIDE_MARGIN}). */
     private static Trains.Carriage carriageAtPos(ServerLevel level, double x, double y, double z) {
+        CarriageLocator installed = locator;
+        if (installed != null) {
+            return installed.at(level, x, y, z, RIDE_MARGIN);
+        }
         for (Trains.Carriage c : Trains.allCarriages(level)) {
             AABBdc bb = c.ship().worldAABB();
             if (bb != null && contains(bb, x, y, z)) {
