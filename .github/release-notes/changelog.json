@@ -1476,6 +1476,19 @@
       "released": true,
       "released_in": "v0.131.0",
       "released_at": "2026-11-24T15:24:50Z"
+    },
+    {
+      "id": "dt-carriage-locator",
+      "version": "0.132.0",
+      "type": "perf",
+      "title": "Smoother echoes on long trains",
+      "summary": "Echoes on a Dungeon Train work out which carriage they are on with much less effort, so busy trains stay smoother as they grow.",
+      "highlights": [],
+      "pr": 274,
+      "date": "2026-11-25",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }
