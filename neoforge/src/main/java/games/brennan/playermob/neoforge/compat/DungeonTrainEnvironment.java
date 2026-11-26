@@ -732,7 +732,7 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         return dir != 0 && nextCarriageTarget(self, dir) == null;
     }
 
-    // ---- Dig through a blocked carriage (pass through ice/dirt/mud/moss/log fill) ----
+    // ---- Dig through a blocked carriage (pass through ice/dirt/mud/moss/snow/log fill) ----
 
     /** Swing the arm roughly this often (ticks) while mining, so it reads as repeated digging. */
     private static final int DIG_SWING_INTERVAL = 4;
@@ -763,7 +763,7 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
     private static final Map<Entity, DigState> DIG_STATE = new WeakHashMap<>();
 
     /**
-     * Per-tick reflex: if the mob is stuck against soft fill (ice/dirt/mud/moss/log) packing the
+     * Per-tick reflex: if the mob is stuck against soft fill (ice/dirt/mud/moss/snow/log) packing the
      * carriage directly ahead of its march, mine it — auto-swapping to the best tool it owns and
      * pacing a realistic, hardness-scaled break — so it can pass through. Returns {@code true}
      * while digging. The carriage's blocks live in its sub-level coordinate space (not at the mob's
@@ -783,12 +783,15 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         }
         Trains.Carriage c = carriageAt(self);
         int dir = mob.getTrainExploreDir();
-        // Off a train, no latched heading, or at the forward group boundary (the wall ahead is the
-        // inter-group gap door — crossing it is CrossGroupGapGoal's job) ⇒ never dig.
-        if (c == null || dir == 0 || atForwardBoundary(self)) {
+        // Off a train or no latched heading ⇒ never dig.
+        if (c == null || dir == 0) {
             endDig(level, mob);
             return false;
         }
+        // At the forward group boundary the wall ahead is the inter-group gap door — crossing it is
+        // CrossGroupGapGoal's job, so the forward scan is off there. A snow drift underfoot still
+        // counts: one at that door lifts the mob into the lintel, and it can never step out to leap.
+        boolean atBoundary = atForwardBoundary(self);
         ManagedShip ship = c.ship();
         DigState st = DIG_STATE.computeIfAbsent(self, k -> new DigState());
 
@@ -807,7 +810,12 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
 
         // The diggable fill block directly ahead along the march axis (foot cell first, then head —
         // a 2-high passage). None ⇒ the immediate slice is clear.
-        BlockPos targetSub = diggableAhead(ship, level, mob, dir);
+        BlockPos targetSub = atBoundary ? null : diggableAhead(ship, level, mob, dir);
+        boolean underfoot = false;
+        if (targetSub == null) {
+            targetSub = snowUnderfoot(ship, level, mob, dir);   // a drift lifting the mob into the lintel
+            underfoot = targetSub != null;
+        }
         if (targetSub == null) {
             // For a thick fill the mob now steps forward into the next slice, so hold the episode
             // briefly rather than re-waiting the full stuck window per block; only once the way has
@@ -820,7 +828,11 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
             }
             return false;
         }
-        st.clearTicks = 0;
+        if (!underfoot) {
+            // Only forward fill proves the way is still blocked. An underfoot hit must not keep the
+            // episode alive, or a mob walking on snow would plough it all.
+            st.clearTicks = 0;
+        }
 
         BlockState state = level.getBlockState(targetSub);
         if (!targetSub.equals(st.target)) {            // a new block to mine — reset the break
@@ -853,6 +865,10 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
             // break particles fire at its (far-offset) sub-level coords and may not be visible.
             level.playSound(null, self.blockPosition(), state.getSoundType().getBreakSound(),
                 SoundSource.BLOCKS, 1.0F, 0.85F + mob.getRandom().nextFloat() * 0.1F);
+            if (PlayerMobConfig.debugSpawnLog()) {
+                LOGGER.info("[Dig] mob={} broke {} at sub={} boundary={}",
+                    mob.getId(), state.getBlock().getDescriptionId(), targetSub.toShortString(), atBoundary);
+            }
             level.destroyBlock(targetSub, /* dropBlock */ true, mob);   // vanilla break: drops on the floor
             clearCrack(level, mob, targetSub);
             st.target = null;
@@ -899,6 +915,26 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
             }
         }
         return null;
+    }
+
+    /**
+     * The sub-level position of a snow drift the mob is standing in, or {@code null}: only when the
+     * drift lifts the mob so high that the solid lintel one cell ahead stops it, which is exactly a
+     * drift at a 2-high doorway. Out in a room (no lintel ahead) it never fires, so a mob walking on
+     * snow leaves it alone. The cell is the one holding the feet ({@code floor(feetY)}, with a hair of
+     * tolerance for collision sink), never the floor below; and only
+     * {@link TrainDigPolicy#isSnowUnderfoot snow layers} are ever taken from under the feet.
+     */
+    private static BlockPos snowUnderfoot(ManagedShip ship, ServerLevel level, PlayerMobEntity mob, int dir) {
+        Vector3d feet = ship.worldToShip(new Vector3d(mob.getX(), mob.getY(), mob.getZ()));
+        int cellY = Mth.floor(feet.y + 1.0e-3);
+        BlockPos own = new BlockPos(Mth.floor(feet.x), cellY, Mth.floor(feet.z));
+        if (!TrainDigPolicy.isSnowUnderfoot(level.getBlockState(own))) {
+            return null;
+        }
+        BlockPos lintel = new BlockPos(own.getX() + dir, cellY + 2, own.getZ());
+        boolean lintelAhead = !level.getBlockState(lintel).getCollisionShape(level, lintel).isEmpty();
+        return lintelAhead && TrainDigPolicy.liftedIntoLintel(feet.y, cellY, mob.getBbHeight()) ? own : null;
     }
 
     /** Clear the cracking overlay for {@code pos} (if any) on {@code mob}'s break channel. */

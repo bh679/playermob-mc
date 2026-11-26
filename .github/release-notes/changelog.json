@@ -1502,6 +1502,19 @@
       "released": true,
       "released_in": "v0.133.0",
       "released_at": "2026-11-25T14:17:42Z"
+    },
+    {
+      "id": "playermob-dig-snow-doorways",
+      "version": "0.134.0",
+      "type": "fix",
+      "title": "PlayerMobs get through snowy doorways",
+      "summary": "PlayerMobs on the train no longer get stuck at snowy doorways.",
+      "highlights": [],
+      "pr": 277,
+      "date": "2026-11-26",
+      "released": false,
+      "released_in": null,
+      "released_at": null
     }
   ]
 }

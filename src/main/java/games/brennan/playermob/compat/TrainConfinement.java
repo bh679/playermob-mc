@@ -150,7 +150,7 @@ public final class TrainConfinement {
     }
 
     /**
-     * If {@code self} is on a train and stuck against soft fill (ice/dirt/mud/moss/log) blocking
+     * If {@code self} is on a train and stuck against soft fill (ice/dirt/mud/moss/snow/log) blocking
      * its march, mine that block to pass — returning {@code true} while doing so. No-op (returns
      * {@code false}) off a train / without a train mod; see
      * {@link TrainEnvironment#digObstructingBlock}.

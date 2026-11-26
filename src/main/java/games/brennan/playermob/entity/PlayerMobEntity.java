@@ -1515,7 +1515,7 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             // so the train seam reaches for the door block directly (in the carriage's own
             // coordinate space), every tick, regardless of which goal owns movement.
             TrainConfinement.openBlockingDoor(this);
-            // ...and, when wedged against soft fill (ice/dirt/mud/moss/logs) packing a carriage,
+            // ...and, when wedged against soft fill (ice/dirt/mud/moss/snow/logs) packing a carriage,
             // mine it to clear the march. Like the door reflex it reaches into the carriage's
             // sub-level block space (the fill doesn't sit at the mob's world position), so it can't
             // be an ordinary block-breaking goal. No-op without Dungeon Train.

@@ -6,7 +6,7 @@ import net.minecraft.world.entity.ai.goal.Goal;
 /**
  * Readout-only goal: declares the "Digging through" objective for the Creative under-name
  * readout while the mob is mining its way through a Dungeon-Train carriage packed with fill
- * (ice/dirt/mud/moss/logs).
+ * (ice/dirt/mud/moss/snow/logs).
  *
  * <p>The dig itself — detecting the stuck mob, reading the blocking block in the carriage's
  * sub-level coordinate space, pacing the break, and destroying it — is a per-tick reflex in
