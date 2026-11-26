@@ -154,6 +154,16 @@ final class TrainDoorReflex {
         return reflex(mob, level, st, subEye, scan);
     }
 
+    /**
+     * Strikes the stuck probe has spent on its current door without the mob getting through (0 when no
+     * probe is outstanding). Read by the dig reflex's door-first ladder: a door tried both ways that
+     * still doesn't let the mob through may be broken.
+     */
+    static int probeStrikes(Entity mob) {
+        State st = STATE.get(mob);
+        return st == null || st.probeDoor == StuckDoorPolicy.NO_DOOR ? 0 : st.probeStrikes;
+    }
+
     /** The mob's current travel axis as the reflex sees it, or {@code null} if none is known. */
     static Direction.Axis currentAxis(Entity mob) {
         State st = STATE.get(mob);
@@ -227,11 +237,14 @@ final class TrainDoorReflex {
         return String.format(java.util.Locale.ROOT, "%.2f", v);
     }
 
-    /** Non-air blocks in the 3×2×3 around the mob's feet (relative offsets), for the wedged trace. */
+    /**
+     * Non-air blocks in the 3×3×3 around the mob's feet (relative offsets), for the wedged trace: the
+     * leg, head and lintel rows, with a snow layer's depth, so a too-low doorway shows up.
+     */
     private static String describeAround(ServerLevel level, BlockPos feet) {
         StringBuilder sb = new StringBuilder();
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
-        for (int dy = 0; dy <= 1; dy++) {
+        for (int dy = 0; dy <= 2; dy++) {
             for (int dx = -1; dx <= 1; dx++) {
                 for (int dz = -1; dz <= 1; dz++) {
                     cursor.set(feet.getX() + dx, feet.getY() + dy, feet.getZ() + dz);
@@ -244,6 +257,9 @@ final class TrainDoorReflex {
                     }
                     sb.append('(').append(dx).append(',').append(dy).append(',').append(dz).append(')')
                       .append(state.getBlock().getDescriptionId().replace("block.minecraft.", ""));
+                    if (state.getBlock() instanceof net.minecraft.world.level.block.SnowLayerBlock) {
+                        sb.append('[').append(state.getValue(net.minecraft.world.level.block.SnowLayerBlock.LAYERS)).append(']');
+                    }
                 }
             }
         }
