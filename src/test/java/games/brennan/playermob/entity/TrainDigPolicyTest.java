@@ -45,15 +45,43 @@ class TrainDigPolicyTest {
     @Test
     void snowLayersAndSnowBlocksAreDiggable() {
         // A snowy room's drift 3+ layers deep beside a 2-high doorway leaves a player-sized mob too
-        // tall to pass, so the stuck mob shovels it. Every layer count is fill; 1-layer snow has no
-        // collision and the reflex skips it before asking this policy.
+        // tall to pass, so the stuck mob shovels it. 1-2 layers never block, so they stay.
         for (int layers = 1; layers <= 8; layers++) {
-            assertTrue(TrainDigPolicy.isDiggableObstruction(
-                    Blocks.SNOW.defaultBlockState().setValue(
-                        net.minecraft.world.level.block.SnowLayerBlock.LAYERS, layers)),
-                "snow with " + layers + " layers");
+            boolean diggable = TrainDigPolicy.isDiggableObstruction(
+                Blocks.SNOW.defaultBlockState().setValue(
+                    net.minecraft.world.level.block.SnowLayerBlock.LAYERS, layers));
+            if (layers >= 3) {
+                assertTrue(diggable, "snow with " + layers + " layers blocks");
+            } else {
+                assertFalse(diggable, "snow with " + layers + " layers is a step, not a wall");
+            }
         }
         assertTrue(TrainDigPolicy.isDiggableObstruction(Blocks.SNOW_BLOCK.defaultBlockState()));
+    }
+
+    @Test
+    void onlySnowWithCollisionCountsAsUnderfoot() {
+        net.minecraft.world.level.block.state.BlockState one = Blocks.SNOW.defaultBlockState();
+        assertFalse(TrainDigPolicy.isSnowUnderfoot(one), "1 layer has no collision");
+        for (int layers = 2; layers <= 8; layers++) {
+            assertTrue(TrainDigPolicy.isSnowUnderfoot(
+                    one.setValue(net.minecraft.world.level.block.SnowLayerBlock.LAYERS, layers)),
+                layers + " layers lift the mob");
+        }
+        // Anything else under the feet is a floor and must never be dug.
+        assertFalse(TrainDigPolicy.isSnowUnderfoot(Blocks.SNOW_BLOCK.defaultBlockState()));
+        assertFalse(TrainDigPolicy.isSnowUnderfoot(Blocks.DIRT.defaultBlockState()));
+        assertFalse(TrainDigPolicy.isSnowUnderfoot(Blocks.STONE_BRICKS.defaultBlockState()));
+        assertFalse(TrainDigPolicy.isSnowUnderfoot(Blocks.AIR.defaultBlockState()));
+    }
+
+    @Test
+    void onlyADriftDeepEnoughToHitTheLintelCounts() {
+        double h = 1.8;   // a player-sized PlayerMob
+        assertFalse(TrainDigPolicy.liftedIntoLintel(126.0, 126, h), "on the floor");
+        assertFalse(TrainDigPolicy.liftedIntoLintel(126.125, 126, h), "2 layers fit under a 2-high lintel");
+        assertTrue(TrainDigPolicy.liftedIntoLintel(126.25, 126, h), "3 layers do not");
+        assertTrue(TrainDigPolicy.liftedIntoLintel(126.5, 126, h), "5 layers (feet in the same cell)");
     }
 
     @Test

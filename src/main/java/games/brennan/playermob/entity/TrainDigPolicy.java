@@ -3,6 +3,7 @@ package games.brennan.playermob.entity;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.SnowLayerBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.Set;
@@ -44,13 +45,41 @@ public final class TrainDigPolicy {
         // moss
         Blocks.MOSS_BLOCK, Blocks.MOSS_CARPET,
         // snow
-        Blocks.SNOW, Blocks.SNOW_BLOCK);
+        Blocks.SNOW_BLOCK);   // snow LAYERS are judged by depth in isDiggableObstruction
 
     /**
      * True if {@code state} is a fill block the mob may mine to pass through a blocked carriage:
      * ice, the dirt family, mud, moss, snow, or any log/stem ({@link BlockTags#LOGS}).
      */
     public static boolean isDiggableObstruction(BlockState state) {
+        if (state.is(Blocks.SNOW)) {
+            // Only a drift that actually blocks: 3+ layers. 2 layers is a step a player-sized mob
+            // clears even under a 2-high lintel, so digging it would just strip the room's snow.
+            return state.getValue(SnowLayerBlock.LAYERS) >= MIN_BLOCKING_SNOW_LAYERS;
+        }
         return FILL.contains(state.getBlock()) || state.is(BlockTags.LOGS);
+    }
+
+    /** Snow layers from which a drift ahead blocks a player-sized mob at a 2-high doorway. */
+    static final int MIN_BLOCKING_SNOW_LAYERS = 3;
+
+    /**
+     * True if {@code state} is snow the mob may shovel out from under its own feet: a snow layer deep
+     * enough to have collision (2+ layers) and so lift the mob off the floor. Standing on a 3+ layer
+     * drift right beside a 2-high doorway leaves a player-sized mob too tall to step into the door
+     * cell, and the block ahead is clear, so the forward scan alone never frees it. Only snow layers:
+     * every other fill under the feet is a floor, which the dig never touches.
+     */
+    /**
+     * Whether a mob standing in a cell whose floor is at {@code cellY}, feet at {@code feetY}, is too
+     * tall for a lintel two blocks above that floor: the drift's lift plus the mob's height reaches
+     * past it. A player-sized mob (1.8) on 2 layers (0.125) fits; on 3 layers (0.25) it doesn't.
+     */
+    public static boolean liftedIntoLintel(double feetY, int cellY, double mobHeight) {
+        return (feetY - cellY) + mobHeight > 2.0;
+    }
+
+    public static boolean isSnowUnderfoot(BlockState state) {
+        return state.is(Blocks.SNOW) && state.getValue(SnowLayerBlock.LAYERS) >= 2;
     }
 }
