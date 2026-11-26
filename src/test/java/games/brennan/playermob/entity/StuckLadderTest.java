@@ -46,22 +46,20 @@ class StuckLadderTest {
 
     @Test
     void wallColumnsAreTheTwoEndsOfEveryCarriage() {
-        // A 3-carriage group from world X 100 to 127: carriages 100..109, 109..118, 118..127.
-        double min = 100.0, max = 127.0;
-        assertTrue(StuckLadder.isCarriageEndWall(100.5, min, max, 3), "first carriage, west wall");
-        assertTrue(StuckLadder.isCarriageEndWall(108.5, min, max, 3), "first carriage, east wall");
-        assertTrue(StuckLadder.isCarriageEndWall(109.5, min, max, 3), "second carriage, west wall");
-        assertTrue(StuckLadder.isCarriageEndWall(126.5, min, max, 3), "last carriage, east wall");
-        assertFalse(StuckLadder.isCarriageEndWall(101.5, min, max, 3), "first interior cell");
-        assertFalse(StuckLadder.isCarriageEndWall(107.5, min, max, 3), "last interior cell");
-        assertFalse(StuckLadder.isCarriageEndWall(113.5, min, max, 3), "mid carriage");
+        // Seen on the train: a group from sub x 20481019, carriages 9 long. Walls at 019 and 027
+        // (first carriage), 028 and 036, 037 and 045; the doors sit in those columns.
+        int origin = 20481019;
+        for (int x : new int[] {20481019, 20481027, 20481028, 20481036, 20481037, 20481045}) {
+            assertTrue(StuckLadder.isCarriageEndWall(x, origin, 9), "wall column " + x);
+        }
+        for (int x : new int[] {20481020, 20481026, 20481029, 20481032, 20481044}) {
+            assertFalse(StuckLadder.isCarriageEndWall(x, origin, 9), "interior column " + x);
+        }
     }
 
     @Test
-    void wallColumnsInASingleCarriageGroup() {
-        assertTrue(StuckLadder.isCarriageEndWall(0.5, 0.0, 9.0, 1));
-        assertTrue(StuckLadder.isCarriageEndWall(8.5, 0.0, 9.0, 1));
-        assertFalse(StuckLadder.isCarriageEndWall(4.5, 0.0, 9.0, 1));
-        assertFalse(StuckLadder.isCarriageEndWall(4.5, 0.0, 0.0, 1), "no bounds: never a wall");
+    void anUnknownLengthIsNeverAWall() {
+        assertFalse(StuckLadder.isCarriageEndWall(0, 0, 0));
+        assertFalse(StuckLadder.isCarriageEndWall(5, 0, 1));
     }
 }

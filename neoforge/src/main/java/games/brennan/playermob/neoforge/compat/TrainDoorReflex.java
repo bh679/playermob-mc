@@ -237,11 +237,14 @@ final class TrainDoorReflex {
         return String.format(java.util.Locale.ROOT, "%.2f", v);
     }
 
-    /** Non-air blocks in the 3×2×3 around the mob's feet (relative offsets), for the wedged trace. */
+    /**
+     * Non-air blocks in the 3×3×3 around the mob's feet (relative offsets), for the wedged trace: the
+     * leg, head and lintel rows, with a snow layer's depth, so a too-low doorway shows up.
+     */
     private static String describeAround(ServerLevel level, BlockPos feet) {
         StringBuilder sb = new StringBuilder();
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
-        for (int dy = 0; dy <= 1; dy++) {
+        for (int dy = 0; dy <= 2; dy++) {
             for (int dx = -1; dx <= 1; dx++) {
                 for (int dz = -1; dz <= 1; dz++) {
                     cursor.set(feet.getX() + dx, feet.getY() + dy, feet.getZ() + dz);
@@ -254,6 +257,9 @@ final class TrainDoorReflex {
                     }
                     sb.append('(').append(dx).append(',').append(dy).append(',').append(dz).append(')')
                       .append(state.getBlock().getDescriptionId().replace("block.minecraft.", ""));
+                    if (state.getBlock() instanceof net.minecraft.world.level.block.SnowLayerBlock) {
+                        sb.append('[').append(state.getValue(net.minecraft.world.level.block.SnowLayerBlock.LAYERS)).append(']');
+                    }
                 }
             }
         }

@@ -65,21 +65,16 @@ public final class StuckLadder {
     }
 
     /**
-     * Whether a cell is in one of its carriage's two end-wall columns. A group of {@code rooms}
-     * carriages spans {@code groupMinX..groupMaxX} in world X (carriage rotation is identity, so world
-     * X runs along the train), each carriage the same length end to end. A wall column's centre sits
-     * 0.5 inside its carriage's edge and every interior cell at least 1.5, so anything less than 1
-     * from either edge of its carriage is wall.
+     * Whether sub-level column {@code cellX} is one of its carriage's two end walls. A group's
+     * carriages sit end to end from {@code originX} (the west wall of its first carriage), each
+     * {@code length} blocks long, so the walls are the first and last column of
+     * every {@code length}-block run. Never a wall when the length is unknown.
      */
-    public static boolean isCarriageEndWall(double cellCentreX, double groupMinX, double groupMaxX, int rooms) {
-        if (rooms <= 0 || groupMaxX <= groupMinX) {
+    public static boolean isCarriageEndWall(int cellX, int originX, int length) {
+        if (length < 3) {
             return false;
         }
-        double roomLen = (groupMaxX - groupMinX) / rooms;
-        double offset = (cellCentreX - groupMinX) % roomLen;
-        if (offset < 0) {
-            offset += roomLen;
-        }
-        return offset < 1.0 || offset > roomLen - 1.0;
+        int offset = Math.floorMod(cellX - originX, length);
+        return offset == 0 || offset == length - 1;
     }
 }

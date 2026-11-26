@@ -765,7 +765,7 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         boolean fired;          // a firing has been recorded (fireX/fireZ are valid)
         double fireX;
         double fireZ;
-        StuckLadder.Rung rung = StuckLadder.Rung.USE_DOOR;   // rung that chose the current target
+        StuckLadder.Rung rung;  // rung that chose the current target (null: tunnelling inside the carriage)
     }
 
     /** Sub-frame distance within which a new stuck firing counts as "the same spot". */
@@ -837,9 +837,10 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
             // For a thick fill the mob now steps forward into the next slice, so hold the episode
             // briefly rather than re-waiting the full stuck window per block; only once the way has
             // stayed clear (the mob walked out the far side) is the dig genuinely done.
+            // Keep the half-done break (target + progress) through the grace: a mob shuffling across a
+            // threshold sees its target vanish and come back tick to tick, and resetting each time would
+            // mean it never finishes. endDig clears it once the way has stayed clear.
             mob.setDigging(false);
-            clearCrack(level, mob, st.target);
-            st.target = null;
             if (++st.clearTicks >= EPISODE_CLEAR_GRACE) {
                 endDig(level, mob);
             }
@@ -854,6 +855,13 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         BlockState state = level.getBlockState(targetSub);
         if (!targetSub.equals(st.target)) {            // a new block to mine — reset the break
             clearCrack(level, mob, st.target);
+            if (PlayerMobConfig.debugSpawnLog()) {
+                LOGGER.info("[DigStart] mob={} target {} at sub={} mob=({}, {}, {}) rung={} firings={}",
+                    mob.getId(), level.getBlockState(targetSub).getBlock().getDescriptionId(),
+                    targetSub.toShortString(), String.format(java.util.Locale.ROOT, "%.2f", sub.x),
+                    String.format(java.util.Locale.ROOT, "%.2f", sub.y), String.format(java.util.Locale.ROOT, "%.2f", sub.z),
+                    underfoot ? "SNOW_UNDERFOOT" : st.rung == null ? "TUNNEL" : st.rung, st.firings);
+            }
             st.target = targetSub;
             st.breakTicks = 0;
             st.breakTotal = 0;
@@ -886,7 +894,7 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
             if (PlayerMobConfig.debugSpawnLog()) {
                 LOGGER.info("[Dig] mob={} broke {} at sub={} boundary={} rung={} firings={} roomOffset={}",
                     mob.getId(), state.getBlock().getDescriptionId(), targetSub.toShortString(), atBoundary,
-                    underfoot ? "SNOW_UNDERFOOT" : st.rung, st.firings, roomOffset(c, mob, sub, targetSub));
+                    underfoot ? "SNOW_UNDERFOOT" : st.rung == null ? "TUNNEL" : st.rung, st.firings, roomOffset(c, targetSub));
             }
             level.destroyBlock(targetSub, /* dropBlock */ true, mob);   // vanilla break: drops on the floor
             clearCrack(level, mob, targetSub);
@@ -902,25 +910,38 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
     /**
      * What the stuck mob digs this tick, door first and wall last ({@link StuckLadder}), or
      * {@code null} to leave it to the door reflex. Inside a carriage (the cell ahead is not a wall
-     * column) this is the plain fill tunnel ({@link #diggableAhead}). Against a carriage's end wall:
+     * column) this is the plain fill tunnel ({@link #diggableAhead}); {@code st.rung} is then null.
+     * Wall columns come from the carriage grid: where the group's first carriage starts, and the
+     * carriage length.
+     * Against a carriage's end wall:
      * find the door in that wall, then dig the fill on the way to it, break the door once the probe
      * has tried it both ways, or break the wall when there is no door or the way to it is blocked.
-     * With no group bounds nothing is dug, so an unknown layout never loses a wall.
      */
     private BlockPos ladderTarget(Trains.Carriage c, ServerLevel level, PlayerMobEntity mob,
                                   Vector3d sub, int dir, DigState st) {
-        AABBdc bb = c.ship().worldAABB();
-        if (bb == null) {
-            return null;
+        int length = c.provider().dims().length();
+        Integer startX = carriagesStartX(c, length);
+        if (startX == null) {
+            return null;                                          // unknown layout: never lose a wall
         }
-        int rooms = c.provider().getGroupHighestPIdx() - c.provider().getPIdx() + 1;
         int mx = Mth.floor(sub.x);
         int mz = Mth.floor(sub.z);
         int legY = Mth.floor(sub.y + 0.5);
         int aheadX = mx + dir;
-        if (!isWallColumn(bb, rooms, mob, sub, aheadX)) {
-            st.rung = StuckLadder.Rung.USE_DOOR;
-            return diggableAhead(c.ship(), level, mob, dir);    // tunnelling inside the carriage
+        if (!StuckLadder.isCarriageEndWall(aheadX, startX, length)) {
+            // Tunnelling inside the carriage. Standing in a doorway (the mob's own column is a wall),
+            // snow just past the threshold is "unblock the door": even a 2-layer drift there wedges a
+            // mob stepping out of the door cell, so it counts.
+            boolean inDoorway = StuckLadder.isCarriageEndWall(mx, startX, length);
+            st.rung = inDoorway ? StuckLadder.Rung.UNBLOCK_DOOR : null;
+            BlockPos fill = diggableAhead(c.ship(), level, mob, dir);
+            if (fill == null && inDoorway) {
+                BlockPos past = new BlockPos(aheadX, legY, mz);
+                if (TrainDigPolicy.isSnowUnderfoot(level.getBlockState(past))) {   // snow with collision
+                    fill = past;
+                }
+            }
+            return fill;
         }
         BlockPos door = doorInColumn(level, aheadX, legY, mz);
         boolean atDoor = door != null && door.getZ() == mz;
@@ -950,12 +971,6 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
             case BREAK_DOOR -> door;
             case BREAK_WALL -> wallBlockAhead(level, aheadX, legY, mz);
         };
-    }
-
-    /** Whether sub-level column {@code cellX} is an end wall of one of the group's carriages. */
-    private static boolean isWallColumn(AABBdc bb, int rooms, PlayerMobEntity mob, Vector3d sub, int cellX) {
-        double cellWorldX = mob.getX() + (cellX + 0.5 - sub.x);
-        return StuckLadder.isCarriageEndWall(cellWorldX, bb.minX(), bb.maxX(), rooms);
     }
 
     /**
@@ -1000,17 +1015,28 @@ public final class DungeonTrainEnvironment implements TrainEnvironment {
         return null;
     }
 
-    /** The target's offset into its carriage along X, for the {@code [Dig]} trace (proves wall alignment). */
-    private static String roomOffset(Trains.Carriage c, PlayerMobEntity mob, Vector3d sub, BlockPos target) {
+    /**
+     * The sub-level X of the west wall of the group's first carriage, or {@code null} if unknown. A
+     * group's shipyard origin is its back pad's corner, and a multi-carriage group is padded at both
+     * ends (Dungeon Train assembles {@code rooms * length + 2 * pad} blocks), so the pad falls out of
+     * the group's width; a lone carriage has none. Measured from the world box, whose width matches
+     * the sub-level span because carriage rotation is identity.
+     */
+    private static Integer carriagesStartX(Trains.Carriage c, int length) {
         AABBdc bb = c.ship().worldAABB();
-        if (bb == null) {
-            return "?";
+        if (bb == null || length < 3) {
+            return null;
         }
         int rooms = c.provider().getGroupHighestPIdx() - c.provider().getPIdx() + 1;
-        double roomLen = (bb.maxX() - bb.minX()) / rooms;
-        double cellWorldX = mob.getX() + (target.getX() + 0.5 - sub.x);
-        double off = (cellWorldX - bb.minX()) % roomLen;
-        return String.format(java.util.Locale.ROOT, "%.2f/%.2f", off < 0 ? off + roomLen : off, roomLen);
+        int pad = Math.max(0, (int) Math.round((bb.maxX() - bb.minX() - rooms * length) / 2.0));
+        return c.provider().getShipyardOrigin().getX() + pad;
+    }
+
+    /** The target's column offset into its carriage, for the {@code [Dig]} trace (proves wall alignment). */
+    private static String roomOffset(Trains.Carriage c, BlockPos target) {
+        int length = c.provider().dims().length();
+        Integer startX = carriagesStartX(c, length);
+        return startX == null ? "?" : Math.floorMod(target.getX() - startX, length) + "/" + length + " start=" + startX;
     }
 
     /**
