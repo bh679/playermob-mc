@@ -154,6 +154,16 @@ final class TrainDoorReflex {
         return reflex(mob, level, st, subEye, scan);
     }
 
+    /**
+     * Strikes the stuck probe has spent on its current door without the mob getting through (0 when no
+     * probe is outstanding). Read by the dig reflex's door-first ladder: a door tried both ways that
+     * still doesn't let the mob through may be broken.
+     */
+    static int probeStrikes(Entity mob) {
+        State st = STATE.get(mob);
+        return st == null || st.probeDoor == StuckDoorPolicy.NO_DOOR ? 0 : st.probeStrikes;
+    }
+
     /** The mob's current travel axis as the reflex sees it, or {@code null} if none is known. */
     static Direction.Axis currentAxis(Entity mob) {
         State st = STATE.get(mob);
